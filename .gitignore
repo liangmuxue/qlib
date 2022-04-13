@@ -9,7 +9,8 @@ __pycache__/
 _build
 build/
 dist/
-
+lightning_logs/
+examples/weights
 
 *.pkl
 *.hd5

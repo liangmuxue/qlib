@@ -40,7 +40,6 @@ class MetricsCallback(Callback):
 class OptimizeHyperparameters(object):
     
     def __init__(self,
-        clean_mode: False,
         train_dataloader: DataLoader = None,
         val_dataloader: DataLoader = None,
         model_path: str = None,
@@ -59,6 +58,7 @@ class OptimizeHyperparameters(object):
         study: optuna.Study = None,
         verbose: Union[int, bool] = None,
         pruner: optuna.pruners.BasePruner = optuna.pruners.SuccessiveHalvingPruner(),
+        clean_mode=False,
         **kwargs
     ) -> optuna.Study:
         

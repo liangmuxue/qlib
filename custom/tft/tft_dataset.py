@@ -6,6 +6,8 @@ from typing import Any, Callable, Dict, List, Tuple, Union
 from copy import deepcopy
 import pandas as pd
 import numpy as np
+from torch.utils.data.sampler import Sampler
+from torch.utils.data import DataLoader, Dataset
 
 from .data_extractor import StockDataExtractor
 
@@ -17,10 +19,11 @@ class TFTDataset(DatasetH):
     DEFAULT_STEP_LEN = 30
 
     def __init__(self, step_len = DEFAULT_STEP_LEN,**kwargs):
+        # 基层数据处理器
+        self.data_extractor = StockDataExtractor() 
         super().__init__(**kwargs)
         self.step_len = step_len
-        self.data_extractor = StockDataExtractor()  
-
+         
     def config(self, **kwargs):
         if "step_len" in kwargs:
             self.step_len = kwargs.pop("step_len")
@@ -48,52 +51,62 @@ class TFTDataset(DatasetH):
         pad_start = cal[pad_start_idx]
         return slice(pad_start, end)
 
-    def _prepare_seg(self, slc: slice, **kwargs) -> TimeSeriesDataSet:
+    def _prepare_seg(self, slc: slice, **kwargs) -> pd.DataFrame:
         """
-        组装TimeSeriesDataSet类型的数据集
+        组装数据,内容加工
         """
         dtype = kwargs.pop("dtype", None)
         start, end = slc.start, slc.stop
-        flt_col = kwargs.pop("flt_col", None)
-        
 
         ext_slice = self._extend_slice(slc, self.cal, self.step_len)
         data = super()._prepare_seg(ext_slice, **kwargs)
+        # 恢复成一维列索引
+        data = data.reset_index() 
+        # 重新定义动态数据字段
+        self.reals_cols = data.columns.get_level_values(1).values[2:-1]
+        # 重建字段名
+        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols,np.array(["label"])))
+        data.columns = pd.Index(new_cols_idx)                                                                                                   
+        # 补充辅助数据,添加日期编号
+        data["month"] = data.datetime.astype("str").str.slice(0,7)
+        data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
+        # 重新编号,解决节假日不连续问题
+        data["time_idx"] -= data["time_idx"].min() 
+        # 取得时间唯一值并映射为连续编号,生成字典
+        time_uni = np.sort(data['time_idx'].unique())
+        time_uni_dict = dict(enumerate(time_uni.flatten(), 1))
+        time_uni_dict = {v: k for k, v in time_uni_dict.items()}
+        # 使用字典批量替换为连续编号
+        data["time_idx"]  = data["time_idx"] .map(time_uni_dict)        
+        # 补充商品指数数据,按照月份合并
+        data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
+        return data
+ 
+    def get_ts_dataset(self,data,mode="train",train_ts=None):
+        """
+        取得TimeSeriesDataSet对象
 
-        flt_kwargs = deepcopy(kwargs)
-        if flt_col is not None:
-            flt_kwargs["col_set"] = flt_col
-            flt_data = self._prepare_seg(ext_slice, **flt_kwargs)
-            assert len(flt_data.columns) == 1
-        else:
-            flt_data = None
-            
-        # 补充辅助数据
-        flt_data["month"] = flt_data.date.dt.month.astype("str").astype("category")
-        flt_data["log_volume"] = np.log(data.volume + 1e-8)
-        
-        flt_data["time_idx"] = flt_data["date"].dt.year * 12 + flt_data["date"].dt.month
-        flt_data["time_idx"] -= flt_data["time_idx"].min() 
-               
+        Parameters
+        ----------
+        data : DataFrame 已经生成的panda数据
+        """     
+           
         # 每批次的训练长度
         max_encoder_length = self.step_len
         # 每批次的预测长度
-        max_prediction_length = self.step_len
-        # 训练数据截取
-        cut_length= kwargs.pop("cut_length", None)
-        training_cutoff = flt_data["time_idx"].max() - cut_length
+        max_prediction_length = self.step_len // 2
         # 取得各个因子名称，组装为动态连续变量
-        time_varying_unknown_reals = self.handler.infer_processors[0].col_list
+        time_varying_unknown_reals = self.reals_cols.tolist()
         # 商品价格指数，用于静态连续变量
         qyspjg = ["qyspjg_total","qyspjg_yoy","qyspjg_mom"]
         # 动态离散变量，用财务数据
         time_varying_unknown_categoricals = []
         # 获取配置文件参数，生成TimeSeriesDataSet类型的对象
         special_days = []
-        training = TimeSeriesDataSet(
-            data[lambda x: x.time_idx <= training_cutoff],
+        tsdata = TimeSeriesDataSet(
+            data,
             time_idx="time_idx",
-            target="volume",
+            target="label",
             # 分组字段: 股票代码
             group_ids=["instrument"],
             min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
@@ -114,8 +127,13 @@ class TFTDataset(DatasetH):
             target_normalizer=GroupNormalizer(
                 groups=["instrument"], transformation="softplus", center=False
             ),  # use softplus with beta=1.0 and normalize by group
+            allow_missing_timesteps=True,
             add_relative_time_idx=True,
             add_target_scales=True,
             add_encoder_length=True,
         )
-        return training
+        if mode=="valid":
+            tsdata = TimeSeriesDataSet.from_dataset(tsdata, data, predict=True, stop_randomization=True)
+        return tsdata     
+    
+    

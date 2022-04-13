@@ -49,6 +49,11 @@ class StockDataExtractor:
         if file_type=="qyspjg":
             path = self.save_path + "/qyspjg.pickle"
             macro_china_qyspjg_df = pd.read_pickle(path)
+            # 添加月份编号
+            macro_china_qyspjg_df["month"] = macro_china_qyspjg_df['月份'].astype(str).str.slice(0,7)
+            # 修改字段
+            macro_china_qyspjg_df.rename(columns={'总指数-指数值':'qyspjg_total', '总指数-同比增长':'qyspjg_yoy', '总指数-环比增长':'qyspjg_mom'}, inplace = True)
+            macro_china_qyspjg_df = macro_china_qyspjg_df[["month","qyspjg_total","qyspjg_yoy","qyspjg_mom"]]
             return macro_china_qyspjg_df
         
 if __name__ == "__main__":    
