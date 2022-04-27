@@ -1,5 +1,6 @@
 from qlib.data.dataset import DatasetH
-from pytorch_forecasting import GroupNormalizer, TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting import GroupNormalizer, TimeSeriesDataSet
+from tft.timeseries_cus import TimeSeriesCusDataset
 
 import bisect
 from typing import Any, Callable, Dict, List, Tuple, Union
@@ -9,7 +10,7 @@ import numpy as np
 from torch.utils.data.sampler import Sampler
 from torch.utils.data import DataLoader, Dataset
 
-from .data_extractor import StockDataExtractor
+from data_extract.data_baseinfo_extractor import StockDataExtractor
 
 class TFTDataset(DatasetH):
     """
@@ -77,9 +78,10 @@ class TFTDataset(DatasetH):
         time_uni_dict = dict(enumerate(time_uni.flatten(), 1))
         time_uni_dict = {v: k for k, v in time_uni_dict.items()}
         # 使用字典批量替换为连续编号
-        data["time_idx"]  = data["time_idx"] .map(time_uni_dict)        
+        data["time_idx"]  = data["time_idx"].map(time_uni_dict)        
         # 补充商品指数数据,按照月份合并
         data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
+        # data.to_pickle("/home/qdata/qlib_data/test/cs100.pkl")
         return data
  
     def get_ts_dataset(self,data,mode="train",train_ts=None):
@@ -99,11 +101,11 @@ class TFTDataset(DatasetH):
         time_varying_unknown_reals = self.reals_cols.tolist()
         # 商品价格指数，用于静态连续变量
         qyspjg = ["qyspjg_total","qyspjg_yoy","qyspjg_mom"]
-        # 动态离散变量，用财务数据
+        # 动态离散变量，可以使用财务数据
         time_varying_unknown_categoricals = []
         # 获取配置文件参数，生成TimeSeriesDataSet类型的对象
         special_days = []
-        tsdata = TimeSeriesDataSet(
+        tsdata = TimeSeriesCusDataset(
             data,
             time_idx="time_idx",
             target="label",
@@ -133,7 +135,7 @@ class TFTDataset(DatasetH):
             add_encoder_length=True,
         )
         if mode=="valid":
-            tsdata = TimeSeriesDataSet.from_dataset(tsdata, data, predict=True, stop_randomization=True)
+            tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
         return tsdata     
     
     

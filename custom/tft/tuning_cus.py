@@ -19,7 +19,7 @@ import statsmodels.api as sm
 import torch
 from torch.utils.data import DataLoader
 
-from pytorch_forecasting import TemporalFusionTransformer
+from tft.tft_model_cus import TftModelCus
 from pytorch_forecasting.data import TimeSeriesDataSet
 from pytorch_forecasting.metrics import QuantileLoss
 
@@ -143,7 +143,7 @@ class OptimizeHyperparameters(object):
         # create model
         hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
         self.kwargs["loss"] = copy.deepcopy(self.loss)
-        model = TemporalFusionTransformer.from_dataset(
+        model = TftModelCus.from_dataset(
             self.train_dataloader.dataset,
             dropout=trial.suggest_uniform("dropout", *self.dropout_range),
             hidden_size=hidden_size,
@@ -229,7 +229,7 @@ class OptimizeHyperparameters(object):
         # create model
         hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
         self.kwargs["loss"] = copy.deepcopy(self.loss)
-        model = TemporalFusionTransformer.from_dataset(
+        model = TftModelCus.from_dataset(
             self.train_dataloader.dataset,
             dropout=trial.suggest_uniform("dropout", *self.dropout_range),
             hidden_size=hidden_size,
@@ -264,6 +264,6 @@ class OptimizeHyperparameters(object):
     
     def get_tft(self,trial_num,epoch_num):
         best_model_path = os.path.join(self.model_path, "trial_{}/epoch={}.ckpt".format(trial_num,epoch_num))
-        best_tft = TemporalFusionTransformer.load_from_checkpoint(best_model_path)
+        best_tft = TftModelCus.load_from_checkpoint(best_model_path)
         return best_tft
     

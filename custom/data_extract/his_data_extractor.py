@@ -1,0 +1,87 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+import os
+import numpy as np
+import requests
+import datetime
+from tqdm import tqdm
+import akshare as ak
+import pandas as pd
+
+class HisDataExtractor:
+    """历史证券数据采集"""
+
+    def __init__(self, backend_channel="ak"):
+        """
+
+        Parameters
+        ----------
+        backend_channel : 采集源    ak: akshare数据源
+        """
+        
+        self.CODE_DATA_SAVEPATH = "./custom/data/stock_data/"
+        self.ITEM_DATA_SAVEPATH = "./custom/data/stock_data/item"
+        
+        if backend_channel=="ak":
+            self.source_url = ""
+
+    def get_code_data(self,create=True):
+        """取得所有股票代码"""
+        
+        if create is True:
+            all_sz = ak.stock_info_sz_name_code(indicator="A股列表")
+            all_sh1 = ak.stock_info_sh_name_code(indicator="主板A股")   
+            df_sz = all_sz.iloc[:,1]
+            df_sh = all_sh1.iloc[:,2]      
+            self.stock_sz = np.hstack([np.array(df_sz), '399107'])
+            self.stock_sh = np.hstack([np.array(df_sh), '000001'])                        
+        else:
+            # 直接读取已经保存的code文件
+            all_sz = pd.read_csv(self.CODE_DATA_SAVEPATH + "/sz.csv")  
+            all_sh1 = pd.read_csv(self.CODE_DATA_SAVEPATH + "/sh.csv")
+            df_sz = all_sz
+            df_sh = all_sh1    
+            self.stock_sz = np.hstack([np.array(df_sz)[:,0], '399107'])
+            self.stock_sh = np.hstack([np.array(df_sh)[:,0], '000001'])       
+        
+        # 保存代码数据到文件
+        if create is True:
+            sh_savepath = self.CODE_DATA_SAVEPATH + "/sh.csv"
+            sz_savepath = self.CODE_DATA_SAVEPATH + "/sz.csv"
+            # df_sh.to_csv(sh_savepath,index=False)
+            # df_sz.to_csv(sz_savepath,index=False)
+               
+    def load_all_data(self):
+        """取得所有股票历史行情数据"""
+        
+        stock_item = {'sz': self.stock_sz, 'sh': self.stock_sh}
+        stock_item = {'sh': self.stock_sh}
+        for key, value in stock_item.items():
+            for single_stock in value:
+                try:
+                    item_data = self.load_item_data(single_stock)
+                    # 中文标题改英文 
+                    item_data.columns = ["code","date","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
+                    # 每个股票分别保存
+                    save_path = "{}/{}.csv".format(self.ITEM_DATA_SAVEPATH,single_stock)
+                    item_data.to_csv(save_path, index=False)
+                    print("save item data ok:{}".format(single_stock))
+                except Exception as e:
+                    print("load item {} err".format(single_stock),e)
+                
+    def load_item_data(self,instrument_code):   
+        """取得单个股票历史行情数据"""
+        
+        # 取得日线数据，后复权
+        stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=instrument_code, period="daily", adjust="hfq")
+        stock_zh_a_hist_df.insert(loc=0, column='code', value=instrument_code)
+        # 添加股票代码列
+        return stock_zh_a_hist_df
+        
+if __name__ == "__main__":    
+    extractor = HisDataExtractor()       
+    # extractor.download_data(file_type="qyspjg")
+    extractor.get_code_data(create=False)
+    extractor.load_all_data()
+        

@@ -1,7 +1,7 @@
 qlib_init:
-    provider_uri: "/home/qdata/qlib_data/cn_data"
+    provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market csi100
+market: &market test_one
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -17,19 +17,9 @@ data_handler_config: &data_handler_config
                             "ROC60", "RESI10", "VSTD5", "RSQR60", "CORR60", "WVMA60", "STD5", 
                             "RSQR20", "CORD60", "CORD10", "CORR20", "KLOW"
                         ]
-        - class: RobustZScoreNorm
-          kwargs:
-              fields_group: feature
-              clip_outlier: true
-        - class: Fillna
-          kwargs:
-              fields_group: feature
     learn_processors:
         - class: DropnaLabel
-        - class: CSRankNorm
-          kwargs:
-              fields_group: label
-    label: ["Ref($close, -2) / Ref($close, -1) - 1"] 
+    label: ["Ref($close, -1)"] 
 
 port_analysis_config: &port_analysis_config
     strategy:
@@ -58,10 +48,10 @@ task:
         module_path: tft.pytorch_tft
         kwargs:
             GPU: 1
-            batch_size: 64
+            batch_size: 1
             seed: 0
             n_jobs: 20
-            type: 'best_train'
+            type: 'opt_train'
             optargs:
                n_trials: 20
                max_epochs : 50
@@ -79,8 +69,8 @@ task:
                 test: [2017-01-01, 2020-08-01]
             step_len: 30
     record: 
-        - class: SignalRecord
-          module_path: qlib.workflow.record_temp
+        - class: TftRecord
+          module_path: tft.tft_recorder
           kwargs: 
             model: <MODEL>
             dataset: <DATASET>

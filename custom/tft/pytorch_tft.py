@@ -78,6 +78,10 @@ class TftModel(Model):
         self,
         dataset: TFTDataset
     ):
+        if self.type=="pred_only":
+            # 直接进行预测,只需要加载模型参数
+            print("do nothing for pred")
+            return      
         # 取得训练数据(DataFrame)
         df_train = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         # 生成tft时间序列训练数据集
@@ -103,24 +107,22 @@ class TftModel(Model):
             trainer_kwargs=dict(limit_train_batches=0.1,log_every_n_steps=16,gpus=[1]),
             reduce_on_plateau_patience=4,
             use_learning_rate_finder=False,
-        )           
+        )                       
         # 根据标志决定优化学习,还是使用优化好的参数直接训练
         if self.type=="opt_train":
             study = self.study_opt.do_study()        
             with open("custom/data/test_study.pkl", "wb") as fout:
                 pickle.dump(study, fout)                  
-        elif self.type=="best_train":
+        if self.type=="best_train":
             # 使用已经生成的最优化参数进行训练
-            study = self.study_opt.do_apply("custom/data/test_study.pkl")                  
-        else:
-            self.study_opt.do_apply("test_study.pkl")
- 
+            study = self.study_opt.do_apply("custom/data/test_study.pkl")      
         
     def predict(self, dataset: TFTDataset):
         df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         test_ds = dataset.get_ts_dataset(df_test,mode="valid")
         test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)        
-        best_tft = OptimizeHyperparameters(clean_mode=True,model_path="examples/weights").get_tft(1,49)
+        best_tft = OptimizeHyperparameters(clean_mode=True,model_path="examples/weights").get_tft(1,6)
         predictions, x = best_tft.predict(test_loader, return_x=True)
-     
-        
+        predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
+        best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
+        return pd.Series(np.concatenate(predictions), index=df_test.get_index())
