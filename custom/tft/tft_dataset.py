@@ -52,6 +52,17 @@ class TFTDataset(DatasetH):
         pad_start = cal[pad_start_idx]
         return slice(pad_start, end)
 
+    def _reindex_inner(self,df):
+        """给每个股票顺序编号"""
+        
+        # 取得时间唯一值并映射为连续编号,生成字典
+        time_uni = np.sort(df['time_idx'].unique())
+        time_uni_dict = dict(enumerate(time_uni.flatten(), 1))
+        time_uni_dict = {v: k for k, v in time_uni_dict.items()}    
+        # 使用字典批量替换为连续编号
+        df["time_idx"]  = df["time_idx"].map(time_uni_dict)  
+        return df   
+            
     def _prepare_seg(self, slc: slice, **kwargs) -> pd.DataFrame:
         """
         组装数据,内容加工
@@ -67,18 +78,15 @@ class TFTDataset(DatasetH):
         self.reals_cols = data.columns.get_level_values(1).values[2:-1]
         # 重建字段名
         new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols,np.array(["label"])))
-        data.columns = pd.Index(new_cols_idx)                                                                                                   
+        data.columns = pd.Index(new_cols_idx)    
+        # 清除NAN数据
+        data = data.dropna() 
         # 补充辅助数据,添加日期编号
         data["month"] = data.datetime.astype("str").str.slice(0,7)
         data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
-        # 重新编号,解决节假日不连续问题
         data["time_idx"] -= data["time_idx"].min() 
-        # 取得时间唯一值并映射为连续编号,生成字典
-        time_uni = np.sort(data['time_idx'].unique())
-        time_uni_dict = dict(enumerate(time_uni.flatten(), 1))
-        time_uni_dict = {v: k for k, v in time_uni_dict.items()}
-        # 使用字典批量替换为连续编号
-        data["time_idx"]  = data["time_idx"].map(time_uni_dict)        
+        # 重新编号,解决节假日以及相关日期不连续问题
+        data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
         # 补充商品指数数据,按照月份合并
         data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
         # data.to_pickle("/home/qdata/qlib_data/test/cs100.pkl")
@@ -129,7 +137,7 @@ class TFTDataset(DatasetH):
             target_normalizer=GroupNormalizer(
                 groups=["instrument"], transformation="softplus", center=False
             ),  # use softplus with beta=1.0 and normalize by group
-            allow_missing_timesteps=True,
+            allow_missing_timesteps=False,
             add_relative_time_idx=True,
             add_target_scales=True,
             add_encoder_length=True,

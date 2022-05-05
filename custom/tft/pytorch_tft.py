@@ -82,7 +82,7 @@ class TftModel(Model):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
             return      
-        # 取得训练数据(DataFrame)
+        # 取得训练数据(DataFrame),添加nan_validate_label，用于数据空值校验
         df_train = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         # 生成tft时间序列训练数据集
         ts_data_train = dataset.get_ts_dataset(df_train)

@@ -48,7 +48,8 @@ class StockDataExtractor:
         if file_type=="instrument":
             macro_china_qyspjg_df = ak.macro_china_qyspjg()
             stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=instrument_code, period="daily", start_date=start_date, end_date=end_date, adjust="hfq")
-            print(stock_zh_a_hist_df)        
+            pd.set_option('display.max_columns', None)
+            print(stock_zh_a_hist_df[(stock_zh_a_hist_df['日期']>="2008-01-02") & (stock_zh_a_hist_df['日期']<="2008-01-08")])
             
     def load_data(self,file_type):
         if file_type=="qyspjg":

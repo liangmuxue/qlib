@@ -1,4 +1,6 @@
 from qlib.contrib.data.handler import DataHandlerLP,check_transform_proc,_DEFAULT_LEARN_PROCESSORS
+from qlib.data.dataset.loader import QlibDataLoader
+from qlib.data.ops import Mad
 
 class TftDataHandler(DataHandlerLP):
     """负责从底层取得原始数据"""
@@ -48,9 +50,12 @@ class TftDataHandler(DataHandlerLP):
             "kbar": {},
             "price": {
                 "windows": [0],
-                "feature": ["OPEN", "HIGH", "LOW", "VWAP"],
+                # "feature": ["OPEN", "HIGH", "LOW", "VWAP"],
+                "feature": ["OPEN", "HIGH", "LOW"],
             },
             "rolling": {},
+            # 添加nan_validate_label，用于数据空值校验
+            "nan_validate_fields": {},
         }
         return self.parse_config_to_fields(conf)
     
@@ -80,6 +85,10 @@ class TftDataHandler(DataHandlerLP):
         """
         fields = []
         names = []
+        # 校验空值
+        if "nan_validate_fields" in config:
+            fields += ["$close"]
+            names += ["nan_validate"]
         if "kbar" in config:
             fields += [
                 "($close-$open)/$open",
@@ -207,8 +216,9 @@ class TftDataHandler(DataHandlerLP):
                 fields += ["Std($volume, %d)/($volume+1e-12)" % d for d in windows]
                 names += ["VSTD%d" % d for d in windows]
             if use("WVMA"):
+                # 添加小数，避免NAN
                 fields += [
-                    "Std(Abs($close/Ref($close, 1)-1)*$volume, %d)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, %d)+1e-12)"
+                    "Std(Abs($close/Ref($close, 1)-1+1e-5)*$volume, %d)/(Mean(Abs($close/Ref($close, 1)-1+1e-5)*$volume, %d)+1e-12)"
                     % (d, d)
                     for d in windows
                 ]
@@ -236,3 +246,5 @@ class TftDataHandler(DataHandlerLP):
                 names += ["VSUMD%d" % d for d in windows]
     
         return fields, names
+    
+    

@@ -12,7 +12,7 @@ import pandas as pd
 class HisDataExtractor:
     """历史证券数据采集"""
 
-    def __init__(self, backend_channel="ak"):
+    def __init__(self, backend_channel="ak",item_savepath=None):
         """
 
         Parameters
@@ -21,8 +21,10 @@ class HisDataExtractor:
         """
         
         self.CODE_DATA_SAVEPATH = "./custom/data/stock_data/"
-        self.ITEM_DATA_SAVEPATH = "./custom/data/stock_data/item"
-        
+        if item_savepath is None:
+            self.ITEM_DATA_SAVEPATH = "./custom/data/stock_data/item"
+        else:
+            self.ITEM_DATA_SAVEPATH = item_savepath
         if backend_channel=="ak":
             self.source_url = ""
 
@@ -61,27 +63,30 @@ class HisDataExtractor:
             for single_stock in value:
                 try:
                     item_data = self.load_item_data(single_stock)
-                    # 中文标题改英文 
-                    item_data.columns = ["code","date","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
-                    # 每个股票分别保存
-                    save_path = "{}/{}.csv".format(self.ITEM_DATA_SAVEPATH,single_stock)
-                    item_data.to_csv(save_path, index=False)
                     print("save item data ok:{}".format(single_stock))
                 except Exception as e:
                     print("load item {} err".format(single_stock),e)
                 
-    def load_item_data(self,instrument_code):   
+    def load_item_data(self,instrument_code,start_date=None,end_date=None):   
         """取得单个股票历史行情数据"""
         
         # 取得日线数据，后复权
-        stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=instrument_code, period="daily", adjust="hfq")
-        stock_zh_a_hist_df.insert(loc=0, column='code', value=instrument_code)
-        # 添加股票代码列
-        return stock_zh_a_hist_df
-        
+        item_data = ak.stock_zh_a_hist(symbol=instrument_code, period="daily", start_date=start_date,end_date=end_date,adjust="hfq")
+        item_data.insert(loc=0, column='code', value=instrument_code)
+        # 中文标题改英文 
+        item_data.columns = ["code","date","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
+        # 每个股票分别保存
+        save_path = "{}/{}.csv".format(self.ITEM_DATA_SAVEPATH,instrument_code)
+        item_data.to_csv(save_path, index=False)        
+        return item_data
+    
 if __name__ == "__main__":    
-    extractor = HisDataExtractor()       
+    extractor = HisDataExtractor(item_savepath="./custom/data/stock_data/item")   
+    # extractor.load_item_data("600520",start_date="2008-05-21",end_date="2008-05-28")    
+    extractor.load_item_data("600520")
+    # extractor = HisDataExtractor()
     # extractor.download_data(file_type="qyspjg")
-    extractor.get_code_data(create=False)
-    extractor.load_all_data()
+    # extractor.get_code_data(create=False)
+    # extractor.load_all_data()
+    
         

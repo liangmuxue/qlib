@@ -220,9 +220,19 @@ def test_tft_stock_vis():
     # plt.savefig("/home/qdata/qlib_data/test/fig_stock.png")
     plt.show()
     print("show after")
- 
+
+def index_inner(df):
+    time_uni = np.sort(df['time_idx'].unique())
+    time_uni_dict = dict(enumerate(time_uni.flatten(), 1))
+    time_uni_dict = {v: k for k, v in time_uni_dict.items()}    
+    df["time_idx"]  = df["time_idx"].map(time_uni_dict)  
+    return df
+    
 def test_index():
-                  
+    data = pd.read_pickle("/home/qdata/qlib_data/test/time_idx.pkl")    
+    data = data.groupby("instrument").apply(lambda df: index_inner(df))       
+    print("after data",data.describe())
+        
 if __name__ == "__main__":
     # test_pd_index()
     # test_pd_timeser()

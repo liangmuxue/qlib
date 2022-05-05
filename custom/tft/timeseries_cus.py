@@ -82,7 +82,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         self.viz_cont = TensorViz(env="dataview_cont")
         
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
-        print("predict_{} item in:{}".format(self.predict_mode,idx))
+        # print("predict_{} item in:{}".format(self.predict_mode,idx))
         item_index = idx
         
         index = self.index.iloc[idx]
