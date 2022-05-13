@@ -232,7 +232,13 @@ def test_index():
     data = pd.read_pickle("/home/qdata/qlib_data/test/time_idx.pkl")    
     data = data.groupby("instrument").apply(lambda df: index_inner(df))       
     print("after data",data.describe())
-        
+  
+def test_data_compare():
+    data1 = pd.read_pickle("/home/qdata/qlib_data/test/instrument_test.pkl")    
+    data2 = pd.read_pickle("/home/qdata/qlib_data/test/instrument_train.pkl") 
+    compare = pd.DataFrame(data1.keys().to_frame().eq(data2.keys().to_frame()))
+    print("compare result",compare)
+            
 if __name__ == "__main__":
     # test_pd_index()
     # test_pd_timeser()
@@ -246,6 +252,7 @@ if __name__ == "__main__":
     # test_tft_stock_vis()
     # test_tft()
     # test_tft_data_view()
-    test_index()
+    # test_index()
+    test_data_compare()
     
     

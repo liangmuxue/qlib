@@ -200,8 +200,7 @@ class OptimizeHyperparameters(object):
         # report result
         return metrics_callback.metrics[-1]["val_loss"].item()
 
-# setup optuna and run
-
+    # setup optuna and run
     def objective_best(self,trial: optuna.Trial) -> float:
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
             dirpath=os.path.join(self.model_path, "trial_{}".format(trial.number)), filename="{epoch}", monitor="val_loss"

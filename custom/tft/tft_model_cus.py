@@ -44,6 +44,8 @@ class TftModelCus(TemporalFusionTransformer):
         else:
             # create figure
             kwargs = {}
+            if name!="month":
+                return None
             # adjust figure size for figures with many labels
             if self.hparams.embedding_sizes.get(name, [1e9])[0] > 10:
                 kwargs = dict(figsize=(10, 5))
@@ -132,9 +134,10 @@ class TftModelCus(TemporalFusionTransformer):
                 ax2.set_yscale("log")
             ax2.bar(x, support, width=x_step, linewidth=0, alpha=0.2, color="k")
             # adjust layout and legend
-            fig.tight_layout()
-            fig.legend()
-            plt.savefig("custom/data/lightning_logs/fig.png")
+            # fig.tight_layout()
+            # fig.legend()
+            # plt.savefig("custom/data/lightning_logs/fig_{}.png".format(name))
+            print("save ok:{}".format(name))
             return fig        
         
     def training_step(self, batch, batch_idx):

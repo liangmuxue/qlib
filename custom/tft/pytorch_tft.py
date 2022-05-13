@@ -90,12 +90,14 @@ class TftModel(Model):
         # 生成tft验证集,并删除不在训练集中的股票数据
         df_valid = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         df_valid = df_valid[df_valid['instrument'].isin(df_train['instrument'].unique())]
+        # # 验证数据集需要全部数据作为参数
+        # df_all = pd.concat(df_train,df_valid)
         validation = dataset.get_ts_dataset(df_valid,mode="valid",train_ts=ts_data_train)
         val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)       
         self.study_opt = OptimizeHyperparameters(
             train_loader,
             val_loader,
-            model_path="examples/weights",
+            model_path=self.optargs['weight_path'],
             n_trials=self.optargs["n_trials"],
             max_epochs=self.optargs["max_epochs"],
             gradient_clip_val_range=(0.01, 1.0),
@@ -107,6 +109,7 @@ class TftModel(Model):
             trainer_kwargs=dict(limit_train_batches=0.1,log_every_n_steps=16,gpus=[1]),
             reduce_on_plateau_patience=4,
             use_learning_rate_finder=False,
+            log_dir=self.optargs['log_path']
         )                       
         # 根据标志决定优化学习,还是使用优化好的参数直接训练
         if self.type=="opt_train":
@@ -119,9 +122,11 @@ class TftModel(Model):
         
     def predict(self, dataset: TFTDataset):
         df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        # 删除价格为负数的数据
+        df_test = df_test[df_test.nan_validate>0]
         test_ds = dataset.get_ts_dataset(df_test,mode="valid")
         test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)        
-        best_tft = OptimizeHyperparameters(clean_mode=True,model_path="examples/weights").get_tft(1,6)
+        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path']).get_tft(0,33)
         predictions, x = best_tft.predict(test_loader, return_x=True)
         predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  

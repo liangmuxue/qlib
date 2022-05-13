@@ -1,4 +1,9 @@
 from qlib.data.dataset import DatasetH
+from qlib.data.dataset.handler import DataHandler, DataHandlerLP
+from qlib.log import get_module_logger
+from typing import Union, List, Tuple, Dict, Text, Optional
+from inspect import getfullargspec
+
 from pytorch_forecasting import GroupNormalizer, TimeSeriesDataSet
 from tft.timeseries_cus import TimeSeriesCusDataset
 
@@ -62,7 +67,36 @@ class TFTDataset(DatasetH):
         # 使用字典批量替换为连续编号
         df["time_idx"]  = df["time_idx"].map(time_uni_dict)  
         return df   
-            
+ 
+    def prepare(
+        self,
+        segments: Union[List[Text], Tuple[Text], Text, slice],
+        col_set=DataHandler.CS_ALL,
+        data_key=DataHandlerLP.DK_I,
+        **kwargs,
+    ) -> Union[List[pd.DataFrame], pd.DataFrame]:
+        """重载父类方法"""
+    
+        # 存储segments类别用于后续判断
+        self.segments_mode = segments
+        logger = get_module_logger("DatasetH")
+        fetch_kwargs = {"col_set": col_set}
+        fetch_kwargs.update(kwargs)
+        if "data_key" in getfullargspec(self.handler.fetch).args:
+            fetch_kwargs["data_key"] = data_key
+        else:
+            logger.info(f"data_key[{data_key}] is ignored.")
+
+        # Handle all kinds of segments format
+        if isinstance(segments, (list, tuple)):
+            return [self._prepare_seg(slice(*self.segments[seg]), **fetch_kwargs) for seg in segments]
+        elif isinstance(segments, str):
+            return self._prepare_seg(slice(*self.segments[segments]), **fetch_kwargs)
+        elif isinstance(segments, slice):
+            return self._prepare_seg(segments, **fetch_kwargs)
+        else:
+            raise NotImplementedError(f"This type of input is not supported")   
+         
     def _prepare_seg(self, slc: slice, **kwargs) -> pd.DataFrame:
         """
         组装数据,内容加工
@@ -72,6 +106,11 @@ class TFTDataset(DatasetH):
 
         ext_slice = self._extend_slice(slc, self.cal, self.step_len)
         data = super()._prepare_seg(ext_slice, **kwargs)
+        # 如果是测试阶段，则需要删除日期不在训练集中的股票
+        if self.segments_mode=="test":
+            ext_slice_train = self._extend_slice(slice(*self.segments["train"]), self.cal, self.step_len)
+            data_train = super()._prepare_seg(ext_slice_train, **kwargs)
+            data = data[data.index.get_level_values(1).isin(data_train.index.get_level_values(1).values)]
         # 恢复成一维列索引
         data = data.reset_index() 
         # 重新定义动态数据字段
@@ -81,6 +120,8 @@ class TFTDataset(DatasetH):
         data.columns = pd.Index(new_cols_idx)    
         # 清除NAN数据
         data = data.dropna() 
+        # 删除价格小于0的数据
+        data = data[data.label>0]                
         # 补充辅助数据,添加日期编号
         data["month"] = data.datetime.astype("str").str.slice(0,7)
         data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
@@ -89,7 +130,9 @@ class TFTDataset(DatasetH):
         data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
         # 补充商品指数数据,按照月份合并
         data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
-        # data.to_pickle("/home/qdata/qlib_data/test/cs100.pkl")
+        # month重新编号为1到12
+        data["month"] = data["month"].str.slice(5,7)
+        # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
         return data
  
     def get_ts_dataset(self,data,mode="train",train_ts=None):
@@ -104,7 +147,7 @@ class TFTDataset(DatasetH):
         # 每批次的训练长度
         max_encoder_length = self.step_len
         # 每批次的预测长度
-        max_prediction_length = self.step_len // 2
+        max_prediction_length = self.step_len * 2
         # 取得各个因子名称，组装为动态连续变量
         time_varying_unknown_reals = self.reals_cols.tolist()
         # 商品价格指数，用于静态连续变量
@@ -137,7 +180,7 @@ class TFTDataset(DatasetH):
             target_normalizer=GroupNormalizer(
                 groups=["instrument"], transformation="softplus", center=False
             ),  # use softplus with beta=1.0 and normalize by group
-            allow_missing_timesteps=False,
+            allow_missing_timesteps=True,
             add_relative_time_idx=True,
             add_target_scales=True,
             add_encoder_length=True,

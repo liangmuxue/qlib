@@ -48,13 +48,15 @@ task:
         module_path: tft.pytorch_tft
         kwargs:
             GPU: 1
-            batch_size: 32
+            batch_size: 1024
             seed: 0
             n_jobs: 20
-            type: 'opt_train'
+            type: 'best_train'
             optargs:
                n_trials: 20
                max_epochs : 50
+               weight_path: 'custom/data/weights'
+               log_path: 'custom/data/lightning_logs'
     dataset:
         class: TFTDataset
         module_path: tft.tft_dataset

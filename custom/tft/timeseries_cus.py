@@ -63,25 +63,187 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         scalers: Dict[str, Union[StandardScaler, RobustScaler, TorchNormalizer, EncoderNormalizer]] = {},
         randomize_length: Union[None, Tuple[float, float], bool] = False,
         predict_mode: bool = False):
+
+        # 直接使用上级父类进行初始化
+        Dataset.__init__(self)
         
+        self.max_encoder_length = max_encoder_length
+        assert isinstance(self.max_encoder_length, int), "max encoder length must be integer"
+        if min_encoder_length is None:
+            min_encoder_length = max_encoder_length
+        self.min_encoder_length = min_encoder_length
+        assert (
+            self.min_encoder_length <= self.max_encoder_length
+        ), "max encoder length has to be larger equals min encoder length"
+        assert isinstance(self.min_encoder_length, int), "min encoder length must be integer"
+        self.max_prediction_length = max_prediction_length
+        assert isinstance(self.max_prediction_length, int), "max prediction length must be integer"
+        if min_prediction_length is None:
+            min_prediction_length = max_prediction_length
+        self.min_prediction_length = min_prediction_length
+        assert (
+            self.min_prediction_length <= self.max_prediction_length
+        ), "max prediction length has to be larger equals min prediction length"
+        assert self.min_prediction_length > 0, "min prediction length must be larger than 0"
+        assert isinstance(self.min_prediction_length, int), "min prediction length must be integer"
+        assert data[time_idx].dtype.kind == "i", "Timeseries index should be of type integer"
+        self.target = target
+        self.weight = weight
+        self.time_idx = time_idx
+        self.group_ids = [] + group_ids
+        self.static_categoricals = [] + static_categoricals
+        self.static_reals = [] + static_reals
+        self.time_varying_known_categoricals = [] + time_varying_known_categoricals
+        self.time_varying_known_reals = [] + time_varying_known_reals
+        self.time_varying_unknown_categoricals = [] + time_varying_unknown_categoricals
+        self.time_varying_unknown_reals = [] + time_varying_unknown_reals
+        self.add_relative_time_idx = add_relative_time_idx
+
+        # set automatic defaults
+        if isinstance(randomize_length, bool):
+            if not randomize_length:
+                randomize_length = None
+            else:
+                randomize_length = (0.2, 0.05)
+        self.randomize_length = randomize_length
+        if min_prediction_idx is None:
+            min_prediction_idx = data[self.time_idx].min()
+        self.min_prediction_idx = min_prediction_idx
+        self.constant_fill_strategy = {} if len(constant_fill_strategy) == 0 else constant_fill_strategy
+        self.predict_mode = predict_mode
+        self.allow_missing_timesteps = allow_missing_timesteps
+        self.target_normalizer = target_normalizer
+        self.categorical_encoders = {} if len(categorical_encoders) == 0 else categorical_encoders
+        self.scalers = {} if len(scalers) == 0 else scalers
+        self.add_target_scales = add_target_scales
+        self.variable_groups = {} if len(variable_groups) == 0 else variable_groups
+        self.lags = {} if len(lags) == 0 else lags
+
+        # add_encoder_length
+        if isinstance(add_encoder_length, str):
+            assert (
+                add_encoder_length == "auto"
+            ), f"Only 'auto' allowed for add_encoder_length but found {add_encoder_length}"
+            add_encoder_length = self.min_encoder_length != self.max_encoder_length
+        assert isinstance(
+            add_encoder_length, bool
+        ), f"add_encoder_length should be boolean or 'auto' but found {add_encoder_length}"
+        self.add_encoder_length = add_encoder_length
+
+        # target normalizer
+        self._set_target_normalizer(data)
+
+        # overwrite values
+        self.reset_overwrite_values()
+
+        for target in self.target_names:
+            assert (
+                target not in self.time_varying_known_reals
+            ), f"target {target} should be an unknown continuous variable in the future"
+
+        # add time index relative to prediction position
+        if self.add_relative_time_idx or self.add_encoder_length:
+            data = data.copy()  # only copies indices (underlying data is NOT copied)
+        if self.add_relative_time_idx:
+            assert (
+                "relative_time_idx" not in data.columns
+            ), "relative_time_idx is a protected column and must not be present in data"
+            if "relative_time_idx" not in self.time_varying_known_reals and "relative_time_idx" not in self.reals:
+                self.time_varying_known_reals.append("relative_time_idx")
+            data.loc[:, "relative_time_idx"] = 0.0  # dummy - real value will be set dynamiclly in __getitem__()
+
+        # add decoder length to static real variables
+        if self.add_encoder_length:
+            assert (
+                "encoder_length" not in data.columns
+            ), "encoder_length is a protected column and must not be present in data"
+            if "encoder_length" not in self.time_varying_known_reals and "encoder_length" not in self.reals:
+                self.static_reals.append("encoder_length")
+            data.loc[:, "encoder_length"] = 0  # dummy - real value will be set dynamiclly in __getitem__()
+
+        # validate
+        self._validate_data(data)
+        assert data.index.is_unique, "data index has to be unique"
+
+        # add lags
+        assert self.min_lag > 0, "lags should be positive"
+        if len(self.lags) > 0:
+            # add variables
+            for name in self.lags:
+                lagged_names = self._get_lagged_names(name)
+                for lagged_name in lagged_names:
+                    assert (
+                        lagged_name not in data.columns
+                    ), f"{lagged_name} is a protected column and must not be present in data"
+                # add lags
+                if name in self.time_varying_known_reals:
+                    for lagged_name in lagged_names:
+                        if lagged_name not in self.time_varying_known_reals:
+                            self.time_varying_known_reals.append(lagged_name)
+                elif name in self.time_varying_known_categoricals:
+                    for lagged_name in lagged_names:
+                        if lagged_name not in self.time_varying_known_categoricals:
+                            self.time_varying_known_categoricals.append(lagged_name)
+                elif name in self.time_varying_unknown_reals:
+                    for lagged_name, lag in lagged_names.items():
+                        if lag < self.max_prediction_length:  # keep in unknown as if lag is too small
+                            if lagged_name not in self.time_varying_unknown_reals:
+                                self.time_varying_unknown_reals.append(lagged_name)
+                        else:
+                            if lagged_name not in self.time_varying_known_reals:
+                                # switch to known so that lag can be used in decoder directly
+                                self.time_varying_known_reals.append(lagged_name)
+                elif name in self.time_varying_unknown_categoricals:
+                    for lagged_name, lag in lagged_names.items():
+                        if lag < self.max_prediction_length:  # keep in unknown as if lag is too small
+                            if lagged_name not in self.time_varying_unknown_categoricals:
+                                self.time_varying_unknown_categoricals.append(lagged_name)
+                        if lagged_name not in self.time_varying_known_categoricals:
+                            # switch to known so that lag can be used in decoder directly
+                            self.time_varying_known_categoricals.append(lagged_name)
+                else:
+                    raise KeyError(f"lagged variable {name} is not a known nor unknown time-varying variable")
+
+        # filter data
+        if min_prediction_idx is not None:
+            # filtering for min_prediction_idx will be done on subsequence level ensuring
+            # minimal decoder index is always >= min_prediction_idx
+            data = data[lambda x: x[self.time_idx] >= self.min_prediction_idx - self.max_encoder_length - self.max_lag]
+        data = data.sort_values(self.group_ids + [self.time_idx])
+
+        # preprocess data
+        data = self._preprocess_data(data)
+        #预存原来的数据，用于后续比较
         self.pd_data = data
-        super().__init__(data,time_idx,target,group_ids,
-                         weight=weight,max_encoder_length=max_encoder_length,min_encoder_length=min_encoder_length,
-                         min_prediction_idx=min_prediction_idx,min_prediction_length=min_prediction_length,
-                         max_prediction_length=max_prediction_length,static_categoricals=static_categoricals,
-                         static_reals=static_reals,time_varying_known_categoricals=time_varying_known_categoricals,
-                         time_varying_known_reals=time_varying_known_reals,time_varying_unknown_categoricals=time_varying_unknown_categoricals,
-                         time_varying_unknown_reals=time_varying_unknown_reals,variable_groups=variable_groups,
-                         constant_fill_strategy=constant_fill_strategy,allow_missing_timesteps=allow_missing_timesteps,
-                         lags=lags,add_relative_time_idx=add_relative_time_idx, 
-                         add_target_scales=add_target_scales,add_encoder_length=add_encoder_length,
-                         target_normalizer=target_normalizer,categorical_encoders=categorical_encoders,
-                         scalers=scalers,randomize_length=randomize_length,predict_mode=predict_mode)
+        
+        for target in self.target_names:
+            assert target not in self.scalers, "Target normalizer is separate and not in scalers."
+
+        # create index
+        self.index = self._construct_index(data, predict_mode=predict_mode)
+
+        # convert to torch tensor for high performance data loading later
+        self.data = self._data_to_tensors(data)        
+        
+        # super().__init__(data,time_idx,target,group_ids,
+        #                  weight=weight,max_encoder_length=max_encoder_length,min_encoder_length=min_encoder_length,
+        #                  min_prediction_idx=min_prediction_idx,min_prediction_length=min_prediction_length,
+        #                  max_prediction_length=max_prediction_length,static_categoricals=static_categoricals,
+        #                  static_reals=static_reals,time_varying_known_categoricals=time_varying_known_categoricals,
+        #                  time_varying_known_reals=time_varying_known_reals,time_varying_unknown_categoricals=time_varying_unknown_categoricals,
+        #                  time_varying_unknown_reals=time_varying_unknown_reals,variable_groups=variable_groups,
+        #                  constant_fill_strategy=constant_fill_strategy,allow_missing_timesteps=allow_missing_timesteps,
+        #                  lags=lags,add_relative_time_idx=add_relative_time_idx, 
+        #                  add_target_scales=add_target_scales,add_encoder_length=add_encoder_length,
+        #                  target_normalizer=target_normalizer,categorical_encoders=categorical_encoders,
+        #                  scalers=scalers,randomize_length=randomize_length,predict_mode=predict_mode)
         # visdom可视化环境
-        self.viz_cat = TensorViz(env="dataview_cat")
-        self.viz_cont = TensorViz(env="dataview_cont")
+        # self.viz_cat = TensorViz(env="dataview_cat")
+        # self.viz_cont = TensorViz(env="dataview_cont")
         
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        """定制单个数据获取方式"""
+        
         # print("predict_{} item in:{}".format(self.predict_mode,idx))
         item_index = idx
         
@@ -91,6 +253,10 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         data_cat = self.data["categoricals"][index.index_start : index.index_end + 1].clone()
         time = self.data["time"][index.index_start : index.index_end + 1].clone()
         target = [d[index.index_start : index.index_end + 1].clone() for d in self.data["target"]]
+        
+        if (target[0]<0).any().item() is True:
+            print("ttt")
+        
         groups = self.data["groups"][index.index_start].clone()
         if self.data["weight"] is None:
             weight = None
@@ -275,6 +441,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         
         return (
             dict(
+                index=index,# 保存index用于后续数据对照
                 x_cat=data_cat,
                 x_cont=data_cont,
                 encoder_length=encoder_length,
@@ -286,6 +453,100 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             ),
             (target, weight),
         )        
+
+
+    def _collate_fn(
+        self, batches: List[Tuple[Dict[str, torch.Tensor], torch.Tensor]]
+    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        """
+        Collate function to combine items into mini-batch for dataloader.
+
+        Args:
+            batches (List[Tuple[Dict[str, torch.Tensor], torch.Tensor]]): List of samples generated with
+                :py:meth:`~__getitem__`.
+
+        Returns:
+            Tuple[Dict[str, torch.Tensor], Tuple[Union[torch.Tensor, List[torch.Tensor]], torch.Tensor]: minibatch
+        """
+        # collate function for dataloader
+        # lengths
+        encoder_lengths = torch.tensor([batch[0]["encoder_length"] for batch in batches], dtype=torch.long)
+        decoder_lengths = torch.tensor([batch[0]["decoder_length"] for batch in batches], dtype=torch.long)
+        ori_index = torch.tensor([batch[0]["index"] for batch in batches], dtype=torch.long)
+        
+
+        # ids
+        decoder_time_idx_start = (
+            torch.tensor([batch[0]["encoder_time_idx_start"] for batch in batches], dtype=torch.long) + encoder_lengths
+        )
+        decoder_time_idx = decoder_time_idx_start.unsqueeze(1) + torch.arange(decoder_lengths.max()).unsqueeze(0)
+        groups = torch.stack([batch[0]["groups"] for batch in batches])
+
+        # features
+        encoder_cont = rnn.pad_sequence(
+            [batch[0]["x_cont"][:length] for length, batch in zip(encoder_lengths, batches)], batch_first=True
+        )
+        encoder_cat = rnn.pad_sequence(
+            [batch[0]["x_cat"][:length] for length, batch in zip(encoder_lengths, batches)], batch_first=True
+        )
+
+        decoder_cont = rnn.pad_sequence(
+            [batch[0]["x_cont"][length:] for length, batch in zip(encoder_lengths, batches)], batch_first=True
+        )
+        decoder_cat = rnn.pad_sequence(
+            [batch[0]["x_cat"][length:] for length, batch in zip(encoder_lengths, batches)], batch_first=True
+        )
+
+        # target scale
+        if isinstance(batches[0][0]["target_scale"], torch.Tensor):  # stack tensor
+            target_scale = torch.stack([batch[0]["target_scale"] for batch in batches])
+        elif isinstance(batches[0][0]["target_scale"], (list, tuple)):
+            target_scale = []
+            for idx in range(len(batches[0][0]["target_scale"])):
+                if isinstance(batches[0][0]["target_scale"][idx], torch.Tensor):  # stack tensor
+                    scale = torch.stack([batch[0]["target_scale"][idx] for batch in batches])
+                else:
+                    scale = torch.tensor([batch[0]["target_scale"][idx] for batch in batches], dtype=torch.float)
+                target_scale.append(scale)
+        else:  # convert to tensor
+            target_scale = torch.tensor([batch[0]["target_scale"] for batch in batches], dtype=torch.float)
+
+        # target and weight
+        if isinstance(batches[0][1][0], (tuple, list)):
+            target = [
+                rnn.pad_sequence([batch[1][0][idx] for batch in batches], batch_first=True)
+                for idx in range(len(batches[0][1][0]))
+            ]
+            encoder_target = [
+                rnn.pad_sequence([batch[0]["encoder_target"][idx] for batch in batches], batch_first=True)
+                for idx in range(len(batches[0][1][0]))
+            ]
+        else:
+            target = rnn.pad_sequence([batch[1][0] for batch in batches], batch_first=True)
+            encoder_target = rnn.pad_sequence([batch[0]["encoder_target"] for batch in batches], batch_first=True)
+
+        if batches[0][1][1] is not None:
+            weight = rnn.pad_sequence([batch[1][1] for batch in batches], batch_first=True)
+        else:
+            weight = None
+
+        return (
+            dict(
+                index=ori_index,
+                encoder_cat=encoder_cat,
+                encoder_cont=encoder_cont,
+                encoder_target=encoder_target,
+                encoder_lengths=encoder_lengths,
+                decoder_cat=decoder_cat,
+                decoder_cont=decoder_cont,
+                decoder_target=target,
+                decoder_lengths=decoder_lengths,
+                decoder_time_idx=decoder_time_idx,
+                groups=groups,
+                target_scale=target_scale,
+            ),
+            (target, weight),
+        )
     
     
     
