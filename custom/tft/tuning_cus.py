@@ -261,8 +261,9 @@ class OptimizeHyperparameters(object):
         df.close()
         self.objective_best(study.best_trial)
     
-    def get_tft(self,trial_num,epoch_num):
+    def get_tft(self,trial_num,epoch_num,**kwargs):
         best_model_path = os.path.join(self.model_path, "trial_{}/epoch={}.ckpt".format(trial_num,epoch_num))
-        best_tft = TftModelCus.load_from_checkpoint(best_model_path)
+        best_tft = TftModelCus.load_from_checkpoint(best_model_path,kwargs)
+        best_tft.ext_properties(kwargs)
         return best_tft
     

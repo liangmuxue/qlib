@@ -18,6 +18,9 @@ class TftModelCus(TemporalFusionTransformer):
     def __init__(self,**kwargs):
         super().__init__(**kwargs)
         
+    def ext_properties(self,opts):
+        self.opts = opts
+        
     def plot_prediction_actual_by_variable(
         self, data: Dict[str, Dict[str, torch.Tensor]], name: str = None, ax=None, log_scale: bool = None
     ) -> Union[Dict[str, plt.Figure], plt.Figure]:
@@ -44,8 +47,8 @@ class TftModelCus(TemporalFusionTransformer):
         else:
             # create figure
             kwargs = {}
-            if name!="month":
-                return None
+            # if name!="month":
+            #     return None
             # adjust figure size for figures with many labels
             if self.hparams.embedding_sizes.get(name, [1e9])[0] > 10:
                 kwargs = dict(figsize=(10, 5))
@@ -134,9 +137,9 @@ class TftModelCus(TemporalFusionTransformer):
                 ax2.set_yscale("log")
             ax2.bar(x, support, width=x_step, linewidth=0, alpha=0.2, color="k")
             # adjust layout and legend
-            # fig.tight_layout()
-            # fig.legend()
-            # plt.savefig("custom/data/lightning_logs/fig_{}.png".format(name))
+            fig.tight_layout()
+            fig.legend()
+            plt.savefig("{}/fig_{}.png".format(self.opts["fig_save_path"],name))
             print("save ok:{}".format(name))
             return fig        
         

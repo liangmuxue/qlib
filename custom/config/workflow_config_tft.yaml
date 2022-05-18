@@ -51,7 +51,8 @@ task:
             batch_size: 1024
             seed: 0
             n_jobs: 20
-            type: 'best_train'
+            type: 'pred_sub'
+            fig_save_path: 'custom/data/lightning_logs/chart/subset'
             optargs:
                n_trials: 20
                max_epochs : 50

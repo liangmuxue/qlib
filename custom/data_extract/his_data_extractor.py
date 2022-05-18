@@ -79,11 +79,20 @@ class HisDataExtractor:
         save_path = "{}/{}.csv".format(self.ITEM_DATA_SAVEPATH,instrument_code)
         item_data.to_csv(save_path, index=False)        
         return item_data
-    
+
+    def show_item_data(self,instrument_code,start_date=None,end_date=None):   
+        """显示单个股票历史行情数据"""
+        
+        # 取得日线数据，后复权
+        item_data = ak.stock_zh_a_hist(symbol=instrument_code, period="daily", start_date=start_date,end_date=end_date,adjust="hfq")
+        item_data.insert(loc=0, column='code', value=instrument_code)
+        print(item_data)
+        
 if __name__ == "__main__":    
     extractor = HisDataExtractor(item_savepath="./custom/data/stock_data/item")   
     # extractor.load_item_data("600520",start_date="2008-05-21",end_date="2008-05-28")    
-    extractor.load_item_data("600520")
+    # extractor.load_item_data("600520")
+    extractor.show_item_data("600010",start_date="2020-05-07",end_date="2020-05-29")
     # extractor = HisDataExtractor()
     # extractor.download_data(file_type="qyspjg")
     # extractor.get_code_data(create=False)

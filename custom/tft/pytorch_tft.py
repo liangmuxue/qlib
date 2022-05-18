@@ -68,7 +68,7 @@ class TftModel(Model):
         self.logger.info("Naive Transformer:" "\nbatch_size : {}" "\ndevice : {}".format(self.batch_size, self.device))
         
         self.type = type
-    
+        self.fig_save_path = kwargs['fig_save_path']
     
     @property
     def use_gpu(self):
@@ -78,7 +78,7 @@ class TftModel(Model):
         self,
         dataset: TFTDataset
     ):
-        if self.type=="pred_only":
+        if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
             return      
@@ -121,13 +121,32 @@ class TftModel(Model):
             study = self.study_opt.do_apply("custom/data/test_study.pkl")      
         
     def predict(self, dataset: TFTDataset):
+        # 只预测部分数据
+        if self.type=="pred_sub":
+            return self.predict_subset(dataset) 
+       
         df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         # 删除价格为负数的数据
         df_test = df_test[df_test.nan_validate>0]
         test_ds = dataset.get_ts_dataset(df_test,mode="valid")
         test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)        
-        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path']).get_tft(0,33)
+        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path']).get_tft(1,8,fig_save_path=self.fig_save_path)
         predictions, x = best_tft.predict(test_loader, return_x=True)
         predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
         return pd.Series(np.concatenate(predictions), index=df_test.get_index())
+    
+    def predict_subset(self, dataset: TFTDataset):
+        df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        # 删除价格为负数的数据
+        df_test = df_test[df_test.nan_validate>0]
+        test_ds = dataset.get_ts_dataset(df_test,mode="valid")
+        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path']).get_tft(1,8,fig_save_path=self.fig_save_path)
+        # 筛选出部分数据进行预测
+        subset = test_ds.filter(lambda x: (x.instrument == "600010"))
+        predictions, x = best_tft.predict(subset, mode="quantiles",return_x=True)   
+        # subset.calculate_prediction_oridata(subset,predictions=predictions)
+        predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
+        best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
+        return pd.Series(np.concatenate(predictions), index=df_test.get_index())        
+     

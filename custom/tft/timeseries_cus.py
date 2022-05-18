@@ -210,12 +210,11 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             # minimal decoder index is always >= min_prediction_idx
             data = data[lambda x: x[self.time_idx] >= self.min_prediction_idx - self.max_encoder_length - self.max_lag]
         data = data.sort_values(self.group_ids + [self.time_idx])
-
         # preprocess data
         data = self._preprocess_data(data)
         #预存原来的数据，用于后续比较
-        self.pd_data = data
-        
+        self.pd_data = data.copy()
+                
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
 
@@ -253,9 +252,6 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         data_cat = self.data["categoricals"][index.index_start : index.index_end + 1].clone()
         time = self.data["time"][index.index_start : index.index_end + 1].clone()
         target = [d[index.index_start : index.index_end + 1].clone() for d in self.data["target"]]
-        
-        if (target[0]<0).any().item() is True:
-            print("ttt")
         
         groups = self.data["groups"][index.index_start].clone()
         if self.data["weight"] is None:
@@ -454,99 +450,239 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             (target, weight),
         )        
 
-
-    def _collate_fn(
-        self, batches: List[Tuple[Dict[str, torch.Tensor], torch.Tensor]]
-    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+    def _preprocess_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Collate function to combine items into mini-batch for dataloader.
+        Scale continuous variables, encode categories and set aside target and weight.
 
         Args:
-            batches (List[Tuple[Dict[str, torch.Tensor], torch.Tensor]]): List of samples generated with
-                :py:meth:`~__getitem__`.
+            data (pd.DataFrame): original data
 
         Returns:
-            Tuple[Dict[str, torch.Tensor], Tuple[Union[torch.Tensor, List[torch.Tensor]], torch.Tensor]: minibatch
+            pd.DataFrame: pre-processed dataframe
         """
-        # collate function for dataloader
-        # lengths
-        encoder_lengths = torch.tensor([batch[0]["encoder_length"] for batch in batches], dtype=torch.long)
-        decoder_lengths = torch.tensor([batch[0]["decoder_length"] for batch in batches], dtype=torch.long)
-        ori_index = torch.tensor([batch[0]["index"] for batch in batches], dtype=torch.long)
-        
+        # add lags to data
+        for name in self.lags:
+            # todo: add support for variable groups
+            assert (
+                name not in self.variable_groups
+            ), f"lagged variables that are in {self.variable_groups} are not supported yet"
+            for lagged_name, lag in self._get_lagged_names(name).items():
+                data[lagged_name] = data.groupby(self.group_ids, observed=True)[name].shift(lag)
 
-        # ids
-        decoder_time_idx_start = (
-            torch.tensor([batch[0]["encoder_time_idx_start"] for batch in batches], dtype=torch.long) + encoder_lengths
-        )
-        decoder_time_idx = decoder_time_idx_start.unsqueeze(1) + torch.arange(decoder_lengths.max()).unsqueeze(0)
-        groups = torch.stack([batch[0]["groups"] for batch in batches])
+        # encode group ids - this encoding
+        for name, group_name in self._group_ids_mapping.items():
+            # use existing encoder - but a copy of it not too loose current encodings
+            encoder = deepcopy(self.categorical_encoders.get(group_name, NaNLabelEncoder()))
+            self.categorical_encoders[group_name] = encoder.fit(data[name].to_numpy().reshape(-1), overwrite=False)
+            data[group_name] = self.transform_values(name, data[name], inverse=False, group_id=True)
 
-        # features
-        encoder_cont = rnn.pad_sequence(
-            [batch[0]["x_cont"][:length] for length, batch in zip(encoder_lengths, batches)], batch_first=True
-        )
-        encoder_cat = rnn.pad_sequence(
-            [batch[0]["x_cat"][:length] for length, batch in zip(encoder_lengths, batches)], batch_first=True
-        )
+        # encode categoricals first to ensure that group normalizer for relies on encoded categories
+        if isinstance(
+            self.target_normalizer, (GroupNormalizer, MultiNormalizer)
+        ):  # if we use a group normalizer, group_ids must be encoded as well
+            group_ids_to_encode = self.group_ids
+        else:
+            group_ids_to_encode = []
+        for name in dict.fromkeys(group_ids_to_encode + self.categoricals):
+            if name in self.lagged_variables:
+                continue  # do not encode here but only in transform
+            if name in self.variable_groups:  # fit groups
+                columns = self.variable_groups[name]
+                if name not in self.categorical_encoders:
+                    self.categorical_encoders[name] = NaNLabelEncoder().fit(data[columns].to_numpy().reshape(-1))
+                elif self.categorical_encoders[name] is not None:
+                    try:
+                        check_is_fitted(self.categorical_encoders[name])
+                    except NotFittedError:
+                        self.categorical_encoders[name] = self.categorical_encoders[name].fit(
+                            data[columns].to_numpy().reshape(-1)
+                        )
+            else:
+                if name not in self.categorical_encoders:
+                    self.categorical_encoders[name] = NaNLabelEncoder().fit(data[name])
+                elif self.categorical_encoders[name] is not None and name not in self.target_names:
+                    try:
+                        check_is_fitted(self.categorical_encoders[name])
+                    except NotFittedError:
+                        self.categorical_encoders[name] = self.categorical_encoders[name].fit(data[name])
 
-        decoder_cont = rnn.pad_sequence(
-            [batch[0]["x_cont"][length:] for length, batch in zip(encoder_lengths, batches)], batch_first=True
-        )
-        decoder_cat = rnn.pad_sequence(
-            [batch[0]["x_cat"][length:] for length, batch in zip(encoder_lengths, batches)], batch_first=True
-        )
+        # encode them
+        for name in dict.fromkeys(group_ids_to_encode + self.flat_categoricals):
+            # targets and its lagged versions are handled separetely
+            if name not in self.target_names and name not in self.lagged_targets:
+                # 保留原数据，用于后续比对
+                data["ori_{}".format(name)] = data[name].copy()
+                data[name] = self.transform_values(
+                    name, data[name], inverse=False, ignore_na=name in self.lagged_variables
+                )
 
-        # target scale
-        if isinstance(batches[0][0]["target_scale"], torch.Tensor):  # stack tensor
-            target_scale = torch.stack([batch[0]["target_scale"] for batch in batches])
-        elif isinstance(batches[0][0]["target_scale"], (list, tuple)):
-            target_scale = []
-            for idx in range(len(batches[0][0]["target_scale"])):
-                if isinstance(batches[0][0]["target_scale"][idx], torch.Tensor):  # stack tensor
-                    scale = torch.stack([batch[0]["target_scale"][idx] for batch in batches])
+        # save special variables
+        assert "__time_idx__" not in data.columns, "__time_idx__ is a protected column and must not be present in data"
+        data["__time_idx__"] = data[self.time_idx]  # save unscaled
+        for target in self.target_names:
+            assert (
+                f"__target__{target}" not in data.columns
+            ), f"__target__{target} is a protected column and must not be present in data"
+            data[f"__target__{target}"] = data[target]
+        if self.weight is not None:
+            data["__weight__"] = data[self.weight]
+
+        # train target normalizer
+        if self.target_normalizer is not None:
+            # 保留原结果数据用于后续比对
+            data["ori_{}".format(self.target)] = data[self.target].copy()
+            # fit target normalizer
+            try:
+                check_is_fitted(self.target_normalizer)
+            except NotFittedError:
+                if isinstance(self.target_normalizer, EncoderNormalizer):
+                    self.target_normalizer.fit(data[self.target])
+                elif isinstance(self.target_normalizer, (GroupNormalizer, MultiNormalizer)):
+                    self.target_normalizer.fit(data[self.target], data)
                 else:
-                    scale = torch.tensor([batch[0]["target_scale"][idx] for batch in batches], dtype=torch.float)
-                target_scale.append(scale)
-        else:  # convert to tensor
-            target_scale = torch.tensor([batch[0]["target_scale"] for batch in batches], dtype=torch.float)
+                    self.target_normalizer.fit(data[self.target])
 
-        # target and weight
-        if isinstance(batches[0][1][0], (tuple, list)):
-            target = [
-                rnn.pad_sequence([batch[1][0][idx] for batch in batches], batch_first=True)
-                for idx in range(len(batches[0][1][0]))
-            ]
-            encoder_target = [
-                rnn.pad_sequence([batch[0]["encoder_target"][idx] for batch in batches], batch_first=True)
-                for idx in range(len(batches[0][1][0]))
-            ]
-        else:
-            target = rnn.pad_sequence([batch[1][0] for batch in batches], batch_first=True)
-            encoder_target = rnn.pad_sequence([batch[0]["encoder_target"] for batch in batches], batch_first=True)
+            # transform target
+            if isinstance(self.target_normalizer, EncoderNormalizer):
+                # we approximate the scales and target transformation by assuming one
+                # transformation over the entire time range but by each group
+                common_init_args = [
+                    name
+                    for name in inspect.signature(GroupNormalizer.__init__).parameters.keys()
+                    if name in inspect.signature(EncoderNormalizer.__init__).parameters.keys()
+                    and name not in ["data", "self"]
+                ]
+                copy_kwargs = {name: getattr(self.target_normalizer, name) for name in common_init_args}
+                normalizer = GroupNormalizer(groups=self.group_ids, **copy_kwargs)
+                data[self.target], scales = normalizer.fit_transform(data[self.target], data, return_norm=True)
 
-        if batches[0][1][1] is not None:
-            weight = rnn.pad_sequence([batch[1][1] for batch in batches], batch_first=True)
-        else:
-            weight = None
+            elif isinstance(self.target_normalizer, GroupNormalizer):
+                data[self.target], scales = self.target_normalizer.transform(data[self.target], data, return_norm=True)
 
-        return (
-            dict(
-                index=ori_index,
-                encoder_cat=encoder_cat,
-                encoder_cont=encoder_cont,
-                encoder_target=encoder_target,
-                encoder_lengths=encoder_lengths,
-                decoder_cat=decoder_cat,
-                decoder_cont=decoder_cont,
-                decoder_target=target,
-                decoder_lengths=decoder_lengths,
-                decoder_time_idx=decoder_time_idx,
-                groups=groups,
-                target_scale=target_scale,
-            ),
-            (target, weight),
-        )
+            elif isinstance(self.target_normalizer, MultiNormalizer):
+                transformed, scales = self.target_normalizer.transform(data[self.target], data, return_norm=True)
+
+                for idx, target in enumerate(self.target_names):
+                    data[target] = transformed[idx]
+
+                    if isinstance(self.target_normalizer[idx], NaNLabelEncoder):
+                        # overwrite target because it requires encoding (continuous targets should not be normalized)
+                        data[f"__target__{target}"] = data[target]
+
+            elif isinstance(self.target_normalizer, NaNLabelEncoder):
+                data[self.target] = self.target_normalizer.transform(data[self.target])
+                # overwrite target because it requires encoding (continuous targets should not be normalized)
+                data[f"__target__{self.target}"] = data[self.target]
+                scales = None
+
+            else:
+                data[self.target], scales = self.target_normalizer.transform(data[self.target], return_norm=True)
+
+            # add target scales
+            if self.add_target_scales:
+                if not isinstance(self.target_normalizer, MultiNormalizer):
+                    scales = [scales]
+                for target_idx, target in enumerate(self.target_names):
+                    if not isinstance(self.target_normalizers[target_idx], NaNLabelEncoder):
+                        for scale_idx, name in enumerate(["center", "scale"]):
+                            feature_name = f"{target}_{name}"
+                            assert (
+                                feature_name not in data.columns
+                            ), f"{feature_name} is a protected column and must not be present in data"
+                            data[feature_name] = scales[target_idx][:, scale_idx].squeeze()
+                            if feature_name not in self.reals:
+                                self.static_reals.append(feature_name)
+
+        # rescale continuous variables apart from target
+        for name in self.reals:
+            if name in self.target_names or name in self.lagged_variables:
+                # lagged variables are only transformed - not fitted
+                continue
+            elif name not in self.scalers:
+                self.scalers[name] = StandardScaler().fit(data[[name]])
+            elif self.scalers[name] is not None:
+                try:
+                    check_is_fitted(self.scalers[name])
+                except NotFittedError:
+                    if isinstance(self.scalers[name], GroupNormalizer):
+                        self.scalers[name] = self.scalers[name].fit(data[[name]], data)
+                    else:
+                        self.scalers[name] = self.scalers[name].fit(data[[name]])
+
+        # encode after fitting
+        for name in self.reals:
+            # targets are handled separately
+            transformer = self.get_transformer(name)
+            if (
+                name not in self.target_names
+                and transformer is not None
+                and not isinstance(transformer, EncoderNormalizer)
+            ):
+                data[name] = self.transform_values(name, data[name], data=data, inverse=False)
+
+        # encode lagged categorical targets
+        for name in self.lagged_targets:
+            # normalizer only now available
+            if name in self.flat_categoricals:
+                data[name] = self.transform_values(name, data[name], inverse=False, ignore_na=True)
+
+        # encode constant values
+        self.encoded_constant_fill_strategy = {}
+        for name, value in self.constant_fill_strategy.items():
+            if name in self.target_names:
+                self.encoded_constant_fill_strategy[f"__target__{name}"] = value
+            self.encoded_constant_fill_strategy[name] = self.transform_values(
+                name, np.array([value]), data=data, inverse=False
+            )[0]
+
+        # shorten data by maximum of lagged sequences to avoid NA values - shorten only after encoding
+        if self.max_lag > 0:
+            # negative tail implementation as .groupby().tail(-self.max_lag) is not implemented in pandas
+            g = data.groupby(self._group_ids, observed=True)
+            data = g._selected_obj[g.cumcount() >= self.max_lag]
+        return data
+
     
+    def get_oridata_byindex(self,index_list):
+        """根据索引取得源数据
+        Args:
+            index_list 索引列表，每个索引元素对应一个股票
+        """
+        
+        result = []
+        for index in index_list:
+            data = self.pd_data.iloc[index.index_start.iloc[0]:index.index_end.iloc[0]+1]
+            result.append(data)
+        return result
     
+    def calculate_prediction_oridata(self,dataset,predictions=None,predictions_vs_actuals=None):
+        """
+        计算预测值与原始数据的比较
     
+        Args:
+            dataeset: 原始数据集
+            actual: input数据
+            prediction: 预测数据
+            predictions_vs_actuals: 预测与input的比较结果
+            decoder_lenhgt: 解码器长度，用于从数据集中摘取实际的被预测数据
+        """    
+        
+        single_data_list = self.get_oridata_byindex([dataset.index])
+        if predictions_vs_actuals is not None:
+            averages_actual = predictions_vs_actuals["average"]["actual"]
+            averages_prediction = predictions_vs_actuals["average"]["prediction"]   
+        for idx,single_data in enumerate(single_data_list):                                              
+            combine_data = single_data[["ori_instrument","datetime","ori_label"]]
+            prediction = predictions[idx]
+            expand_length = combine_data.shape[0] - prediction.shape[0]
+            combine_data = combine_data.iloc[expand_length:]
+            combine_data = combine_data.reset_index(drop=True)
+            pred_df = pd.DataFrame(prediction.numpy(),columns=["pred"])
+            combine_data = pd.concat([combine_data,pred_df],axis=1)
+            combine_data.set_index("datetime",inplace=True)
+            combine_data.plot()
+            plt.show()
+            print(combine_data)
+        
+        
+        

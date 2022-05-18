@@ -4,7 +4,6 @@ import sys, os
 import numpy as np
 import cv2
 
-        
 def test_pd_ser():
     
     dict_data1 = {
@@ -238,7 +237,29 @@ def test_data_compare():
     data2 = pd.read_pickle("/home/qdata/qlib_data/test/instrument_train.pkl") 
     compare = pd.DataFrame(data1.keys().to_frame().eq(data2.keys().to_frame()))
     print("compare result",compare)
-            
+  
+def test_viz():
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    plt.style.use('tableau-colorblind10') 
+    plt.rcParams['font.sans-serif'] = ['SimHei']
+    plt.rcParams['axes.unicode_minus'] = False 
+    fig, ax = plt.subplots()
+    
+    np.random.seed(1)
+    ts = pd.Series(np.random.randn(100), index=pd.date_range("1/1/2020", periods=100))
+    ts = ts.cumsum()
+    # ax.set_title(f"averages")
+    # ax.set_xlabel("name")
+    # ax.set_ylabel("Prediction")    
+    fig.tight_layout()
+    fig.legend()   
+    ts.plot()
+    plt.show()
+    print("plot end")
+              
 if __name__ == "__main__":
     # test_pd_index()
     # test_pd_timeser()
@@ -253,6 +274,7 @@ if __name__ == "__main__":
     # test_tft()
     # test_tft_data_view()
     # test_index()
-    test_data_compare()
+    # test_data_compare()
+    test_viz()
     
     
