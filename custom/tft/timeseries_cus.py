@@ -62,7 +62,8 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         categorical_encoders: Dict[str, NaNLabelEncoder] = {},
         scalers: Dict[str, Union[StandardScaler, RobustScaler, TorchNormalizer, EncoderNormalizer]] = {},
         randomize_length: Union[None, Tuple[float, float], bool] = False,
-        predict_mode: bool = False):
+        predict_mode: bool = False,
+        viz: bool = False):
 
         # 直接使用上级父类进行初始化
         Dataset.__init__(self)
@@ -98,6 +99,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         self.time_varying_unknown_categoricals = [] + time_varying_unknown_categoricals
         self.time_varying_unknown_reals = [] + time_varying_unknown_reals
         self.add_relative_time_idx = add_relative_time_idx
+        self.viz = viz
 
         # set automatic defaults
         if isinstance(randomize_length, bool):
@@ -222,7 +224,8 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         self.index = self._construct_index(data, predict_mode=predict_mode)
 
         # convert to torch tensor for high performance data loading later
-        self.data = self._data_to_tensors(data)        
+        self.data = self._data_to_tensors(data)    
+        print("self.data shape in")    
         
         # super().__init__(data,time_idx,target,group_ids,
         #                  weight=weight,max_encoder_length=max_encoder_length,min_encoder_length=min_encoder_length,
@@ -236,9 +239,11 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         #                  add_target_scales=add_target_scales,add_encoder_length=add_encoder_length,
         #                  target_normalizer=target_normalizer,categorical_encoders=categorical_encoders,
         #                  scalers=scalers,randomize_length=randomize_length,predict_mode=predict_mode)
+        
         # visdom可视化环境
-        # self.viz_cat = TensorViz(env="dataview_cat")
-        # self.viz_cont = TensorViz(env="dataview_cont")
+        if self.viz:
+            self.viz_cat = TensorViz(env="dataview_cat")
+            self.viz_cont = TensorViz(env="dataview_cont")
         
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         """定制单个数据获取方式"""
@@ -430,10 +435,10 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             target = target[0][encoder_length:]
             target_scale = target_scale[0]
 
-        # if self.predict_mode is False:
-            # self.viz_cat.viz_matrix_var(data_cat,win="cat_{}".format(item_index))
-            # self.viz_cont.viz_matrix_var(data_cont[:,0:2],win="cont_{}".format(item_index))
-            
+        # if self.predict_mode is False and self.viz is True:
+        #     self.viz_cat.viz_matrix_var(data_cat,win="cat_{}".format(item_index))
+        #     self.viz_cont.viz_matrix_var(data_cont[:,:],win="cont_{}".format(item_index),names=self.reals)
+        #     print("step viz")
         
         return (
             dict(

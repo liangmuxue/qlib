@@ -53,9 +53,10 @@ class TftDataHandler(DataHandlerLP):
                 # "feature": ["OPEN", "HIGH", "LOW", "VWAP"],
                 "feature": ["OPEN", "HIGH", "LOW"],
             },
+            "volume": {},
             "rolling": {},
             # 添加nan_validate_label，用于数据空值校验
-            "nan_validate_fields": {},
+            "validate_fields": {},
         }
         return self.parse_config_to_fields(conf)
     
@@ -85,10 +86,10 @@ class TftDataHandler(DataHandlerLP):
         """
         fields = []
         names = []
-        # 校验空值
-        if "nan_validate_fields" in config:
+        # 校验无效值
+        if "validate_fields" in config:
             fields += ["$close"]
-            names += ["nan_validate"]
+            names += ["value_validate"]
         if "kbar" in config:
             fields += [
                 "($close-$open)/$open",
@@ -123,6 +124,8 @@ class TftDataHandler(DataHandlerLP):
             windows = config["volume"].get("windows", range(5))
             fields += ["Ref($volume, %d)/$volume" % d if d != 0 else "$volume/$volume" for d in windows]
             names += ["VOLUME" + str(d) for d in windows]
+            fields += ["$volume/100"]
+            names += ["VOLUME_CLOSE"]
         if "rolling" in config:
             windows = config["rolling"].get("windows", [5, 10, 20, 30, 60])
             include = config["rolling"].get("include", None)

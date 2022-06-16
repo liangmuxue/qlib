@@ -75,9 +75,14 @@ class HisDataExtractor:
         item_data.insert(loc=0, column='code', value=instrument_code)
         # 中文标题改英文 
         item_data.columns = ["code","date","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
+        ori_len = item_data.shape[0]
+        item_data = self.data_clean(item_data)
+        if ori_len>item_data.shape[0]:
+            print("clean some:{},less:{}".format(instrument_code,ori_len-item_data.shape[0]))
+            
         # 每个股票分别保存
         save_path = "{}/{}.csv".format(self.ITEM_DATA_SAVEPATH,instrument_code)
-        item_data.to_csv(save_path, index=False)        
+        # item_data.to_csv(save_path, index=False)        
         return item_data
 
     def show_item_data(self,instrument_code,start_date=None,end_date=None):   
@@ -87,12 +92,23 @@ class HisDataExtractor:
         item_data = ak.stock_zh_a_hist(symbol=instrument_code, period="daily", start_date=start_date,end_date=end_date,adjust="hfq")
         item_data.insert(loc=0, column='code', value=instrument_code)
         print(item_data)
+     
+    def data_clean(self,item_data):
+        """数据清洗"""
         
+        # 收盘排查
+        item_data_clean = item_data[item_data["close"]>0]
+        item_data_clean = item_data_clean[item_data_clean["close"]/item_data_clean["open"]-1<0.2]
+        # 高低价格排查
+        item_data_clean = item_data_clean[(item_data_clean["high"]-item_data_clean["low"])>=0]
+        
+        return item_data_clean
+           
 if __name__ == "__main__":    
     extractor = HisDataExtractor(item_savepath="./custom/data/stock_data/item")   
     # extractor.load_item_data("600520",start_date="2008-05-21",end_date="2008-05-28")    
-    # extractor.load_item_data("600520")
-    extractor.show_item_data("600010",start_date="2020-05-07",end_date="2020-05-29")
+    extractor.load_item_data("600060")
+    # extractor.show_item_data("600010",start_date="2020-05-07",end_date="2020-05-29")
     # extractor = HisDataExtractor()
     # extractor.download_data(file_type="qyspjg")
     # extractor.get_code_data(create=False)

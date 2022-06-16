@@ -4,7 +4,7 @@ from qlib.log import get_module_logger
 from typing import Union, List, Tuple, Dict, Text, Optional
 from inspect import getfullargspec
 
-from pytorch_forecasting import GroupNormalizer, TimeSeriesDataSet
+from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
 from tft.timeseries_cus import TimeSeriesCusDataset
 
 import bisect
@@ -24,11 +24,13 @@ class TFTDataset(DatasetH):
 
     DEFAULT_STEP_LEN = 30
 
-    def __init__(self, step_len = DEFAULT_STEP_LEN,**kwargs):
+    def __init__(self, step_len = DEFAULT_STEP_LEN,pred_len = 5,**kwargs):
         # 基层数据处理器
         self.data_extractor = StockDataExtractor() 
         super().__init__(**kwargs)
         self.step_len = step_len
+        self.pred_len = pred_len
+        self.viz = kwargs["viz"]
          
     def config(self, **kwargs):
         if "step_len" in kwargs:
@@ -101,6 +103,10 @@ class TFTDataset(DatasetH):
         """
         组装数据,内容加工
         """
+        
+        # 使用成交量作为标签时的处理
+        return self.prepare_seg_volume(slc)
+        
         dtype = kwargs.pop("dtype", None)
         start, end = slc.start, slc.stop
 
@@ -113,15 +119,24 @@ class TFTDataset(DatasetH):
             data = data[data.index.get_level_values(1).isin(data_train.index.get_level_values(1).values)]
         # 恢复成一维列索引
         data = data.reset_index() 
-        # 重新定义动态数据字段
-        self.reals_cols = data.columns.get_level_values(1).values[2:-1]
-        # 重建字段名
-        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols,np.array(["label"])))
+        # 重新定义动态数据字段,忽略前面几个无效字段,注意不需要手工添加label字段了
+        self.reals_cols = data.columns.get_level_values(1).values[3:-1]
+        # 重建字段名，添加日期和股票字段,以及label字段
+        new_cols_idx = np.concatenate((np.array(["datetime","instrument","value_validate"]),self.reals_cols,['label']))
         data.columns = pd.Index(new_cols_idx)    
         # 清除NAN数据
         data = data.dropna() 
         # 删除价格小于0的数据
-        data = data[data.label>0]                
+        # data = data[data.label>0]        
+        # 删除涨跌幅度大于20%的数据 
+        data = data[data.label.abs()<0.2]  
+        # 正数转换
+        data['label'] = data['label'] + 0.2 
+        # 增大取值范围
+        data['label'] = data['label'] *1000
+        # data = data[data.VSTD5.abs()<0.1] 
+        # 变为正数 
+        # data.label = data.label + 100
         # 补充辅助数据,添加日期编号
         data["month"] = data.datetime.astype("str").str.slice(0,7)
         data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
@@ -132,9 +147,51 @@ class TFTDataset(DatasetH):
         data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
+        # 删除校验列
+        data.drop(columns=['value_validate'],inplace=True)
         # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
         return data
  
+    def prepare_seg_volume(self, slc: slice, **kwargs):
+        """处理成交量模式的数据"""
+        
+        dtype = kwargs.pop("dtype", None)
+        start, end = slc.start, slc.stop
+
+        ext_slice = self._extend_slice(slc, self.cal, self.step_len)
+        data = super()._prepare_seg(ext_slice, **kwargs)
+        # 如果是测试阶段，则需要删除日期不在训练集中的股票
+        if self.segments_mode=="test":
+            ext_slice_train = self._extend_slice(slice(*self.segments["train"]), self.cal, self.step_len)
+            data_train = super()._prepare_seg(ext_slice_train, **kwargs)
+            data = data[data.index.get_level_values(1).isin(data_train.index.get_level_values(1).values)]
+        # 恢复成一维列索引
+        data = data.reset_index() 
+        # 重新定义动态数据字段,忽略前面几个无效字段,注意不需要手工添加label字段了
+        self.reals_cols = data.columns.values[3:-1]
+        # 重建字段名，添加日期和股票字段,以及label字段
+        new_cols_idx = np.concatenate((np.array(["datetime","instrument","value_validate"]),self.reals_cols,['label']))
+        data.columns = pd.Index(new_cols_idx)   
+        # 缩小取值空间 
+        # data["label"] = data["label"] / 100
+        # 清除NAN数据
+        data = data.dropna() 
+        data["month"] = data.datetime.astype("str").str.slice(0,7)
+        data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
+        data["time_idx"] -= data["time_idx"].min() 
+        # 重新编号,解决节假日以及相关日期不连续问题
+        data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
+        # 补充商品指数数据,按照月份合并
+        data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
+        # month重新编号为1到12
+        data["month"] = data["month"].str.slice(5,7)
+        # datetime转为字符串
+        data["datetime"] = data.datetime.astype("str")
+        # 删除校验列
+        data.drop(columns=['value_validate'],inplace=True)
+        # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
+        return data
+            
     def get_ts_dataset(self,data,mode="train",train_ts=None):
         """
         取得TimeSeriesDataSet对象
@@ -143,15 +200,17 @@ class TFTDataset(DatasetH):
         ----------
         data : DataFrame 已经生成的panda数据
         """     
-           
+        
+        # return self.get_ts_dataset_test(data,mode=mode)
         # 每批次的训练长度
         max_encoder_length = self.step_len
         # 每批次的预测长度
-        max_prediction_length = self.step_len * 2
+        max_prediction_length = self.pred_len
         # 取得各个因子名称，组装为动态连续变量
-        time_varying_unknown_reals = self.reals_cols.tolist()
+        time_varying_unknown_reals = ["label"] # self.reals_cols.tolist()
         # 商品价格指数，用于静态连续变量
         qyspjg = ["qyspjg_total","qyspjg_yoy","qyspjg_mom"]
+        qyspjg = []
         # 动态离散变量，可以使用财务数据
         time_varying_unknown_categoricals = []
         # 获取配置文件参数，生成TimeSeriesDataSet类型的对象
@@ -167,26 +226,71 @@ class TFTDataset(DatasetH):
             min_prediction_length=1,
             max_prediction_length=max_prediction_length,
             # 静态固定变量: 股票代码
-            static_categoricals=["instrument"],
+            static_categoricals=["instrument"], # ["instrument"],
             # 静态连续变量:每年的股市整体和外部经济环境数据
             static_reals=qyspjg,
-            # 动态离散变量:月份
-            time_varying_known_categoricals=["month"],
+            # 动态离散变量:日期
+            time_varying_known_categoricals=["datetime"], #["month"],
             # 动态已知离散变量: 节假日
             # variable_groups={"special_days": special_days},
-            time_varying_known_reals=["time_idx"],
+            time_varying_known_reals=[], #["time_idx"],
             time_varying_unknown_categoricals=time_varying_unknown_categoricals,
             time_varying_unknown_reals=time_varying_unknown_reals,
-            target_normalizer=GroupNormalizer(
-                groups=["instrument"], transformation="softplus", center=False
-            ),  # use softplus with beta=1.0 and normalize by group
-            allow_missing_timesteps=True,
+            target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
+            allow_missing_timesteps=False,
             add_relative_time_idx=True,
             add_target_scales=True,
             add_encoder_length=True,
+            viz=self.viz,
         )
         if mode=="valid":
             tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
         return tsdata     
+    
+    
+    def get_ts_dataset_test(self,data_ori,mode="train",train_ts=None):
+        from pytorch_forecasting.data.examples import get_stallion_data
+        data = get_stallion_data()
+        
+        data["month"] = data.date.dt.month.astype("str").astype("category")
+        data["log_volume"] = np.log(data.volume + 1e-8)
+        
+        data["time_idx"] = data["date"].dt.year * 12 + data["date"].dt.month
+        data["time_idx"] -= data["time_idx"].min()
+        data["avg_volume_by_sku"] = data.groupby(["time_idx", "sku"], observed=True).volume.transform("mean")
+        data["avg_volume_by_agency"] = data.groupby(["time_idx", "agency"], observed=True).volume.transform("mean")       
+         
+        training_cutoff = data["time_idx"].max() - 6
+        max_encoder_length = 18
+        max_prediction_length = 6        
+        tsdata = TimeSeriesCusDataset(
+            data[lambda x: x.time_idx <= training_cutoff],
+            time_idx="time_idx",
+            target="volume",
+            group_ids=["agency", "sku"],
+            min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
+            max_encoder_length=max_encoder_length,
+            min_prediction_length=1,
+            max_prediction_length=max_prediction_length,
+            static_categoricals= ["agency", "sku"],
+            static_reals=[],#["avg_population_2017", "avg_yearly_household_income_2017"],
+            time_varying_known_categoricals=["month"],
+            # variable_groups={"special_days": special_days},  # group of categorical variables can be treated as one variable
+            time_varying_known_reals= [], #["time_idx", "price_regular", "discount_in_percent"],
+            time_varying_unknown_categoricals=[],
+            time_varying_unknown_reals=[
+                "volume",
+            ],
+            target_normalizer=GroupNormalizer(
+                groups=["agency", "sku"], transformation="softplus", center=False
+            ),  # use softplus with beta=1.0 and normalize by group
+            add_relative_time_idx=True,
+            add_target_scales=True,
+            add_encoder_length=True,
+        )       
+        if mode=="valid":
+            tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
+        return tsdata     
+    
     
     

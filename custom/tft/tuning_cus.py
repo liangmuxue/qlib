@@ -59,15 +59,21 @@ class OptimizeHyperparameters(object):
         verbose: Union[int, bool] = None,
         pruner: optuna.pruners.BasePruner = optuna.pruners.SuccessiveHalvingPruner(),
         clean_mode=False,
+        load_weights=None,
+        trial_no=None,
+        epoch_no=None,
+        viz=False,
         **kwargs
     ) -> optuna.Study:
-        
-        self.model_path = model_path
-        if clean_mode is True:
-            return None
-        
         """重构超参数trial"""
         
+        self.model_path = model_path
+        self.load_weights = load_weights
+        self.trial_no = trial_no
+        self.epoch_no = epoch_no
+        if clean_mode is True:
+            return None
+                
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
         self.max_epochs = max_epochs
@@ -85,6 +91,7 @@ class OptimizeHyperparameters(object):
         self.study = study
         self.verbose = verbose        
         self.pruner = pruner
+        self.viz = viz
         self.kwargs = kwargs  
         
         assert isinstance(train_dataloader.dataset, TimeSeriesDataSet) and isinstance(
@@ -157,6 +164,7 @@ class OptimizeHyperparameters(object):
             log_interval=-1,
             **self.kwargs,
         )
+        model.ext_properties(fig_save_path=None,viz=self.viz)
         # find good learning rate
         if self.use_learning_rate_finder:
             lr_trainer = pl.Trainer(
@@ -206,7 +214,7 @@ class OptimizeHyperparameters(object):
             dirpath=os.path.join(self.model_path, "trial_{}".format(trial.number)), filename="{epoch}", monitor="val_loss"
         )
         metrics_callback = MetricsCallback()
-        logger = TensorBoardLogger(self.log_dir, name="optuna", version=trial.number)
+        logger = TensorBoardLogger(self.log_dir, name="optuna_best", version=trial.number)
         gradient_clip_val = trial.suggest_loguniform("gradient_clip_val", *self.gradient_clip_val_range)
         default_trainer_kwargs = dict(
             gpus=[0] if torch.cuda.is_available() else None,
@@ -220,29 +228,31 @@ class OptimizeHyperparameters(object):
             enable_progress_bar=self.optuna_verbose < optuna.logging.INFO,
             enable_model_summary=False,
         )
-        default_trainer_kwargs.update(self.trainer_kwargs)
+        default_trainer_kwargs.update(self.trainer_kwargs)     
         self.trainer = pl.Trainer(
             **default_trainer_kwargs,
-        )
-
-        # create model
-        hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
-        self.kwargs["loss"] = copy.deepcopy(self.loss)
-        model = TftModelCus.from_dataset(
-            self.train_dataloader.dataset,
-            dropout=trial.suggest_uniform("dropout", *self.dropout_range),
-            hidden_size=hidden_size,
-            hidden_continuous_size=trial.suggest_int(
-                "hidden_continuous_size",
-                self.hidden_continuous_size_range[0],
-                min(self.hidden_continuous_size_range[1], hidden_size),
-                log=True,
-            ),
-            attention_head_size=trial.suggest_int("attention_head_size", *self.attention_head_size_range),
-            log_interval=-1,
-            **self.kwargs,
-        )
-        model.hparams.learning_rate = trial.suggest_loguniform("learning_rate", *self.learning_rate_range)
+        )               
+        if self.load_weights:
+            model = self.get_tft()     
+        else:        
+            # create model
+            hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
+            self.kwargs["loss"] = copy.deepcopy(self.loss)
+            model = TftModelCus.from_dataset(
+                self.train_dataloader.dataset,
+                dropout=trial.suggest_uniform("dropout", *self.dropout_range),
+                hidden_size=hidden_size,
+                hidden_continuous_size=trial.suggest_int(
+                    "hidden_continuous_size",
+                    self.hidden_continuous_size_range[0],
+                    min(self.hidden_continuous_size_range[1], hidden_size),
+                    log=True,
+                ),
+                attention_head_size=trial.suggest_int("attention_head_size", *self.attention_head_size_range),
+                log_interval=-1,
+                **self.kwargs,
+            )
+            model.hparams.learning_rate = trial.suggest_loguniform("learning_rate", *self.learning_rate_range)
 
         # fit
         self.trainer.fit(model, train_dataloaders=self.train_dataloader, val_dataloaders=self.val_dataloader)
@@ -261,9 +271,9 @@ class OptimizeHyperparameters(object):
         df.close()
         self.objective_best(study.best_trial)
     
-    def get_tft(self,trial_num,epoch_num,**kwargs):
-        best_model_path = os.path.join(self.model_path, "trial_{}/epoch={}.ckpt".format(trial_num,epoch_num))
-        best_tft = TftModelCus.load_from_checkpoint(best_model_path,kwargs)
-        best_tft.ext_properties(kwargs)
+    def get_tft(self,fig_save_path=None,viz=False):
+        best_model_path = os.path.join(self.model_path, "trial_{}/epoch={}.ckpt".format(self.trial_no,self.epoch_no))
+        best_tft = TftModelCus.load_from_checkpoint(best_model_path)
+        best_tft.ext_properties(fig_save_path=fig_save_path,viz=viz)
         return best_tft
     

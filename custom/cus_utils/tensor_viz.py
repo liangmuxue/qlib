@@ -47,11 +47,14 @@ class TensorViz(object):
     def __init__(self,env="debug",type="cont_data"):
         self.viz = Visdom(env=env,port=7098)  
             
-    def viz_matrix_var(self,data,win="matrix"):
+    def viz_matrix_var(self,data,win="matrix",names=None):
         length = data.shape[1]
         ts = data.shape[0]
         for i in range(length):
-            line_name = "line{}".format(i+1)
+            if names is not None:
+                line_name = "{}".format(names[i])
+            else:
+                line_name = "line{}".format(i+1)
             if i==0:
                 self.viz.line(
                     X=np.arange(ts),
@@ -75,7 +78,10 @@ class TensorViz(object):
                     update='append',
                 )
                 
-                
+    def viz_line_compare(self,line_pair,win="compare",names=None):    
+        """比较两条线段"""  
+        
+        print("do nothing")          
             
 def reals_data_test():
     viz = TensorViz()

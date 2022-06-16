@@ -21,6 +21,7 @@ examples/weights
 .nvimrc
 .vscode
 
+custom/data
 qlib/VERSION.txt
 qlib/data/_libs/expanding.cpp
 qlib/data/_libs/rolling.cpp

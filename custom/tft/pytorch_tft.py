@@ -7,6 +7,7 @@ from __future__ import print_function
 
 import os
 import numpy as np
+from collections import Counter
 import pandas as pd
 import pickle
 import copy
@@ -90,8 +91,6 @@ class TftModel(Model):
         # 生成tft验证集,并删除不在训练集中的股票数据
         df_valid = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         df_valid = df_valid[df_valid['instrument'].isin(df_train['instrument'].unique())]
-        # # 验证数据集需要全部数据作为参数
-        # df_all = pd.concat(df_train,df_valid)
         validation = dataset.get_ts_dataset(df_valid,mode="valid",train_ts=ts_data_train)
         val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)       
         self.study_opt = OptimizeHyperparameters(
@@ -109,15 +108,23 @@ class TftModel(Model):
             trainer_kwargs=dict(limit_train_batches=0.1,log_every_n_steps=16,gpus=[1]),
             reduce_on_plateau_patience=4,
             use_learning_rate_finder=False,
-            log_dir=self.optargs['log_path']
+            load_weights=self.optargs['load_weights'],
+            trial_no = self.optargs['best_trial_no'],
+            epoch_no = self.optargs['best_ckpt_no'],            
+            log_dir=self.optargs['log_path'],
+            viz=self.optargs['viz']
         )                       
         # 根据标志决定优化学习,还是使用优化好的参数直接训练
         if self.type=="opt_train":
             study = self.study_opt.do_study()        
             with open("custom/data/test_study.pkl", "wb") as fout:
-                pickle.dump(study, fout)                  
+                pickle.dump(study, fout)      
+        # 使用已经生成的最优化参数进行训练                    
         if self.type=="best_train":
-            # 使用已经生成的最优化参数进行训练
+            # 根据参数决定是否加载之前训练的权重
+            if self.optargs['load_weights']:
+                self.study_opt.trial_no = self.optargs['best_trial_no']
+                self.study_opt.epoch_no = self.optargs['best_ckpt_no']            
             study = self.study_opt.do_apply("custom/data/test_study.pkl")      
         
     def predict(self, dataset: TFTDataset):
@@ -126,11 +133,11 @@ class TftModel(Model):
             return self.predict_subset(dataset) 
        
         df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        # 删除价格为负数的数据
-        df_test = df_test[df_test.nan_validate>0]
         test_ds = dataset.get_ts_dataset(df_test,mode="valid")
         test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)        
-        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path']).get_tft(1,8,fig_save_path=self.fig_save_path)
+        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path'],load_weights=True,
+                                           trial_no=self.optargs['best_trial_no'],
+                                           epoch_no=self.optargs['best_ckpt_no']).get_tft(fig_save_path=self.fig_save_path,viz=self.optargs['viz'])
         predictions, x = best_tft.predict(test_loader, return_x=True)
         predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
@@ -138,15 +145,41 @@ class TftModel(Model):
     
     def predict_subset(self, dataset: TFTDataset):
         df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        # 删除价格为负数的数据
-        df_test = df_test[df_test.nan_validate>0]
         test_ds = dataset.get_ts_dataset(df_test,mode="valid")
-        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path']).get_tft(1,8,fig_save_path=self.fig_save_path)
+        test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1) 
+        trial_no = self.optargs['best_trial_no']
+        epoch_no = self.optargs['best_ckpt_no']
+        ohp = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path'],load_weights=True,
+                                           trial_no=trial_no,
+                                           epoch_no=epoch_no)
+        best_tft = ohp.get_tft(fig_save_path=self.fig_save_path,viz=self.optargs['viz'])
         # 筛选出部分数据进行预测
-        subset = test_ds.filter(lambda x: (x.instrument == "600010"))
-        predictions, x = best_tft.predict(subset, mode="quantiles",return_x=True)   
+        # subset = test_ds.filter(lambda x: (x.instrument == "600010"))
+        # test_loader_syb = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1) 
+        # actuals_sub = torch.cat([y[0] for x, y in iter(test_loader_syb)])
+        # test_loader = subset.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1) 
+        actuals = torch.cat([y[0] for x, y in iter(test_loader)])
+        predictions, x = best_tft.predict(test_ds,return_x=True)   
+        loss = (actuals - predictions).abs().mean()
+        print("loss is:",loss)
+        self.show_pred_act(predictions,actuals)
+        raw_predictions, x = best_tft.predict(test_loader, mode="raw", return_x=True)
+        for idx in range(10):  # plot 10 examples
+            best_tft.plot_prediction(x, raw_predictions, idx=idx, add_loss_to_title=True);        
         # subset.calculate_prediction_oridata(subset,predictions=predictions)
+        predictions, x = best_tft.predict(test_ds, mode="quantiles",return_x=True)  
         predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
         return pd.Series(np.concatenate(predictions), index=df_test.get_index())        
      
+    def show_pred_act(self,predictions,actuals):
+        from cus_utils.tensor_viz import TensorViz
+        viz_cat = TensorViz(env="dataview_compare")
+        
+        length = actuals.shape[0]
+        for i in range(length):
+            actual = actuals[i]
+            prediction = predictions[i]
+            compare_matrix = torch.cat([actual.unsqueeze(-1),prediction.unsqueeze(-1)],1)   
+            viz_cat.viz_matrix_var(compare_matrix,win="comp_{}".format(i),names=["actual","prediction"])
+          
