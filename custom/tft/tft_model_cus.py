@@ -12,7 +12,71 @@ from pytorch_lightning.trainer.states import RunningStage
 from pytorch_lightning.utilities.parsing import AttributeDict, get_init_args
 import scipy.stats
 import torch
+from torch.utils.data import DataLoader
+from tqdm.autonotebook import tqdm
+from pytorch_forecasting.utils import (
+    OutputMixIn,
+    apply_to_list,
+    create_mask,
+    get_embedding_size,
+    groupby_apply,
+    move_to_device,
+    to_list,
+)
+
 from cus_utils.tensor_viz import TensorViz
+from .timeseries_cus import TimeSeriesCusDataset
+
+VIZ_ITEM_NUMBER = 20
+
+def _concatenate_output(
+    output: List[Dict[str, List[Union[List[torch.Tensor], torch.Tensor, bool, int, str, np.ndarray]]]]
+) -> Dict[str, Union[torch.Tensor, np.ndarray, List[Union[torch.Tensor, int, bool, str]]]]:
+    output_cat = {}
+    for name in output[0].keys():
+        v0 = output[0][name]
+        # concatenate simple tensors
+        if isinstance(v0, torch.Tensor):
+            output_cat[name] = _torch_cat_na([out[name] for out in output])
+        # concatenate list of tensors
+        elif isinstance(v0, (tuple, list)) and len(v0) > 0:
+            output_cat[name] = []
+            for target_id in range(len(v0)):
+                if isinstance(v0[target_id], torch.Tensor):
+                    output_cat[name].append(_torch_cat_na([out[name][target_id] for out in output]))
+                else:
+                    try:
+                        output_cat[name].append(np.concatenate([out[name][target_id] for out in output], axis=0))
+                    except ValueError:
+                        output_cat[name] = [item for out in output for item in out[name][target_id]]
+        # flatten list for everything else
+        else:
+            try:
+                output_cat[name] = np.concatenate([out[name] for out in output], axis=0)
+            except ValueError:
+                if iterable(output[0][name]):
+                    output_cat[name] = [item for out in output for item in out[name]]
+                else:
+                    output_cat[name] = [out[name] for out in output]
+
+    if isinstance(output[0], OutputMixIn):
+        output_cat = output[0].__class__(**output_cat)
+    return output_cat
+
+def _torch_cat_na(x: List[torch.Tensor]) -> torch.Tensor:
+    if x[0].ndim > 1:
+        first_lens = [xi.shape[1] for xi in x]
+        max_first_len = max(first_lens)
+        if max_first_len > min(first_lens):
+            x = [
+                xi
+                if xi.shape[1] == max_first_len
+                else torch.cat(
+                    [xi, torch.full((xi.shape[0], max_first_len - xi.shape[1], *xi.shape[2:]), float("nan"))], dim=1
+                )
+                for xi in x
+            ]
+    return torch.cat(x, dim=0)
 
 class TftModelCus(TemporalFusionTransformer):
     def __init__(self,**kwargs):
@@ -24,6 +88,7 @@ class TftModelCus(TemporalFusionTransformer):
         self.fig_save_path = kwargs['fig_save_path']
         if self.viz:
             self.viz_target_pred = TensorViz(env="dataview_pred_target")
+            self.viz_valid = TensorViz(env="dataview_validation")
             self.viz_input = TensorViz(env="dataview_input")        
         
         
@@ -159,36 +224,132 @@ class TftModelCus(TemporalFusionTransformer):
         if self.viz:
             self.viz_training(out, x,y,index=batch_idx)          
         return log        
-    
-    def viz_training(self,out,x,y,index=0):
-        if index % 10 != 0:
-            return
-        print("do viz_training:",index)
-        p1 = out.prediction[9]
-        p2 = y[0][9].unsqueeze(-1)
-        target_pred = torch.cat((p1,p2),1)
-        target_pred = target_pred.detach().cpu().numpy()
-        input_data = x['encoder_cont'][9].detach().cpu().numpy()
-        names=["pred_{}".format(i) for i in range(7)]
-        names = names + ["target"]
-        win_target = "target_" + str(index)
-        win_input = "input_" + str(index)
-        self.viz_target_pred.viz_matrix_var(target_pred,win=win_target,names=names)
-        self.viz_target_pred.viz_matrix_var(input_data,win=win_input,names=self.reals)
-        if index%100==0:
-            print("iii")
-        print("step viz")  
  
-    def viz_output(self,output,index=0):
-        if index % 10 != 0:
-            return     
-        print("do viz_output:",index)   
-        output = output[9]
-        output = output.detach().cpu().numpy()
-        names=["output_{}".format(i) for i in range(7)]
-        win_output= "output_" + str(index)
-        self.viz_target_pred.viz_matrix_var(output,win=win_output,names=names)
-                    
+    def predict(
+        self,
+        data: Union[DataLoader, pd.DataFrame, TimeSeriesCusDataset],
+        mode: Union[str, Tuple[str, str]] = "prediction",
+        return_index: bool = False,
+        return_decoder_lengths: bool = False,
+        batch_size: int = 64,
+        num_workers: int = 0,
+        fast_dev_run: bool = False,
+        show_progress_bar: bool = False,
+        return_x: bool = False,
+        mode_kwargs: Dict[str, Any] = None,
+        return_ori_outupt = False,
+        **kwargs,
+    ):
+        """
+        重载父类预测方法.
+        """
+        # convert to dataloader
+        if isinstance(data, pd.DataFrame):
+            data = TimeSeriesCusDataset.from_parameters(self.dataset_parameters, data, predict=True)
+        if isinstance(data, TimeSeriesCusDataset):
+            dataloader = data.to_dataloader(batch_size=batch_size, train=False, num_workers=num_workers)
+        else:
+            dataloader = data
+
+        # mode kwargs default to None
+        if mode_kwargs is None:
+            mode_kwargs = {}
+
+        # ensure passed dataloader is correct
+        assert isinstance(dataloader.dataset, TimeSeriesCusDataset), "dataset behind dataloader mut be TimeSeriesDataSet"
+
+        # prepare model
+        self.eval()  # no dropout, etc. no gradients
+
+        # run predictions
+        output = []
+        decode_lenghts = []
+        x_list = []
+        index = []
+        progress_bar = tqdm(desc="Predict", unit=" batches", total=len(dataloader), disable=not show_progress_bar)
+        with torch.no_grad():
+            for x, _ in dataloader:
+                # move data to appropriate device
+                data_device = x["encoder_cont"].device
+                if data_device != self.device:
+                    x = move_to_device(x, self.device)
+
+                # make prediction
+                out = self(x, **kwargs)  # raw output is dictionary
+                prediction = out.prediction
+                lengths = x["decoder_lengths"]
+                if return_decoder_lengths:
+                    decode_lenghts.append(lengths)
+                nan_mask = create_mask(lengths.max(), lengths)
+                if isinstance(mode, (tuple, list)):
+                    if mode[0] == "raw":
+                        out = out[mode[1]]
+                    else:
+                        raise ValueError(
+                            f"If a tuple is specified, the first element must be 'raw' - got {mode[0]} instead"
+                        )
+                elif mode == "prediction":
+                    out = self.to_prediction(out, **mode_kwargs)
+                    # mask non-predictions
+                    if isinstance(out, (list, tuple)):
+                        out = [
+                            o.masked_fill(nan_mask, torch.tensor(float("nan"))) if o.dtype == torch.float else o
+                            for o in out
+                        ]
+                    elif out.dtype == torch.float:  # only floats can be filled with nans
+                        out = out.masked_fill(nan_mask, torch.tensor(float("nan")))
+                elif mode == "quantiles":
+                    out = self.to_quantiles(out, **mode_kwargs)
+                    # mask non-predictions
+                    if isinstance(out, (list, tuple)):
+                        out = [
+                            o.masked_fill(nan_mask.unsqueeze(-1), torch.tensor(float("nan")))
+                            if o.dtype == torch.float
+                            else o
+                            for o in out
+                        ]
+                    elif out.dtype == torch.float:
+                        out = out.masked_fill(nan_mask.unsqueeze(-1), torch.tensor(float("nan")))
+                elif mode == "raw":
+                    pass
+                else:
+                    raise ValueError(f"Unknown mode {mode} - see docs for valid arguments")
+
+                out = move_to_device(out, device="cpu")
+
+                output.append(out)
+                if return_x:
+                    x = move_to_device(x, "cpu")
+                    x_list.append(x)
+                if return_index:
+                    index.append(dataloader.dataset.x_to_index(x))
+                progress_bar.update()
+                if fast_dev_run:
+                    break
+
+        # concatenate output (of different batches)
+        if isinstance(mode, (tuple, list)) or mode != "raw":
+            if isinstance(output[0], (tuple, list)) and len(output[0]) > 0 and isinstance(output[0][0], torch.Tensor):
+                output = [_torch_cat_na([out[idx] for out in output]) for idx in range(len(output[0]))]
+            else:
+                output = _torch_cat_na(output)
+        elif mode == "raw":
+            output = _concatenate_output(output)
+
+        # generate output
+        if return_x or return_index or return_decoder_lengths or return_ori_outupt:
+            output = [output]
+        if return_x:
+            output.append(_concatenate_output(x_list))
+        if return_index:
+            output.append(pd.concat(index, axis=0, ignore_index=True))
+        if return_decoder_lengths:
+            output.append(torch.cat(decode_lenghts, dim=0))
+        # 返回分位数完整数据
+        if return_ori_outupt:
+            output.append(prediction)            
+        return output
+       
     def validation_step(self, batch, batch_idx):
         """
         验证步骤方法重载.
@@ -198,9 +359,78 @@ class TftModelCus(TemporalFusionTransformer):
         if log['loss']<5:
             print("lll")
         log.update(self.create_log(x, y, out, batch_idx))
+        self.viz_validation(out, x, y, batch_idx)
         return log
-    
-    
+ 
+    def viz_training(self,out,x,y,index=0):
+        if index % 10 != 0:
+            return
+        print("do viz_training:",index)
+        # 分位数图形
+        pred_fw = out.prediction[VIZ_ITEM_NUMBER]
+        names=["pred_{}".format(i) for i in range(7)]
+        win_target = "target_" + str(index)
+        self.viz_target_pred.viz_matrix_var(pred_fw,win=win_target,names=names)
+        # 预测值与实际值图形      
+        label = y[0][VIZ_ITEM_NUMBER].unsqueeze(-1)
+        prediction = self.to_prediction(out, {})
+        prediction = prediction[VIZ_ITEM_NUMBER].unsqueeze(-1)
+        target_pred = torch.cat((prediction,label),1)
+        names=["pred","label"]
+        win_target = "pred_label_" + str(index)
+        self.viz_target_pred.viz_matrix_var(target_pred,win=win_target,names=names)        
+        # 输入值图形
+        input_cats = x['encoder_cat'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
+        input_reals = x['encoder_cont'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
+        input_data = np.concatenate((input_reals,input_cats), axis=1)
+        win_input = "input_" + str(index)
+        inputs_names = self.reals + self.categoricals
+        self.viz_target_pred.viz_matrix_var(input_data,win=win_input,names=inputs_names)
+        if index%100==0:
+            print("iii")
+        print("step viz")  
+
+    def viz_validation(self,out,x,y,index=0):
+        if index % 10 != 0:
+            return
+        print("do viz_training:",index)
+        # 分位数图形
+        pred_fw = out.prediction[VIZ_ITEM_NUMBER].detach().cpu().numpy()
+        names=["pred_{}".format(i) for i in range(7)]
+        win_target = "target_" + str(index)
+        self.viz_valid.viz_matrix_var(pred_fw,win=win_target,names=names)
+        # 预测值与实际值图形      
+        label = y[0][VIZ_ITEM_NUMBER].unsqueeze(-1)
+        prediction = self.to_prediction(out, {})
+        prediction = prediction[VIZ_ITEM_NUMBER].unsqueeze(-1)
+        target_pred = torch.cat((prediction,label),1)
+        names=["pred","label"]
+        win_target = "pred_label_" + str(index)
+        self.viz_valid.viz_matrix_var(target_pred,win=win_target,names=names)        
+        # 输入值图形
+        input_cats = x['encoder_cat'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
+        input_reals = x['encoder_cont'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
+        input_data = np.concatenate((input_reals,input_cats), axis=1)
+        win_input = "input_" + str(index)
+        inputs_names = self.reals + self.categoricals
+        self.viz_valid.viz_matrix_var(input_data,win=win_input,names=inputs_names)
+        if index%100==0:
+            print("iii")
+        print("step viz")  
+               
+    def viz_output(self,output,index=0):
+        if index % 10 != 0:
+            return     
+        print("do viz_output:",index)   
+        output = output[VIZ_ITEM_NUMBER]
+        output = output.detach().cpu().numpy()
+        names=["output_{}".format(i) for i in range(7)]
+        win_output= "output_" + str(index)
+        if self.training:
+            self.viz_target_pred.viz_matrix_var(output,win=win_output,names=names)
+        else:
+            self.viz_valid.viz_matrix_var(output,win=win_output,names=names)
+                       
     def forward(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
         input dimensions: n_samples x time x variables

@@ -253,7 +253,7 @@ class OptimizeHyperparameters(object):
                 **self.kwargs,
             )
             model.hparams.learning_rate = trial.suggest_loguniform("learning_rate", *self.learning_rate_range)
-
+        model.ext_properties(fig_save_path=None,viz=self.viz)   
         # fit
         self.trainer.fit(model, train_dataloaders=self.train_dataloader, val_dataloaders=self.val_dataloader)
 

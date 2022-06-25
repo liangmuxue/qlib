@@ -212,6 +212,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             # minimal decoder index is always >= min_prediction_idx
             data = data[lambda x: x[self.time_idx] >= self.min_prediction_idx - self.max_encoder_length - self.max_lag]
         data = data.sort_values(self.group_ids + [self.time_idx])
+        self.pd_ori_data = data.copy()        
         # preprocess data
         data = self._preprocess_data(data)
         #预存原来的数据，用于后续比较

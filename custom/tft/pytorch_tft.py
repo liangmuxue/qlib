@@ -144,9 +144,11 @@ class TftModel(Model):
         return pd.Series(np.concatenate(predictions), index=df_test.get_index())
     
     def predict_subset(self, dataset: TFTDataset):
-        df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        test_ds = dataset.get_ts_dataset(df_test,mode="valid")
-        test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1) 
+        df_train = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        df_valid = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        df_valid = df_valid[df_valid['instrument'].isin(df_train['instrument'].unique())]
+        validation = dataset.get_ts_dataset(df_valid,mode="valid")
+        val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)  
         trial_no = self.optargs['best_trial_no']
         epoch_no = self.optargs['best_ckpt_no']
         ohp = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path'],load_weights=True,
@@ -158,28 +160,32 @@ class TftModel(Model):
         # test_loader_syb = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1) 
         # actuals_sub = torch.cat([y[0] for x, y in iter(test_loader_syb)])
         # test_loader = subset.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1) 
-        actuals = torch.cat([y[0] for x, y in iter(test_loader)])
-        predictions, x = best_tft.predict(test_ds,return_x=True)   
+        actuals = torch.cat([y[0] for x, y in iter(val_loader)])
+        predictions, x, pred_ori = best_tft.predict(val_loader,return_x=True,return_ori_outupt=True)   
         loss = (actuals - predictions).abs().mean()
         print("loss is:",loss)
-        self.show_pred_act(predictions,actuals)
-        raw_predictions, x = best_tft.predict(test_loader, mode="raw", return_x=True)
-        for idx in range(10):  # plot 10 examples
+        self.show_pred_act(predictions,pred_ori,actuals)
+        raw_predictions, x = best_tft.predict(val_loader, mode="raw", return_x=True)
+        for idx in range(0,100,5):  # plot 10 examples
             best_tft.plot_prediction(x, raw_predictions, idx=idx, add_loss_to_title=True);        
         # subset.calculate_prediction_oridata(subset,predictions=predictions)
-        predictions, x = best_tft.predict(test_ds, mode="quantiles",return_x=True)  
+        predictions, x = best_tft.predict(validation, mode="quantiles",return_x=True)  
         predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
-        return pd.Series(np.concatenate(predictions), index=df_test.get_index())        
+        return pd.Series(np.concatenate(predictions), index=df_valid.get_index())        
+    
      
-    def show_pred_act(self,predictions,actuals):
+    def show_pred_act(self,predictions,pred_ori,actuals):
         from cus_utils.tensor_viz import TensorViz
-        viz_cat = TensorViz(env="dataview_compare")
+        viz_compare = TensorViz(env="dataview_compare")
         
         length = actuals.shape[0]
         for i in range(length):
             actual = actuals[i]
             prediction = predictions[i]
             compare_matrix = torch.cat([actual.unsqueeze(-1),prediction.unsqueeze(-1)],1)   
-            viz_cat.viz_matrix_var(compare_matrix,win="comp_{}".format(i),names=["actual","prediction"])
-          
+            viz_compare.viz_matrix_var(compare_matrix,win="comp_{}".format(i),names=["actual","prediction"])
+            names=["pred_{}".format(i) for i in range(7)]
+            win_target = "comp_quant_" + str(i)            
+            viz_compare.viz_matrix_var(pred_ori[i],win=win_target,names=names)
+            continue

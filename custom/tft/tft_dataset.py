@@ -105,7 +105,7 @@ class TFTDataset(DatasetH):
         """
         
         # 使用成交量作为标签时的处理
-        return self.prepare_seg_volume(slc)
+        # return self.prepare_seg_volume(slc)
         
         dtype = kwargs.pop("dtype", None)
         start, end = slc.start, slc.stop
@@ -133,10 +133,7 @@ class TFTDataset(DatasetH):
         # 正数转换
         data['label'] = data['label'] + 0.2 
         # 增大取值范围
-        data['label'] = data['label'] *1000
-        # data = data[data.VSTD5.abs()<0.1] 
-        # 变为正数 
-        # data.label = data.label + 100
+        data['label'] = data['label'] * 100
         # 补充辅助数据,添加日期编号
         data["month"] = data.datetime.astype("str").str.slice(0,7)
         data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
@@ -147,6 +144,8 @@ class TFTDataset(DatasetH):
         data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
+        # datetime转为字符串
+        data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")        
         # 删除校验列
         data.drop(columns=['value_validate'],inplace=True)
         # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
@@ -186,7 +185,7 @@ class TFTDataset(DatasetH):
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
         # datetime转为字符串
-        data["datetime"] = data.datetime.astype("str")
+        data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")   
         # 删除校验列
         data.drop(columns=['value_validate'],inplace=True)
         # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
@@ -230,16 +229,15 @@ class TFTDataset(DatasetH):
             # 静态连续变量:每年的股市整体和外部经济环境数据
             static_reals=qyspjg,
             # 动态离散变量:日期
-            time_varying_known_categoricals=["datetime"], #["month"],
+            time_varying_known_categoricals=["dayofweek"],
             # 动态已知离散变量: 节假日
             # variable_groups={"special_days": special_days},
             time_varying_known_reals=[], #["time_idx"],
             time_varying_unknown_categoricals=time_varying_unknown_categoricals,
             time_varying_unknown_reals=time_varying_unknown_reals,
             target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
-            allow_missing_timesteps=False,
-            add_relative_time_idx=True,
-            add_target_scales=True,
+            add_relative_time_idx=False,
+            add_target_scales=False,
             add_encoder_length=True,
             viz=self.viz,
         )
