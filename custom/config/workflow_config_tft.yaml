@@ -74,7 +74,7 @@ task:
                 valid: [2015-01-01, 2016-12-31]
                 test: [2017-01-01, 2020-08-01]
             step_len: 15
-            pred_len: 2
+            pred_len: 1
             viz: False
     record: 
         - class: TftRecord
