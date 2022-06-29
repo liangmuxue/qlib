@@ -25,7 +25,7 @@ from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 from qlib.data.dataset import DatasetH, TSDatasetH
 from qlib.data.dataset.handler import DataHandlerLP
-
+from pytorch_forecasting.metrics import MAE, RMSE, SMAPE, PoissonLoss, QuantileLoss
 from pytorch_forecasting import GroupNormalizer, TemporalFusionTransformer, TimeSeriesDataSet
 from .tuning_cus import OptimizeHyperparameters
 from tft.tft_dataset import TFTDataset
@@ -83,7 +83,7 @@ class TftModel(Model):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
             return      
-        # 取得训练数据(DataFrame),添加nan_validate_label，用于数据空值校验
+        # 取得训练数据(DataFrame)
         df_train = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         # 生成tft时间序列训练数据集
         ts_data_train = dataset.get_ts_dataset(df_train)
@@ -138,7 +138,10 @@ class TftModel(Model):
         best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path'],load_weights=True,
                                            trial_no=self.optargs['best_trial_no'],
                                            epoch_no=self.optargs['best_ckpt_no']).get_tft(fig_save_path=self.fig_save_path,viz=self.optargs['viz'])
-        predictions, x = best_tft.predict(test_loader, return_x=True)
+        actuals = torch.cat([y[0] for x, y in iter(test_loader)])
+        predictions, x, pred_ori = best_tft.predict(test_loader,return_x=True,return_ori_outupt=True)   
+        loss = (actuals - predictions).abs().mean()
+        print("loss is:",loss)        
         predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
         return pd.Series(np.concatenate(predictions), index=df_test.get_index())
@@ -164,17 +167,37 @@ class TftModel(Model):
         predictions, x, pred_ori = best_tft.predict(val_loader,return_x=True,return_ori_outupt=True)   
         loss = (actuals - predictions).abs().mean()
         print("loss is:",loss)
-        self.show_pred_act(predictions,pred_ori,actuals)
+        self.cal_range(predictions,actuals)
+        # self.show_pred_act(predictions,pred_ori,actuals)
         raw_predictions, x = best_tft.predict(val_loader, mode="raw", return_x=True)
-        for idx in range(0,100,5):  # plot 10 examples
-            best_tft.plot_prediction(x, raw_predictions, idx=idx, add_loss_to_title=True);        
+        # self.show_worst(best_tft,val_loader,x,raw_predictions,actuals)
+        # for idx in range(0,100,5):  # plot 10 examples
+        #     best_tft.plot_prediction(x, raw_predictions, idx=idx, add_loss_to_title=True);        
         # subset.calculate_prediction_oridata(subset,predictions=predictions)
         predictions, x = best_tft.predict(validation, mode="quantiles",return_x=True)  
         predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
         return pd.Series(np.concatenate(predictions), index=df_valid.get_index())        
     
-     
+    def cal_range(self,predictions,actuals):
+        """计算区间差值的准确度"""
+        pred_se_range = (predictions[:,4] - predictions[:,0]) / predictions[:,0]
+        pred_se_range_sort,idx = torch.sort(pred_se_range,descending=True, dim=-1)
+        act_range = actuals[idx]
+        act_se_range = (actuals[:,4] - actuals[:,0]) / actuals[:,0]
+        act_se_range_sort,act_idx = torch.sort(act_se_range,descending=True, dim=-1)
+        print("pred idx:{} and act idx:{}".format(idx,act_idx))
+    
+    def show_worst(self,best_tft,val_dataloader,x,raw_predictions,actuals):
+        predictions = best_tft.predict(val_dataloader)
+        mean_losses = SMAPE(reduction="none")(predictions, actuals).mean(1)
+        indices = mean_losses.argsort(descending=True)  # sort losses
+        for idx in range(10):  # plot 10 examples
+            best_tft.plot_prediction(
+                x, raw_predictions, idx=indices[idx], add_loss_to_title=SMAPE(quantiles=best_tft.loss.quantiles)
+            );
+            print("ctn")   
+             
     def show_pred_act(self,predictions,pred_ori,actuals):
         from cus_utils.tensor_viz import TensorViz
         viz_compare = TensorViz(env="dataview_compare")

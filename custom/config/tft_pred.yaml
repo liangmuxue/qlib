@@ -13,12 +13,13 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: ["value_validate", "VOLUME_CLOSE","KLEN", "VSTD5"]
+              col_list: ["CUR_CLOSE","WVMA5", "VSTD5", "CORD5"]  
+              # col_list: ["value_validate", "VOLUME_CLOSE","KLEN", "VSTD5"]
     learn_processors:
         - class: DropnaLabel
-    label: ["Ref($close, -2) / Ref($close, -1) - 1"] 
+    # label: ["Ref($close, -2) / Ref($close, -1) - 1"] 
     # label: ["$volume/100"]
-    # label: ["Ref($close, -1)"] 
+    label: ["Ref($close, -1)"] 
    
 port_analysis_config: &port_analysis_config
     strategy:
@@ -57,8 +58,8 @@ task:
                max_epochs : 50
                weight_path: 'custom/data/weights'
                log_path: 'custom/data/lightning_logs'
-               best_trial_no: 2
-               best_ckpt_no: 13
+               best_trial_no: 1
+               best_ckpt_no: 36
                viz: False
     dataset:
         class: TFTDataset

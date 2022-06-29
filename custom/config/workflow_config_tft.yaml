@@ -13,10 +13,7 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: ["nan_validate","RESI5", "WVMA5", "RSQR5", "KLEN", "RSQR10", "CORR5", "CORD5", "CORR10", 
-                            "ROC60", "RESI10", "VSTD5", "RSQR60", "CORR60", "WVMA60", "STD5", 
-                            "RSQR20", "CORD60", "CORD10", "CORR20", "KLOW"
-                        ]                
+              col_list: ["CUR_CLOSE","WVMA5", "VSTD5", "CORD5"]                
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -76,8 +73,8 @@ task:
                 train: [2008-01-01, 2014-12-31]
                 valid: [2015-01-01, 2016-12-31]
                 test: [2017-01-01, 2020-08-01]
-            step_len: 30
-            pred_len: 10
+            step_len: 15
+            pred_len: 2
             viz: False
     record: 
         - class: TftRecord

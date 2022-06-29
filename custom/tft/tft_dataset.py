@@ -119,19 +119,20 @@ class TFTDataset(DatasetH):
             data = data[data.index.get_level_values(1).isin(data_train.index.get_level_values(1).values)]
         # 恢复成一维列索引
         data = data.reset_index() 
-        # 重新定义动态数据字段,忽略前面几个无效字段,注意不需要手工添加label字段了
-        self.reals_cols = data.columns.get_level_values(1).values[3:-1]
-        # 重建字段名，添加日期和股票字段,以及label字段
-        new_cols_idx = np.concatenate((np.array(["datetime","instrument","value_validate"]),self.reals_cols,['label']))
+        # 重新定义动态数据字段,忽略前面几个无效字段,并手工添加label字段
+        self.reals_cols = data.columns.get_level_values(1).values[2:-1]
+        self.reals_cols  = np.concatenate((self.reals_cols,['label']))
+        # 重建字段名，添加日期和股票字段
+        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols))
         data.columns = pd.Index(new_cols_idx)    
         # 清除NAN数据
         data = data.dropna() 
         # 删除价格小于0的数据
-        # data = data[data.label>0]        
+        data = data[data.label>0]        
         # 删除涨跌幅度大于20%的数据 
-        data = data[data.label.abs()<0.2]  
+        data = data[data.label.abs()<=0.1]  
         # 正数转换
-        data['label'] = data['label'] + 0.2 
+        data['label'] = data['label'] + 0.1
         # 增大取值范围
         data['label'] = data['label'] * 100
         # 补充辅助数据,添加日期编号
@@ -146,8 +147,6 @@ class TFTDataset(DatasetH):
         data["month"] = data["month"].str.slice(5,7)
         # datetime转为字符串
         data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")        
-        # 删除校验列
-        data.drop(columns=['value_validate'],inplace=True)
         # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
         return data
  
@@ -167,9 +166,9 @@ class TFTDataset(DatasetH):
         # 恢复成一维列索引
         data = data.reset_index() 
         # 重新定义动态数据字段,忽略前面几个无效字段,注意不需要手工添加label字段了
-        self.reals_cols = data.columns.values[3:-1]
+        self.reals_cols = data.columns.values[2:-1]
         # 重建字段名，添加日期和股票字段,以及label字段
-        new_cols_idx = np.concatenate((np.array(["datetime","instrument","value_validate"]),self.reals_cols,['label']))
+        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols,['label']))
         data.columns = pd.Index(new_cols_idx)   
         # 缩小取值空间 
         # data["label"] = data["label"] / 100
@@ -186,8 +185,6 @@ class TFTDataset(DatasetH):
         data["month"] = data["month"].str.slice(5,7)
         # datetime转为字符串
         data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")   
-        # 删除校验列
-        data.drop(columns=['value_validate'],inplace=True)
         # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
         return data
             
@@ -206,7 +203,7 @@ class TFTDataset(DatasetH):
         # 每批次的预测长度
         max_prediction_length = self.pred_len
         # 取得各个因子名称，组装为动态连续变量
-        time_varying_unknown_reals = ["label"] # self.reals_cols.tolist()
+        time_varying_unknown_reals = self.reals_cols.tolist()
         # 商品价格指数，用于静态连续变量
         qyspjg = ["qyspjg_total","qyspjg_yoy","qyspjg_mom"]
         qyspjg = []
@@ -232,13 +229,13 @@ class TFTDataset(DatasetH):
             time_varying_known_categoricals=["dayofweek"],
             # 动态已知离散变量: 节假日
             # variable_groups={"special_days": special_days},
-            time_varying_known_reals=[], #["time_idx"],
+            time_varying_known_reals=["time_idx"],
             time_varying_unknown_categoricals=time_varying_unknown_categoricals,
             time_varying_unknown_reals=time_varying_unknown_reals,
             target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
             add_relative_time_idx=False,
-            add_target_scales=False,
-            add_encoder_length=True,
+            add_target_scales=True,
+            add_encoder_length=False,
             viz=self.viz,
         )
         if mode=="valid":
@@ -260,7 +257,21 @@ class TFTDataset(DatasetH):
          
         training_cutoff = data["time_idx"].max() - 6
         max_encoder_length = 18
-        max_prediction_length = 6        
+        max_prediction_length = 6      
+        special_days = [
+            "easter_day",
+            "good_friday",
+            "new_year",
+            "christmas",
+            "labor_day",
+            "independence_day",
+            "revolution_day_memorial",
+            "regional_games",
+            "fifa_u_17_world_cup",
+            "football_gold_cup",
+            "beer_capital",
+            "music_fest",
+        ]          
         tsdata = TimeSeriesCusDataset(
             data[lambda x: x.time_idx <= training_cutoff],
             time_idx="time_idx",
@@ -270,14 +281,20 @@ class TFTDataset(DatasetH):
             max_encoder_length=max_encoder_length,
             min_prediction_length=1,
             max_prediction_length=max_prediction_length,
-            static_categoricals= ["agency", "sku"],
-            static_reals=[],#["avg_population_2017", "avg_yearly_household_income_2017"],
+            static_categoricals=["agency", "sku"],
+            static_reals=["avg_population_2017", "avg_yearly_household_income_2017"],
             time_varying_known_categoricals=["month"],
             # variable_groups={"special_days": special_days},  # group of categorical variables can be treated as one variable
-            time_varying_known_reals= [], #["time_idx", "price_regular", "discount_in_percent"],
+            time_varying_known_reals=["time_idx", "price_regular", "discount_in_percent"],
             time_varying_unknown_categoricals=[],
             time_varying_unknown_reals=[
                 "volume",
+                "log_volume",
+                "industry_volume",
+                "soda_volume",
+                "avg_max_temp",
+                "avg_volume_by_agency",
+                "avg_volume_by_sku",
             ],
             target_normalizer=GroupNormalizer(
                 groups=["agency", "sku"], transformation="softplus", center=False

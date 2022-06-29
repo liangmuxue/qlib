@@ -51,7 +51,7 @@ class TftDataHandler(DataHandlerLP):
             "price": {
                 "windows": [0],
                 # "feature": ["OPEN", "HIGH", "LOW", "VWAP"],
-                "feature": ["OPEN", "HIGH", "LOW"],
+                "feature": ["OPEN", "HIGH", "LOW","CLOSE"],
             },
             "volume": {},
             "rolling": {},
@@ -120,6 +120,8 @@ class TftDataHandler(DataHandlerLP):
                 field = field.lower()
                 fields += ["Ref($%s, %d)/$close" % (field, d) if d != 0 else "$%s/$close" % field for d in windows]
                 names += [field.upper() + str(d) for d in windows]
+            fields += ["$close"]
+            names += ["CUR_CLOSE"]    
         if "volume" in config:
             windows = config["volume"].get("windows", range(5))
             fields += ["Ref($volume, %d)/$volume" % d if d != 0 else "$volume/$volume" for d in windows]
