@@ -128,11 +128,11 @@ class TFTDataset(DatasetH):
         # 清除NAN数据
         data = data.dropna() 
         # 删除价格小于0的数据
-        data = data[data.label>0]        
+        # data = data[data.label>0]        
         # 删除涨跌幅度大于20%的数据 
         data = data[data.label.abs()<=0.1]  
         # 正数转换
-        data['label'] = data['label'] + 0.1
+        # data['label'] = data['label'] + 0.1
         # 增大取值范围
         data['label'] = data['label'] * 100
         # 补充辅助数据,添加日期编号

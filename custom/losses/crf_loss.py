@@ -1,0 +1,35 @@
+import torch
+import torch.nn as nn
+from torchcrf import CRF
+
+from pytorch_forecasting.metrics import MultiHorizonMetric
+
+class CrfLoss(MultiHorizonMetric):
+    """使用CRF模型进行loss计算
+    """
+
+    def __init__(self, num_classes,**kwargs):
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.crf = CRF(num_tags=num_classes, batch_first=True)
+
+    def loss(self, inputs, targets):
+        """
+        Args:
+            inputs 输入,shape为(batch_size,pred_size,output_size)
+            targets 标签,shape为(batch_size,pred_size)
+        """
+              
+        loss = self.crf(inputs, targets) 
+        loss = -1 * loss
+        return loss
+    
+    def to_prediction(self, y_pred: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        重载预测转换方法,以适应时序标注模式
+        """
+        pred_labels = self.crf.decode(y_pred) 
+        pred_labels = torch.Tensor(pred_labels).cuda()
+        return pred_labels
+    
+    

@@ -63,10 +63,9 @@ class TftModel(Model):
         self.early_stop = early_stop
         
         self.n_jobs = n_jobs
-        self.device = torch.device("cuda:%d" % GPU if torch.cuda.is_available() and GPU >= 0 else "cpu")
+        self.gpus = GPU
         self.seed = seed
         self.logger = get_module_logger("TransformerModel")
-        self.logger.info("Naive Transformer:" "\nbatch_size : {}" "\ndevice : {}".format(self.batch_size, self.device))
         
         self.type = type
         self.fig_save_path = kwargs['fig_save_path']
@@ -105,14 +104,16 @@ class TftModel(Model):
             attention_head_size_range=(1, 4),
             learning_rate_range=(0.001, 0.1),
             dropout_range=(0.1, 0.3),
-            trainer_kwargs=dict(limit_train_batches=0.1,log_every_n_steps=16,gpus=[1]),
+            trainer_kwargs=dict(limit_train_batches=0.1,log_every_n_steps=16,gpus=self.gpus),
             reduce_on_plateau_patience=4,
             use_learning_rate_finder=False,
             load_weights=self.optargs['load_weights'],
             trial_no = self.optargs['best_trial_no'],
             epoch_no = self.optargs['best_ckpt_no'],            
             log_dir=self.optargs['log_path'],
-            viz=self.optargs['viz']
+            viz=self.optargs['viz'],
+            gpus=self.gpus
+            
         )                       
         # 根据标志决定优化学习,还是使用优化好的参数直接训练
         if self.type=="opt_train":

@@ -28,6 +28,7 @@ from pytorch_forecasting.data.encoders import (
 )
 
 from cus_utils.tensor_viz import TensorViz
+from tft.class_define import CLASS_VALUES
 
 NORMALIZER = Union[TorchNormalizer, NaNLabelEncoder, EncoderNormalizer]
 
@@ -258,6 +259,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         data_cat = self.data["categoricals"][index.index_start : index.index_end + 1].clone()
         time = self.data["time"][index.index_start : index.index_end + 1].clone()
         target = [d[index.index_start : index.index_end + 1].clone() for d in self.data["target"]]
+        # target_ori = [d[index.index_start : index.index_end + 1].clone() for d in self.data["ori_{}".format(self.target)]]
         
         groups = self.data["groups"][index.index_start].clone()
         if self.data["weight"] is None:
@@ -436,11 +438,12 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             target = target[0][encoder_length:]
             target_scale = target_scale[0]
 
-        # if self.predict_mode is False and self.viz is True:
-        #     self.viz_cat.viz_matrix_var(data_cat,win="cat_{}".format(item_index))
-        #     self.viz_cont.viz_matrix_var(data_cont[:,:],win="cont_{}".format(item_index),names=self.reals)
-        #     print("step viz")
-        
+        # 使用分类模式,转换标签
+        p_taragets = []
+        for item in target:
+            p_taraget = [k for k, v in CLASS_VALUES.items() if (item>=v[0] and item<v[1])]
+            p_taragets.append(p_taraget)
+        p_taragets = torch.Tensor(p_taragets).squeeze(-1).long()
         return (
             dict(
                 index=index,# 保存index用于后续数据对照
@@ -453,7 +456,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
                 groups=groups,
                 target_scale=target_scale,
             ),
-            (target, weight),
+            (p_taragets, weight),
         )        
 
     def _preprocess_data(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -516,8 +519,6 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         for name in dict.fromkeys(group_ids_to_encode + self.flat_categoricals):
             # targets and its lagged versions are handled separetely
             if name not in self.target_names and name not in self.lagged_targets:
-                # 保留原数据，用于后续比对
-                data["ori_{}".format(name)] = data[name].copy()
                 data[name] = self.transform_values(
                     name, data[name], inverse=False, ignore_na=name in self.lagged_variables
                 )

@@ -1,6 +1,8 @@
 from pytorch_forecasting.models import TemporalFusionTransformer
 from pytorch_forecasting.utils import to_list
 from pytorch_forecasting.data.encoders import EncoderNormalizer, GroupNormalizer, MultiNormalizer, NaNLabelEncoder
+from pytorch_forecasting.metrics import MAE, MAPE, MASE, RMSE, SMAPE, MultiHorizonMetric, MultiLoss, QuantileLoss
+from torch import nn
 
 import matplotlib.pyplot as plt
 from typing import Any, Callable, Dict, Iterable, List, Tuple, Union
@@ -24,10 +26,10 @@ from pytorch_forecasting.utils import (
     to_list,
 )
 
-from cus_utils.tensor_viz import TensorViz
+from losses.crf_loss import CrfLoss
 from .timeseries_cus import TimeSeriesCusDataset
-
-VIZ_ITEM_NUMBER = 20
+from cus_utils.visualization import VisUtil
+from tft.class_define import CLASS_VALUES
 
 def _concatenate_output(
     output: List[Dict[str, List[Union[List[torch.Tensor], torch.Tensor, bool, int, str, np.ndarray]]]]
@@ -78,18 +80,86 @@ def _torch_cat_na(x: List[torch.Tensor]) -> torch.Tensor:
             ]
     return torch.cat(x, dim=0)
 
+class OutputNetwork(nn.Module):
+    def __init__(
+        self,
+        hidden_size=16,pred_size=5,num_classes = 6
+    ):
+        """
+        自定义输出层,回归转序列标注问题
+        """
+        super().__init__()
+        # 全链接取得分类维度数据,把隐含层数据转换为类别数的维度
+        self.classify = nn.Linear(hidden_size, num_classes)
+    def forward(self, output):
+        output = self.classify(output)   
+        return output
+    
 class TftModelCus(TemporalFusionTransformer):
-    def __init__(self,**kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        hidden_size: int = 16,
+        lstm_layers: int = 1,
+        dropout: float = 0.1,
+        output_size: Union[int, List[int]] = 7,
+        loss = None,
+        attention_head_size: int = 4,
+        max_encoder_length: int = 10,
+        static_categoricals: List[str] = [],
+        static_reals: List[str] = [],
+        time_varying_categoricals_encoder: List[str] = [],
+        time_varying_categoricals_decoder: List[str] = [],
+        categorical_groups: Dict[str, List[str]] = {},
+        time_varying_reals_encoder: List[str] = [],
+        time_varying_reals_decoder: List[str] = [],
+        x_reals: List[str] = [],
+        x_categoricals: List[str] = [],
+        hidden_continuous_size: int = 8,
+        hidden_continuous_sizes: Dict[str, int] = {},
+        embedding_sizes: Dict[str, Tuple[int, int]] = {},
+        embedding_paddings: List[str] = [],
+        embedding_labels: Dict[str, np.ndarray] = {},
+        learning_rate: float = 1e-3,
+        log_interval: Union[int, float] = -1,
+        log_val_interval: Union[int, float] = None,
+        log_gradient_flow: bool = False,
+        reduce_on_plateau_patience: int = 1000,
+        monotone_constaints: Dict[str, int] = {},
+        share_single_variable_networks: bool = False,
+        logging_metrics: nn.ModuleList = None,
+        device=None,
+        **kwargs,
+    ):
+        self.hidden_size = hidden_size
+        # 只保留1个输出
+        output_size = 1
+        # 对应分类模式,使用交叉螪损失函数
+        num_classes = len(CLASS_VALUES)
+        loss = CrfLoss(
+            num_classes=num_classes,
+        )          
+        pred_size = kwargs["pred_size"] 
+        kwargs.pop("pred_size",None)
+        # 使用类别数作为输出层size
+        super().__init__(hidden_size=hidden_size,lstm_layers=lstm_layers,dropout=dropout,
+                         output_size=num_classes,loss=loss,attention_head_size=attention_head_size,
+                         max_encoder_length=max_encoder_length,static_categoricals=static_categoricals,static_reals=static_reals,
+                          time_varying_categoricals_encoder=time_varying_categoricals_encoder,time_varying_categoricals_decoder=time_varying_categoricals_decoder,categorical_groups=categorical_groups,
+                           time_varying_reals_encoder=time_varying_reals_encoder,time_varying_reals_decoder=time_varying_reals_decoder,
+                            x_reals=x_reals,x_categoricals=x_categoricals,hidden_continuous_size=hidden_continuous_size,
+                            hidden_continuous_sizes=hidden_continuous_sizes,embedding_sizes=embedding_sizes,embedding_paddings=embedding_paddings,
+                            embedding_labels=embedding_labels,learning_rate=learning_rate,log_interval=log_interval,
+                            log_val_interval=log_val_interval,log_gradient_flow=log_gradient_flow,reduce_on_plateau_patience=reduce_on_plateau_patience,
+                            monotone_constaints=monotone_constaints,share_single_variable_networks=share_single_variable_networks,logging_metrics=logging_metrics,
+                            **kwargs)
+        # 自定義output层,使用固定预测长度 
+        self.output_layer = OutputNetwork(pred_size=pred_size,hidden_size=hidden_size,num_classes=num_classes)   
 
-        
     def ext_properties(self,**kwargs):
         self.viz = kwargs['viz']
         self.fig_save_path = kwargs['fig_save_path']
         if self.viz:
-            self.viz_target_pred = TensorViz(env="dataview_pred_target")
-            self.viz_valid = TensorViz(env="dataview_validation")
-            self.viz_input = TensorViz(env="dataview_input")        
+            self.viz_util = VisUtil()
         
     def calculate_prediction_actual_by_variable(
         self,
@@ -340,7 +410,7 @@ class TftModelCus(TemporalFusionTransformer):
         log, out = self.step(x, y, batch_idx)
         log.update(self.create_log(x, y, out, batch_idx))
         if self.viz:
-            self.viz_training(out, x,y,index=batch_idx)          
+            self.viz_util.viz_loss(out, x,y,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="training")          
         return log        
  
     def predict(
@@ -477,78 +547,20 @@ class TftModelCus(TemporalFusionTransformer):
         if log['loss']<5:
             print("lll")
         log.update(self.create_log(x, y, out, batch_idx))
-        self.viz_validation(out, x, y, batch_idx)
+        if self.viz:
+            self.viz_util.viz_loss(out, x,y,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="validation")  
         return log
- 
-    def viz_training(self,out,x,y,index=0):
-        if index % 10 != 0:
-            return
-        print("do viz_training:",index)
-        # 分位数图形
-        pred_fw = out.prediction[VIZ_ITEM_NUMBER]
-        names=["pred_{}".format(i) for i in range(7)]
-        win_target = "target_" + str(index)
-        self.viz_target_pred.viz_matrix_var(pred_fw,win=win_target,names=names)
-        # 预测值与实际值图形      
-        label = y[0][VIZ_ITEM_NUMBER].unsqueeze(-1)
-        prediction = self.to_prediction(out, {})
-        prediction = prediction[VIZ_ITEM_NUMBER].unsqueeze(-1)
-        target_pred = torch.cat((prediction,label),1)
-        names=["pred","label"]
-        win_target = "pred_label_" + str(index)
-        self.viz_target_pred.viz_matrix_var(target_pred,win=win_target,names=names)        
-        # 输入值图形
-        input_cats = x['encoder_cat'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
-        input_reals = x['encoder_cont'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
-        input_data = np.concatenate((input_reals,input_cats), axis=1)
-        win_input = "input_" + str(index)
-        inputs_names = self.reals + self.categoricals
-        self.viz_target_pred.viz_matrix_var(input_data,win=win_input,names=inputs_names)
-        if index%100==0:
-            print("iii")
-        print("step viz")  
 
-    def viz_validation(self,out,x,y,index=0):
-        if index % 10 != 0:
-            return
-        print("do viz_training:",index)
-        # 分位数图形
-        pred_fw = out.prediction[VIZ_ITEM_NUMBER].detach().cpu().numpy()
-        names=["pred_{}".format(i) for i in range(7)]
-        win_target = "target_" + str(index)
-        self.viz_valid.viz_matrix_var(pred_fw,win=win_target,names=names)
-        # 预测值与实际值图形      
-        label = y[0][VIZ_ITEM_NUMBER].unsqueeze(-1)
-        prediction = self.to_prediction(out, {})
-        prediction = prediction[VIZ_ITEM_NUMBER].unsqueeze(-1)
-        target_pred = torch.cat((prediction,label),1)
-        names=["pred","label"]
-        win_target = "pred_label_" + str(index)
-        self.viz_valid.viz_matrix_var(target_pred,win=win_target,names=names)        
-        # 输入值图形
-        input_cats = x['encoder_cat'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
-        input_reals = x['encoder_cont'][VIZ_ITEM_NUMBER].detach().cpu().numpy()
-        input_data = np.concatenate((input_reals,input_cats), axis=1)
-        win_input = "input_" + str(index)
-        inputs_names = self.reals + self.categoricals
-        self.viz_valid.viz_matrix_var(input_data,win=win_input,names=inputs_names)
-        if index%100==0:
-            print("iii")
-        print("step viz")  
-               
-    def viz_output(self,output,index=0):
-        if index % 10 != 0:
-            return     
-        print("do viz_output:",index)   
-        output = output[VIZ_ITEM_NUMBER]
-        output = output.detach().cpu().numpy()
-        names=["output_{}".format(i) for i in range(7)]
-        win_output= "output_" + str(index)
-        if self.training:
-            self.viz_target_pred.viz_matrix_var(output,win=win_output,names=names)
-        else:
-            self.viz_valid.viz_matrix_var(output,win=win_output,names=names)
-                       
+    def transform_output(
+        self, prediction: Union[torch.Tensor, List[torch.Tensor]], target_scale: Union[torch.Tensor, List[torch.Tensor]]
+    ) -> torch.Tensor:
+        """
+        重新定义输出方法
+        """
+        # out = self.loss.rescale_parameters(prediction, target_scale=target_scale, encoder=self.output_transformer)
+        # 改成分类模式以后,不需要上述的数据变换了
+        return prediction
+                           
     def forward(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
         input dimensions: n_samples x time x variables
@@ -659,8 +671,8 @@ class TftModelCus(TemporalFusionTransformer):
         else:
             output = self.output_layer(output)
         
-        if self.viz:
-            self.viz_output(output,index=self.batch_idx)
+        # if self.viz:
+        #     self.viz_util.viz_output(output,index=self.batch_idx)
         prediction=self.transform_output(output, target_scale=x["target_scale"])
         # if self.training:
         #     self.log_pred_and_input(prediction, input_vectors)

@@ -47,6 +47,7 @@ class OptimizeHyperparameters(object):
         n_trials: int = 100,
         timeout: float = 3600 * 8.0,  # 8 hours
         gradient_clip_val_range: Tuple[float, float] = (0.01, 100.0),
+        pred_size: int = 5,
         hidden_size_range: Tuple[int, int] = (16, 265),
         hidden_continuous_size_range: Tuple[int, int] = (8, 64),
         attention_head_size_range: Tuple[int, int] = (1, 4),
@@ -63,11 +64,13 @@ class OptimizeHyperparameters(object):
         trial_no=None,
         epoch_no=None,
         viz=False,
+        gpus=[1],
         **kwargs
     ) -> optuna.Study:
         """重构超参数trial"""
         
         self.model_path = model_path
+        self.pred_size = pred_size
         self.load_weights = load_weights
         self.trial_no = trial_no
         self.epoch_no = epoch_no
@@ -92,6 +95,7 @@ class OptimizeHyperparameters(object):
         self.verbose = verbose        
         self.pruner = pruner
         self.viz = viz
+        self.gpus = gpus
         self.kwargs = kwargs  
         
         assert isinstance(train_dataloader.dataset, TimeSeriesDataSet) and isinstance(
@@ -150,6 +154,8 @@ class OptimizeHyperparameters(object):
         # create model
         hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
         self.kwargs["loss"] = copy.deepcopy(self.loss)
+        self.kwargs["pred_size"] = self.pred_size
+        device = torch.device("cuda:{}".format(self.gpus))
         model = TftModelCus.from_dataset(
             self.train_dataloader.dataset,
             dropout=trial.suggest_uniform("dropout", *self.dropout_range),
@@ -162,6 +168,7 @@ class OptimizeHyperparameters(object):
             ),
             attention_head_size=trial.suggest_int("attention_head_size", *self.attention_head_size_range),
             log_interval=-1,
+            device=device,
             **self.kwargs,
         )
         model.ext_properties(fig_save_path=None,viz=self.viz)
@@ -238,6 +245,7 @@ class OptimizeHyperparameters(object):
             # create model
             hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
             self.kwargs["loss"] = copy.deepcopy(self.loss)
+            self.kwargs["pred_size"] = self.pred_size
             model = TftModelCus.from_dataset(
                 self.train_dataloader.dataset,
                 dropout=trial.suggest_uniform("dropout", *self.dropout_range),

@@ -47,7 +47,7 @@ class TensorViz(object):
     def __init__(self,env="debug",type="cont_data"):
         self.viz = Visdom(env=env,port=7098)  
             
-    def viz_matrix_var(self,data,win="matrix",names=None):
+    def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None):
         length = data.shape[1]
         ts = data.shape[0]
         for i in range(length):
@@ -64,7 +64,8 @@ class TensorViz(object):
                     update=None,
                     opts={
                         'showlegend': True, 
-                        'title': win,
+                        'title': title,
+                        'caption':desc,
                         'xlabel': "time", 
                         'ylabel': "values", 
                     },

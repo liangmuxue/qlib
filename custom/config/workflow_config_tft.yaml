@@ -55,6 +55,7 @@ task:
             optargs:
                n_trials: 20
                max_epochs : 50
+               pred_size: 5
                weight_path: 'custom/data/weights'
                log_path: 'custom/data/lightning_logs'
                best_trial_no: 2
@@ -74,7 +75,7 @@ task:
                 valid: [2015-01-01, 2016-12-31]
                 test: [2017-01-01, 2020-08-01]
             step_len: 15
-            pred_len: 1
+            pred_len: 5
             viz: False
     record: 
         - class: TftRecord
