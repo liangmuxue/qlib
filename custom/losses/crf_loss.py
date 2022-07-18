@@ -32,4 +32,18 @@ class CrfLoss(MultiHorizonMetric):
         pred_labels = torch.Tensor(pred_labels).cuda()
         return pred_labels
     
+    def compute_acc(self,y_pred, targets):
+        """
+        计算准确率
+        """   
+        pred_labels = self.to_prediction(y_pred)
+        comp = torch.eq(pred_labels, targets)
+        # 分别比较每个标签,取得准确率
+        acc = comp.sum()/(targets.shape[0]*targets.shape[1])
+        # 计算相对准确率
+        reduce = torch.abs(pred_labels - targets)
+        reduce = reduce.sum()
+        acc_relative = 1- reduce/targets.sum()
+        return acc,acc_relative
+        
     

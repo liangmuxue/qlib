@@ -213,11 +213,10 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             # minimal decoder index is always >= min_prediction_idx
             data = data[lambda x: x[self.time_idx] >= self.min_prediction_idx - self.max_encoder_length - self.max_lag]
         data = data.sort_values(self.group_ids + [self.time_idx])
-        self.pd_ori_data = data.copy()        
+        #预存原来的数据，用于后续比较
+        self.pd_data = data.copy()        
         # preprocess data
         data = self._preprocess_data(data)
-        #预存原来的数据，用于后续比较
-        self.pd_data = data.copy()
                 
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
@@ -227,21 +226,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
 
         # convert to torch tensor for high performance data loading later
         self.data = self._data_to_tensors(data)    
-        print("self.data shape in")    
-        
-        # super().__init__(data,time_idx,target,group_ids,
-        #                  weight=weight,max_encoder_length=max_encoder_length,min_encoder_length=min_encoder_length,
-        #                  min_prediction_idx=min_prediction_idx,min_prediction_length=min_prediction_length,
-        #                  max_prediction_length=max_prediction_length,static_categoricals=static_categoricals,
-        #                  static_reals=static_reals,time_varying_known_categoricals=time_varying_known_categoricals,
-        #                  time_varying_known_reals=time_varying_known_reals,time_varying_unknown_categoricals=time_varying_unknown_categoricals,
-        #                  time_varying_unknown_reals=time_varying_unknown_reals,variable_groups=variable_groups,
-        #                  constant_fill_strategy=constant_fill_strategy,allow_missing_timesteps=allow_missing_timesteps,
-        #                  lags=lags,add_relative_time_idx=add_relative_time_idx, 
-        #                  add_target_scales=add_target_scales,add_encoder_length=add_encoder_length,
-        #                  target_normalizer=target_normalizer,categorical_encoders=categorical_encoders,
-        #                  scalers=scalers,randomize_length=randomize_length,predict_mode=predict_mode)
-        
+
         # visdom可视化环境
         if self.viz:
             self.viz_cat = TensorViz(env="dataview_cat")
@@ -250,7 +235,6 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         """定制单个数据获取方式"""
         
-        # print("predict_{} item in:{}".format(self.predict_mode,idx))
         item_index = idx
         
         index = self.index.iloc[idx]
@@ -259,7 +243,7 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
         data_cat = self.data["categoricals"][index.index_start : index.index_end + 1].clone()
         time = self.data["time"][index.index_start : index.index_end + 1].clone()
         target = [d[index.index_start : index.index_end + 1].clone() for d in self.data["target"]]
-        # target_ori = [d[index.index_start : index.index_end + 1].clone() for d in self.data["ori_{}".format(self.target)]]
+        target_ori = [d[index.index_start : index.index_end + 1].clone() for d in self.data["ori_target"]]
         
         groups = self.data["groups"][index.index_start].clone()
         if self.data["weight"] is None:
@@ -649,6 +633,15 @@ class TimeSeriesCusDataset(TimeSeriesDataSet):
             data = g._selected_obj[g.cumcount() >= self.max_lag]
         return data
 
+    def _data_to_tensors(self, data: pd.DataFrame) -> Dict[str, torch.Tensor]:
+        """
+        重载父类方法,加入转换前的原目标值
+        """
+
+        tensors = super()._data_to_tensors(data)
+        ori_target = torch.tensor(data[f"ori_{self.target}"].to_numpy(dtype=np.float64), dtype=torch.float)
+        tensors["ori_target"] = [ori_target]
+        return tensors
     
     def get_oridata_byindex(self,index_list):
         """根据索引取得源数据

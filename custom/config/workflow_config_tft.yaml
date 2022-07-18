@@ -50,17 +50,17 @@ task:
             batch_size: 1024
             seed: 0
             n_jobs: 20
-            type: 'opt_train'
+            type: 'best_train'
             fig_save_path: 'custom/data/lightning_logs/chart/subset'
             optargs:
-               n_trials: 20
-               max_epochs : 50
+               n_trials: 30
+               max_epochs : 150
                pred_size: 5
                weight_path: 'custom/data/weights'
                log_path: 'custom/data/lightning_logs'
-               best_trial_no: 2
-               best_ckpt_no: 13
-               load_weights: False
+               best_trial_no: 17
+               best_ckpt_no: 12
+               load_weights: True
                viz: True
     dataset:
         class: TFTDataset

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-VIZ_ITEM_NUMBER = 20
+VIZ_ITEM_NUMBER = 0
 
 class VisUtil:
     
@@ -36,7 +36,33 @@ class VisUtil:
         if index%100==0:
             print("iii")
         print("step viz")      
-           
+    
+    def viz_loss_bar(self,out,x,y,epoch=0,index=0,loss=None,loss_value=None,step="training"):
+        """图形显示预测与标签进行比较结果"""
+        
+        if step=="training" and index not in [3,6,9]:
+            return
+        if step=="validation" and index not in [0]:
+            return        
+        # 取得某个股票的预测值,并转换为预测类别数值
+        pred_fw = loss.to_prediction(out.prediction)
+        pred = pred_fw[VIZ_ITEM_NUMBER].unsqueeze(0)
+        label = y[0][VIZ_ITEM_NUMBER].unsqueeze(0)
+        target_pred = torch.cat((pred,label),0).cpu().numpy().transpose(1,0)
+        names=["pred","target"]
+        if loss_value is None:
+            loss_value = 0
+        else:
+            loss_value = round(loss_value.cpu().item(), 2)
+        win_target = "target_{}_{}".format(epoch,str(index))
+        title = "target_{}_{} loss:{}".format(epoch,str(index),loss_value)
+        desc = "target_{} loss:{}".format(str(index),loss_value)
+        if step=="training":
+            self.viz_target_pred.viz_data_bar(target_pred,win=win_target,title=title,desc=desc,names=names)
+        else:
+            self.viz_valid.viz_data_bar(target_pred,win=win_target,title=title,desc=desc,names=names)
+        print("step viz")  
+                   
     def viz_training(self,out,x,y,index=0):
         if index % 10 != 0:
             return
@@ -93,7 +119,7 @@ class VisUtil:
             print("iii")
         print("step viz")  
                
-    def viz_output(self,output,index=0):
+    def viz_output(self,output,index=0,is_training=True):
         if index % 10 != 0:
             return     
         print("do viz_output:",index)   
@@ -101,9 +127,10 @@ class VisUtil:
         output = output.detach().cpu().numpy()
         names=["output_{}".format(i) for i in range(7)]
         win_output= "output_" + str(index)
-        if self.training:
-            self.viz_target_pred.viz_matrix_var(output,win=win_output,names=names)
+        title = win_output
+        if is_training:
+            self.viz_target_pred.viz_matrix_var(output,win=win_output,title=title,names=names)
         else:
-            self.viz_valid.viz_matrix_var(output,win=win_output,names=names)
+            self.viz_valid.viz_matrix_var(output,win=win_output,title=title,names=names)
     
     

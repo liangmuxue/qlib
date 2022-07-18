@@ -154,7 +154,6 @@ class OptimizeHyperparameters(object):
         # create model
         hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
         self.kwargs["loss"] = copy.deepcopy(self.loss)
-        self.kwargs["pred_size"] = self.pred_size
         device = torch.device("cuda:{}".format(self.gpus))
         model = TftModelCus.from_dataset(
             self.train_dataloader.dataset,
@@ -245,7 +244,6 @@ class OptimizeHyperparameters(object):
             # create model
             hidden_size = trial.suggest_int("hidden_size", *self.hidden_size_range, log=True)
             self.kwargs["loss"] = copy.deepcopy(self.loss)
-            self.kwargs["pred_size"] = self.pred_size
             model = TftModelCus.from_dataset(
                 self.train_dataloader.dataset,
                 dropout=trial.suggest_uniform("dropout", *self.dropout_range),

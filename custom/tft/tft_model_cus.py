@@ -3,6 +3,7 @@ from pytorch_forecasting.utils import to_list
 from pytorch_forecasting.data.encoders import EncoderNormalizer, GroupNormalizer, MultiNormalizer, NaNLabelEncoder
 from pytorch_forecasting.metrics import MAE, MAPE, MASE, RMSE, SMAPE, MultiHorizonMetric, MultiLoss, QuantileLoss
 from torch import nn
+from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau
 
 import matplotlib.pyplot as plt
 from typing import Any, Callable, Dict, Iterable, List, Tuple, Union
@@ -83,7 +84,7 @@ def _torch_cat_na(x: List[torch.Tensor]) -> torch.Tensor:
 class OutputNetwork(nn.Module):
     def __init__(
         self,
-        hidden_size=16,pred_size=5,num_classes = 6
+        hidden_size=16,num_classes = 6
     ):
         """
         自定义输出层,回归转序列标注问题
@@ -91,6 +92,7 @@ class OutputNetwork(nn.Module):
         super().__init__()
         # 全链接取得分类维度数据,把隐含层数据转换为类别数的维度
         self.classify = nn.Linear(hidden_size, num_classes)
+        
     def forward(self, output):
         output = self.classify(output)   
         return output
@@ -133,13 +135,11 @@ class TftModelCus(TemporalFusionTransformer):
         self.hidden_size = hidden_size
         # 只保留1个输出
         output_size = 1
-        # 对应分类模式,使用交叉螪损失函数
+        # 对应时序标注模式,使用条件随机场损失函数
         num_classes = len(CLASS_VALUES)
         loss = CrfLoss(
             num_classes=num_classes,
         )          
-        pred_size = kwargs["pred_size"] 
-        kwargs.pop("pred_size",None)
         # 使用类别数作为输出层size
         super().__init__(hidden_size=hidden_size,lstm_layers=lstm_layers,dropout=dropout,
                          output_size=num_classes,loss=loss,attention_head_size=attention_head_size,
@@ -153,14 +153,45 @@ class TftModelCus(TemporalFusionTransformer):
                             monotone_constaints=monotone_constaints,share_single_variable_networks=share_single_variable_networks,logging_metrics=logging_metrics,
                             **kwargs)
         # 自定義output层,使用固定预测长度 
-        self.output_layer = OutputNetwork(pred_size=pred_size,hidden_size=hidden_size,num_classes=num_classes)   
+        self.output_layer = OutputNetwork(hidden_size=hidden_size,num_classes=num_classes)   
 
     def ext_properties(self,**kwargs):
         self.viz = kwargs['viz']
         self.fig_save_path = kwargs['fig_save_path']
         if self.viz:
             self.viz_util = VisUtil()
+            
+    def configure_optimizers(self):
+        """
+        自定义优化器及学习率
+        """
         
+        # 默认使用adam优化器
+        lrs = self.hparams.learning_rate
+        if isinstance(lrs, (list, tuple)):
+            lr = lrs[0]
+        else:
+            lr = lrs        
+        ignored_params = list(map(id, self.loss.parameters()))
+        base_params = filter(lambda p: id(p) not in ignored_params, self.parameters())
+        
+        optimizer = torch.optim.Adam([
+                {'params': base_params},
+                {'params': self.loss.parameters(), 'lr': lr*10}], lr,weight_decay=0)
+        # Assuming optimizer has two groups.
+        lambda1 = lambda epoch: 0.9 ** epoch
+        lambda2 = lambda epoch: 0.9 ** epoch
+        # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size, gamma=0.1, last_epoch=-1)
+        scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
+        scheduler_config = {
+            "scheduler": scheduler,
+            "monitor": "val_loss",  # Default: val_loss
+            "interval": "epoch",
+            "frequency": 1,
+            "strict": False,
+        }
+        return {"optimizer": optimizer, "lr_scheduler": scheduler_config}
+            
     def calculate_prediction_actual_by_variable(
         self,
         x: Dict[str, torch.Tensor],
@@ -408,9 +439,20 @@ class TftModelCus(TemporalFusionTransformer):
         """
         x, y = batch
         log, out = self.step(x, y, batch_idx)
+        # 计算准确率
+        acc,acc_relative = self.loss.compute_acc(out.prediction,y[0])      
+        log['acc']= acc
+        log['acc_relative']= acc_relative        
         log.update(self.create_log(x, y, out, batch_idx))
+        self.log(
+            f"{self.current_stage}_acc",
+            acc,
+            on_step=self.training,
+            on_epoch=True,
+            prog_bar=True
+        )        
         if self.viz:
-            self.viz_util.viz_loss(out, x,y,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="training")          
+            self.viz_util.viz_loss_bar(out, x,y,epoch=self.current_epoch,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="training")          
         return log        
  
     def predict(
@@ -544,11 +586,20 @@ class TftModelCus(TemporalFusionTransformer):
         """        
         x, y = batch
         log, out = self.step(x, y, batch_idx)
-        if log['loss']<5:
-            print("lll")
+        # 计算准确率
+        acc,acc_relative = self.loss.compute_acc(out.prediction,y[0])      
+        log['acc']= acc
+        log['acc_relative']= acc_relative
+        self.log(
+            f"{self.current_stage}_acc",
+            acc,
+            on_step=self.training,
+            on_epoch=True,
+            prog_bar=True
+        )           
         log.update(self.create_log(x, y, out, batch_idx))
         if self.viz:
-            self.viz_util.viz_loss(out, x,y,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="validation")  
+            self.viz_util.viz_loss_bar(out, x,y,epoch=self.current_epoch,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="validation")  
         return log
 
     def transform_output(
@@ -672,7 +723,7 @@ class TftModelCus(TemporalFusionTransformer):
             output = self.output_layer(output)
         
         # if self.viz:
-        #     self.viz_util.viz_output(output,index=self.batch_idx)
+        #     self.viz_util.viz_output(output,index=self.batch_idx,is_training=self.training)
         prediction=self.transform_output(output, target_scale=x["target_scale"])
         # if self.training:
         #     self.log_pred_and_input(prediction, input_vectors)

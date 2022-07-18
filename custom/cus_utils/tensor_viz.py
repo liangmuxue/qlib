@@ -46,7 +46,25 @@ def test_normal_vis():
 class TensorViz(object):
     def __init__(self,env="debug",type="cont_data"):
         self.viz = Visdom(env=env,port=7098)  
-            
+
+    def viz_data_bar(self,data,win="matrix",names=None,desc=None,title=None):     
+        """绘制柱状比较图"""
+        
+        length = data.shape[0]
+        rownames = ["t{}".format(i) for i in range(length)]
+        self.viz.bar(X=data,
+                     win=win,
+                     opts=dict(
+                        stacked=False,
+                        legend=names,
+                        rownames=rownames,
+                        title=title,
+                        ylabel='values',
+                        xtickmin=0.4, 
+                        xtickstep=0.4
+                    )
+            )               
+        
     def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None):
         length = data.shape[1]
         ts = data.shape[0]
