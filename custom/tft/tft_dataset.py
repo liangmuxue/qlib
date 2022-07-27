@@ -6,6 +6,7 @@ from inspect import getfullargspec
 
 from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
 from tft.timeseries_cus import TimeSeriesCusDataset
+from tft.timeseries_crf import TimeSeriesCrfDataset
 
 import bisect
 from typing import Any, Callable, Dict, List, Tuple, Union
@@ -242,70 +243,68 @@ class TFTDataset(DatasetH):
             tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
         return tsdata     
     
-    
-    def get_ts_dataset_test(self,data_ori,mode="train",train_ts=None):
-        from pytorch_forecasting.data.examples import get_stallion_data
-        data = get_stallion_data()
+    def get_crf_dataset(self,data,mode="train"):
+        """
+        取得TimeSeriesDataSet对象
+
+        Parameters
+        ----------
+        data : DataFrame 已经生成的panda数据
+        """     
         
-        data["month"] = data.date.dt.month.astype("str").astype("category")
-        data["log_volume"] = np.log(data.volume + 1e-8)
-        
-        data["time_idx"] = data["date"].dt.year * 12 + data["date"].dt.month
-        data["time_idx"] -= data["time_idx"].min()
-        data["avg_volume_by_sku"] = data.groupby(["time_idx", "sku"], observed=True).volume.transform("mean")
-        data["avg_volume_by_agency"] = data.groupby(["time_idx", "agency"], observed=True).volume.transform("mean")       
-         
-        training_cutoff = data["time_idx"].max() - 6
-        max_encoder_length = 18
-        max_prediction_length = 6      
-        special_days = [
-            "easter_day",
-            "good_friday",
-            "new_year",
-            "christmas",
-            "labor_day",
-            "independence_day",
-            "revolution_day_memorial",
-            "regional_games",
-            "fifa_u_17_world_cup",
-            "football_gold_cup",
-            "beer_capital",
-            "music_fest",
-        ]          
-        tsdata = TimeSeriesCusDataset(
-            data[lambda x: x.time_idx <= training_cutoff],
+        # return self.get_ts_dataset_test(data,mode=mode)
+        # 每批次的训练长度
+        max_encoder_length = self.step_len
+        # 每批次的预测长度
+        max_prediction_length = self.pred_len
+        # 取得各个因子名称，组装为动态连续变量
+        time_varying_unknown_reals = self.reals_cols.tolist()
+        # 连续变量离散化
+        # self.reals_bins(data,self.reals_cols[0:-1])
+        # 商品价格指数，用于静态连续变量
+        qyspjg = ["qyspjg_total","qyspjg_yoy","qyspjg_mom"]
+        qyspjg = []
+        # 动态离散变量，可以使用财务数据
+        time_varying_unknown_categoricals = []
+        # 获取配置文件参数，生成TimeSeriesDataSet类型的对象
+        special_days = []
+        tsdata = TimeSeriesCrfDataset(
+            data,
             time_idx="time_idx",
-            target="volume",
-            group_ids=["agency", "sku"],
+            target="label",
+            # 分组字段: 股票代码
+            group_ids=["instrument"],
             min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
             max_encoder_length=max_encoder_length,
             min_prediction_length=1,
             max_prediction_length=max_prediction_length,
-            static_categoricals=["agency", "sku"],
-            static_reals=["avg_population_2017", "avg_yearly_household_income_2017"],
-            time_varying_known_categoricals=["month"],
-            # variable_groups={"special_days": special_days},  # group of categorical variables can be treated as one variable
-            time_varying_known_reals=["time_idx", "price_regular", "discount_in_percent"],
-            time_varying_unknown_categoricals=[],
-            time_varying_unknown_reals=[
-                "volume",
-                "log_volume",
-                "industry_volume",
-                "soda_volume",
-                "avg_max_temp",
-                "avg_volume_by_agency",
-                "avg_volume_by_sku",
-            ],
-            target_normalizer=GroupNormalizer(
-                groups=["agency", "sku"], transformation="softplus", center=False
-            ),  # use softplus with beta=1.0 and normalize by group
-            add_relative_time_idx=True,
-            add_target_scales=True,
-            add_encoder_length=True,
-        )       
+            # 静态固定变量: 股票代码
+            static_categoricals=["instrument"], # ["instrument"],
+            # 静态连续变量:每年的股市整体和外部经济环境数据
+            static_reals=qyspjg,
+            # 动态离散变量:日期
+            time_varying_known_categoricals=["dayofweek"],
+            # 动态已知离散变量: 节假日
+            # variable_groups={"special_days": special_days},
+            time_varying_known_reals=["time_idx"],
+            time_varying_unknown_categoricals=time_varying_unknown_categoricals,
+            time_varying_unknown_reals=time_varying_unknown_reals,
+            target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
+            add_relative_time_idx=False,
+            add_target_scales=False,
+            add_encoder_length=False,
+            viz=self.viz,
+        )
         if mode=="valid":
-            tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
+            tsdata = TimeSeriesCrfDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
         return tsdata     
     
-    
+        
+    def reals_bins(self,data, columns, cut_number=15):
+        """连续变量离散化"""
+        
+        for column in columns:
+            data[column] = pd.qcut(data[column],cut_number,labels=False)
+            
+        
     
