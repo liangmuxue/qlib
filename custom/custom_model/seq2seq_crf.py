@@ -41,18 +41,20 @@ class SeqCrf(nn.Module):
         hidden_size: int = 16,
         step_len: int = 15,
         input_size:int = 5,
+        device=None,
         **kwargs,
     ):
         super().__init__()
         
+        self.device = device
         self.hidden_size = hidden_size
         # 对应时序标注模式,使用条件随机场损失函数
         num_classes = len(CLASS_VALUES)
         # 使用encoder,decoder方式，并使用crf进行loss收集
-        self.enc = encoder(input_size, step_len)
-        self.dec = decoder(num_classes)
-        self.crf = CRF(hidden_size, num_classes)
-        self = self.cuda()  
+        self.enc = encoder(input_size, step_len,device=device)
+        self.dec = decoder(num_classes,device=device)
+        self.crf = CRF(hidden_size, num_classes,device=device)
+        # self = self.cuda(device=self.device)  
 
     def ext_properties(self,**kwargs):
         self.viz = kwargs['viz']
@@ -98,12 +100,12 @@ class SeqCrf(nn.Module):
         
         encoder_lengths = x["encoder_lengths"]
         decoder_lengths = x["decoder_lengths"]    
-        encoder_target = x["encoder_target"].cuda()
-        x_cat = x["encoder_cat"].cuda()
-        x_cont = x["encoder_cont"].cuda()
+        encoder_target = x["encoder_target"].cuda(device=self.device)
+        x_cat = x["encoder_cat"].cuda(device=self.device)
+        x_cont = x["encoder_cont"].cuda(device=self.device)
         # 拼接离散变量和连续变量转换后的离散变量
-        xc = torch.cat((x_cat,x_cont),2)
-        target = y[0].cuda()
+        xc = x_cont #torch.cat((x_cat,x_cont),2)
+        target = y[0].cuda(device=self.device)
         ya,ymask = self.base(xc, encoder_target, target)
         loss = self.crf.loss(ya, target, masks=ymask)
         return loss
@@ -121,30 +123,30 @@ class SeqCrf(nn.Module):
         self.dec.hidden = self.enc.hidden
         self.dec.attn.Va = zeros(b, length, HIDDEN_SIZE)
         # 使用1作为初始值
-        yi = LongTensor([1] * b)
+        yi = torch.LongTensor([1] * b).cuda(device=self.device)
         yt = yi.unsqueeze(1).repeat(1,length)
         mask = mask.unsqueeze(-1).repeat(1,1,length)
         ya = self.dec(yt, mask)
         return ya,ymask        
 
     def val(self,  x: Dict[str, torch.Tensor],y: Tuple[torch.Tensor, torch.Tensor]):
-        encoder_target = x["encoder_target"].cuda()
-        x_cat = x["encoder_cat"].cuda()
-        x_cont = x["encoder_cont"].cuda()       
+        encoder_target = x["encoder_target"].cuda(device=self.device)
+        x_cat = x["encoder_cat"].cuda(device=self.device)
+        x_cont = x["encoder_cont"].cuda(device=self.device)       
         # 拼接离散变量和连续变量转换后的离散变量
-        xc = torch.cat((x_cat,x_cont),2)
-        target = y[0].cuda()
+        xc = x_cont # torch.cat((x_cat,x_cont),2)
+        target = y[0].cuda(device=self.device)
         ya,mask = self.base(xc, encoder_target, target)
         scores, tag_seq = self.crf(ya, mask)
-        return scores
+        return scores,tag_seq
             
 class encoder(nn.Module):
-    def __init__(self, cti_size, wti_size):
+    def __init__(self, cti_size, wti_size,device=None):
         super().__init__()
         self.hidden = None # encoder hidden states
 
         # architecture
-        self.embed = embed(ENC_EMBED, cti_size, wti_size)
+        self.embed = embed(ENC_EMBED, cti_size, wti_size,device=device)
         self.rnn = getattr(nn, RNN_TYPE)(
             input_size = self.embed.dim,
             hidden_size = HIDDEN_SIZE // NUM_DIRS,
@@ -154,7 +156,8 @@ class encoder(nn.Module):
             dropout = DROPOUT,
             bidirectional = (NUM_DIRS == 2)
         )
-
+        self = self.cuda(device=device)
+        
     def init_state(self, b): # initialize RNN states
         n = NUM_LAYERS * NUM_DIRS
         h = HIDDEN_SIZE // NUM_DIRS
@@ -173,13 +176,13 @@ class encoder(nn.Module):
         return h
     
 class decoder(nn.Module):
-    def __init__(self, wti_size):
+    def __init__(self, wti_size,device=None):
         super().__init__()
         self.M = None # source hidden states
         self.hidden = None # decoder hidden states
 
         # architecture
-        self.embed = embed(DEC_EMBED, 0, wti_size)
+        self.embed = embed(DEC_EMBED, 0, wti_size,device=device)
         self.rnn = getattr(nn, RNN_TYPE)(
             input_size = self.embed.dim + HIDDEN_SIZE, # input feeding
             hidden_size = HIDDEN_SIZE // NUM_DIRS,
@@ -192,6 +195,7 @@ class decoder(nn.Module):
         self.attn = attn()
         self.out = nn.Linear(HIDDEN_SIZE, wti_size)
         self.softmax = nn.LogSoftmax(1)
+        self = self.cuda(device=device)
 
     def forward(self, y1, mask):
         x = self.embed(None, y1)

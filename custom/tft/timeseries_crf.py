@@ -429,6 +429,8 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         p_targets = self.classify_target(target)
         # 使用分类模式,转换编码部分目标数据
         p_enc_targets = self.classify_target(encoder_target)
+        # data_cont = data_cont[:,1:]
+        # data_cat = torch.empty(data_cat.shape[0],data_cat.shape[1])
         return (
             dict(
                 x_cat=data_cat,

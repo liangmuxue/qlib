@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market test_one
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -47,10 +47,10 @@ task:
         module_path: tft.pytorch_crf
         kwargs:
             GPU: 1
-            batch_size: 8
+            batch_size: 1024
             seed: 0
             n_jobs: 20
-            type: 'opt_train'
+            type: 'predict'
             fig_save_path: 'custom/data/lightning_logs/chart/subset'
             optargs:
                n_trials: 30
@@ -58,10 +58,10 @@ task:
                step_len: 15
                input_size: 5
                hidden_size: 1000
-               weight_path: 'custom/data/weights'
+               weight_path: 'custom/data/weights/crf'
                log_path: 'custom/data/lightning_logs'
                best_trial_no: 17
-               best_ckpt_no: 12
+               best_ckpt_no: 99
                load_weights: True
                viz: True
     dataset:

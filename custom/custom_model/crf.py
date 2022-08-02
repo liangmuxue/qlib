@@ -20,7 +20,7 @@ class CRF(nn.Module):
     :param num_tag: number of tags. DO NOT include START, STOP tags, they are included internal.
     """
 
-    def __init__(self, in_features, num_tags):
+    def __init__(self, in_features, num_tags,device=None):
         super(CRF, self).__init__()
 
         self.num_tags = num_tags + 2
@@ -33,6 +33,7 @@ class CRF(nn.Module):
         self.transitions = nn.Parameter(torch.randn(self.num_tags, self.num_tags), requires_grad=True)
         self.transitions.data[self.start_idx, :] = IMPOSSIBLE
         self.transitions.data[:, self.stop_idx] = IMPOSSIBLE
+        self = self.cuda(device=device)
 
     def forward(self, features, masks):
         """decode tags

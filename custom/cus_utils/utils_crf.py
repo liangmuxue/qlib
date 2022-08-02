@@ -59,6 +59,7 @@ def load_checkpoint(filename, model = None):
     if model:
         model.enc.load_state_dict(checkpoint["enc_state_dict"])
         model.dec.load_state_dict(checkpoint["dec_state_dict"])
+        model.crf.load_state_dict(checkpoint["crf_state_dict"])
     epoch = checkpoint["epoch"]
     loss = checkpoint["loss"]
     print("saved model: epoch = %d, loss = %f" % (checkpoint["epoch"], checkpoint["loss"]))
@@ -71,6 +72,8 @@ def save_checkpoint(filename, model, epoch, loss, time):
         checkpoint = {}
         checkpoint["enc_state_dict"] = model.enc.state_dict()
         checkpoint["dec_state_dict"] = model.dec.state_dict()
+        checkpoint["crf_state_dict"] = model.crf.state_dict()
+        # checkpoint["optimizer_state_dict"] = optimizer.state_dict()
         checkpoint["epoch"] = epoch
         checkpoint["loss"] = loss
         torch.save(checkpoint, filename + ".epoch%d" % epoch)

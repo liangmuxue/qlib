@@ -31,7 +31,7 @@ from .tuning_cus import OptimizeHyperparameters
 from tft.tft_dataset import TFTDataset
 from custom_model.seq2seq_crf import SeqCrf
 from custom_model.parameters import *
-from cus_utils.utils_crf import save_checkpoint
+from cus_utils.utils_crf import save_checkpoint,load_checkpoint
 from time import time
 
 class CrfModel(Model):
@@ -95,60 +95,108 @@ class CrfModel(Model):
         df_valid = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         df_valid = df_valid[df_valid['instrument'].isin(df_train['instrument'].unique())]
         validation = dataset.get_crf_dataset(df_valid,mode="valid")
-        val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)       
+        val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)      
+        device = torch.device("cuda:{}".format(self.gpus)) 
+        self.device = device
         self.model = SeqCrf(
             hidden_size=self.optargs['hidden_size'],
             input_size=self.optargs["input_size"],
             step_len=self.optargs["step_len"],
             viz=self.optargs['viz'],
-            gpus=self.gpus
+            device=device
             
         )      
-        self.enc_optim = torch.optim.Adam(self.model.enc.parameters(), lr = LEARNING_RATE)
-        self.dec_optim = torch.optim.Adam(self.model.dec.parameters(), lr = LEARNING_RATE)    
-        epoch = 0  
         num_epochs = self.optargs["max_epochs"]
+        weight_path = self.optargs['weight_path']        
+        if self.optargs['load_weights']:
+            step = self.optargs["best_ckpt_no"]
+            filepath = "{}/crf_{}.pth".format(weight_path,step)
+            epoch = load_checkpoint(filepath, self.model)
+        self.enc_optim = torch.optim.Adam(self.model.enc.parameters(), lr = LEARNING_RATE)
+        self.dec_optim = torch.optim.Adam(self.model.dec.parameters(), lr = LEARNING_RATE)   
+        self.crf_optim = torch.optim.Adam(self.model.crf.parameters(), lr = LEARNING_RATE * 2)  
+        epoch = 0  
+
         
-        
-        for step in range(self.n_epochs):
+        for step in range(num_epochs):
+            weight_file = "{}/crf_{}.pth".format(weight_path,step)
             timer = time()
             self.logger.info("Epoch%d:", step)
             self.logger.info("training...")
-            self.train_epoch(train_loader)
-            self.logger.info("evaluating...")
             train_loss = self.train_epoch(train_loader)
+            self.logger.info("evaluating...")
             scores = self.test_epoch(val_loader)
             timer = time() - timer
             self.logger.info("train %.6f, valid %.6f" % (train_loss, scores))
-            save_checkpoint("", None, step, train_loss, timer)
+            save_checkpoint(weight_file, self.model, step, train_loss, timer)
 
     def predict(self, dataset: TFTDataset):
-
-        df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        test_ds = dataset.get_ts_dataset(df_test,mode="valid")
-        test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)        
-
+        device = torch.device("cuda:{}".format(self.gpus)) 
+        self.device = device
+        self.model = SeqCrf(
+            hidden_size=self.optargs['hidden_size'],
+            input_size=self.optargs["input_size"],
+            step_len=self.optargs["step_len"],
+            viz=self.optargs['viz'],
+            device=device
+            
+        )     
+        weight_path = self.optargs['weight_path']        
+        if self.optargs['load_weights']:
+            step = self.optargs["best_ckpt_no"]
+            filepath = "{}/crf_{}.pth".format(weight_path,step)
+            epoch = load_checkpoint(filepath, self.model)        
+        df_train = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        # 生成tft时间序列训练数据集
+        ts_data_train = dataset.get_crf_dataset(df_train)
+        train_loader = ts_data_train.to_dataloader(train=True, batch_size=self.batch_size, num_workers=8)  
+        df_valid = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        df_valid = df_valid[df_valid['instrument'].isin(df_train['instrument'].unique())]
+        validation = dataset.get_crf_dataset(df_valid,mode="valid")
+        val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)           
+        acc = self.test_epoch(val_loader)
+        print("test acc:",acc)
                 
     def train_epoch(self, data_loader):
         self.model.train()
-        loss_sum = 0              
+        loss_sum = 0       
+        step_number = len(data_loader.dataset) // self.batch_size    
+        # print("data length:{},step_number:{}".format(len(data_loader.dataset),step_number))
+        step_idx = 0
         for (x,y) in data_loader:
             loss = self.model(x,y) # forward pass and compute loss
+            # self.logger.info("step:{}/{},training step,loss:{}".format(step_idx,step_number,loss))
             loss.backward() # compute gradients
             self.enc_optim.step() # update encoder parameters
             self.dec_optim.step() # update decoder parameters
+            self.crf_optim.step()
             loss_sum += loss.item()   
+            step_idx = step_idx + 1
         return loss_sum
         
     def test_epoch(self, data_loader):
 
         self.model.eval()
 
-        scores = torch.tensor([]).cuda()
+        acc_total = None
         losses = []
-
+        
         for (x,y)  in data_loader:
-            score = self.model.val(x, y)
-            scores = torch.cat((scores,score))
-
-        return torch.mean(scores)
+            score,tag_seq = self.model.val(x, y)
+            pred,target = self.clean_tag_data(tag_seq,y[0])
+            acc = np.sum(pred == target)/(target.shape[0]*target.shape[1])
+            acc = np.array([acc])
+            if acc_total is None:
+                acc_total = acc
+            else:
+                acc_total = np.concatenate((acc_total,acc))
+        return np.mean(acc_total)
+    
+    def clean_tag_data(self,pred,target):
+        pred_new = []
+        target_new = []
+        for index,item in enumerate(pred):
+            if len(item)==5:
+                pred_new.append(item)
+                target_new.append(target[index].numpy())
+        return np.array(pred_new),np.array(target_new)
