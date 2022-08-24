@@ -1,7 +1,7 @@
 qlib_init:
-    provider_uri: "/home/qdata/qlib_data/custom_cn_data"
+    provider_uri: "/home/qdata/qlib_data/custom_data"
     region: cn
-market: &market test_one
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -46,7 +46,7 @@ task:
         class: CrfModel
         module_path: tft.pytorch_crf
         kwargs:
-            GPU: 1
+            GPU: 0
             batch_size: 8
             seed: 0
             n_jobs: 20

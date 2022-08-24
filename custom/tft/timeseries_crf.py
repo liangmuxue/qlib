@@ -647,7 +647,7 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
 
     def _data_to_tensors(self, data: pd.DataFrame) -> Dict[str, torch.Tensor]:
         """
-        重载父类方法,加入转换前的原目标值
+         重载父类方法,加入转换前的原目标值
         """
 
         tensors = super()._data_to_tensors(data)
