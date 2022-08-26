@@ -1,6 +1,7 @@
 # https://github.com/github/gitignore/blob/master/Python.gitignore
 __pycache__/
 
+.pvdevproject
 *.pyc
 *.pyd
 *.so
@@ -11,6 +12,7 @@ build/
 dist/
 lightning_logs/
 examples/weights
+
 
 *.pkl
 *.hd5
