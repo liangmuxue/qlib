@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market test_100
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -17,7 +17,7 @@ data_handler_config: &data_handler_config
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
-    label: ["Ref($close, -2) / Ref($close, -1) - 1"] 
+    label: ["$close / Ref($close, 1) - 1"] 
     # label: ["$volume/100"]
 
 port_analysis_config: &port_analysis_config
@@ -47,10 +47,10 @@ task:
         module_path: tft.pytorch_crf
         kwargs:
             GPU: 1
-            batch_size: 1024
+            batch_size: 8
             seed: 0
             n_jobs: 20
-            type: 'predict'
+            type: 'opt_train'
             fig_save_path: 'custom/data/lightning_logs/chart/subset'
             optargs:
                n_trials: 30
@@ -60,9 +60,10 @@ task:
                hidden_size: 1000
                weight_path: 'custom/data/weights/crf'
                log_path: 'custom/data/lightning_logs'
-               best_trial_no: 17
-               best_ckpt_no: 99
-               load_weights: True
+               best_trial_no: 1
+               best_ckpt_no: 148
+               load_weights: FALSE
+               qcut_len: 15 
                viz: True
     dataset:
         class: TFTDataset

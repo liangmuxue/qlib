@@ -82,7 +82,7 @@ class HisDataExtractor:
             
         # 每个股票分别保存
         save_path = "{}/{}.csv".format(self.ITEM_DATA_SAVEPATH,instrument_code)
-        # item_data.to_csv(save_path, index=False)        
+        item_data.to_csv(save_path, index=False)        
         return item_data
 
     def show_item_data(self,instrument_code,start_date=None,end_date=None):   
@@ -107,11 +107,11 @@ class HisDataExtractor:
 if __name__ == "__main__":    
     extractor = HisDataExtractor(item_savepath="./custom/data/stock_data/item")   
     # extractor.load_item_data("600520",start_date="2008-05-21",end_date="2008-05-28")    
-    extractor.load_item_data("600060")
+    extractor.load_item_data("600007",start_date="20161227",end_date="20161230")
     # extractor.show_item_data("600010",start_date="2020-05-07",end_date="2020-05-29")
     # extractor = HisDataExtractor()
     # extractor.download_data(file_type="qyspjg")
-    # extractor.get_code_data(create=False)
+    # extractor.get_code_data(create=False)aq
     # extractor.load_all_data()
     
         

@@ -146,11 +146,10 @@ class TFTDataset(DatasetH):
         data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
-        # datetime转为字符串
-        data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")        
+        data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")    
         # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
         return data
- 
+    
     def prepare_seg_volume(self, slc: slice, **kwargs):
         """处理成交量模式的数据"""
         
@@ -243,7 +242,7 @@ class TFTDataset(DatasetH):
             tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
         return tsdata     
     
-    def get_crf_dataset(self,data,mode="train"):
+    def get_crf_dataset(self,data,mode="train",opt=None):
         """
         取得TimeSeriesDataSet对象
 
@@ -293,6 +292,7 @@ class TFTDataset(DatasetH):
             add_relative_time_idx=False,
             add_target_scales=False,
             add_encoder_length=False,
+            qcut_len=opt["qcut_len"],
             viz=self.viz,
         )
         if mode=="valid":

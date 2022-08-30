@@ -100,8 +100,14 @@ class TensorViz(object):
     def viz_line_compare(self,line_pair,win="compare",names=None):    
         """比较两条线段"""  
         
-        print("do nothing")          
-            
+        print("do nothing")    
+     
+    def viz_data_hist(self,data,numbins=10,win="histogram",title="histogram"):     
+        """绘制柱状比较图"""
+        
+        length = data.shape[0]
+        self.viz.histogram(X=data, win=win, opts=dict(numbins=numbins,title=title))  
+                   
 def reals_data_test():
     viz = TensorViz()
     reals = np.load("/home/qdata/project/pytorch-forecasting/viz/reals.npy")

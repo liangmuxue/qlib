@@ -12,6 +12,7 @@ NUM_LAYERS = 2
 BATCH_SIZE = 64 * 3 # BATCH_SIZE * BEAM_SIZE
 HRE = False # (UNIT == "sent") # hierarchical recurrent encoding
 ENC_EMBED = {"lookup": 300} # encoder embedding (char-cnn, char-rnn, lookup, sae)
+ENC_EMBED = {"char-rnn": 300} 
 DEC_EMBED = {"lookup": 300} # decoder embedding (lookup only)
 HIDDEN_SIZE = 1000
 COPY = True # copying mechanism
@@ -24,7 +25,7 @@ SAVE_EVERY = 10
 
 PAD, PAD_IDX = "<PAD>", 0 # padding
 SOS, SOS_IDX = "<SOS>", 1 # start of sequence
-EOS, EOS_IDX = "<EOS>", 2 # end of sequence
+EOS, EOS_IDX = "<EOS>", 7 # end of sequence
 UNK, UNK_IDX = "<UNK>", 3 # unknown token
 
 CUDA = torch.cuda.is_available()
