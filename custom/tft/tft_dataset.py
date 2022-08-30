@@ -133,7 +133,7 @@ class TFTDataset(DatasetH):
         # 删除涨跌幅度大于20%的数据 
         data = data[data.label.abs()<=0.1]  
         # 正数转换
-        # data['label'] = data['label'] + 0.1
+        data['label'] = data['label'] + 0.1
         # 增大取值范围
         data['label'] = data['label'] * 100
         # 补充辅助数据,添加日期编号

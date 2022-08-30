@@ -35,7 +35,7 @@ class HisDataExtractor:
             all_sz = ak.stock_info_sz_name_code(indicator="A股列表")
             all_sh1 = ak.stock_info_sh_name_code(indicator="主板A股")   
             df_sz = all_sz.iloc[:,1]
-            df_sh = all_sh1.iloc[:,2]      
+            df_sh = all_sh1.iloc[:,0]      
             self.stock_sz = np.hstack([np.array(df_sz), '399107'])
             self.stock_sh = np.hstack([np.array(df_sh), '000001'])                        
         else:
@@ -51,8 +51,8 @@ class HisDataExtractor:
         if create is True:
             sh_savepath = self.CODE_DATA_SAVEPATH + "/sh.csv"
             sz_savepath = self.CODE_DATA_SAVEPATH + "/sz.csv"
-            # df_sh.to_csv(sh_savepath,index=False)
-            # df_sz.to_csv(sz_savepath,index=False)
+            df_sh.to_csv(sh_savepath,index=False)
+            df_sz.to_csv(sz_savepath,index=False)
                
     def load_all_data(self):
         """取得所有股票历史行情数据"""
@@ -65,12 +65,16 @@ class HisDataExtractor:
                     item_data = self.load_item_data(single_stock)
                     print("save item data ok:{}".format(single_stock))
                 except Exception as e:
-                    print("load item {} err".format(single_stock),e)
+                    print("load item {} err:{}".format(single_stock,e))
                 
     def load_item_data(self,instrument_code,start_date=None,end_date=None):   
         """取得单个股票历史行情数据"""
         
         # 取得日线数据，后复权
+        if start_date is None:
+            start_date = "19700101"
+        if end_date is None:
+            end_date = "20500101"            
         item_data = ak.stock_zh_a_hist(symbol=instrument_code, period="daily", start_date=start_date,end_date=end_date,adjust="hfq")
         item_data.insert(loc=0, column='code', value=instrument_code)
         # 中文标题改英文 
@@ -107,11 +111,11 @@ class HisDataExtractor:
 if __name__ == "__main__":    
     extractor = HisDataExtractor(item_savepath="./custom/data/stock_data/item")   
     # extractor.load_item_data("600520",start_date="2008-05-21",end_date="2008-05-28")    
-    extractor.load_item_data("600007",start_date="20161227",end_date="20161230")
+    # extractor.load_item_data("600060")
     # extractor.show_item_data("600010",start_date="2020-05-07",end_date="2020-05-29")
     # extractor = HisDataExtractor()
     # extractor.download_data(file_type="qyspjg")
-    # extractor.get_code_data(create=False)aq
-    # extractor.load_all_data()
+    extractor.get_code_data(create=True)
+    extractor.load_all_data()
     
         

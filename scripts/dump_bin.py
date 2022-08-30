@@ -232,10 +232,10 @@ class DumpDataBase:
                 np.hstack([date_index, _df[field]]).astype("<f").tofile(str(bin_path.resolve()))
 
     def _dump_bin(self, file_or_data: [Path, pd.DataFrame], calendar_list: List[pd.Timestamp]):
-        if file_or_data.name=="600520.csv":
-            print("ggg")
-        else:
-            return
+        # if file_or_data.name=="600520.csv":
+        #     print("ggg")
+        # else:
+        #     return
         if isinstance(file_or_data, pd.DataFrame):
             if file_or_data.empty:
                 return
