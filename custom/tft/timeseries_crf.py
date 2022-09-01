@@ -37,8 +37,8 @@ NORMALIZER = Union[TorchNormalizer, NaNLabelEncoder, EncoderNormalizer]
 class TimeSeriesCrfDataset(TimeSeriesDataSet):
     """继承TimeSeriesDataSet,实现部分功能定制"""
     
-    def __init__(self,
-        data: pd.DataFrame,
+    def __init__(self, 
+                 data:pd.DataFrame,
         time_idx: str,
         target: Union[str, List[str]],
         group_ids: List[str],
@@ -225,7 +225,8 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
 
-        data_for_aug =self.prepare_aug_data(data)
+        data_for_aug = self.prepare_aug_data(data)
+        np.save("custom/data/aug/test100.npy",data_for_aug)
         # create index
         self.index = self._construct_index(data, predict_mode=predict_mode)
 
@@ -249,7 +250,7 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
             for index in range(size):
                 df_tem = df[seg_length * index: seg_length * (index + 1)]
                 # 如果后5天累加不超过10个点，则不需要
-                cs = df_tem[15:,-1]["ori_label"].cumsum()
+                cs = np.sum(df_tem["ori_label"].values[15:])
                 if cs<60:
                     continue
                 print("match cs:",cs)

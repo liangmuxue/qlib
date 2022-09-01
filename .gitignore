@@ -1,7 +1,7 @@
 # https://github.com/github/gitignore/blob/master/Python.gitignore
 __pycache__/
 
-.pvdevproject
+.pydevproject
 *.pyc
 *.pyd
 *.so
