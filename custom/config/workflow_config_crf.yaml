@@ -1,5 +1,5 @@
 qlib_init:
-    provider_uri: "/home/qdata/qlib_data/custom_data"
+    provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
 market: &market test_5
 benchmark: &benchmark SH000300

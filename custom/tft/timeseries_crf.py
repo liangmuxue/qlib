@@ -225,13 +225,42 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
 
+        data_for_aug =self.prepare_aug_data(data)
         # create index
         self.index = self._construct_index(data, predict_mode=predict_mode)
 
         # convert to torch tensor for high performance data loading later
         self.data = self._data_to_tensors(data)    
 
+    def prepare_aug_data(self,data):  
+        """数据增强预处理，切割为等长数据"""
         
+        def filter_data_value(df_data):
+            df_data[15:]["ori_label"].cumsum()
+            
+        grp = data.groupby("instrument")
+        seg_length = 20
+        np_ret = None
+        loop_number = 0
+        for instrument,df in grp:
+            # 按照证券号码分组后，切分等长数据
+            size = df.shape[0] // seg_length
+            print("do loop:{}".format(loop_number))
+            for index in range(size):
+                df_tem = df[seg_length * index: seg_length * (index + 1)]
+                # 如果后5天累加不超过10个点，则不需要
+                cs = df_tem[15:,-1]["ori_label"].cumsum()
+                if cs<60:
+                    continue
+                print("match cs:",cs)
+                np_tem = np.expand_dims(df_tem.values,axis=0)
+                if np_ret is None:
+                    np_ret = np_tem
+                else:
+                    np_ret = np.concatenate((np_ret,np_tem),axis=0)
+            loop_number = loop_number +1
+        return np_ret        
+    
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         """定制单个数据获取方式"""
         
