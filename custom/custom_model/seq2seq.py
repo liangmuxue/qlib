@@ -33,14 +33,17 @@ from tft.class_define import CLASS_VALUES
 from .embedding import embed
 from .parameters import *
 from custom_model.crf import CRF
+from custom_model.beamsearch import *
 from cus_utils.utils_crf import maskset
+from cus_utils.dataloader import data
+from tft.class_define import CLASS_VALUES, EOS_IDX, WEOS_IDX, SOS_IDX, PAD_IDX
     
-class SeqCrf(nn.Module):
+class Seq2Seq(nn.Module):
     def __init__(
         self,
         hidden_size: int = 16,
-        step_len: int = 15,
-        input_size:int = 5,
+        qcut_len: int = 15,
+        num_classes:int = 6,
         device=None,
         **kwargs,
     ):
@@ -48,12 +51,10 @@ class SeqCrf(nn.Module):
         
         self.device = device
         self.hidden_size = hidden_size
-        # 对应时序标注模式,使用条件随机场损失函数
-        num_classes = len(CLASS_VALUES)
-        # 使用encoder,decoder方式，并使用crf进行loss收集
-        self.enc = encoder(input_size, step_len,device=device)
+        # 使用encoder,decoder方式,注意输入长度应该包括前后标志符号以及pad符号
+        cti_size = qcut_len + 3
+        self.enc = encoder(cti_size, num_classes,device=device)
         self.dec = decoder(num_classes,device=device)
-        self.crf = CRF(hidden_size, num_classes,device=device)
         # self = self.cuda(device=self.device)  
 
     def ext_properties(self,**kwargs):
@@ -106,40 +107,74 @@ class SeqCrf(nn.Module):
         # 拼接离散变量和连续变量转换后的离散变量
         xc = x_cont #torch.cat((x_cat,x_cont),2)
         target = y[0].cuda(device=self.device)
-        ya,ymask = self.base(xc, encoder_target, target)
-        loss = self.crf.loss(ya, target, masks=ymask)
-        return loss
+        # 标签添加结束标志
+        target = F.pad(target, (0,1), value=WEOS_IDX) 
+        loss = 0
+        mask,lens = self.base(xc, encoder_target, target)
+        # 使用1作为初始值
+        yi = torch.LongTensor([1] * target.size(0)).cuda(device=self.device)
+        results = []
+        for t in range(target.size(1)):          
+            yo = self.dec(yi.unsqueeze(1), mask)
+            results.append(yo)
+            yi = target[:, t] # teacher forcing
+
+            loss += F.nll_loss(yo, yi, ignore_index = PAD_IDX)        
+        data = {"results":results,"target":target,"inputs_xc":xc,"inputs_xw":encoder_target}
+        return loss,data
     
     def base(self, xc, xw, y0):
+        # “词向量”添加起結束符號
+        xw = F.pad(xw, (0,1,0,0), value=WEOS_IDX)  
+        # “字符向量”添加起始和結束符號
+        xc = F.pad(xc, (1,0,0,0,0,0), value=SOS_IDX) 
+        xc = F.pad(xc, (0,1,0,0,0,0), value=EOS_IDX) 
+        # xc多补充一个end行
+        xc = F.pad(xc, (0,0,0,1,0,0), value=PAD_IDX)  
         b = y0.size(0) # batch size
-        length = y0.size(1) # target length
         self.zero_grad()
         mask, lens = maskset(xw)
-        ymask,_ = maskset(y0)
-        ymask = ~ymask
         lens = lens.cpu()
         # 传递连续值和离散值
         self.dec.M = self.enc(b, xc,xw, lens)
         self.dec.hidden = self.enc.hidden
-        self.dec.attn.Va = zeros(b, length, HIDDEN_SIZE)
-        # 使用1作为初始值
-        yi = torch.LongTensor([1] * b).cuda(device=self.device)
-        yt = yi.unsqueeze(1).repeat(1,length)
-        mask = mask.unsqueeze(-1).repeat(1,1,length)
-        ya = self.dec(yt, mask)
-        return ya,ymask        
+        self.dec.attn.Va = zeros(b, 1, HIDDEN_SIZE)   
+        return mask,lens 
 
     def val(self,  x: Dict[str, torch.Tensor],y: Tuple[torch.Tensor, torch.Tensor]):
+        itw = list(CLASS_VALUES.keys())
         encoder_target = x["encoder_target"].cuda(device=self.device)
         x_cat = x["encoder_cat"].cuda(device=self.device)
         x_cont = x["encoder_cont"].cuda(device=self.device)       
         # 拼接离散变量和连续变量转换后的离散变量
         xc = x_cont # torch.cat((x_cat,x_cont),2)
         target = y[0].cuda(device=self.device)
-        ya,mask = self.base(xc, encoder_target, target)
-        scores, tag_seq = self.crf(ya, mask)
-        return scores,tag_seq
-            
+        target = F.pad(target, (0,1), value=WEOS_IDX)  
+        mask,lens = self.base(xc, encoder_target, target)
+        b = target.size(0)
+        t = 0
+        # 使用1作为初始值
+        yi = torch.LongTensor([[1]] * b).cuda(device=self.device)     
+        eos = [False for _ in encoder_target]
+        batch = data()   
+        batch.idx = list(range(len(encoder_target)))
+        batch.xc = xc
+        batch.xw = encoder_target
+        batch.y1 = [[] for _ in range(b)]
+        batch.prob = [torch.FloatTensor([0]).cuda(device=self.device) for _ in range(b)]
+        batch.attn = [[["", *batch.x1[i], EOS]] for i in batch.idx]
+        while t < MAX_LEN and sum(eos) < len(eos):
+            yo = self.dec(yi, mask)
+            args = (self.dec, batch, itw, eos, lens, yo)
+            yi = beam_search(*args, t) if BEAM_SIZE > 1 else greedy_search(*args)
+            t += 1
+        results = []
+        for i, (x0, y0, y1) in enumerate(zip(xc, target, batch.y1)):
+            if not i % BEAM_SIZE: # use the best candidate from each beam
+                y1 = [itw[y] for y in y1[:-1]]
+                results.append((x0, y0, y1))        
+        return results
+       
 class encoder(nn.Module):
     def __init__(self, cti_size, wti_size,device=None):
         super().__init__()
@@ -202,7 +237,9 @@ class decoder(nn.Module):
         x = torch.cat((x, self.attn.Va), 2) # input feeding
         h, _ = self.rnn(x, self.hidden)
         h = self.attn(h, self.M, mask)
-        return h
+        h = self.out(h).squeeze(1)
+        y = self.softmax(h)     
+        return y
 
 class attn(nn.Module):
     def __init__(self):
@@ -215,7 +252,7 @@ class attn(nn.Module):
 
     def align(self, ht, hs, mask):
         a = ht.bmm(hs.transpose(1, 2)) # [B, 1, H] @ [B, H, L] = [B, 1, L]
-        a = F.softmax(a.masked_fill(mask.permute(0,2,1), -10000), 2)
+        a = F.softmax(a.masked_fill(mask.unsqueeze(1), -10000), 2)
         return a # attention weights
 
     def forward(self, ht, hs, mask):

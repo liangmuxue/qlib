@@ -17,7 +17,7 @@ data_handler_config: &data_handler_config
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
-    label: ["Ref($close, -2) / Ref($close, -1) - 1"] 
+    label: ["$close / Ref($close, 1) - 1"] 
     # label: ["$volume/100"]
 
 port_analysis_config: &port_analysis_config
@@ -58,11 +58,12 @@ task:
                step_len: 15
                input_size: 5
                hidden_size: 1000
-               weight_path: 'custom/data/weights'
+               weight_path: 'custom/data/weights/crf'
                log_path: 'custom/data/lightning_logs'
-               best_trial_no: 17
-               best_ckpt_no: 12
-               load_weights: True
+               best_trial_no: 1
+               best_ckpt_no: 148
+               load_weights: FALSE
+               qcut_len: 15 
                viz: True
     dataset:
         class: TFTDataset

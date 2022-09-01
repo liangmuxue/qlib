@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 class embed(nn.Module):
-    def __init__(self, ls, cti_size, wti_size, hre = False):
+    def __init__(self, ls, cti_size, wti_size, hre = False,device=None):
         super().__init__()
         self.ls = ls # embedding module list
         self.dim = sum(ls.values())
@@ -23,7 +23,7 @@ class embed(nn.Module):
                     self.word_embed = self.sae(wti_size, dim)
         if self.hre:
             self.sent_embed = self.rnn(self.dim, self.dim, True)
-        self = self.cuda() if CUDA else self
+        self = self.cuda(device=device) if CUDA else self
 
     def forward(self, xc, xw):
         hc, hw = None, None

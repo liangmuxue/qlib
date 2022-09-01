@@ -27,9 +27,10 @@ from pytorch_forecasting.data.encoders import (
     TorchNormalizer,
 )
 
-from cus_utils.common_compute import np_qcut
+from cus_utils.common_compute import np_qcut,enhance_data_complex
 from cus_utils.tensor_viz import TensorViz
-from tft.class_define import CLASS_VALUES
+from tft.class_define import CLASS_VALUES, VALUE_BINS, EOS_IDX, PAD_IDX
+from sqlalchemy.dialects.mysql import enumerated
 
 NORMALIZER = Union[TorchNormalizer, NaNLabelEncoder, EncoderNormalizer]
 
@@ -65,6 +66,7 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         scalers: Dict[str, Union[StandardScaler, RobustScaler, TorchNormalizer, EncoderNormalizer]] = {},
         randomize_length: Union[None, Tuple[float, float], bool] = False,
         predict_mode: bool = False,
+        qcut_len: int = 15,
         viz: bool = False):
 
         # 直接使用上级父类进行初始化
@@ -101,6 +103,7 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         self.time_varying_unknown_categoricals = [] + time_varying_unknown_categoricals
         self.time_varying_unknown_reals = [] + time_varying_unknown_reals
         self.add_relative_time_idx = add_relative_time_idx
+        self.qcut_len = qcut_len
         self.viz = viz
 
         # set automatic defaults
@@ -222,17 +225,42 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
 
+        data_for_aug =self.prepare_aug_data(data)
         # create index
         self.index = self._construct_index(data, predict_mode=predict_mode)
 
         # convert to torch tensor for high performance data loading later
         self.data = self._data_to_tensors(data)    
 
-        # visdom可视化环境
-        if self.viz:
-            self.viz_cat = TensorViz(env="dataview_cat")
-            self.viz_cont = TensorViz(env="dataview_cont")
+    def prepare_aug_data(self,data):  
+        """数据增强预处理，切割为等长数据"""
         
+        def filter_data_value(df_data):
+            df_data[15:]["ori_label"].cumsum()
+            
+        grp = data.groupby("instrument")
+        seg_length = 20
+        np_ret = None
+        loop_number = 0
+        for instrument,df in grp:
+            # 按照证券号码分组后，切分等长数据
+            size = df.shape[0] // seg_length
+            print("do loop:{}".format(loop_number))
+            for index in range(size):
+                df_tem = df[seg_length * index: seg_length * (index + 1)]
+                # 如果后5天累加不超过10个点，则不需要
+                cs = df_tem[15:,-1]["ori_label"].cumsum()
+                if cs<60:
+                    continue
+                print("match cs:",cs)
+                np_tem = np.expand_dims(df_tem.values,axis=0)
+                if np_ret is None:
+                    np_ret = np_tem
+                else:
+                    np_ret = np.concatenate((np_ret,np_tem),axis=0)
+            loop_number = loop_number +1
+        return np_ret        
+    
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         """定制单个数据获取方式"""
         
@@ -429,12 +457,18 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         p_targets = self.classify_target(target)
         # 使用分类模式,转换编码部分目标数据
         p_enc_targets = self.classify_target(encoder_target)
+        # 填充0來擴展列維度
+        # data_cat= np.pad(data_cat,((0,1),(0,0)),'constant', constant_values=(0)) 
+        # data_cont= np.pad(data_cont,((0,1),(0,0)),'constant', constant_values=(0)) 
+        # data_cat = torch.empty(data_cat.shape[0],data_cat.shape[1])
+        # if self.predict_mode:
+        #     print("ggg")
         return (
             dict(
                 x_cat=data_cat,
                 x_cont=data_cont,
                 encoder_length=encoder_length,
-                decoder_length=decoder_length,
+                decoder_length=decoder_length+1,
                 encoder_target=p_enc_targets,
                 encoder_time_idx_start=time[0],
                 groups=groups,
@@ -449,6 +483,8 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         for item in target:
             p_taraget = [k for k, v in CLASS_VALUES.items() if (item>=v[0] and item<v[1])]
             p_taragets.append(p_taraget)
+        # 添加結束標誌
+        # p_taragets.append([EOS_IDX])
         p_taragets = torch.Tensor(p_taragets).squeeze(-1).long()        
         return p_taragets
     
@@ -651,18 +687,52 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         """
 
         tensors = super()._data_to_tensors(data)
-        # 连续数据变为离散数据，
         data_cont = tensors["reals"]
         # 需要剔除已知连续数据（time_varying_known_reals）
         ignore_index = len(self.time_varying_known_reals)
-        data_cont = data_cont[:,ignore_index:]
-        data_cont = np.apply_along_axis(np_qcut, axis=0, arr=data_cont, q=15)
-        tensors["reals"] = torch.tensor(np.concatenate((tensors["reals"][:,0:ignore_index],data_cont),axis=1))
+        data_cont = data_cont[:,ignore_index:]       
+        # 训练阶段数据增强
+        if not self.predict_mode:
+            # 目标数据增强
+            self.target_data_enhance(tensors)
+            # 动态指标数据增强
+            data_cont = self.real_data_enhance(data_cont,bin_numbers=self.qcut_len)
+        self.viz_input = TensorViz(env="data_histtm") 
+        self.viz_input.viz_data_hist(tensors['target'][0].numpy(),numbins=20,win="test5_data",title="test5_data")
+        # np.save("custom/data/data.npy",tensors['target'][0].numpy())
+        # 连续数据变为离散数据，
+        data_cont = np.apply_along_axis(np_qcut, axis=0, arr=data_cont, q=self.qcut_len)
+        tensors["reals"] = torch.tensor(data_cont).int()
         # 保留原数值        
         ori_target = torch.tensor(data[f"ori_{self.target}"].to_numpy(dtype=np.float64), dtype=torch.float)
         tensors["ori_target"] = [ori_target]
         return tensors
-    
+
+    def target_data_enhance(self,tensor_data):
+        """目标数据增强"""
+        bins = VALUE_BINS
+        amplitude,y_res = enhance_data_complex(tensor_data['target'][0].numpy(),bins=bins)
+        tensor_data['target'][0] = torch.Tensor(amplitude)
+        return amplitude
+ 
+    def real_data_enhance(self,data_cont,bin_numbers=15):
+        """动态指标数据增强"""
+        rtn = None
+        for index,item in enumerate(data_cont.permute(1,0)):
+            self.viz_input = TensorViz(env="data_histtm") 
+            self.viz_input.viz_data_hist(item.numpy(),numbins=bin_numbers,win="item{}".format(index),title="item{}".format(index))            
+            # start = item.min() - 0.001
+            # stop = item.max() + 0.001
+            # step = (stop - start)/(bin_numbers+1)
+            # step = step + step*0.01
+            # bins = torch.range(start,stop,step)
+            # amplitude,y_res = enhance_data_complex(item.numpy(),bins=bins.numpy(),mode="smote")
+            # if rtn is None:
+            #     rtn = amplitude
+            # else:
+            #     rtn = np.concatenate((rtn,amplitude),axis=0)
+        return torch.tensor(rtn)
+               
     def get_oridata_byindex(self,index_list):
         """根据索引取得源数据
         Args:

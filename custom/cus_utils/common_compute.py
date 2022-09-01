@@ -1,9 +1,15 @@
 from visdom import Visdom
 import torch
 import numpy as np
-
 from torch import nn
-                
+
+from imblearn.over_sampling import RandomOverSampler
+from imblearn.over_sampling import SMOTE, ADASYN, BorderlineSMOTE,KMeansSMOTE
+from collections import Counter
+from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
+
+             
 def mae_comp(input,target):
     loss_fn = torch.nn.L1Loss(reduce=False, size_average=False)
     loss = loss_fn(input.float(), target.float())
@@ -15,7 +21,6 @@ def np_qcut(arr, q):
     """ 实现类似pandas的qcut功能"""
 
     res = np.zeros(arr.size)
-    # nanµÄ½á¹û²»²ÎÓë¼ÆËã
     na_mask = np.isnan(arr)
     res[na_mask] = np.nan
     x = arr[~na_mask]
@@ -30,6 +35,49 @@ def np_qcut(arr, q):
     
     res[~na_mask] = np.digitize(x, bins, right=True)
     return res
+
+def enhance_data_complex(ori_data,mode="adasyn",bins=None):
+    """综合数据增强，使用imblearn组件
+    Parameters
+    ----------
+    ori_data : 需要增强的数据，numpy数组
+    mode : 增强模式
+    bins : 数据间隔分组数
+    Returns
+    ----------
+    增强后的数据
+    """
+    
+    # 使用分箱范围数据进行数据分组
+    digitized = np.digitize(ori_data, bins)
+    print('Original dataset shape %s' % Counter(digitized))
+    amplitude = np.expand_dims(ori_data,axis=1)
+    if mode=="smote":
+        sm = KMeansSMOTE(random_state=42)    
+    # sm = SMOTE(random_state=42) 
+    if mode=="adasyn":
+        sm = ADASYN(random_state=42) 
+    # 过采样数据补充
+    amplitude, y_res = sm.fit_resample(amplitude, digitized)  
+    print('Resampled dataset shape %s' % Counter(y_res))
+    amplitude = np.squeeze(amplitude,axis=1)     
+    return amplitude,y_res
+
+def enhance_data(ori_data,mode="smote",bins=None):
+    """数据增强"""
+    
+    digitized = np.digitize(ori_data, bins)
+    print('Original dataset shape %s' % Counter(digitized))
+    amplitude = np.expand_dims(ori_data,axis=1)
+    if mode=="smote":
+        sm = BorderlineSMOTE(random_state=42,kind="borderline-1")    
+    # sm = SMOTE(random_state=42) 
+    if mode=="adasyn":
+        sm = ADASYN(random_state=42) 
+    amplitude, y_res = sm.fit_resample(amplitude, digitized)  
+    print('Resampled dataset shape %s' % Counter(y_res))
+    amplitude = np.squeeze(amplitude,axis=1)     
+    return amplitude,y_res
 
 if __name__ == "__main__":
     # test_normal_vis()
