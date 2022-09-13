@@ -45,7 +45,7 @@ def test_normal_vis():
 
 class TensorViz(object):
     def __init__(self,env="debug",type="cont_data"):
-        self.viz = Visdom(env=env,port=7098)  
+        self.viz = Visdom(env=env,port=8098)  
 
     def viz_data_bar(self,data,win="matrix",names=None,desc=None,title=None):     
         """绘制柱状比较图"""

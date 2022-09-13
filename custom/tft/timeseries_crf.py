@@ -225,7 +225,7 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
 
-        data_for_aug = self.prepare_aug_data(data)
+        data_for_aug = self.prepare_aug_data(data,keep_all=False,columns=['CORD5', 'VSTD5', 'WVMA5', 'label'])
         np.save("custom/data/aug/test100.npy",data_for_aug)
         # create index
         self.index = self._construct_index(data, predict_mode=predict_mode)
@@ -233,16 +233,15 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         # convert to torch tensor for high performance data loading later
         self.data = self._data_to_tensors(data)    
 
-    def prepare_aug_data(self,data):  
+    def prepare_aug_data(self,data,keep_all=False,columns=None):  
         """数据增强预处理，切割为等长数据"""
-        
-        def filter_data_value(df_data):
-            df_data[15:]["ori_label"].cumsum()
-            
+
         grp = data.groupby("instrument")
         seg_length = 20
         np_ret = None
         loop_number = 0
+        if columns is not None:
+            columns = columns + ["ori_label"]        
         for instrument,df in grp:
             # 按照证券号码分组后，切分等长数据
             size = df.shape[0] // seg_length
@@ -251,9 +250,11 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
                 df_tem = df[seg_length * index: seg_length * (index + 1)]
                 # 如果后5天累加不超过10个点，则不需要
                 cs = np.sum(df_tem["ori_label"].values[15:])
-                if cs<60:
+                if cs<60 and not keep_all:
                     continue
                 print("match cs:",cs)
+                if columns is not None:
+                    df_tem = df_tem[columns]
                 np_tem = np.expand_dims(df_tem.values,axis=0)
                 if np_ret is None:
                     np_ret = np_tem
