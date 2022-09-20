@@ -29,6 +29,7 @@ from pytorch_forecasting.data.encoders import (
 
 from cus_utils.common_compute import np_qcut,enhance_data_complex
 from cus_utils.tensor_viz import TensorViz
+from cus_utils.data_aug import outliers_proc
 from tft.class_define import CLASS_VALUES, VALUE_BINS, EOS_IDX, PAD_IDX
 from sqlalchemy.dialects.mysql import enumerated
 
@@ -221,38 +222,46 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         self.pd_data = data.copy()        
         # preprocess data
         data = self._preprocess_data(data)
-                
+               
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
 
-        data_for_aug = self.prepare_aug_data(data,keep_all=False,columns=['CORD5', 'VSTD5', 'WVMA5', 'label'])
-        np.save("custom/data/aug/test100.npy",data_for_aug)
+        data = data.reset_index(drop=True) 
+        data_for_aug = self.prepare_aug_data(data,keep_all=True,columns=['datetime_number','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label'])
+        np.save("custom/data/aug/test100_all.npy",data_for_aug)
         # create index
         self.index = self._construct_index(data, predict_mode=predict_mode)
 
         # convert to torch tensor for high performance data loading later
         self.data = self._data_to_tensors(data)    
 
-    def prepare_aug_data(self,data,keep_all=False,columns=None):  
+    def prepare_aug_data(self,data_ori,keep_all=False,columns=None):  
         """数据增强预处理，切割为等长数据"""
 
+        # 清除离群数据
+        data = outliers_proc(data_ori,"VSTD5")
         grp = data.groupby("instrument")
         seg_length = 20
         np_ret = None
         loop_number = 0
         if columns is not None:
-            columns = columns + ["ori_label"]        
+            columns = columns + ["ori_label"]   
+        
+        # 按照证券号码分组处理  
         for instrument,df in grp:
-            # 按照证券号码分组后，切分等长数据
+            # 切分为等长数据
             size = df.shape[0] // seg_length
             print("do loop:{}".format(loop_number))
             for index in range(size):
                 df_tem = df[seg_length * index: seg_length * (index + 1)]
-                # 如果后5天累加不超过10个点，则不需要
+                # 如果后5天累加不超过10个点，则不需要(注意由于做了正向化，因此每天的10代表0，那么50代表5天的0，60代表超出10个点)）
                 cs = np.sum(df_tem["ori_label"].values[15:])
                 if cs<60 and not keep_all:
                     continue
+                zero_rows = pd.DataFrame(np.zeros((1,df_tem.shape[1])),columns=df.columns) 
+                zero_rows.iloc[:,-1] = cs
                 print("match cs:",cs)
+                df_tem = pd.concat([df_tem[:15], zero_rows])
                 if columns is not None:
                     df_tem = df_tem[columns]
                 np_tem = np.expand_dims(df_tem.values,axis=0)
@@ -694,13 +703,13 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         ignore_index = len(self.time_varying_known_reals)
         data_cont = data_cont[:,ignore_index:]       
         # 训练阶段数据增强
-        if not self.predict_mode:
-            # 目标数据增强
-            self.target_data_enhance(tensors)
-            # 动态指标数据增强
-            data_cont = self.real_data_enhance(data_cont,bin_numbers=self.qcut_len)
-        self.viz_input = TensorViz(env="data_histtm") 
-        self.viz_input.viz_data_hist(tensors['target'][0].numpy(),numbins=20,win="test5_data",title="test5_data")
+        # if not self.predict_mode:
+        #     # 目标数据增强
+        #     self.target_data_enhance(tensors)
+        #     # 动态指标数据增强
+        #     data_cont = self.real_data_enhance(data_cont,bin_numbers=self.qcut_len)
+        # self.viz_input = TensorViz(env="data_histtm") 
+        # self.viz_input.viz_data_hist(tensors['target'][0].numpy(),numbins=20,win="test5_data",title="test5_data")
         # np.save("custom/data/data.npy",tensors['target'][0].numpy())
         # 连续数据变为离散数据，
         data_cont = np.apply_along_axis(np_qcut, axis=0, arr=data_cont, q=self.qcut_len)

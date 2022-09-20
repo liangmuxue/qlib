@@ -7,6 +7,7 @@ from inspect import getfullargspec
 from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
 from tft.timeseries_cus import TimeSeriesCusDataset
 from tft.timeseries_crf import TimeSeriesCrfDataset
+from tft.timeseries_numpy import TimeSeriesNumpyDataset
 
 import bisect
 from typing import Any, Callable, Dict, List, Tuple, Union
@@ -147,6 +148,8 @@ class TFTDataset(DatasetH):
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")    
+        # 添加数字类型的时间戳
+        data["datetime_number"] = data.datetime.astype("int")
         # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
         return data
     
@@ -299,7 +302,53 @@ class TFTDataset(DatasetH):
             tsdata = TimeSeriesCrfDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
         return tsdata     
     
+    def get_numpy_dataset(self,file_path,mode="train",opt=None):
+        """
+        取得TimeSeriesDataSet对象,numpy数据模式
+
+        Parameters
+        ----------
+        file_path : numpy 路径
+        columns : 对应列名称
+        """     
+        np_data = np.load(file_path,allow_pickle=True)
+        data_columns = ['datetime_number','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label']
+        max_encoder_length = self.step_len
+        # 每批次的预测长度
+        max_prediction_length = self.pred_len
+        # 取得各个因子名称，组装为动态连续变量
         
+        time_varying_unknown_reals = ['CORD5', 'VSTD5', 'WVMA5', 'label']
+        tsdata = TimeSeriesNumpyDataset(
+            np_data,
+            time_idx="datetime_number",
+            target="label",
+            data_columns=data_columns,
+            # 分组字段: 股票代码
+            group_ids=["instrument"],
+            min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
+            max_encoder_length=max_encoder_length,
+            min_prediction_length=1,
+            max_prediction_length=max_prediction_length,
+            # 静态固定变量: 股票代码
+            static_categoricals=["instrument"], # ["instrument"],
+            # 静态连续变量:每年的股市整体和外部经济环境数据
+            static_reals=[],
+            # 动态离散变量:日期
+            time_varying_known_categoricals=["dayofweek"],
+            # 动态已知离散变量: 节假日
+            # variable_groups={"special_days": special_days},
+            time_varying_known_reals=["datetime_number"],
+            time_varying_unknown_categoricals=[],
+            time_varying_unknown_reals=time_varying_unknown_reals,
+            target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
+            add_relative_time_idx=False,
+            add_target_scales=True,
+            add_encoder_length=False,
+            viz=self.viz,
+        )       
+        return tsdata     
+            
     def reals_bins(self,data, columns, cut_number=15):
         """连续变量离散化"""
         

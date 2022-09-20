@@ -31,6 +31,7 @@ from losses.crf_loss import CrfLoss
 from .timeseries_cus import TimeSeriesCusDataset
 from cus_utils.visualization import VisUtil
 from tft.class_define import CLASS_VALUES
+from aiohttp import log
 
 def _concatenate_output(
     output: List[Dict[str, List[Union[List[torch.Tensor], torch.Tensor, bool, int, str, np.ndarray]]]]
@@ -97,7 +98,7 @@ class OutputNetwork(nn.Module):
         output = self.classify(output)   
         return output
     
-class TftModelCus(TemporalFusionTransformer):
+class TftModelNor(TemporalFusionTransformer):
     def __init__(
         self,
         hidden_size: int = 16,
@@ -133,17 +134,17 @@ class TftModelCus(TemporalFusionTransformer):
         **kwargs,
     ):
         self.hidden_size = hidden_size
-        # 只保留1个输出
-        output_size = 1
-        # 对应时序标注模式,使用条件随机场损失函数
-        num_classes = len(CLASS_VALUES)
-        loss = CrfLoss(
-            num_classes=num_classes,
-        )          
+ 
+        if logging_metrics is None:
+            logging_metrics = nn.ModuleList([SMAPE(), MAE(), RMSE(), MAPE()])
+        if loss is None:
+            loss = QuantileLoss()
+                   
+        embedding_sizes = {'instrument': (98, 21), 'dayofweek': (5, 4)}
         
         # 使用类别数作为输出层size
         super().__init__(hidden_size=hidden_size,lstm_layers=lstm_layers,dropout=dropout,
-                         output_size=num_classes,loss=loss,attention_head_size=attention_head_size,
+                         output_size=output_size,loss=loss,attention_head_size=attention_head_size,
                          max_encoder_length=max_encoder_length,static_categoricals=static_categoricals,static_reals=static_reals,
                           time_varying_categoricals_encoder=time_varying_categoricals_encoder,time_varying_categoricals_decoder=time_varying_categoricals_decoder,categorical_groups=categorical_groups,
                            time_varying_reals_encoder=time_varying_reals_encoder,time_varying_reals_decoder=time_varying_reals_decoder,
@@ -153,8 +154,7 @@ class TftModelCus(TemporalFusionTransformer):
                             log_val_interval=log_val_interval,log_gradient_flow=log_gradient_flow,reduce_on_plateau_patience=reduce_on_plateau_patience,
                             monotone_constaints=monotone_constaints,share_single_variable_networks=share_single_variable_networks,logging_metrics=logging_metrics,
                             **kwargs)
-        # 自定義output层,使用固定预测长度 
-        self.output_layer = OutputNetwork(hidden_size=hidden_size,num_classes=num_classes)   
+
 
     def ext_properties(self,**kwargs):
         self.viz = kwargs['viz']
@@ -440,18 +440,7 @@ class TftModelCus(TemporalFusionTransformer):
         """
         x, y = batch
         log, out = self.step(x, y, batch_idx)
-        # 计算准确率
-        acc,acc_relative = self.loss.compute_acc(out.prediction,y[0])      
-        log['acc']= acc
-        log['acc_relative']= acc_relative        
-        log.update(self.create_log(x, y, out, batch_idx))
-        self.log(
-            f"{self.current_stage}_acc",
-            acc,
-            on_step=self.training,
-            on_epoch=True,
-            prog_bar=True
-        )        
+        log.update(self.create_log(x, y, out, batch_idx))  
         if self.viz:
             self.viz_util.viz_loss_bar(out, x,y,epoch=self.current_epoch,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="training")          
         return log        
@@ -580,28 +569,6 @@ class TftModelCus(TemporalFusionTransformer):
         if return_ori_outupt:
             output.append(prediction)            
         return output
-       
-    def validation_step(self, batch, batch_idx):
-        """
-        验证步骤方法重载.
-        """        
-        x, y = batch
-        log, out = self.step(x, y, batch_idx)
-        # 计算准确率
-        acc,acc_relative = self.loss.compute_acc(out.prediction,y[0])      
-        log['acc']= acc
-        log['acc_relative']= acc_relative
-        self.log(
-            f"{self.current_stage}_acc",
-            acc,
-            on_step=self.training,
-            on_epoch=True,
-            prog_bar=True
-        )           
-        log.update(self.create_log(x, y, out, batch_idx))
-        if self.viz:
-            self.viz_util.viz_loss_bar(out, x,y,epoch=self.current_epoch,index=batch_idx,loss=self.loss,loss_value=log['loss'],step="validation")  
-        return log
 
     def transform_output(
         self, prediction: Union[torch.Tensor, List[torch.Tensor]], target_scale: Union[torch.Tensor, List[torch.Tensor]]

@@ -2,6 +2,49 @@ import torch
 import numpy as np
 import pandas as pd
 
+def box_plot_outliers(data_ser, box_scale):
+    """
+    利用箱线图去除异常值
+    :param data_ser: 接收 pandas.Series 数据格式
+    :param box_scale: 箱线图尺度
+    """
+    iqr = box_scale * (data_ser.quantile(0.75) - data_ser.quantile(0.25))
+    val_low = data_ser.quantile(0.25) - iqr
+    val_up = data_ser.quantile(0.75) + iqr
+    rule_low = (data_ser < val_low)
+    rule_up = (data_ser > val_up)
+    return (rule_low, rule_up), (val_low, val_up)
+    
+def outliers_proc(data, col_name, scale=3):
+    """
+    用于清洗异常值，默认box_plot(scale=3)进行清洗
+    param data: 接收pandas数据格式
+    param col_name: pandas列名
+    param scale: 尺度
+    """
+    
+    data_n = data.copy()
+    data_serier = data_n[col_name]
+    rule, value = box_plot_outliers(data_serier, box_scale=scale)
+    index = np.arange(data_serier.shape[0])[rule[0] | rule[1]]
+    print("Delete number is:{}".format(len(index)))
+    data_n = data_n.drop(index)
+    data_n.reset_index(drop=True, inplace=True)
+    print("Now column number is:{}".format(data_n.shape[0]))
+    index_low = np.arange(data_serier.shape[0])[rule[0]]
+    outliers = data_serier.iloc[index_low]
+    print("Description of data less than the lower bound is:")
+    print(pd.Series(outliers).describe())
+    index_up = np.arange(data_serier.shape[0])[rule[1]]
+    outliers = data_serier.iloc[index_up]
+    print("Description of data larger than the upper bound is:")
+    print(pd.Series(outliers).describe())
+
+    # fig, ax = plt.subplots(1, 2, figsize=(10, 7))
+    # sns.boxplot(y=data[col_name], data=data, palette="Set1", ax=ax[0])
+    # sns.boxplot(y=data_n[col_name], data=data_n, palette="Set1", ax=ax[1])
+    return data_n      
+
 def aug_data_view(file_path):
     data = np.load(file_path,allow_pickle=True)
     print("shape",data.shape)
@@ -20,7 +63,7 @@ def aug_data_process(file_path,train_path=None,test_path=None,sp_rate=0.7):
     np.save(test_path,test_data)
     
 if __name__ == "__main__":
-    file_path = "custom/data/aug/test100_all.npy"
+    file_path = "custom/data/aug/test100.npy"
     train_path = "custom/data/aug/test100_all_train.npy"
     test_path = "custom/data/aug/test100_all_test.npy"
     # aug_data_process(file_path,train_path=train_path,test_path=test_path)

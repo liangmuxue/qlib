@@ -11,7 +11,7 @@ class CrfLoss(MultiHorizonMetric):
     def __init__(self, num_classes,**kwargs):
         super().__init__(**kwargs)
         self.num_classes = num_classes
-        self.crf = CRF(num_tags=num_classes, batch_first=True)
+        self.crf = CRF(num_labels=num_classes)
 
     def loss(self, inputs, targets):
         """
