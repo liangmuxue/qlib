@@ -48,7 +48,18 @@ def outliers_proc(data, col_name, scale=3):
 def aug_data_view(file_path):
     data = np.load(file_path,allow_pickle=True)
     print("shape",data.shape)
+
+def aug_pd_data_view(file_path):
+    df = pd.read_pickle(file_path)
+    print("df",df)
     
+def aug_data_to_pd(file_path,tar_file_path,columns):
+    data = np.load(file_path,allow_pickle=True)
+    data = np.reshape(data,(-1,len(columns)))
+    pd_data = pd.DataFrame(data,columns=columns)
+    pd_data.to_pickle(tar_file_path)
+    print("save ok")
+        
 def aug_data_process(file_path,train_path=None,test_path=None,sp_rate=0.7):
     """再次加工数据"""
     
@@ -63,11 +74,14 @@ def aug_data_process(file_path,train_path=None,test_path=None,sp_rate=0.7):
     np.save(test_path,test_data)
     
 if __name__ == "__main__":
-    file_path = "custom/data/aug/test100.npy"
+    file_path = "custom/data/aug/test_100.npy"
+    pd_file_path = "custom/data/aug/test_100.pkl"
     train_path = "custom/data/aug/test100_all_train.npy"
     test_path = "custom/data/aug/test100_all_test.npy"
     # aug_data_process(file_path,train_path=train_path,test_path=test_path)
-    aug_data_view(file_path)
+    # aug_data_view(file_path)
+    # aug_data_to_pd(file_path,pd_file_path,['datetime','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label','ori_label'])\
+    aug_pd_data_view(pd_file_path)
     
        
     

@@ -115,7 +115,7 @@ def test_columns():
 def test_group():
     np.random.seed(2015)
     df = pd.DataFrame({'account': ['foo', 'bar', 'baz'] * 3,
-                       'val': np.random.choice([np.nan, 1],size=9)})
+                       'val': np.random.choice([0, 1],size=9)})
     print (df)
     df['val1'] = df.groupby('account')['val'].transform('last')
     df['val2'] = df.groupby('account')['val'].transform('nth', -1)
@@ -259,14 +259,21 @@ def test_viz():
     ts.plot()
     plt.show()
     print("plot end")
-              
+             
+def test_build_datetime():        
+    begin_date = '2010-10-16'
+    end_date = '2011-10-1'     
+    df = pd.DataFrame({'forecast_date':pd.date_range(begin_date, end_date)})    
+    df['dayofweek'] = df['forecast_date'].dt.dayofweek
+    print(df)
+    
 if __name__ == "__main__":
     # test_pd_index()
     # test_pd_timeser()
     # test_join()
     # test_merge()
     # test_columns()
-    # test_group()
+    test_group()
     # test_diff()
     # test_vis()
     # test_tft_vis()
@@ -275,6 +282,7 @@ if __name__ == "__main__":
     # test_tft_data_view()
     # test_index()
     # test_data_compare()
-    test_viz()
+    # test_viz()
+    # test_build_datetime()
     
     

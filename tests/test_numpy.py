@@ -338,7 +338,20 @@ def test_reshape():
     print(A.shape)
     B = np.reshape(A,(-1,2))
     print(B.shape)
-  
+
+def test_meshgrid():
+    xy = np.mgrid[-5:5.1:0.5, -5:5.1:0.5].reshape(2,-1).T
+    X, Y = np.mgrid[-5:5:21j, -5:5:21j]
+    print(xy)   
+
+def test_linespace_2d():
+    len = 3
+    array_ori = np.array([3,100,300])
+    arr_2d = [np.arange(item,item+len,dtype=np.int32) for item in array_ori]
+    np_arr_2d = np.array(arr_2d)
+    # arr = np.linspace(0, 10,10,dtype=np.int32)
+    print(arr_2d)
+       
 if __name__ == "__main__":
     # test_argwhere()
     # test_condition3()
@@ -359,7 +372,9 @@ if __name__ == "__main__":
     # test_linear()
     # test_inrange()
     # test_tensor_list()
-    test_reshape()
+    # test_reshape()
+    # test_meshgrid()
+    test_linespace_2d()
     # test_pd_df()
     # test_pd_trans()
     # test_pd_index()

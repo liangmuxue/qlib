@@ -219,22 +219,31 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
             data = data[lambda x: x[self.time_idx] >= self.min_prediction_idx - self.max_encoder_length - self.max_lag]
         data = data.sort_values(self.group_ids + [self.time_idx])
         #预存原来的数据，用于后续比较
-        self.pd_data = data.copy()        
+        self.pd_data = data.copy()    
+        # 保留原结果数据用于后续比对
+        data["ori_{}".format(self.target)] = data[self.target].copy()          
         # preprocess data
         data = self._preprocess_data(data)
-               
+        # 增强模式存储相关数据
+        self.process_pd_data(data)          
         for target in self.target_names:
             assert target not in self.scalers, "Target normalizer is separate and not in scalers."
 
-        data = data.reset_index(drop=True) 
-        data_for_aug = self.prepare_aug_data(data,keep_all=True,columns=['datetime_number','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label'])
-        np.save("custom/data/aug/test100_all.npy",data_for_aug)
         # create index
         self.index = self._construct_index(data, predict_mode=predict_mode)
 
         # convert to torch tensor for high performance data loading later
         self.data = self._data_to_tensors(data)    
-
+    
+    def process_pd_data(self,ori_data):
+        columns=['time_idx','instrument','dayofweek','STD5', 'VSTD5', 'label','ori_label']
+        pd_data = ori_data[columns]
+        tar_file_path = "custom/data/aug/test_all_timeidx.pkl"
+        pd_data.to_pickle(tar_file_path)
+        # data = ori_data.copy().reset_index(drop=True) 
+        # data_for_aug = self.prepare_aug_data(data,keep_all=True,columns=['datetime','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label','ori_label'])
+        # np.save("custom/data/aug/test_100.npy",data_for_aug)       
+    
     def prepare_aug_data(self,data_ori,keep_all=False,columns=None):  
         """数据增强预处理，切割为等长数据"""
 
@@ -244,8 +253,6 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         seg_length = 20
         np_ret = None
         loop_number = 0
-        if columns is not None:
-            columns = columns + ["ori_label"]   
         
         # 按照证券号码分组处理  
         for instrument,df in grp:
@@ -577,8 +584,6 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
 
         # train target normalizer
         if self.target_normalizer is not None:
-            # 保留原结果数据用于后续比对
-            data["ori_{}".format(self.target)] = data[self.target].copy()
             # fit target normalizer
             try:
                 check_is_fitted(self.target_normalizer)
