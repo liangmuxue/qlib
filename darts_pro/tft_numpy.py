@@ -85,15 +85,15 @@ class TftNumpyModel(Model):
             return      
         if self.type.startswith("data_view"):
             # 只进行数据处理模式
-            self.data_view()
+            self.data_view(dataset)
             return           
         if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
-            return             
+            return       
+              
         # 生成tft时间序列训练数据集
-        file_path = "/home/qdata/project/qlib/custom/data/aug/test100_all.npy"
-        ts_data_train = dataset.get_numpy_dataset(file_path,mode="train")
+        ts_data_train = dataset.get_custom_numpy_dataset(file_path,mode="train")
         train_loader = ts_data_train.to_dataloader(train=True, batch_size=self.batch_size, num_workers=8)
         validation = dataset.get_numpy_dataset(file_path,mode="valid")
         val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)       
@@ -117,38 +117,10 @@ class TftNumpyModel(Model):
         best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
         return pd.Series(np.concatenate(predictions), index=df_test.get_index())
     
-    def _get_seq_columns(self):
-        """取得所有数据字段名称"""
-        time_column = self.optargs["time_column"]
-        col_list = self.optargs["col_list"]
-        group_column = self.optargs["group_column"]
-        target_column = self.optargs["target_column"]      
-        columns = [time_column] + [group_column] + [target_column] + col_list
-        return columns  
-    
-    def _get_target_column_index(self):
-        """取得目标字段对应下标"""
-        columns = self._get_seq_columns()
-        target_column = self.optargs["target_column"]    
-        return columns.index(target_column)
-
-    def _get_feature_column_index(self):
-        """取得特征字段对应下标"""
-        columns = self._get_seq_columns()
-        feature_columns = self.optargs["col_list"]    
-        return [columns.index(column) for column in feature_columns]
- 
-    def _get_feature_and_target_column_index(self):
-        """取得目标字段及特征字段对应下标"""
-        columns_index = self._get_feature_column_index() + [self._get_target_column_index()]
-        return columns_index
-                  
     def build_aug_data(self,dataset):
         save_file_path = self.optargs["save_path"]
-        time_column = self.optargs["time_column"]
-        col_list = self.optargs["col_list"]
-        group_column = self.optargs["group_column"]
-        target_column = self.optargs["target_column"]
+        group_column = dataset.col_def["group_column"]
+        target_column = dataset.col_def["target_column"]
         forecast_horizon = self.optargs["forecast_horizon"]
         wave_threhold = self.optargs["wave_threhold"]
         over_time = self.optargs["over_time"]
@@ -158,7 +130,7 @@ class TftNumpyModel(Model):
         # 股票代码(即分组字段)转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')
         # 拼接所有需要使用的字段
-        columns = self._get_seq_columns()
+        columns = dataset.get_seq_columns()
         df = df[columns]
         data_len = df.shape[0]
               
@@ -172,7 +144,7 @@ class TftNumpyModel(Model):
         print("wave_data",wave_data.shape)
         np.save(save_file_path,wave_data)  
         
-    def data_view(self):
+    def data_view(self,dataset):
         data_path = self.optargs["data_path"]
         wave_period = self.optargs["wave_period"]
         forecast_horizon = self.optargs["forecast_horizon"]
@@ -181,14 +153,14 @@ class TftNumpyModel(Model):
         high_threhold = self.optargs["high_threhold"]
         over_time = self.optargs["over_time"]
         
-        data = np.load(data_path)       
+        data = np.load(data_path,allow_pickle=True)       
         data_filter = DataFilter() 
         viz_input = TensorViz(env="data_hist") 
         start = wave_period - forecast_horizon
         if aug_type == "combine":
             value_combine = None
             # 通过列排序规则，取得目标数据对应下标
-            target_index = self._get_target_column_index()
+            target_index = dataset.get_target_column_index()
             # 分别取得涨幅较大以及跌幅较大的数据
             low_data = data_filter.get_data_with_threhold(data,target_index,wave_threhold_type="less",threhold=low_threhold,
                                                           wave_period=wave_period,check_length=forecast_horizon,over_time=over_time)
@@ -200,14 +172,14 @@ class TftNumpyModel(Model):
             nor_data = data[nor_index,:,:]
             combine_data = np.concatenate((low_data,high_data,nor_data),axis=0)
             # 最后一列为观察数值,并且时间轴只使用后5个数据
-            data_index = self._get_target_column_index()
+            data_index = dataset.get_target_column_index()
             value = combine_data[:,start:,data_index]
             v_title = "aug_data"    
             viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=v_title,title=v_title)  
             # 随机取得某些数据，并显示折线图
             for i in random_int_list(1,combine_data.shape[0],10):
                 title = "line_{}".format(i)
-                viz_input.viz_matrix_var(combine_data[i],win=title,title=title)
+                viz_input.viz_matrix_var(combine_data[i,:,target_index:target_index+1],win=title,title=title)
 
         
     

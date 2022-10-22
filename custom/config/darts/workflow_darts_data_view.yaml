@@ -58,14 +58,10 @@ task:
                forecast_horizon: 5
                low_threhold: -5
                high_threhold: 5
-               over_time: 2
-               col_list: *col_list
-               group_column: 'instrument'
-               target_column: 'label'
-               time_column: 'time_idx'                             
+               over_time: 2                           
     dataset:
         class: TFTDataset
-        module_path: tft.tft_dataset
+        module_path: darts_pro.tft_dataset
         kwargs:
             handler:
                 class: TftDataHandler
@@ -75,6 +71,11 @@ task:
                 train: [2008-01-01, 2020-12-31]
                 valid: [2015-01-01, 2020-12-31]
                 test: [2017-01-01, 2020-08-01]
-            step_len: 15
-            pred_len: 5
-            viz: False
+            step_len: 30
+            pred_len: 5   
+            col_def:
+                col_list: *col_list
+                group_column: 'instrument'
+                target_column: 'label'
+                time_column: 'time_idx'
+                covariate_columns: ['dayofweek'] 
