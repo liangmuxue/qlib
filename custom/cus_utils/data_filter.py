@@ -17,8 +17,19 @@ class DataFilter():
         self.wave_period = 30
         self.forecast_horizon = 5
 
+    def data_clean(self,data,training_cutoff):
+        # 清除序列长度不够的股票,需要多出训练数据的一定比例
+        thr_number = int(training_cutoff * 1.2)
+        gcnt = data.groupby("instrument").count()
+        index = gcnt[gcnt['time_idx']>thr_number].index
+        data = data[data['instrument'].isin(index)]
+        return data
+
     def rolling_window(self,a, window):
         shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
+        print("shape in rolling window",shape)
+        if shape[0]<1:
+            return None        
         strides = a.strides + (a.strides[-1],)
         return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
     
@@ -35,7 +46,9 @@ class DataFilter():
         # @nb.njit(nogil=True)
         def handle(data,threhold,check_length,over_time):
             # 首先取得滚动后的目标2维数据，每行长度为wave_period
-            rolling_data = self.rolling_window(data[target_column].values, wave_period)            
+            rolling_data = self.rolling_window(data[target_column].values, wave_period)   
+            if rolling_data is None:
+                return None      
             # 查找每行,在后面几个数里,超过阈值的总个数
             if wave_threhold_type == "more":
                 over_data = (rolling_data[:,wave_period-check_length:]>threhold).sum(axis=1)
@@ -43,27 +56,46 @@ class DataFilter():
                 over_data = (rolling_data[:,wave_period-check_length:]<threhold).sum(axis=1)
             start_arr = np.where(over_data>=over_time)[0]
             if start_arr.shape[0]==0:
-                return np.array([])
+                return None
             # 根据坐标数据,以及wave_period长度，取得分段数据
             index_arr = np.array([np.arange(item,item+wave_period,dtype=np.int32) for item in start_arr])
             # target_data = [data.take(index) for index in index_arr]
             target_data = data.values.take(index_arr,axis=0)
-            return target_data      
-        
-        # 进行滚动操作，查找指定期限内，符合阈值条件的多个系列
-        # rtn = data[target_column].rolling(window=wave_period,axis=0, min_periods=wave_period).apply(handle,args=(wave_threhold,over_time,wave_period-forecast_horizon),raw=True).dropna()
-        
+            return target_data    
+          
+            
+        # 按股票分组，病进行滚动操作，查找指定期限内，符合阈值条件的多个系列
         target_data = data.groupby(group_column).apply(lambda data:handle(data,wave_threhold,forecast_horizon,over_time))
-        target_data_array = None
-        for item in target_data:
-            if item.shape[0]>0:
-                if target_data_array is None:
-                    target_data_array = item
-                else:
-                    target_data_array = np.concatenate((target_data_array,item),axis=0)
-        return target_data_array
+        print("do loop choice:{}".format(len(target_data)))
+        target_data = target_data.dropna()
+        target_data = np.concatenate(target_data.values, axis=0)
+        return target_data
+        
+        # @nb.njit(nogil=True)
+        # def combine_data(target_data):
+        #     data_array = None
+        #     for item in target_data:
+        #         if item.shape[0]>0:
+        #             if data_array is None:
+        #                 data_array = item
+        #             else:
+        #                 data_array = np.concatenate((data_array,item),axis=0)
+        #     return data_array
+        #
+        # return combine_data(target_data.values)
 
-    
+    def get_data_with_threhold(self,data,column_index,wave_threhold_type="more",threhold=5,wave_period=30,check_length=5,over_time=2):
+        """筛选numpy数据，查找涨幅或跌幅超出的部分"""
+        
+        # 查找每行,在后面几个数里,超过阈值的总个数
+        if wave_threhold_type == "more":
+            over_data = (data[:,wave_period-check_length:,column_index]>threhold).sum(axis=1)
+        else:
+            over_data = (data[:,wave_period-check_length:,column_index]<threhold).sum(axis=1)
+        index_arr = np.where(over_data>=over_time)[0]
+        target_data = data.take(index_arr,axis=0)   
+        return target_data
+        
 if __name__ == "__main__":
     file_path = "/home/qdata/project/qlib/custom/data/aug/test_all_timeidx.pkl"
     check_time_ser_data(file_path)

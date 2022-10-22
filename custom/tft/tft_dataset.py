@@ -109,9 +109,6 @@ class TFTDataset(DatasetH):
         # 使用成交量作为标签时的处理
         # return self.prepare_seg_volume(slc)
         
-        dtype = kwargs.pop("dtype", None)
-        start, end = slc.start, slc.stop
-
         ext_slice = self._extend_slice(slc, self.cal, self.step_len)
         data = super()._prepare_seg(ext_slice, **kwargs)
         # 如果是测试阶段，则需要删除日期不在训练集中的股票
@@ -129,12 +126,8 @@ class TFTDataset(DatasetH):
         data.columns = pd.Index(new_cols_idx)    
         # 清除NAN数据
         data = data.dropna() 
-        # 删除价格小于0的数据
-        # data = data[data.label>0]        
-        # 删除涨跌幅度大于20%的数据 
-        data = data[data.label.abs()<=0.1]  
-        # 正数转换
-        data['label'] = data['label'] + 0.1
+        # 删除涨跌幅度过大的数据 
+        data = data[data.label.abs()<=0.2]  
         # 增大取值范围
         data['label'] = data['label'] * 100
         # 补充辅助数据,添加日期编号
@@ -148,47 +141,6 @@ class TFTDataset(DatasetH):
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")    
-        # 添加数字类型的时间戳
-        data["datetime_number"] = data.datetime.astype("int")
-        # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
-        return data
-    
-    def prepare_seg_volume(self, slc: slice, **kwargs):
-        """处理成交量模式的数据"""
-        
-        dtype = kwargs.pop("dtype", None)
-        start, end = slc.start, slc.stop
-
-        ext_slice = self._extend_slice(slc, self.cal, self.step_len)
-        data = super()._prepare_seg(ext_slice, **kwargs)
-        # 如果是测试阶段，则需要删除日期不在训练集中的股票
-        if self.segments_mode=="test":
-            ext_slice_train = self._extend_slice(slice(*self.segments["train"]), self.cal, self.step_len)
-            data_train = super()._prepare_seg(ext_slice_train, **kwargs)
-            data = data[data.index.get_level_values(1).isin(data_train.index.get_level_values(1).values)]
-        # 恢复成一维列索引
-        data = data.reset_index() 
-        # 重新定义动态数据字段,忽略前面几个无效字段,注意不需要手工添加label字段了
-        self.reals_cols = data.columns.values[2:-1]
-        # 重建字段名，添加日期和股票字段,以及label字段
-        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols,['label']))
-        data.columns = pd.Index(new_cols_idx)   
-        # 缩小取值空间 
-        # data["label"] = data["label"] / 100
-        # 清除NAN数据
-        data = data.dropna() 
-        data["month"] = data.datetime.astype("str").str.slice(0,7)
-        data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
-        data["time_idx"] -= data["time_idx"].min() 
-        # 重新编号,解决节假日以及相关日期不连续问题
-        data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
-        # 补充商品指数数据,按照月份合并
-        data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
-        # month重新编号为1到12
-        data["month"] = data["month"].str.slice(5,7)
-        # datetime转为字符串
-        data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")   
-        # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
         return data
             
     def get_ts_dataset(self,data,mode="train",train_ts=None):
@@ -244,116 +196,6 @@ class TFTDataset(DatasetH):
         if mode=="valid":
             tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
         return tsdata     
-    
-    def get_crf_dataset(self,data,mode="train",opt=None):
-        """
-        取得TimeSeriesDataSet对象
 
-        Parameters
-        ----------
-        data : DataFrame 已经生成的panda数据
-        """     
-        
-        # return self.get_ts_dataset_test(data,mode=mode)
-        # 每批次的训练长度
-        max_encoder_length = self.step_len
-        # 每批次的预测长度
-        max_prediction_length = self.pred_len
-        # 取得各个因子名称，组装为动态连续变量
-        time_varying_unknown_reals = self.reals_cols.tolist()
-        # 连续变量离散化
-        # self.reals_bins(data,self.reals_cols[0:-1])
-        # 商品价格指数，用于静态连续变量
-        qyspjg = ["qyspjg_total","qyspjg_yoy","qyspjg_mom"]
-        qyspjg = []
-        # 动态离散变量，可以使用财务数据
-        time_varying_unknown_categoricals = []
-        # 获取配置文件参数，生成TimeSeriesDataSet类型的对象
-        special_days = []
-        tsdata = TimeSeriesCrfDataset(
-            data,
-            time_idx="time_idx",
-            target="label",
-            # 分组字段: 股票代码
-            group_ids=["instrument"],
-            min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
-            max_encoder_length=max_encoder_length,
-            min_prediction_length=1,
-            max_prediction_length=max_prediction_length,
-            # 静态固定变量: 股票代码
-            static_categoricals=["instrument"], # ["instrument"],
-            # 静态连续变量:每年的股市整体和外部经济环境数据
-            static_reals=qyspjg,
-            # 动态离散变量:日期
-            time_varying_known_categoricals=["dayofweek"],
-            # 动态已知离散变量: 节假日
-            # variable_groups={"special_days": special_days},
-            time_varying_known_reals=["time_idx"],
-            time_varying_unknown_categoricals=time_varying_unknown_categoricals,
-            time_varying_unknown_reals=time_varying_unknown_reals,
-            target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
-            add_relative_time_idx=False,
-            add_target_scales=False,
-            add_encoder_length=False,
-            qcut_len=opt["qcut_len"],
-            viz=self.viz,
-        )
-        if mode=="valid":
-            tsdata = TimeSeriesCrfDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
-        return tsdata     
-    
-    def get_numpy_dataset(self,file_path,mode="train",opt=None):
-        """
-        取得TimeSeriesDataSet对象,numpy数据模式
-
-        Parameters
-        ----------
-        file_path : numpy 路径
-        columns : 对应列名称
-        """     
-        np_data = np.load(file_path,allow_pickle=True)
-        data_columns = ['datetime_number','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label']
-        max_encoder_length = self.step_len
-        # 每批次的预测长度
-        max_prediction_length = self.pred_len
-        # 取得各个因子名称，组装为动态连续变量
-        
-        time_varying_unknown_reals = ['CORD5', 'VSTD5', 'WVMA5', 'label']
-        tsdata = TimeSeriesNumpyDataset(
-            np_data,
-            time_idx="datetime_number",
-            target="label",
-            data_columns=data_columns,
-            # 分组字段: 股票代码
-            group_ids=["instrument"],
-            min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
-            max_encoder_length=max_encoder_length,
-            min_prediction_length=1,
-            max_prediction_length=max_prediction_length,
-            # 静态固定变量: 股票代码
-            static_categoricals=["instrument"], # ["instrument"],
-            # 静态连续变量:每年的股市整体和外部经济环境数据
-            static_reals=[],
-            # 动态离散变量:日期
-            time_varying_known_categoricals=["dayofweek"],
-            # 动态已知离散变量: 节假日
-            # variable_groups={"special_days": special_days},
-            time_varying_known_reals=["datetime_number"],
-            time_varying_unknown_categoricals=[],
-            time_varying_unknown_reals=time_varying_unknown_reals,
-            target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
-            add_relative_time_idx=False,
-            add_target_scales=True,
-            add_encoder_length=False,
-            viz=self.viz,
-        )       
-        return tsdata     
-            
-    def reals_bins(self,data, columns, cut_number=15):
-        """连续变量离散化"""
-        
-        for column in columns:
-            data[column] = pd.qcut(data[column],cut_number,labels=False)
-            
         
     
