@@ -51,22 +51,16 @@ task:
             seed: 0
             n_jobs: 20
             type: 'train'
+            max_epochs : 150
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
+               work_dir: 'custom/data/darts'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
-               col_list: *col_list
-               group_column: 'instrument'
-               target_column: 'label'
-               time_column: 'time_idx'    
-               covariate_columns: ['dayofweek']
     dataset:
-        class: TFTDataset
+        class: TFTNumpyDataset
         module_path: darts_pro.tft_numpy_dataset
-        data_path: 'custom/data/aug/darts/all_nor.npy'
-        step_len: *wave_period
-        pred_len: *forecast_horizon
         kwargs:
             handler:
                 class: TftDataHandler
@@ -76,7 +70,21 @@ task:
                 train: [2008-01-01, 2014-12-31]
                 valid: [2015-01-01, 2016-12-31]
                 test: [2017-01-01, 2020-08-01]
-            viz: False  
+            data_path: 'custom/data/aug/darts/all_nor.npy'
+            aug_type: 'no'
+            step_len: *wave_period
+            pred_len: *forecast_horizon
+            over_time: 2          
+            low_threhold: -5
+            high_threhold: 5   
+            col_def:
+                col_list: *col_list
+                group_column: 'instrument'
+                target_column: 'label'
+                time_column: 'time_idx'    
+                future_covariate_col: ['dayofweek']   
+                past_covariate_col: ['STD5', 'VSTD5', 'label']
+                static_covariate_col: ['instrument']    
 
     record: 
         - class: TftRecord

@@ -3,7 +3,7 @@ from qlib.data.dataset.handler import DataHandler, DataHandlerLP
 from qlib.log import get_module_logger
 from typing import Union, List, Tuple, Dict, Text, Optional
 from inspect import getfullargspec
-
+from sklearn.preprocessing import MinMaxScaler
 from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
 from tft.timeseries_cus import TimeSeriesCusDataset
 from tft.timeseries_crf import TimeSeriesCrfDataset
@@ -15,119 +15,68 @@ import numpy as np
 
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
+from darts_pro.tft_dataset import TFTDataset
+from cus_utils.tensor_viz import TensorViz
+from cus_utils.data_filter import DataFilter
 
-class TFTDataset(DatasetH):
+class TFTNumpyDataset(TFTDataset):
     """
     自定义数据集，负责组装底层原始数据，形成DataFrame数据
     """
 
-    DEFAULT_STEP_LEN = 30
-
-    def __init__(self, step_len = DEFAULT_STEP_LEN,pred_len = 5,data_path=None,
-                 columns=[],future_covariate_col=[],past_covariate_col=[],static_covariate_col=[],**kwargs):
+    def __init__(self, data_path=None,step_len = 30,pred_len = 5,aug_type="yes",low_threhold=-5,high_threhold=5,over_time=2,col_def={},**kwargs):
         # 基层数据处理器
         self.data_extractor = StockDataExtractor() 
-        super().__init__(**kwargs)
-        self.step_len = step_len
-        self.pred_len = pred_len
-        self.columns = columns
-        self.future_covariate_col = future_covariate_col
-        self.past_covariate_col = past_covariate_col
-        self.static_covariate_col = static_covariate_col     
-        self.viz = kwargs["viz"]
+        super().__init__(col_def=col_def,step_len=step_len,pred_len=pred_len,**kwargs)
         
-        self.data = np.load(data_path)
-
-    def setup_data(self, **kwargs):
-        super().setup_data(**kwargs)
-        # make sure the calendar is updated to latest when loading data from new config
-        cal = self.handler.fetch(col_set=self.handler.CS_RAW).index.get_level_values("datetime").unique()
+        self.future_covariate_col = col_def['future_covariate_col']
+        self.past_covariate_col = col_def['past_covariate_col']
+        self.static_covariate_col = col_def['static_covariate_col']    
+        self.low_threhold = low_threhold
+        self.high_threhold = high_threhold
+        self.over_time = over_time        
         
-        ###### 用于静态连续变量的数据字典 ######
+        self.columns = self.get_seq_columns()
+        self.training_cutoff = 0.7
         
-        # 商品价格指数
-        self.qyspjg_data = self.data_extractor.load_data("qyspjg")
-                
-        self.cal = sorted(cal)
-   
-    def prepare(
-        self,
-        segments: Union[List[Text], Tuple[Text], Text, slice],
-        col_set=DataHandler.CS_ALL,
-        data_key=DataHandlerLP.DK_I,
-        **kwargs,
-    ) -> Union[List[pd.DataFrame], pd.DataFrame]:
-        """重载父类方法"""
-    
-        # 存储segments类别用于后续判断
-        self.segments_mode = segments
-        logger = get_module_logger("DatasetH")
-        fetch_kwargs = {"col_set": col_set}
-        fetch_kwargs.update(kwargs)
-        if "data_key" in getfullargspec(self.handler.fetch).args:
-            fetch_kwargs["data_key"] = data_key
+        data = np.load(data_path,allow_pickle=True)
+        # 根据条件决定是否筛选数据，取得均衡
+        if aug_type=="yes":
+            self.data = self.filter_balance_data(data)
         else:
-            logger.info(f"data_key[{data_key}] is ignored.")
-
-        # Handle all kinds of segments format
-        if isinstance(segments, (list, tuple)):
-            return [self._prepare_seg(slice(*self.segments[seg]), **fetch_kwargs) for seg in segments]
-        elif isinstance(segments, str):
-            return self._prepare_seg(slice(*self.segments[segments]), **fetch_kwargs)
-        elif isinstance(segments, slice):
-            return self._prepare_seg(segments, **fetch_kwargs)
-        else:
-            raise NotImplementedError(f"This type of input is not supported")   
-
-    def _prepare_seg(self, slc: slice, **kwargs) -> pd.DataFrame:
-        """
-        组装数据,内容加工
-        """
-        
-        # 使用成交量作为标签时的处理
-        # return self.prepare_seg_volume(slc)
-        
-        dtype = kwargs.pop("dtype", None)
-        start, end = slc.start, slc.stop
-
-        ext_slice = self._extend_slice(slc, self.cal, self.step_len)
-        data = super()._prepare_seg(ext_slice, **kwargs)
-        # 如果是测试阶段，则需要删除日期不在训练集中的股票
-        if self.segments_mode=="test":
-            ext_slice_train = self._extend_slice(slice(*self.segments["train"]), self.cal, self.step_len)
-            data_train = super()._prepare_seg(ext_slice_train, **kwargs)
-            data = data[data.index.get_level_values(1).isin(data_train.index.get_level_values(1).values)]
-        # 恢复成一维列索引
-        data = data.reset_index() 
-        # 重新定义动态数据字段,忽略前面几个无效字段,并手工添加label字段
-        self.reals_cols = data.columns.get_level_values(1).values[2:-1]
-        self.reals_cols  = np.concatenate((self.reals_cols,['label']))
-        # 重建字段名，添加日期和股票字段
-        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols))
-        data.columns = pd.Index(new_cols_idx)    
-        # 清除NAN数据
-        data = data.dropna() 
-        # 删除涨跌幅度过大的数据 
-        data = data[data.label.abs()<=0.2]  
-        # 增大取值范围
-        data['label'] = data['label'] * 100
-        # 补充辅助数据,添加日期编号
-        data["month"] = data.datetime.astype("str").str.slice(0,7)
-        data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
-        data["time_idx"] -= data["time_idx"].min() 
-        # 重新编号,解决节假日以及相关日期不连续问题
-        data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
-        # 补充商品指数数据,按照月份合并
-        data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
-        # month重新编号为1到12
-        data["month"] = data["month"].str.slice(5,7)
-        data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")    
-        # 添加数字类型的时间戳
-        data["datetime_number"] = data.datetime.astype("int")
-        # data['instrument'].value_counts().to_pickle("/home/qdata/qlib_data/test/instrument_{}.pkl".format(self.segments_mode))
-        return data_
+            self.data = data
+        # 对目标值进行归一化
+        scaler = MinMaxScaler()
+        target_index = self.get_target_column_index()
+        self.data[:,:,target_index] = scaler.fit_transform(self.data[:,:,target_index])      
+        # viz_input = TensorViz(env="data_hist")   
+        # v_title = "np_data"
+        # viz_input.viz_data_hist(self.data[:,25:,target_index].reshape(-1),numbins=10,win=v_title,title=v_title)  
+        # print("lll")
     
-    def get_custom_numpy_dataset(self,numpy_data):
+    def filter_balance_data(self,data):
+        """筛选出均衡的数据"""
+        
+        wave_period = self.step_len
+        forecast_horizon = self.pred_len
+        low_threhold = self.low_threhold
+        high_threhold = self.high_threhold
+        over_time = self.over_time
+                        
+        data_filter = DataFilter()
+        target_index = self.get_target_column_index()
+        low_data = data_filter.get_data_with_threhold(data,target_index,wave_threhold_type="less",threhold=low_threhold,
+                                                      wave_period=wave_period,check_length=forecast_horizon,over_time=over_time)
+        high_data = data_filter.get_data_with_threhold(data,target_index,wave_threhold_type="more",threhold=high_threhold,
+                                                      wave_period=wave_period,check_length=forecast_horizon,over_time=over_time)       
+        nor_size = (low_data.shape[0] + high_data.shape[0])//3
+        nor_index = np.random.randint(1,data.shape[0],(nor_size,))
+        # 参考高低涨幅数据量，取得普通数据量，合并为目标数据
+        nor_data = data[nor_index,:,:]
+        combine_data = np.concatenate((low_data,high_data,nor_data),axis=0)
+        return combine_data
+                    
+    def get_custom_numpy_dataset(self,mode="train"):
         """
         直接使用numpy数据取得DataSet对象
 
@@ -140,14 +89,35 @@ class TFTDataset(DatasetH):
         past_covariate_index = [self.columns.index(item) for item in self.past_covariate_col]
         static_covariate_index = [self.columns.index(item) for item in self.static_covariate_col]
         
+        training_data,val_data = self.training_data_split()
+        if mode=="train":
+            data = training_data
+        else:
+            data = val_data
+        
         return CustomNumpyDataset(
-            numpy_data,
-            self.input_chunk_length,
-            self.output_chunk_length,
+            data,
+            self.step_len-self.pred_len,
+            self.pred_len,
             future_covariate_index,
             past_covariate_index,
             static_covariate_index,            
         ) 
 
+    def training_data_split(self):  
+        """"拆分训练集和测试集"""
+        
+        time_index = self.get_time_column_index()
+        time_begin = self.data[:,:,time_index].min()
+        time_end = self.data[:,:,time_index].max()
+        # 根据长度取得切分点
+        sp_index = time_begin + (time_end - time_begin)*self.training_cutoff
+        # 训练集使用时间序列最后一个时间点进行切分
+        training_data = self.data[self.data[:,-1,time_index]<sp_index]
+        # 测试集使用时间序列第一个时间点进行切分
+        val_data = self.data[self.data[:,0,time_index]>sp_index]
+        return training_data,val_data
+    
+        
         
     

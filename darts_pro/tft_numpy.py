@@ -26,11 +26,15 @@ from qlib.data.dataset import DatasetH, TSDatasetH
 from qlib.data.dataset.handler import DataHandlerLP
 from pytorch_forecasting.metrics import MAE, RMSE, SMAPE, PoissonLoss, QuantileLoss
 from pytorch_forecasting import GroupNormalizer, TemporalFusionTransformer, TimeSeriesDataSet
+from torch.optim.lr_scheduler import CosineAnnealingLR,CosineAnnealingWarmRestarts,StepLR
 
 from tft.tft_dataset import TFTDataset
+from darts.utils.likelihood_models import QuantileRegression
+
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
+from darts_pro.data_extension.custom_model import TFTCusModel
 
 class TftNumpyModel(Model):
     def __init__(
@@ -93,11 +97,70 @@ class TftNumpyModel(Model):
             return       
               
         # 生成tft时间序列训练数据集
-        ts_data_train = dataset.get_custom_numpy_dataset(file_path,mode="train")
-        train_loader = ts_data_train.to_dataloader(train=True, batch_size=self.batch_size, num_workers=8)
-        validation = dataset.get_numpy_dataset(file_path,mode="valid")
-        val_loader = validation.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)       
-          
+        data_train = dataset.get_custom_numpy_dataset(mode="train")
+        data_validation = dataset.get_custom_numpy_dataset(mode="valid")
+        # 使用股票代码数量作为embbding长度
+        # emb_size = np.unique(dataset.data[:,:,dataset.get_target_column_index()])
+        emb_size = 1000
+        self.model = self._build_model(dataset,emb_size)
+        self.model.fit(data_train,data_validation,trainer=None,verbose=True)
+    
+    def _build_model(self,dataset,emb_size):
+        optimizer_cls = torch.optim.Adam
+        scheduler = CosineAnnealingLR
+        scheduler_config = {
+            "T_max": 5, 
+            "eta_min": 0,
+        }     
+        quantiles = [
+            0.01,
+            0.05,
+            0.1,
+            0.15,
+            0.2,
+            0.25,
+            0.3,
+            0.4,
+            0.5,
+            0.6,
+            0.7,
+            0.75,
+            0.8,
+            0.85,
+            0.9,
+            0.95,
+            0.99,
+        ]     
+        categorical_embedding_sizes = {"dayofweek": 5,dataset.col_def["group_column"]: emb_size}    
+        input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
+        my_model = TFTCusModel(
+            input_chunk_length=input_chunk_length,
+            output_chunk_length=self.optargs["forecast_horizon"],
+            hidden_size=64,
+            lstm_layers=1,
+            num_attention_heads=4,
+            dropout=0.1,
+            batch_size=4096,
+            n_epochs=self.n_epochs,
+            add_relative_index=False,
+            add_encoders=None,
+            categorical_embedding_sizes=categorical_embedding_sizes,
+            likelihood=QuantileRegression(
+                quantiles=quantiles
+            ),  # QuantileRegression is set per default
+            # loss_fn=MSELoss(),
+            random_state=42,
+            # model_name="tft",
+            log_tensorboard=True,
+            save_checkpoints=True,
+            work_dir=self.optargs["work_dir"],
+            lr_scheduler_cls=scheduler,
+            lr_scheduler_kwargs=scheduler_config,
+            optimizer_cls=optimizer_cls,
+            optimizer_kwargs={"lr": 1e-2},
+            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0]}  
+        )
+        return my_model          
         
     def predict(self, dataset: TFTDataset):
         if self.type!="predict":

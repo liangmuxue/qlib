@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 import pytorch_lightning as pl
 
-from demo.cus_utils.data.custom_dataset import CustomNumpyDataset
+from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 
 class TFTCusModel(TFTModel):
     def __init__(
@@ -70,8 +70,8 @@ class TFTCusModel(TFTModel):
     @random_method
     def fit(
         self,
-        train_numpy_data,
-        val_numpy_data,
+        train_dataset,
+        val_dataset,
         trainer: Optional[pl.Trainer] = None,
         verbose: Optional[bool] = None,
         epochs: int = 0,
@@ -86,9 +86,6 @@ class TFTCusModel(TFTModel):
             Fitted model.
         """
         
-        train_dataset = self._build_train_dataset(train_numpy_data)
-        val_dataset = self._build_train_dataset(val_numpy_data)
-
         return self.fit_from_dataset(
             train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers
         )          

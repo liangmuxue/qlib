@@ -140,7 +140,7 @@ class TFTDataset(DatasetH):
         data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
-        data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")    
+        data["dayofweek"] = data.datetime.dt.dayofweek    
         return data
             
     def get_ts_dataset(self,data,mode="train",train_ts=None):
@@ -203,8 +203,8 @@ class TFTDataset(DatasetH):
         col_list = self.col_def["col_list"]
         group_column = self.col_def["group_column"]
         target_column = self.col_def["target_column"]      
-        covariate_columns = self.col_def["covariate_columns"]
-        columns = [time_column] + [group_column] + [target_column] + col_list + covariate_columns
+        future_covariate_col = self.col_def["future_covariate_col"]
+        columns = [time_column] + [group_column] + [target_column] + col_list + future_covariate_col
         return columns  
     
     def get_target_column_index(self):
@@ -213,6 +213,12 @@ class TFTDataset(DatasetH):
         target_column = self.col_def["target_column"]    
         return columns.index(target_column)
 
+    def get_time_column_index(self):
+        """取得日期字段对应下标"""
+        columns = self.get_seq_columns()
+        target_column = self.col_def["time_column"]    
+        return columns.index(target_column)
+    
     def get_feature_column_index(self):
         """取得特征字段对应下标"""
         columns = self.get_seq_columns()
