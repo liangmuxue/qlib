@@ -21,12 +21,10 @@ from cus_utils.data_filter import DataFilter
 
 class TFTNumpyDataset(TFTDataset):
     """
-    自定义数据集，负责组装底层原始数据，形成DataFrame数据
+    自定义数据集，直接从numpy文件中获取数据，并进行相关处理
     """
 
     def __init__(self, data_path=None,step_len = 30,pred_len = 5,aug_type="yes",low_threhold=-5,high_threhold=5,over_time=2,col_def={},**kwargs):
-        # 基层数据处理器
-        self.data_extractor = StockDataExtractor() 
         super().__init__(col_def=col_def,step_len=step_len,pred_len=pred_len,**kwargs)
         
         self.future_covariate_col = col_def['future_covariate_col']
@@ -88,6 +86,7 @@ class TFTNumpyDataset(TFTDataset):
         future_covariate_index = [self.columns.index(item) for item in self.future_covariate_col]
         past_covariate_index = [self.columns.index(item) for item in self.past_covariate_col]
         static_covariate_index = [self.columns.index(item) for item in self.static_covariate_col]
+        target_index = self.get_target_column_index()
         
         training_data,val_data = self.training_data_split()
         if mode=="train":
@@ -101,8 +100,10 @@ class TFTNumpyDataset(TFTDataset):
             self.pred_len,
             future_covariate_index,
             past_covariate_index,
-            static_covariate_index,            
+            static_covariate_index,    
+            target_index        
         ) 
+        
 
     def training_data_split(self):  
         """"拆分训练集和测试集"""

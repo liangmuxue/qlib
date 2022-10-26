@@ -141,6 +141,8 @@ class TFTDataset(DatasetH):
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek    
+        # 使用指定字段
+        data = data[self.get_seq_columns()]
         return data
             
     def get_ts_dataset(self,data,mode="train",train_ts=None):
@@ -199,6 +201,7 @@ class TFTDataset(DatasetH):
 
     def get_seq_columns(self):
         """取得所有数据字段名称"""
+        
         time_column = self.col_def["time_column"]
         col_list = self.col_def["col_list"]
         group_column = self.col_def["group_column"]
@@ -206,7 +209,24 @@ class TFTDataset(DatasetH):
         future_covariate_col = self.col_def["future_covariate_col"]
         columns = [time_column] + [group_column] + [target_column] + col_list + future_covariate_col
         return columns  
+
+    def get_without_target_columns(self):
+        """取得不包括目标字段的其他数据字段名称"""
+        
+        time_column = self.col_def["time_column"]
+        col_list = self.col_def["col_list"]
+        group_column = self.col_def["group_column"]
+        future_covariate_col = self.col_def["future_covariate_col"]
+        columns = [time_column] + [group_column] + col_list + future_covariate_col
+        return columns  
     
+    def get_past_columns(self):
+        """取得过去协变量字段名称"""
+        col_list = self.col_def["col_list"]
+        target_column = self.col_def["target_column"]      
+        columns =[target_column] + col_list
+        return columns  
+       
     def get_target_column_index(self):
         """取得目标字段对应下标"""
         columns = self.get_seq_columns()
@@ -222,7 +242,7 @@ class TFTDataset(DatasetH):
     def get_feature_column_index(self):
         """取得特征字段对应下标"""
         columns = self.get_seq_columns()
-        feature_columns = self.col_def["col_list"]    
+        feature_columns = self.col_def["future_covariate_col"]    
         return [columns.index(column) for column in feature_columns]
  
     def get_feature_and_target_column_index(self):

@@ -44,7 +44,7 @@ port_analysis_config: &port_analysis_config
 task:
     model:
         class: TftNumpyModel
-        module_path: darts_pro.tft_numpy
+        module_path: darts_pro.tft_process
         kwargs:
             GPU: 0
             batch_size: 8

@@ -14,6 +14,7 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
         future_covariate_index: List = [],
         past_covariate_index: List = [],
         static_covariate_index: List = [],
+        target_index: str = None,
     ):
         """
         自定义数据集，直接使用numpy数据进行取值
@@ -26,6 +27,7 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
         self.future_covariate_index = future_covariate_index
         self.past_covariate_index = past_covariate_index
         self.static_covariate_index = static_covariate_index
+        self.target_index = target_index
 
     def __len__(self):
         return self.numpy_data.shape[0]
@@ -40,12 +42,12 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
         np.ndarray,
     ]:
         row = self.numpy_data[idx]
-        past_target = row[:self.input_chunk_length,-1:]
+        past_target = row[:self.input_chunk_length,self.target_index:self.target_index+1]
         past_covariate = row[:self.input_chunk_length,self.past_covariate_index]
         future_covariate = row[self.input_chunk_length:,self.future_covariate_index]
         historic_future_covariate = row[:self.input_chunk_length,self.future_covariate_index]
-        future_target = row[self.input_chunk_length:,-1:]
-        static_covariate = row[:self.input_chunk_length,self.static_covariate_index]
+        future_target = row[self.input_chunk_length:,self.target_index:self.target_index+1]
+        static_covariate = np.expand_dims(row[0,self.static_covariate_index],axis=0)
         
         return (
             past_target,

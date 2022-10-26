@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market test_one
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -44,18 +44,18 @@ port_analysis_config: &port_analysis_config
 task:
     model:
         class: TftNumpyModel
-        module_path: darts_pro.tft_numpy
+        module_path: darts_pro.tft_process
         kwargs:
             GPU: 0
             batch_size: 8
             seed: 0
             n_jobs: 20
             type: 'train'
-            max_epochs : 150
+            n_epochs : 150
             optargs:
                data_type: 'combine'
-               data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
+               model_name: 'test3'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:

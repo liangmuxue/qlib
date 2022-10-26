@@ -13,12 +13,13 @@ import math
 from qlib.utils import get_or_create_path
 from qlib.log import get_module_logger
 import random
-
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from darts.metrics import mape
 
 from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
@@ -35,6 +36,7 @@ from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
 from darts_pro.data_extension.custom_model import TFTCusModel
+from darts_pro.tft_series_dataset import TFTSeriesDataset
 
 class TftNumpyModel(Model):
     def __init__(
@@ -102,10 +104,11 @@ class TftNumpyModel(Model):
         # 使用股票代码数量作为embbding长度
         # emb_size = np.unique(dataset.data[:,:,dataset.get_target_column_index()])
         emb_size = 1000
-        self.model = self._build_model(dataset,emb_size)
+        self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True)
+        # self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"])          
         self.model.fit(data_train,data_validation,trainer=None,verbose=True)
     
-    def _build_model(self,dataset,emb_size):
+    def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         optimizer_cls = torch.optim.Adam
         scheduler = CosineAnnealingLR
         scheduler_config = {
@@ -131,8 +134,12 @@ class TftNumpyModel(Model):
             0.95,
             0.99,
         ]     
+               
         categorical_embedding_sizes = {"dayofweek": 5,dataset.col_def["group_column"]: emb_size}    
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
+        model_name = self.optargs["model_name"]
+        if not use_model_name:
+            model_name = None
         my_model = TFTCusModel(
             input_chunk_length=input_chunk_length,
             output_chunk_length=self.optargs["forecast_horizon"],
@@ -150,7 +157,7 @@ class TftNumpyModel(Model):
             ),  # QuantileRegression is set per default
             # loss_fn=MSELoss(),
             random_state=42,
-            # model_name="tft",
+            model_name=model_name,
             log_tensorboard=True,
             save_checkpoints=True,
             work_dir=self.optargs["work_dir"],
@@ -162,24 +169,58 @@ class TftNumpyModel(Model):
         )
         return my_model          
         
-    def predict(self, dataset: TFTDataset):
+    def predict(self, dataset: TFTSeriesDataset):
         if self.type!="predict":
             return 
-       
-        df_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        test_ds = dataset.get_ts_dataset(df_test,mode="valid")
-        test_loader = test_ds.to_dataloader(train=False, batch_size=self.batch_size, num_workers=1)        
-        best_tft = OptimizeHyperparameters(clean_mode=True,model_path=self.optargs['weight_path'],load_weights=True,
-                                           trial_no=self.optargs['best_trial_no'],
-                                           epoch_no=self.optargs['best_ckpt_no']).get_tft(fig_save_path=self.fig_save_path,viz=self.optargs['viz'])
-        actuals = torch.cat([y[0] for x, y in iter(test_loader)])
-        predictions, x, pred_ori = best_tft.predict(test_loader,return_x=True,return_ori_outupt=True)   
-        loss = (actuals - predictions).abs().mean()
-        print("loss is:",loss)        
-        predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
-        best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals);  
-        return pd.Series(np.concatenate(predictions), index=df_test.get_index())
+        lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
+        label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
+        label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"     
+           
+        model_name = self.optargs["model_name"]
+        forecast_horizon = self.optargs["forecast_horizon"]
+        my_model = self._build_model(dataset,emb_size=1000,use_model_name=False)
+        val_series_list,past_covariates,future_covariates,series_total = dataset.get_series_data()
+        # 首先需要进行fit设置
+        my_model.super_fit(val_series_list, past_covariates=past_covariates, future_covariates=future_covariates,
+                     val_series=val_series_list,val_past_covariates=past_covariates,val_future_covariates=future_covariates,
+                     verbose=True,epochs=-1)            
+        # 根据参数决定是否从文件中加载权重
+        if model_name is not None:
+            my_model = TFTCusModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"])       
     
+        # 对验证集进行预测，得到预测结果   
+        pred_series_list = my_model.predict(n=forecast_horizon, series=val_series_list,
+                                              num_samples=200,past_covariates=past_covariates,future_covariates=future_covariates)
+        
+        # 整个序列比较多，只比较某几个序列
+        r = 10
+        figsize = (9, 6)
+        # 创建比较序列，后面保持所有，或者自己指定长度
+        actual_series_list = []
+        for index,train_ser in enumerate(val_series_list):
+            ser_total = series_total[index]
+            # 从数据集后面截取一定长度的数据，作为比较序列
+            actual_series = ser_total[
+                ser_total.end_time() - (2 * forecast_horizon - 1) * ser_total.freq : 
+            ]
+            actual_series_list.append(actual_series)   
+        for i in range(r):
+            plt.figure(figsize=figsize)
+            pred_series = pred_series_list[i]
+            actual_series = actual_series_list[i]
+            # 实际数据集的结尾与预测序列对齐
+            actual_series[: pred_series.end_time()].plot(label="actual")
+            # 分位数范围显示
+            pred_series.plot(
+                low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
+            )
+            pred_series.plot(low_quantile=low_q, high_quantile=high_q, label=label_q_inner)
+            # 与实际的数据集进行比较，比较的是两个数据集的交集
+            plt.title("ser_{},MAPE: {:.2f}%".format(i,mape(actual_series, pred_series)))
+            plt.legend()
+            plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],i))
+            plt.clf()
+        
     def build_aug_data(self,dataset):
         save_file_path = self.optargs["save_path"]
         group_column = dataset.col_def["group_column"]
@@ -244,7 +285,4 @@ class TftNumpyModel(Model):
                 title = "line_{}".format(i)
                 viz_input.viz_matrix_var(combine_data[i,:,target_index:target_index+1],win=title,title=title)
 
-        
-    
-                  
         
