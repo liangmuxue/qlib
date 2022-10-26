@@ -78,4 +78,4 @@ task:
                 group_column: 'instrument'
                 target_column: 'label'
                 time_column: 'time_idx'
-                covariate_columns: ['dayofweek'] 
+                future_covariate_col: ['dayofweek'] 
