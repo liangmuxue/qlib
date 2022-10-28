@@ -224,7 +224,11 @@ class TFTDataset(DatasetH):
         """取得过去协变量字段名称"""
         past_covariate_col = self.col_def["past_covariate_col"] + [self.col_def["target_column"]] 
         return past_covariate_col  
-    
+
+    def get_target_column(self):
+        """取得目标字段"""
+        return self.col_def["target_column"]   
+        
     def get_past_column_index(self):
         """取得过去协变量段对应下标"""
         columns = self.get_seq_columns()

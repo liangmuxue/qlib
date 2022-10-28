@@ -76,7 +76,6 @@ class TftNumpyModel(Model):
         self.logger = get_module_logger("TransformerModel")
         
         self.type = type
-        self.viz_input = TensorViz(env="data_hist") 
         
     @property
     def use_gpu(self):
@@ -108,7 +107,6 @@ class TftNumpyModel(Model):
         emb_size = 1000
         self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
         self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"])       
-        self.model.n_epoch = self.n_epochs
         self.model.fit(data_train,data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
     
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
@@ -186,7 +184,7 @@ class TftNumpyModel(Model):
         model_name = self.optargs["model_name"]
         forecast_horizon = self.optargs["forecast_horizon"]
         my_model = self._build_model(dataset,emb_size=1000,use_model_name=False)
-        val_series_list,past_covariates,future_covariates,series_total = dataset.get_series_data()
+        val_series_list,past_covariates,future_covariates,series_total = dataset.get_series_data(aug_type=self.optargs["aug_type"])
         # 首先需要进行fit设置
         my_model.super_fit(val_series_list, past_covariates=past_covariates, future_covariates=future_covariates,
                      val_series=val_series_list,val_past_covariates=past_covariates,val_future_covariates=future_covariates,
@@ -283,19 +281,20 @@ class TftNumpyModel(Model):
             self.numpy_data_view(dataset,combine_data)
 
     def numpy_data_view(self,dataset,numpy_data): 
+        viz_input = TensorViz(env="data_hist") 
         wave_period = self.optargs["wave_period"]
         forecast_horizon = self.optargs["forecast_horizon"]     
         target_index = dataset.get_target_column_index()   
         start = wave_period - forecast_horizon
         value = numpy_data[:,start:,target_index]
         v_title = "aug_data"    
-        self.viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=v_title,title=v_title) 
+        viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=v_title,title=v_title) 
         columns = dataset.get_past_columns() 
         columns_index = dataset.get_past_column_index()
         # 随机取得某些数据，并显示折线图
         for i in random_int_list(1,numpy_data.shape[0],10):
             title = "line_{}".format(i)
             view_data = numpy_data[i,:,columns_index].transpose(1,0)
-            self.viz_input.viz_matrix_var(view_data,win=title,title=title,names=columns)        
+            viz_input.viz_matrix_var(view_data,win=title,title=title,names=columns)        
         
         

@@ -18,8 +18,6 @@ import numpy as np
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 from darts_pro.tft_dataset import TFTDataset
-from cus_utils.tensor_viz import TensorViz
-from cus_utils.data_filter import DataFilter
 
 class TFTSeriesDataset(TFTDataset):
     """
@@ -43,12 +41,13 @@ class TFTSeriesDataset(TFTDataset):
         # 首先取得pandas原始数据,使用test数据集
         self.data = self.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         
+        # from cus_utils.tensor_viz import TensorViz
         # viz_input = TensorViz(env="data_hist")   
         # v_title = "np_data"
-        # viz_input.viz_data_hist(self.data[:,25:,target_index].reshape(-1),numbins=10,win=v_title,title=v_title)  
+        # viz_input.viz_data_hist(self.data[self.get_target_column()].values,numbins=10,win=v_title,title=v_title)  
         # print("lll")
     
-    def get_series_data(self):
+    def get_series_data(self,aug_type="no"):
         """从pandas数据取得时间序列类型数据"""
         
         group_column = self.col_def["group_column"]
@@ -60,9 +59,16 @@ class TFTSeriesDataset(TFTDataset):
         # 使用后5天的移动平均值作为目标数值
         df[target_column]  = df.groupby(group_column)[target_column].shift(-self.pred_len).rolling(window=self.pred_len,min_periods=1).mean()
         df = df.dropna()      
-        # 只在目标列上使用scaler  
+        # if aug_type=="yes":
+        #     df[[target_column]] = df[df[target_column]] 
+        # 在目标列上使用scaler  
         scaler = MinMaxScaler()
-        df[[target_column]] = scaler.fit_transform(df[[target_column]])           
+        df[[target_column]] = scaler.fit_transform(df[[target_column]])        
+        # 对协变量值进行归一化 
+        for item in self.get_past_columns():
+            if item==self.get_target_column():
+                continue
+            df[[item]] = scaler.fit_transform(df[[item]])                 
         # group需要转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')    
         value_cols = self.get_seq_columns()
@@ -100,7 +106,7 @@ class TFTSeriesDataset(TFTDataset):
         return series_transformed,past_covariates,future_covariates,series_total
         
     def build_future_covariates(self,series):
-        # 生成未来已知协变量
+        """生成未来已知协变量"""
         df = series.pd_dataframe()
         columns = self.col_def["future_covariate_col"] 
         future_covariates = TimeSeries.from_times_and_values(
