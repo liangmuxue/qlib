@@ -115,7 +115,7 @@ if __name__ == "__main__":
     # extractor.show_item_data("600010",start_date="2020-05-07",end_date="2020-05-29")
     # extractor = HisDataExtractor()
     # extractor.download_data(file_type="qyspjg")
-    extractor.get_code_data(create=True)
+    extractor.get_code_data(create=False)
     extractor.load_all_data()
     
         

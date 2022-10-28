@@ -13,7 +13,7 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: &col_list ["STD5", "VSTD5"]                
+              col_list: &col_list ["STD5", "TSTD5", "TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]               
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -51,11 +51,11 @@ task:
             seed: 0
             n_jobs: 20
             type: 'train'
-            n_epochs : 150
+            n_epochs : 300
             optargs:
                data_type: 'combine'
                work_dir: 'custom/data/darts'
-               model_name: 'test3'
+               model_name: 'test5_aug'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:
@@ -71,10 +71,10 @@ task:
                 valid: [2015-01-01, 2016-12-31]
                 test: [2017-01-01, 2020-08-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
-            aug_type: 'no'
+            aug_type: 'yes'
             step_len: *wave_period
             pred_len: *forecast_horizon
-            over_time: 2          
+            over_time: 3          
             low_threhold: -5
             high_threhold: 5   
             col_def:
@@ -83,7 +83,7 @@ task:
                 target_column: 'label'
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek']   
-                past_covariate_col: ['STD5', 'VSTD5', 'label']
+                past_covariate_col: *col_list
                 static_covariate_col: ['instrument']    
 
     record: 

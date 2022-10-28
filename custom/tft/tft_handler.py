@@ -54,6 +54,7 @@ class TftDataHandler(DataHandlerLP):
                 "feature": ["OPEN", "HIGH", "LOW","CLOSE"],
             },
             "volume": {},
+            "turnover": {},
             "rolling": {},
             # 添加nan_validate_label，用于数据空值校验
             "validate_fields": {},
@@ -126,8 +127,14 @@ class TftDataHandler(DataHandlerLP):
             windows = config["volume"].get("windows", range(5))
             fields += ["Ref($volume, %d)/$volume" % d if d != 0 else "$volume/$volume" for d in windows]
             names += ["VOLUME" + str(d) for d in windows]
-            fields += ["$volume/100"]
+            fields += ["$volume"]
             names += ["VOLUME_CLOSE"]
+        if "turnover" in config:
+            windows = config["turnover"].get("windows", range(5))
+            fields += ["Ref($turnover, %d)/$turnover" % d if d != 0 else "$turnover/$turnover" for d in windows]
+            names += ["TURNOVER" + str(d) for d in windows]
+            fields += ["$turnover"]
+            names += ["TURNOVER_CLOSE"]            
         if "rolling" in config:
             windows = config["rolling"].get("windows", [5, 10, 20, 30, 60])
             include = config["rolling"].get("include", None)
@@ -249,7 +256,18 @@ class TftDataHandler(DataHandlerLP):
                     for d in windows
                 ]
                 names += ["VSUMD%d" % d for d in windows]
-    
+            if use("TSTD"):
+                # 对换手率进行STD
+                fields += ["Std($turnover, %d)/($turnover+1e-12)" % d for d in windows]
+                names += ["TSTD%d" % d for d in windows]
+            if use("TSUMP"):
+                # 对换手率进行SUMP
+                fields += [
+                    "Sum(Greater($turnover-Ref($turnover, 1), 0), %d)/(Sum(Abs($turnover-Ref($turnover, 1)), %d)+1e-12)"
+                    % (d, d)
+                    for d in windows
+                ]
+                names += ["TSUMP%d" % d for d in windows]                
         return fields, names
     
     

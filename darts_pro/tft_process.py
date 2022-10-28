@@ -76,7 +76,8 @@ class TftNumpyModel(Model):
         self.logger = get_module_logger("TransformerModel")
         
         self.type = type
-    
+        self.viz_input = TensorViz(env="data_hist") 
+        
     @property
     def use_gpu(self):
         return self.device != torch.device("cpu")
@@ -100,20 +101,25 @@ class TftNumpyModel(Model):
               
         # 生成tft时间序列训练数据集
         data_train = dataset.get_custom_numpy_dataset(mode="train")
+        self.numpy_data_view(dataset, data_train.numpy_data)
         data_validation = dataset.get_custom_numpy_dataset(mode="valid")
         # 使用股票代码数量作为embbding长度
         # emb_size = np.unique(dataset.data[:,:,dataset.get_target_column_index()])
         emb_size = 1000
-        self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True)
-        # self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"])          
-        self.model.fit(data_train,data_validation,trainer=None,verbose=True)
+        self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
+        self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"])       
+        self.model.n_epoch = self.n_epochs
+        self.model.fit(data_train,data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
     
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         optimizer_cls = torch.optim.Adam
         scheduler = CosineAnnealingLR
+        scheduler = CosineAnnealingWarmRestarts
         scheduler_config = {
-            "T_max": 5, 
-            "eta_min": 0,
+            # "T_max": 5, 
+            # "eta_min": 0,
+            "T_0": 3,
+            "T_mult": 3
         }     
         quantiles = [
             0.01,
@@ -147,7 +153,7 @@ class TftNumpyModel(Model):
             lstm_layers=1,
             num_attention_heads=4,
             dropout=0.1,
-            batch_size=4096,
+            batch_size=2048,
             n_epochs=self.n_epochs,
             add_relative_index=False,
             add_encoders=None,
@@ -158,6 +164,7 @@ class TftNumpyModel(Model):
             # loss_fn=MSELoss(),
             random_state=42,
             model_name=model_name,
+            force_reset=True,
             log_tensorboard=True,
             save_checkpoints=True,
             work_dir=self.optargs["work_dir"],
@@ -259,10 +266,8 @@ class TftNumpyModel(Model):
         
         data = np.load(data_path,allow_pickle=True)       
         data_filter = DataFilter() 
-        viz_input = TensorViz(env="data_hist") 
-        start = wave_period - forecast_horizon
+        
         if aug_type == "combine":
-            value_combine = None
             # 通过列排序规则，取得目标数据对应下标
             target_index = dataset.get_target_column_index()
             # 分别取得涨幅较大以及跌幅较大的数据
@@ -275,14 +280,22 @@ class TftNumpyModel(Model):
             # 参考高低涨幅数据量，取得普通数据量，合并为目标数据
             nor_data = data[nor_index,:,:]
             combine_data = np.concatenate((low_data,high_data,nor_data),axis=0)
-            # 最后一列为观察数值,并且时间轴只使用后5个数据
-            data_index = dataset.get_target_column_index()
-            value = combine_data[:,start:,data_index]
-            v_title = "aug_data"    
-            viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=v_title,title=v_title)  
-            # 随机取得某些数据，并显示折线图
-            for i in random_int_list(1,combine_data.shape[0],10):
-                title = "line_{}".format(i)
-                viz_input.viz_matrix_var(combine_data[i,:,target_index:target_index+1],win=title,title=title)
+            self.numpy_data_view(dataset,combine_data)
 
+    def numpy_data_view(self,dataset,numpy_data): 
+        wave_period = self.optargs["wave_period"]
+        forecast_horizon = self.optargs["forecast_horizon"]     
+        target_index = dataset.get_target_column_index()   
+        start = wave_period - forecast_horizon
+        value = numpy_data[:,start:,target_index]
+        v_title = "aug_data"    
+        self.viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=v_title,title=v_title) 
+        columns = dataset.get_past_columns() 
+        columns_index = dataset.get_past_column_index()
+        # 随机取得某些数据，并显示折线图
+        for i in random_int_list(1,numpy_data.shape[0],10):
+            title = "line_{}".format(i)
+            view_data = numpy_data[i,:,columns_index].transpose(1,0)
+            self.viz_input.viz_matrix_var(view_data,win=title,title=title,names=columns)        
+        
         

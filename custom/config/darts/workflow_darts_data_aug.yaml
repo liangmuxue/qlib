@@ -13,7 +13,7 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: &col_list ["STD5", "VSTD5"]                
+              col_list: &col_list ["STD5", "TSTD5", "TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]                
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 

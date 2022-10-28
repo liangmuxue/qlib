@@ -56,7 +56,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test2'
+               model_name: 'test3'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:

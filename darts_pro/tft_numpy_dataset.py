@@ -46,11 +46,12 @@ class TFTNumpyDataset(TFTDataset):
         # 对目标值进行归一化
         scaler = MinMaxScaler()
         target_index = self.get_target_column_index()
-        self.data[:,:,target_index] = scaler.fit_transform(self.data[:,:,target_index])      
-        # viz_input = TensorViz(env="data_hist")   
-        # v_title = "np_data"
-        # viz_input.viz_data_hist(self.data[:,25:,target_index].reshape(-1),numbins=10,win=v_title,title=v_title)  
-        # print("lll")
+        self.data[:,:,target_index] = scaler.fit_transform(self.data[:,:,target_index])     
+        # 对协变量值进行归一化 
+        for index in self.get_past_column_index():
+            if index==self.get_target_column_index():
+                continue
+            self.data[:,:,index] = scaler.fit_transform(self.data[:,:,index])   
     
     def filter_balance_data(self,data):
         """筛选出均衡的数据"""
@@ -84,7 +85,7 @@ class TFTNumpyDataset(TFTDataset):
         """     
         
         future_covariate_index = [self.columns.index(item) for item in self.future_covariate_col]
-        past_covariate_index = [self.columns.index(item) for item in self.past_covariate_col]
+        past_covariate_index = self.get_past_column_index()
         static_covariate_index = [self.columns.index(item) for item in self.static_covariate_col]
         target_index = self.get_target_column_index()
         
