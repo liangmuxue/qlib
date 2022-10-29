@@ -260,6 +260,10 @@ class TftDataHandler(DataHandlerLP):
                 # 对换手率进行STD
                 fields += ["Std($turnover, %d)/($turnover+1e-12)" % d for d in windows]
                 names += ["TSTD%d" % d for d in windows]
+            if use("TMA"):
+                # 对换手率进行MEAN
+                fields += ["Mean($turnover, %d)/($turnover+1e-12)" % d for d in windows]
+                names += ["TMA%d" % d for d in windows]                
             if use("TSUMP"):
                 # 对换手率进行SUMP
                 fields += [

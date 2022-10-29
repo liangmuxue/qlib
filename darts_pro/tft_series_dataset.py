@@ -24,7 +24,7 @@ class TFTSeriesDataset(TFTDataset):
     自定义数据集，使用darts封装的TimeSeries类型数据
     """
 
-    def __init__(self, step_len = 30,pred_len = 5,low_threhold=-5,high_threhold=5,over_time=2,col_def={},**kwargs):
+    def __init__(self, step_len = 30,pred_len = 5,low_threhold=-5,high_threhold=5,over_time=2,aug_type="no",col_def={},**kwargs):
         # 基层数据处理器
         self.data_extractor = StockDataExtractor() 
         super().__init__(col_def=col_def,step_len=step_len,pred_len=pred_len,**kwargs)
@@ -35,7 +35,7 @@ class TFTSeriesDataset(TFTDataset):
         self.low_threhold = low_threhold
         self.high_threhold = high_threhold
         self.over_time = over_time        
-        
+        self.aug_type = aug_type
         self.columns = self.get_seq_columns()
         
         # 首先取得pandas原始数据,使用test数据集
@@ -47,7 +47,7 @@ class TFTSeriesDataset(TFTDataset):
         # viz_input.viz_data_hist(self.data[self.get_target_column()].values,numbins=10,win=v_title,title=v_title)  
         # print("lll")
     
-    def get_series_data(self,aug_type="no"):
+    def get_series_data(self):
         """从pandas数据取得时间序列类型数据"""
         
         group_column = self.col_def["group_column"]
@@ -59,7 +59,7 @@ class TFTSeriesDataset(TFTDataset):
         # 使用后5天的移动平均值作为目标数值
         df[target_column]  = df.groupby(group_column)[target_column].shift(-self.pred_len).rolling(window=self.pred_len,min_periods=1).mean()
         df = df.dropna()      
-        # if aug_type=="yes":
+        # if self.aug_type=="yes":
         #     df[[target_column]] = df[df[target_column]] 
         # 在目标列上使用scaler  
         scaler = MinMaxScaler()

@@ -3,7 +3,7 @@ from qlib.data.dataset.handler import DataHandler, DataHandlerLP
 from qlib.log import get_module_logger
 from typing import Union, List, Tuple, Dict, Text, Optional
 from inspect import getfullargspec
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
 from tft.timeseries_cus import TimeSeriesCusDataset
 from tft.timeseries_crf import TimeSeriesCrfDataset
@@ -45,13 +45,17 @@ class TFTNumpyDataset(TFTDataset):
             self.data = data
         # 对目标值进行归一化
         scaler = MinMaxScaler()
+        stanard_scaler = StandardScaler()
         target_index = self.get_target_column_index()
         self.data[:,:,target_index] = scaler.fit_transform(self.data[:,:,target_index])     
-        # 对协变量值进行归一化 
+        # 对协变量值进行标准化 
         for index in self.get_past_column_index():
             if index==self.get_target_column_index():
                 continue
-            self.data[:,:,index] = scaler.fit_transform(self.data[:,:,index])   
+            # 相关字段需要首先进行标准化
+            # if index in self.get_past_standard_column_index():
+            #     self.data[:,:,index] = stanard_scaler.fit_transform(self.data[:,:,index]) 
+            self.data[:,:,index] = stanard_scaler.fit_transform(self.data[:,:,index])   
     
     def filter_balance_data(self,data):
         """筛选出均衡的数据"""

@@ -105,8 +105,8 @@ class TftNumpyModel(Model):
         # 使用股票代码数量作为embbding长度
         # emb_size = np.unique(dataset.data[:,:,dataset.get_target_column_index()])
         emb_size = 1000
-        self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
-        self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"])       
+        self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True)
+        # self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"])       
         self.model.fit(data_train,data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
     
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
@@ -151,7 +151,7 @@ class TftNumpyModel(Model):
             lstm_layers=1,
             num_attention_heads=4,
             dropout=0.1,
-            batch_size=2048,
+            batch_size=self.batch_size,
             n_epochs=self.n_epochs,
             add_relative_index=False,
             add_encoders=None,
@@ -184,7 +184,7 @@ class TftNumpyModel(Model):
         model_name = self.optargs["model_name"]
         forecast_horizon = self.optargs["forecast_horizon"]
         my_model = self._build_model(dataset,emb_size=1000,use_model_name=False)
-        val_series_list,past_covariates,future_covariates,series_total = dataset.get_series_data(aug_type=self.optargs["aug_type"])
+        val_series_list,past_covariates,future_covariates,series_total = dataset.get_series_data()
         # 首先需要进行fit设置
         my_model.super_fit(val_series_list, past_covariates=past_covariates, future_covariates=future_covariates,
                      val_series=val_series_list,val_past_covariates=past_covariates,val_future_covariates=future_covariates,
@@ -292,7 +292,7 @@ class TftNumpyModel(Model):
         columns = dataset.get_past_columns() 
         columns_index = dataset.get_past_column_index()
         # 随机取得某些数据，并显示折线图
-        for i in random_int_list(1,numpy_data.shape[0],10):
+        for i in random_int_list(1,numpy_data.shape[0],5):
             title = "line_{}".format(i)
             view_data = numpy_data[i,:,columns_index].transpose(1,0)
             viz_input.viz_matrix_var(view_data,win=title,title=title,names=columns)        
