@@ -143,8 +143,10 @@ class TFTDataset(DatasetH):
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek    
+        # 保留时间戳
+        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)
         # 使用指定字段
-        data = data[self.get_seq_columns()]
+        data = data[self.get_seq_columns() + ["datetime_number"]]
         return data
             
     def filter_extremum_data(self,data,columns=[]):

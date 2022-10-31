@@ -17,6 +17,7 @@ import torch
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 import pytorch_lightning as pl
+from torch.utils.data import DataLoader
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -135,7 +136,29 @@ class TFTCusModel(TFTModel):
         return self.fit_from_dataset(
             train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers
         )          
-        
+
+    def numpy_predict(self,input_dataset,trainer=None,batch_size=1024,mc_dropout=False,verbose=True):
+        pred_loader = DataLoader(
+            input_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=True,
+            drop_last=False,
+            collate_fn=self._batch_collate_fn,
+        )
+
+        # Set mc_dropout rate
+        self.model.set_mc_dropout(mc_dropout)
+
+        # setup trainer. will only be re-instantiated if both `trainer` and `self.trainer` are `None`
+        trainer = trainer if trainer is not None else self.trainer
+        self._setup_trainer(trainer=trainer, verbose=verbose, epochs=self.n_epochs)
+
+        # prediction output comes as nested list: list of predicted `TimeSeries` for each batch.
+        predictions = self.trainer.predict(self.model, pred_loader)
+        return predictions
+                        
     def super_fit(
         self,
         series: Union[TimeSeries, Sequence[TimeSeries]],

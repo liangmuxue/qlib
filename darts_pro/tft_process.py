@@ -105,8 +105,13 @@ class TftNumpyModel(Model):
         # 使用股票代码数量作为embbding长度
         # emb_size = np.unique(dataset.data[:,:,dataset.get_target_column_index()])
         emb_size = 1000
-        self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True)
-        # self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"])       
+        load_weight = self.optargs["load_weight"]
+        if load_weight:
+            # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
+            self.model = TFTCusModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
+            self.model.batch_size = self.batch_size     
+        else:
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
         self.model.fit(data_train,data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
     
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
@@ -174,6 +179,19 @@ class TftNumpyModel(Model):
         )
         return my_model          
         
+    def predict_numpy(self, dataset: TFTDataset):
+        if self.type!="predict":
+            return 
+        lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
+           
+        model_name = self.optargs["model_name"]
+        my_model = self._build_model(dataset,emb_size=1000,use_model_name=False)
+        data_validation = dataset.get_custom_numpy_dataset(mode="valid")
+        # 根据参数决定是否从文件中加载权重
+        if model_name is not None:
+            my_model = TFTCusModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"])      
+        my_model.numpy_predict(data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
+    
     def predict(self, dataset: TFTSeriesDataset):
         if self.type!="predict":
             return 
@@ -198,7 +216,7 @@ class TftNumpyModel(Model):
                                               num_samples=200,past_covariates=past_covariates,future_covariates=future_covariates)
         
         # 整个序列比较多，只比较某几个序列
-        r = 10
+        
         figsize = (9, 6)
         # 创建比较序列，后面保持所有，或者自己指定长度
         actual_series_list = []
@@ -209,8 +227,9 @@ class TftNumpyModel(Model):
                 ser_total.end_time() - (2 * forecast_horizon - 1) * ser_total.freq : 
             ]
             actual_series_list.append(actual_series)   
-        for i in range(r):
-            plt.figure(figsize=figsize)
+        mape_all = 0
+        r = 10
+        for i in range(len(val_series_list)):
             pred_series = pred_series_list[i]
             actual_series = actual_series_list[i]
             # 实际数据集的结尾与预测序列对齐
@@ -221,11 +240,18 @@ class TftNumpyModel(Model):
             )
             pred_series.plot(low_quantile=low_q, high_quantile=high_q, label=label_q_inner)
             # 与实际的数据集进行比较，比较的是两个数据集的交集
-            plt.title("ser_{},MAPE: {:.2f}%".format(i,mape(actual_series, pred_series)))
+            mape_item = mape(actual_series, pred_series)
+            mape_all = mape_all + mape_item
+            if i > r:
+                continue
+            plt.figure(figsize=figsize)
+            plt.title("ser_{},MAPE: {:.2f}%".format(i,mape_item))
             plt.legend()
             plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],i))
             plt.clf()
-        
+        mape_mean = mape_all/len(val_series_list)
+        print("mape_mean:",mape_mean)
+               
     def build_aug_data(self,dataset):
         save_file_path = self.optargs["save_path"]
         group_column = dataset.col_def["group_column"]
@@ -238,11 +264,6 @@ class TftNumpyModel(Model):
         df = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         # 股票代码(即分组字段)转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')
-        # 拼接所有需要使用的字段
-        columns = dataset.get_seq_columns()
-        df = df[columns]
-        data_len = df.shape[0]
-              
         data_filter = DataFilter()
         # 使用后几天（根据预测长度而定）的移动平均值作为目标数值
         df[target_column]  = df.groupby(group_column)[target_column].shift(-forecast_horizon).rolling(window=forecast_horizon,min_periods=1).mean()

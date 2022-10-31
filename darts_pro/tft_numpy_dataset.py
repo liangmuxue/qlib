@@ -1,19 +1,8 @@
-from qlib.data.dataset import DatasetH
 from qlib.data.dataset.handler import DataHandler, DataHandlerLP
-from qlib.log import get_module_logger
-from typing import Union, List, Tuple, Dict, Text, Optional
-from inspect import getfullargspec
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
-from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
-from tft.timeseries_cus import TimeSeriesCusDataset
-from tft.timeseries_crf import TimeSeriesCrfDataset
-from tft.timeseries_numpy import TimeSeriesNumpyDataset
 
-import bisect
-import pandas as pd
 import numpy as np
 
-from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 from darts_pro.tft_dataset import TFTDataset
 from cus_utils.tensor_viz import TensorViz
@@ -48,14 +37,14 @@ class TFTNumpyDataset(TFTDataset):
         stanard_scaler = StandardScaler()
         target_index = self.get_target_column_index()
         self.data[:,:,target_index] = scaler.fit_transform(self.data[:,:,target_index])     
-        # 对协变量值进行标准化 
+        # 对协变量值进行标准化(归一化)
         for index in self.get_past_column_index():
             if index==self.get_target_column_index():
                 continue
             # 相关字段需要首先进行标准化
             # if index in self.get_past_standard_column_index():
             #     self.data[:,:,index] = stanard_scaler.fit_transform(self.data[:,:,index]) 
-            self.data[:,:,index] = stanard_scaler.fit_transform(self.data[:,:,index])   
+            self.data[:,:,index] = scaler.fit_transform(self.data[:,:,index])   
     
     def filter_balance_data(self,data):
         """筛选出均衡的数据"""
@@ -94,6 +83,7 @@ class TFTNumpyDataset(TFTDataset):
         target_index = self.get_target_column_index()
         
         training_data,val_data = self.training_data_split()
+        self.view_datatime(training_data,val_data)
         if mode=="train":
             data = training_data
         else:
@@ -109,21 +99,22 @@ class TFTNumpyDataset(TFTDataset):
             target_index        
         ) 
         
-
     def training_data_split(self):  
         """"拆分训练集和测试集"""
         
-        time_index = self.get_time_column_index()
-        time_begin = self.data[:,:,time_index].min()
-        time_end = self.data[:,:,time_index].max()
+        time_begin = self.data[:,:,-1].min()
+        time_end = self.data[:,:,-1].max()
         # 根据长度取得切分点
         sp_index = time_begin + (time_end - time_begin)*self.training_cutoff
         # 训练集使用时间序列最后一个时间点进行切分
-        training_data = self.data[self.data[:,-1,time_index]<sp_index]
+        training_data = self.data[self.data[:,-1,-1]<sp_index]
         # 测试集使用时间序列第一个时间点进行切分
-        val_data = self.data[self.data[:,0,time_index]>sp_index]
+        val_data = self.data[self.data[:,0,-1]>sp_index]
         return training_data,val_data
     
-        
+    def view_datatime(self,training_data,val_data):
+        t_time = training_data[:,:,-1]
+        v_time = val_data[:,:,-1]
+        print("training time max:{},val time min:{}".format(t_time.max(), v_time.min()))
         
     

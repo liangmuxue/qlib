@@ -5,15 +5,15 @@ market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
-    end_time: 2021-12-31
+    end_time: 2020-12-31
     fit_start_time: 2008-01-01
-    fit_end_time: 2021-12-31
+    fit_end_time: 2020-12-31
     instruments: *market
     infer_processors:
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]               
+              col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","CLOSE0"]               
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -47,7 +47,7 @@ task:
         module_path: darts_pro.tft_process
         kwargs:
             GPU: 0
-            batch_size: 4096
+            batch_size: 2048
             seed: 0
             n_jobs: 20
             type: 'train'
@@ -55,7 +55,8 @@ task:
             optargs:
                data_type: 'combine'
                work_dir: 'custom/data/darts'
-               model_name: 'test5'
+               model_name: 'test6'
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:
@@ -74,7 +75,7 @@ task:
             aug_type: 'no'
             step_len: *wave_period
             pred_len: *forecast_horizon
-            over_time: 3          
+            over_time: 1         
             low_threhold: -5
             high_threhold: 5   
             col_def:

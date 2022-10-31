@@ -60,6 +60,11 @@ def test_pd_timeser():
     sr = pd.to_datetime(data['ID'], format= '%m/%d/%Y').squeeze().dt.date
     data['General format'] =  sr.apply(lambda x: (x - date(1900, 1, 1)).days +2 ).to_frame()
     print(data)
+    df = pd.DataFrame({'date': ['2008-04-24 01:30:00.000']})
+    df['date'] = pd.to_datetime(df['date'])
+    df['date'] = df['date'].astype('int64')//1e9
+    print(df)
+    print(pd.to_datetime(df['date'], unit='s'))
 
 def test_join():
     left = pd.DataFrame({'A': ['A0', 'A1', 'A2', 'A3'],
@@ -269,11 +274,11 @@ def test_build_datetime():
     
 if __name__ == "__main__":
     # test_pd_index()
-    # test_pd_timeser()
+    test_pd_timeser()
     # test_join()
     # test_merge()
     # test_columns()
-    test_group()
+    # test_group()
     # test_diff()
     # test_vis()
     # test_tft_vis()

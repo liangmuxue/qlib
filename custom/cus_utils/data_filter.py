@@ -17,12 +17,12 @@ class DataFilter():
         self.wave_period = 30
         self.forecast_horizon = 5
 
-    def data_clean(self,data,training_cutoff):
+    def data_clean(self,data,training_cutoff,group_column="instrument",time_column="time_idx"):
         # 清除序列长度不够的股票,需要多出训练数据的一定比例
         thr_number = int(training_cutoff * 1.2)
-        gcnt = data.groupby("instrument").count()
-        index = gcnt[gcnt['time_idx']>thr_number].index
-        data = data[data['instrument'].isin(index)]
+        gcnt = data.groupby(group_column).count()
+        index = gcnt[gcnt[time_column]>thr_number].index
+        data = data[data[group_column].isin(index)]
         return data
 
     def rolling_window(self,a, window):

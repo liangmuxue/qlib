@@ -5,15 +5,15 @@ market: &market all
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
-    end_time: 2020-08-01
+    end_time: 2021-12-31
     fit_start_time: 2008-01-01
-    fit_end_time: 2014-12-31
+    fit_end_time: 2021-12-31
     instruments: *market
     infer_processors:
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: &col_list ["STD5", "TURNOVER_CLOSE","TMA5", "TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]                
+              col_list: &col_list ["STD5", "TURNOVER_CLOSE","TMA5", "TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","CLOSE0"]                
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
