@@ -129,7 +129,7 @@ class TFTDataset(DatasetH):
         # 清除极值数据
         data = self.filter_extremum_data(data, columns=self.col_def["past_covariate_col"])
         # 删除涨跌幅度过大的数据 
-        data = data[data.label.abs()<=0.2]  
+        data = data[data.label.abs()<=0.1]  
         # 增大取值范围
         data['label'] = data['label'] * 100
         # 补充辅助数据,添加日期编号

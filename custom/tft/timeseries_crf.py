@@ -737,16 +737,16 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         for index,item in enumerate(data_cont.permute(1,0)):
             self.viz_input = TensorViz(env="data_histtm") 
             self.viz_input.viz_data_hist(item.numpy(),numbins=bin_numbers,win="item{}".format(index),title="item{}".format(index))            
-            # start = item.min() - 0.001
-            # stop = item.max() + 0.001
-            # step = (stop - start)/(bin_numbers+1)
-            # step = step + step*0.01
-            # bins = torch.range(start,stop,step)
-            # amplitude,y_res = enhance_data_complex(item.numpy(),bins=bins.numpy(),mode="smote")
-            # if rtn is None:
-            #     rtn = amplitude
-            # else:
-            #     rtn = np.concatenate((rtn,amplitude),axis=0)
+            start = item.min() - 0.001
+            stop = item.max() + 0.001
+            step = (stop - start)/(bin_numbers+1)
+            step = step + step*0.01
+            bins = torch.range(start,stop,step)
+            amplitude,y_res = enhance_data_complex(item.numpy(),bins=bins.numpy(),mode="smote")
+            if rtn is None:
+                rtn = amplitude
+            else:
+                rtn = np.concatenate((rtn,amplitude),axis=0)
         return torch.tensor(rtn)
                
     def get_oridata_byindex(self,index_list):

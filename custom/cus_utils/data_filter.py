@@ -95,7 +95,16 @@ class DataFilter():
         index_arr = np.where(over_data>=over_time)[0]
         target_data = data.take(index_arr,axis=0)   
         return target_data
+
+    def get_combine_data_with_threhold(self,data,column_index,low_threhold=-5,high_threhold=5,wave_period=30,check_length=5,over_time=1):
+        """筛选numpy数据，查找涨幅或跌幅超出的部分"""
         
+        # 查找每行,在后面几个数里,超过阈值的总个数
+        over_data = ((data[:,wave_period-check_length:,column_index]>low_threhold) & (data[:,wave_period-check_length:,column_index]<high_threhold)).sum(axis=1)
+        index_arr = np.where(over_data>=over_time)[0]
+        target_data = data.take(index_arr,axis=0)   
+        return target_data
+            
 if __name__ == "__main__":
     file_path = "/home/qdata/project/qlib/custom/data/aug/test_all_timeidx.pkl"
     check_time_ser_data(file_path)

@@ -100,8 +100,9 @@ class TftNumpyModel(Model):
               
         # 生成tft时间序列训练数据集
         data_train = dataset.get_custom_numpy_dataset(mode="train")
-        self.numpy_data_view(dataset, data_train.numpy_data)
         data_validation = dataset.get_custom_numpy_dataset(mode="valid")
+        self.numpy_data_view(dataset, data_train.numpy_data,title="train_data")
+        self.numpy_data_view(dataset, data_validation.numpy_data,title="valid_data")
         # 使用股票代码数量作为embbding长度
         # emb_size = np.unique(dataset.data[:,:,dataset.get_target_column_index()])
         emb_size = 1000
@@ -117,13 +118,15 @@ class TftNumpyModel(Model):
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         optimizer_cls = torch.optim.Adam
         scheduler = CosineAnnealingLR
-        scheduler = CosineAnnealingWarmRestarts
         scheduler_config = {
-            # "T_max": 5, 
-            # "eta_min": 0,
-            "T_0": 3,
-            "T_mult": 3
-        }     
+            "T_max": 5, 
+            "eta_min": 0,
+        }        
+        # scheduler = CosineAnnealingWarmRestarts
+        # scheduler_config = {
+        #     "T_0": 3,
+        #     "T_mult": 3
+        # }     
         quantiles = [
             0.01,
             0.05,
@@ -258,6 +261,8 @@ class TftNumpyModel(Model):
         target_column = dataset.col_def["target_column"]
         forecast_horizon = self.optargs["forecast_horizon"]
         wave_threhold = self.optargs["wave_threhold"]
+        wave_window = self.optargs["wave_window"]
+        wave_period = self.optargs["wave_period"]
         over_time = self.optargs["over_time"]
         wave_threhold_type = self.optargs["wave_threhold_type"]
         
@@ -266,10 +271,10 @@ class TftNumpyModel(Model):
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')
         data_filter = DataFilter()
         # 使用后几天（根据预测长度而定）的移动平均值作为目标数值
-        df[target_column]  = df.groupby(group_column)[target_column].shift(-forecast_horizon).rolling(window=forecast_horizon,min_periods=1).mean()
+        df[target_column]  = df.groupby(group_column)[target_column].shift(-wave_window).rolling(window=wave_window,min_periods=1).mean()
         df = df.dropna().reset_index(drop=True)
         # 按照规则进行数据筛选
-        wave_data = data_filter.filter_wave_data(df, target_column=target_column, group_column=group_column,
+        wave_data = data_filter.filter_wave_data(df, target_column=target_column, group_column=group_column,forecast_horizon=forecast_horizon,wave_period=wave_period,
                                                  wave_threhold_type=wave_threhold_type,wave_threhold=wave_threhold,over_time=over_time)
         print("wave_data",wave_data.shape)
         np.save(save_file_path,wave_data)  
@@ -301,21 +306,20 @@ class TftNumpyModel(Model):
             combine_data = np.concatenate((low_data,high_data,nor_data),axis=0)
             self.numpy_data_view(dataset,combine_data)
 
-    def numpy_data_view(self,dataset,numpy_data): 
+    def numpy_data_view(self,dataset,numpy_data,title="train_data"): 
         viz_input = TensorViz(env="data_hist") 
         wave_period = self.optargs["wave_period"]
         forecast_horizon = self.optargs["forecast_horizon"]     
         target_index = dataset.get_target_column_index()   
         start = wave_period - forecast_horizon
         value = numpy_data[:,start:,target_index]
-        v_title = "aug_data"    
-        viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=v_title,title=v_title) 
+        viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=title,title=title) 
         columns = dataset.get_past_columns() 
         columns_index = dataset.get_past_column_index()
         # 随机取得某些数据，并显示折线图
-        for i in random_int_list(1,numpy_data.shape[0],5):
-            title = "line_{}".format(i)
+        for i in random_int_list(1,numpy_data.shape[0],3):
+            sub_title = title + "_line_{}".format(i)
             view_data = numpy_data[i,:,columns_index].transpose(1,0)
-            viz_input.viz_matrix_var(view_data,win=title,title=title,names=columns)        
+            viz_input.viz_matrix_var(view_data,win=sub_title,title=sub_title,names=columns)        
         
         

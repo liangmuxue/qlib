@@ -16,7 +16,6 @@ def mae_comp(input,target):
     print(loss)
     return loss
 
-
 def np_qcut(arr, q):
     """ 实现类似pandas的qcut功能"""
 
@@ -36,11 +35,12 @@ def np_qcut(arr, q):
     res[~na_mask] = np.digitize(x, bins, right=True)
     return res
 
-def enhance_data_complex(ori_data,mode="adasyn",bins=None):
+def enhance_data_complex(ori_data,target_data,mode="smote",bins=None):
     """综合数据增强，使用imblearn组件
     Parameters
     ----------
-    ori_data : 需要增强的数据，numpy数组
+    ori_data : 需要增强的特征数据，numpy数组
+    target_data : 需要增强的label数据，numpy数组
     mode : 增强模式
     bins : 数据间隔分组数
     Returns
@@ -49,17 +49,16 @@ def enhance_data_complex(ori_data,mode="adasyn",bins=None):
     """
     
     # 使用分箱范围数据进行数据分组
-    digitized = np.digitize(ori_data, bins)
-    print('Original dataset shape %s' % Counter(digitized))
-    amplitude = np.expand_dims(ori_data,axis=1)
+    digitized = np.digitize(target_data, bins)
+    # print('Original dataset shape %s' % Counter(digitized))
     if mode=="smote":
-        sm = KMeansSMOTE(random_state=42)    
+        sm = KMeansSMOTE(random_state=42,cluster_balance_threshold=10)    
     # sm = SMOTE(random_state=42) 
     if mode=="adasyn":
         sm = ADASYN(random_state=42) 
     # 过采样数据补充
-    amplitude, y_res = sm.fit_resample(amplitude, digitized)  
-    print('Resampled dataset shape %s' % Counter(y_res))
+    amplitude, y_res = sm.fit_resample(ori_data, digitized)  
+    # print('Resampled dataset shape %s' % Counter(y_res))
     amplitude = np.squeeze(amplitude,axis=1)     
     return amplitude,y_res
 

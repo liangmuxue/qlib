@@ -121,8 +121,8 @@ class TftDataHandler(DataHandlerLP):
                 field = field.lower()
                 fields += ["Ref($%s, %d)/$close" % (field, d) if d != 0 else "$%s/$close" % field for d in windows]
                 names += [field.upper() + str(d) for d in windows]
-            fields += ["$close"]
-            names += ["CUR_CLOSE"]    
+            fields += ["(Ref($close, 1)/$close-1)*100"]
+            names += ["PRICE_SCOPE"]    
         if "volume" in config:
             windows = config["volume"].get("windows", range(5))
             fields += ["Ref($volume, %d)/$volume" % d if d != 0 else "$volume/$volume" for d in windows]

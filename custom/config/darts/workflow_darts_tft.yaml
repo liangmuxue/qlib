@@ -55,10 +55,10 @@ task:
             optargs:
                data_type: 'combine'
                work_dir: 'custom/data/darts'
-               model_name: 'test6'
+               model_name: 'test6_aug'
                load_weight: False
                wave_period : &wave_period 30
-               forecast_horizon: &forecast_horizon 5
+               forecast_horizon: &forecast_horizon 1
     dataset:
         class: TFTNumpyDataset
         module_path: darts_pro.tft_numpy_dataset
@@ -72,7 +72,7 @@ task:
                 valid: [2015-01-01, 2016-12-31]
                 test: [2017-01-01, 2020-08-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
-            aug_type: 'no'
+            aug_type: 'yes'
             step_len: *wave_period
             pred_len: *forecast_horizon
             over_time: 1         
