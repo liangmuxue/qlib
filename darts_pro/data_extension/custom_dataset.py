@@ -15,12 +15,14 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
         past_covariate_index: List = [],
         static_covariate_index: List = [],
         target_index: str = None,
+        model_type = "tft",
     ):
         """
         自定义数据集，直接使用numpy数据进行取值
         """
         super().__init__()
-
+        
+        self.model_type = model_type
         self.numpy_data = numpy_data
         self.input_chunk_length = input_chunk_length
         self.output_chunk_length = output_chunk_length
@@ -49,11 +51,23 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
         future_target = row[self.input_chunk_length:,self.target_index:self.target_index+1]
         static_covariate = np.expand_dims(row[0,self.static_covariate_index],axis=0)
         
-        return (
-            past_target,
-            past_covariate,
-            historic_future_covariate,
-            future_covariate,
-            static_covariate,
-            future_target,
-        )
+        if self.model_type=="tft":
+            return (
+                past_target,
+                past_covariate,
+                historic_future_covariate,
+                future_covariate,
+                static_covariate,
+                future_target,
+            )
+        
+        if self.model_type=="lstm":
+            return (
+                past_target,
+                past_covariate,
+                None,
+                future_target
+            )            
+            
+            
+            

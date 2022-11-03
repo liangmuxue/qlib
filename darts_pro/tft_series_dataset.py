@@ -2,7 +2,6 @@ from qlib.data.dataset import DatasetH
 from qlib.data.dataset.handler import DataHandler, DataHandlerLP
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from darts import TimeSeries, concatenate
-from darts.dataprocessing.transformers import Scaler
 
 import pandas as pd
 
@@ -16,7 +15,7 @@ class TFTSeriesDataset(TFTDataset):
     自定义数据集，使用darts封装的TimeSeries类型数据
     """
 
-    def __init__(self, step_len = 30,pred_len = 5,low_threhold=-5,high_threhold=5,over_time=2,aug_type="no",col_def={},**kwargs):
+    def __init__(self, step_len = 30,pred_len = 5,low_threhold=-5,high_threhold=5,over_time=2,aug_type="no",model_type="lstm",col_def={},**kwargs):
         # 基层数据处理器
         self.data_extractor = StockDataExtractor() 
         super().__init__(col_def=col_def,step_len=step_len,pred_len=pred_len,**kwargs)
@@ -28,11 +27,12 @@ class TFTSeriesDataset(TFTDataset):
         self.high_threhold = high_threhold
         self.over_time = over_time        
         self.aug_type = aug_type
+        self.model_type = model_type
         self.columns = self.get_seq_columns()
         
         # 首先取得pandas原始数据,使用test数据集
         self.data = self.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        
+      
         # from cus_utils.tensor_viz import TensorViz
         # viz_input = TensorViz(env="data_hist")   
         # v_title = "np_data"
@@ -53,18 +53,13 @@ class TFTSeriesDataset(TFTDataset):
         # 使用后5天的移动平均值作为目标数值
         df[target_column]  = df.groupby(group_column)[target_column].shift(-self.pred_len).rolling(window=self.pred_len,min_periods=1).mean()
         df = df.dropna()      
-        # if self.aug_type=="yes":
-        #     df[[target_column]] = df[df[target_column]] 
-        # 在目标列上使用scaler  
-        scaler = MinMaxScaler()
-        stanard_scaler = StandardScaler()
-        # 对目标值进行归一化
-        df[[target_column]] = scaler.fit_transform(df[[target_column]])        
-        # 对协变量值进行标准化 
+        # 对目标值进行归一化,标准化
+        df[[target_column]] = self.scaler.fit_transform(df[[target_column]])        
+        # 对协变量值进行归一化,标准化 
         for item in self.get_past_columns():
             if item==self.get_target_column():
                 continue
-            df[[item]] = stanard_scaler.fit_transform(df[[item]])                 
+            df[[item]] = self.scaler.fit_transform(df[[item]])                 
         # group需要转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')    
         value_cols = self.get_seq_columns()
@@ -79,7 +74,9 @@ class TFTSeriesDataset(TFTDataset):
         series_transformed = []
         future_covariates = []
         past_covariates = []
+        static_covariates = []
         series_total = []
+        
         for s_transformed in series:
             # 对于测试集再次切分，多出一部分用于协变量查询
             cut_size = s_transformed.pd_dataframe().shape[0] - self.pred_len
@@ -97,10 +94,22 @@ class TFTSeriesDataset(TFTDataset):
             s_transformed = s_transformed.drop_columns(ignore_cols)
             series_total.append(s_transformed)
             series_transformed.append(val_ser)
-            
+           
         # 分别返回用于训练预测的序列series_transformed，以及完整序列series
-        return series_transformed,past_covariates,future_covariates,series_total
-        
+        return series_transformed,past_covariates,future_covariates,static_covariates,series_total
+
+    def build_static_covariates(self,series):
+        """生成静态协变量"""
+        df = series.pd_dataframe()
+        columns = self.col_def["static_covariate_col"] 
+        static_covariates = TimeSeries.from_times_and_values(
+            times=df.index,
+            values=df[columns].values,
+            static_covariates=df["instrument"],
+            columns=columns,
+        )     
+        return static_covariates 
+            
     def build_future_covariates(self,series):
         """生成未来已知协变量"""
         df = series.pd_dataframe()

@@ -13,7 +13,8 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]                 
+              # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]  
+              col_list: &col_list ["STD5", "TURNOVER_CLOSE","PRICE_SCOPE"]                 
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -56,7 +57,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test5'
+               model_name: 'test6_tft'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:
@@ -73,6 +74,7 @@ task:
                 test: [2020-08-01, 2020-12-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             aug_type: 'no'
+            scaler_type: 'norm'
             step_len: *wave_period
             pred_len: *forecast_horizon
             over_time: 2          

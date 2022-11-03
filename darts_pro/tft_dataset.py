@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 from torch.utils.data.sampler import Sampler
 from torch.utils.data import DataLoader, Dataset
+from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 
@@ -33,7 +34,13 @@ class TFTDataset(DatasetH):
         self.col_def = col_def
         self.step_len = step_len
         self.pred_len = pred_len
-         
+        self.scaler_type = kwargs['scaler_type']
+        
+        if self.scaler_type == "norm":
+            self.scaler = MinMaxScaler()
+        else:
+            self.scaler = StandardScaler()  
+                     
     def config(self, **kwargs):
         if "step_len" in kwargs:
             self.step_len = kwargs.pop("step_len")

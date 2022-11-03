@@ -13,8 +13,7 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","CLOSE0"]      
-              col_list: &col_list ["STD5", "TURNOVER_CLOSE","PRICE_SCOPE"]            
+              col_list: &col_list ["STD5", "TURNOVER_CLOSE","PRICE_SCOPE"]               
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -44,21 +43,22 @@ port_analysis_config: &port_analysis_config
             min_cost: 5
 task:
     model:
-        class: TftNumpyModel
-        module_path: darts_pro.tft_process
+        class: LstmNumpyModel
+        module_path: darts_pro.lstm_process
         kwargs:
             GPU: 0
-            batch_size: 2048
+            batch_size: 128
             seed: 0
             n_jobs: 20
             type: 'train'
             n_epochs : 300
             optargs:
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft'
-               load_weight: True
+               model_name: 'test6_lstm'
+               load_weight: False
                wave_period : &wave_period 30
-               forecast_horizon: &forecast_horizon 1
+               wave_window : 5
+               forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTNumpyDataset
         module_path: darts_pro.tft_numpy_dataset
@@ -68,13 +68,14 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2010-08-31]
-                valid: [2010-09-01, 2010-12-31]
+                train: [2010-01-01, 2011-12-31]
+                valid: [2012-01-01, 2012-12-31]
                 test: [2017-01-01, 2020-08-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             data_type: 'date_range'
-            aug_type: 'no'
             scaler_type: 'norm'
+            aug_type: 'no'
+            model_type: 'lstm'
             step_len: *wave_period
             pred_len: *forecast_horizon
             over_time: 1         

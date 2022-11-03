@@ -1,5 +1,4 @@
 from qlib.data.dataset.handler import DataHandler, DataHandlerLP
-from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
 import numpy as np
 import pandas as pd
@@ -16,7 +15,7 @@ class TFTNumpyDataset(TFTDataset):
     自定义数据集，直接从numpy文件中获取数据，并进行相关处理
     """
 
-    def __init__(self, data_path=None,step_len = 30,pred_len = 5,aug_type="yes",low_threhold=-5,high_threhold=5,over_time=2,col_def={},**kwargs):
+    def __init__(self, data_path=None,step_len = 30,pred_len = 5,data_type="date_range",aug_type="yes",model_type="tft",low_threhold=-5,high_threhold=5,over_time=2,col_def={},**kwargs):
         super().__init__(col_def=col_def,step_len=step_len,pred_len=pred_len,**kwargs)
         
         self.future_covariate_col = col_def['future_covariate_col']
@@ -28,6 +27,8 @@ class TFTNumpyDataset(TFTDataset):
         self.aug_type = aug_type
         self.columns = self.get_seq_columns()
         self.training_cutoff = 0.8
+        self.model_type = model_type
+        self.data_type = data_type
         
         self.data = np.load(data_path,allow_pickle=True)
         self.training_data,self.val_data = self.build_data_split()
@@ -84,7 +85,7 @@ class TFTNumpyDataset(TFTDataset):
             else:
                 rtn_data = np.concatenate((rtn_data,combine_data),axis=0)
         return rtn_data
-        
+
     def enhance_data(self,data):              
         from cus_utils.common_compute import np_qcut,enhance_data_complex
         bins = [-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0, 1, 2, 3,4, 5, 6, 7,8, 9, 10]
@@ -123,7 +124,8 @@ class TFTNumpyDataset(TFTDataset):
             future_covariate_index,
             past_covariate_index,
             static_covariate_index,    
-            target_index        
+            target_index,
+            model_type=self.model_type   
         ) 
         
     def build_data_split(self):  
@@ -131,12 +133,26 @@ class TFTNumpyDataset(TFTDataset):
         
         time_begin = self.data[:,:,-1].min()
         time_end = self.data[:,:,-1].max()
-        # 根据长度取得切分点
-        sp_index = time_begin + (time_end - time_begin)*self.training_cutoff
-        # 训练集使用时间序列最后一个时间点进行切分
-        training_data = self.data[self.data[:,-1,-1]<sp_index]
-        # 测试集使用时间序列第一个时间点进行切分
-        val_data = self.data[self.data[:,0,-1]>sp_index]
+        # 使用时间范围筛选数据
+        if self.data_type=="date_range":
+            train_range = self.segments["train"]
+            train_start = int(train_range[0].strftime('%Y%m%d'))
+            train_end = int(train_range[1].strftime('%Y%m%d'))
+            valid_range = self.segments["valid"]
+            valid_start = int(valid_range[0].strftime('%Y%m%d'))
+            valid_end = int(valid_range[1].strftime('%Y%m%d'))         
+            training_data = self.data[(self.data[:,-1,-1]> train_start) & (self.data[:,-1,-1]<train_end)]
+            val_data = self.data[(self.data[:,0,-1]> valid_start) & (self.data[:,0,-1]<valid_end)]
+            # 测试集不进行筛选
+            val_index = np.random.randint(1,val_data.shape[0],(training_data.shape[0],))
+        else:
+            # 根据长度取得切分点
+            sp_index = time_begin + (time_end - time_begin)*self.training_cutoff
+            # 训练集使用时间序列最后一个时间点进行切分
+            training_data = self.data[self.data[:,-1,-1]<sp_index]
+            # 测试集使用时间序列第一个时间点进行切分
+            val_data = self.data[self.data[:,0,-1]>sp_index]
+            
         # 根据条件决定是否筛选数据，取得均衡
         if self.aug_type=="yes":
             # bins=[-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0, 1, 2, 3,4, 5, 6, 7,8, 9, 10]
@@ -147,7 +163,7 @@ class TFTNumpyDataset(TFTDataset):
             # val_data = val_data[val_index,:,:]         
             val_data = val_data[:15000,:,:]   
             # val_data = self.filter_balance_data_by_bins(val_data,bins=bins)
-        
+            
         # 归一化处理
         training_data = self.normolize(training_data)
         val_data = self.normolize(val_data)
@@ -156,10 +172,9 @@ class TFTNumpyDataset(TFTDataset):
     
     def normolize(self,data):
         # 对目标值进行归一化
-        scaler = MinMaxScaler()
-        stanard_scaler = StandardScaler()
+
         target_index = self.get_target_column_index()
-        data[:,:,target_index] = scaler.fit_transform(data[:,:,target_index])     
+        data[:,:,target_index] = self.scaler.fit_transform(data[:,:,target_index])     
         # 对协变量值进行标准化(归一化)
         for index in self.get_past_column_index():
             if index==self.get_target_column_index():
@@ -167,7 +182,7 @@ class TFTNumpyDataset(TFTDataset):
             # 相关字段需要首先进行标准化
             # if index in self.get_past_standard_column_index():
             #     self.data[:,:,index] = stanard_scaler.fit_transform(self.data[:,:,index]) 
-            data[:,:,index] = scaler.fit_transform(data[:,:,index])          
+            data[:,:,index] = self.scaler.fit_transform(data[:,:,index])          
         return data
     
     def view_datatime(self,training_data,val_data):
