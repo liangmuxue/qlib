@@ -1,5 +1,5 @@
 from darts.models import RNNModel, ExponentialSmoothing, BlockRNNModel
-from darts.models.forecasting.block_rnn_model import _BlockRNNModule
+from darts.models.forecasting.tcn_model import TCNModel
 from darts.utils.data.training_dataset import TrainingDataset
 from darts.utils.likelihood_models import Likelihood, QuantileRegression
 from darts.utils.torch import random_method
@@ -27,31 +27,30 @@ from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 logger = get_logger(__name__)
 
 
-class CusNorModel(RNNModel):
+class CusTcnModel(TCNModel):
     def __init__(
         self,
         input_chunk_length: int,
-        training_length: int,
-        model: Union[str, nn.Module] = "RNN",
-        hidden_dim: int = 25,
-        n_rnn_layers: int = 1,
-        hidden_fc_sizes: Optional[List] = None,
+        output_chunk_length: int,
+        kernel_size=5,
+        num_filters: int = 3,
+        num_layers: Optional[int] = None,
+        dilation_base: int = 2,
+        weight_norm: bool = False,
         dropout: float = 0.0,
-        model_type="lstm",
         **kwargs,
     ):
         """
         自定义model，直接使用numpy数据
         """
 
-        super().__init__(input_chunk_length,model,hidden_dim,n_rnn_layers,dropout=dropout,training_length=training_length,**kwargs)
+        super().__init__(input_chunk_length,output_chunk_length,dropout=dropout,num_filters=num_filters,num_layers=num_layers,kernel_size=kernel_size,
+                         dilation_base=dilation_base,weight_norm=weight_norm,**kwargs)
         self.super_fit_mode = False
-        self.model_type = model_type
         
     def _verify_train_dataset_type(self, train_dataset: TrainingDataset):
         if self.super_fit_mode:
-            if self.model_type in ["lstm","tcn"]:
-                super()._verify_train_dataset_type(train_dataset)          
+            super()._verify_train_dataset_type(train_dataset)          
         else:          
             raise_if_not(
                 isinstance(train_dataset, CustomNumpyDataset),
@@ -118,8 +117,7 @@ class CusNorModel(RNNModel):
         num_loader_workers: int = 0,
     ):        
         self.super_fit_mode = True
-        if self.model_type in ["lstm","tcn"]:
-            return super().fit(series,past_covariates,None,val_series,
+        return super().fit(series,past_covariates,None,val_series,
                                val_past_covariates,None,trainer,verbose,epochs,max_samples_per_ts,num_loader_workers)
         
     

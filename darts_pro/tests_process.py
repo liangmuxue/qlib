@@ -40,7 +40,7 @@ from darts_pro.data_extension.custom_nor_model import CusNorModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from .base_process import BaseNumpyModel
 
-class LstmNumpyModel(BaseNumpyModel):
+class TestsNumpyModel(BaseNumpyModel):
     def __init__(
         self,
         d_model: int = 64,
@@ -94,15 +94,15 @@ class LstmNumpyModel(BaseNumpyModel):
         # 生成tft时间序列训练数据集
         data_train = dataset.get_custom_numpy_dataset(mode="train")
         data_validation = dataset.get_custom_numpy_dataset(mode="valid")
-        self.numpy_data_view(dataset, data_train.numpy_data,title="train_data")
-        self.numpy_data_view(dataset, data_validation.numpy_data,title="valid_data")
+        self.numpy_data_view(dataset, data_train.numpy_data,title="train_data",no_convi=True)
+        self.numpy_data_view(dataset, data_validation.numpy_data,title="valid_data",no_convi=True)
         # 使用股票代码数量作为embbding长度
         # emb_size = np.unique(dataset.data[:,:,dataset.get_target_column_index()])
         emb_size = 1000
         load_weight = self.optargs["load_weight"]
         if load_weight:
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
-            self.model = BlockRNNModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
+            self.model = CusNorModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
             self.model.batch_size = self.batch_size     
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
@@ -123,25 +123,22 @@ class LstmNumpyModel(BaseNumpyModel):
             model_name = None
         my_model = CusNorModel(
             model_type=dataset.model_type,
-            model="GRU",
-            input_chunk_length=input_chunk_length,
+            model="LSTM",
+            training_length=input_chunk_length,
+            input_chunk_length=input_chunk_length-1,
             output_chunk_length=self.optargs["forecast_horizon"],
-            hidden_dim=10,
+            hidden_dim=20,
             n_rnn_layers=1,
-            loss_fn=torch.nn.L1Loss(),
             batch_size=self.batch_size,
             n_epochs=self.n_epochs,
-            dropout=0.1,
+            dropout=0,
             model_name=model_name,
             random_state=45,
             force_reset=True,
             log_tensorboard=True,
             save_checkpoints=True,
             work_dir=self.optargs["work_dir"],
-            lr_scheduler_cls=scheduler,
-            lr_scheduler_kwargs=scheduler_config,
-            optimizer_cls=optimizer_cls,
-            optimizer_kwargs={"lr": 1e-2},
+            optimizer_kwargs={"lr": 1e-3},
             pl_trainer_kwargs={"accelerator": "gpu", "devices": [0]}  
         )
         return my_model          
@@ -180,5 +177,26 @@ class LstmNumpyModel(BaseNumpyModel):
         
         self.predict_show(val_series_list, pred_series_list, series_total)
   
-        
+    def numpy_data_view(self,dataset,numpy_data,title="train_data",no_convi=False): 
+        viz_input = TensorViz(env="data_hist") 
+        wave_period = self.optargs["wave_period"]
+        forecast_horizon = self.optargs["forecast_horizon"]     
+        target_index = dataset.get_target_column_index()   
+        end = wave_period - forecast_horizon
+        value = numpy_data[:,forecast_horizon:end,target_index]
+        # 标签数据分布图
+        viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=title,title=title) 
+        if no_convi:
+            return
+        columns = dataset.get_past_columns() 
+        columns_index = dataset.get_past_column_index()
+        # 随机取得某些数据，并显示折线图
+        for i in random_int_list(1,numpy_data.shape[0]-1,3):
+            # 标签数据折线图
+            target_title= title + "_target_{}".format(i)
+            view_data = np.expand_dims(numpy_data[i,:,target_index],axis=-1)
+            viz_input.viz_matrix_var(view_data,win=target_title,title=target_title)              
+            sub_title = title + "_line_{}".format(i)
+            view_data = numpy_data[i,:,columns_index].transpose(1,0)
+            viz_input.viz_matrix_var(view_data,win=sub_title,title=sub_title,names=columns)           
         

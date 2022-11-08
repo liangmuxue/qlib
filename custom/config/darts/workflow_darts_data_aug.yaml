@@ -54,12 +54,12 @@ task:
             optargs:
                aug_type: 'combine'
                wave_period : 30
-               forecast_horizon: 1
+               forecast_horizon: 5
                wave_threhold: -10
                wave_window: 5
                over_time: 1
                wave_threhold_type: 'more'
-               save_path: 'custom/data/aug/darts/all_nor.npy'
+               save_path: 'custom/data/aug/darts/all_nor_price.npy'
                log_path: 'custom/data/lightning_logs'
     dataset:
         class: TFTDataset
@@ -75,6 +75,7 @@ task:
                 test: [2017-01-01, 2020-08-01]
             step_len: 30
             pred_len: 5   
+            scaler_type: 'norm'
             col_def:
                 col_list: *col_list
                 group_column: 'instrument'

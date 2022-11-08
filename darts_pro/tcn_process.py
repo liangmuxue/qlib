@@ -36,11 +36,10 @@ from darts.utils.likelihood_models import QuantileRegression
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
-from darts_pro.data_extension.custom_nor_model import CusNorModel
+from darts_pro.data_extension.custom_tcn_model import CusTcnModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
-from .base_process import BaseNumpyModel
 
-class LstmNumpyModel(BaseNumpyModel):
+class TcnNumpyModel(Model):
     def __init__(
         self,
         d_model: int = 64,
@@ -121,19 +120,19 @@ class LstmNumpyModel(BaseNumpyModel):
         model_name = self.optargs["model_name"]
         if not use_model_name:
             model_name = None
-        my_model = CusNorModel(
-            model_type=dataset.model_type,
-            model="GRU",
+        my_model = CusTcnModel(
             input_chunk_length=input_chunk_length,
             output_chunk_length=self.optargs["forecast_horizon"],
-            hidden_dim=10,
-            n_rnn_layers=1,
+            dilation_base=2,
+            weight_norm=True,
+            kernel_size=5,
+            num_filters=3,
             loss_fn=torch.nn.L1Loss(),
             batch_size=self.batch_size,
             n_epochs=self.n_epochs,
             dropout=0.1,
             model_name=model_name,
-            random_state=45,
+            random_state=48,
             force_reset=True,
             log_tensorboard=True,
             save_checkpoints=True,
@@ -156,29 +155,78 @@ class LstmNumpyModel(BaseNumpyModel):
         data_validation = dataset.get_custom_numpy_dataset(mode="valid")
         # 根据参数决定是否从文件中加载权重
         if model_name is not None:
-            my_model = CusNorModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"])      
+            my_model = CusTcnModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"])      
         my_model.numpy_predict(data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
     
     def predict(self, dataset: TFTSeriesDataset):
         if self.type!="predict":
             return 
+        lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
+        label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
+        label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"     
            
         model_name = self.optargs["model_name"]
         forecast_horizon = self.optargs["forecast_horizon"]
         my_model = self._build_model(dataset,emb_size=1000,use_model_name=False)
         val_series_list,past_covariates,future_covariates,static_covariates,series_total = dataset.get_series_data()
         # 首先需要进行fit设置
-        my_model.super_fit(val_series_list, past_covariates=past_covariates, future_covariates=future_covariates,
-                     val_series=val_series_list,val_past_covariates=past_covariates,val_future_covariates=future_covariates,
+        my_model.super_fit(val_series_list, past_covariates=past_covariates, future_covariates=None,
+                     val_series=val_series_list,val_past_covariates=past_covariates,val_future_covariates=None,
                      verbose=True,epochs=-1)            
         # 根据参数决定是否从文件中加载权重
         if model_name is not None:
-            my_model = CusNorModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"])       
+            my_model = CusTcnModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"])       
     
         # 对验证集进行预测，得到预测结果   
         pred_series_list = my_model.predict(n=forecast_horizon, series=val_series_list,past_covariates=past_covariates)
         
-        self.predict_show(val_series_list, pred_series_list, series_total)
-  
+        # 整个序列比较多，只比较某几个序列
+        
+        figsize = (9, 6)
+        # 创建比较序列，后面保持所有，或者自己指定长度
+        actual_series_list = []
+        for index,train_ser in enumerate(val_series_list):
+            ser_total = series_total[index]
+            # 从数据集后面截取一定长度的数据，作为比较序列
+            actual_series = ser_total[
+                ser_total.end_time() - (2 * forecast_horizon - 1) * ser_total.freq : 
+            ]
+            actual_series_list.append(actual_series)   
+        mape_all = 0
+        r = 10
+        for i in range(r):
+            pred_series = pred_series_list[i]
+            actual_series = actual_series_list[i]
+            # 与实际的数据集进行比较，比较的是两个数据集的交集
+            mape_item = mape(actual_series, pred_series)
+            mape_all = mape_all + mape_item
+            if i<r:
+                plt.figure(figsize=figsize)
+                # 实际数据集的结尾与预测序列对齐
+                pred_series.plot(label="forecast")            
+                actual_series[: pred_series.end_time()].plot(label="actual")           
+                plt.title("ser_{},MAPE: {:.2f}%".format(i,mape_item))
+                plt.legend()
+                plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],i))
+                plt.clf()                
+
+        mape_mean = mape_all/len(val_series_list)
+        print("mape_mean:",mape_mean)
+               
+    def numpy_data_view(self,dataset,numpy_data,title="train_data"): 
+        viz_input = TensorViz(env="data_hist") 
+        wave_period = self.optargs["wave_period"]
+        forecast_horizon = self.optargs["forecast_horizon"]     
+        target_index = dataset.get_target_column_index()   
+        start = wave_period - forecast_horizon
+        value = numpy_data[:,start:,target_index]
+        viz_input.viz_data_hist(value.reshape(-1),numbins=10,win=title,title=title) 
+        columns = dataset.get_past_columns() 
+        columns_index = dataset.get_past_column_index()
+        # 随机取得某些数据，并显示折线图
+        for i in random_int_list(1,numpy_data.shape[0],3):
+            sub_title = title + "_line_{}".format(i)
+            view_data = numpy_data[i,:,columns_index].transpose(1,0)
+            viz_input.viz_matrix_var(view_data,win=sub_title,title=sub_title,names=columns)        
         
         

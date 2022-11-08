@@ -65,6 +65,9 @@ class DataFilter():
           
             
         # 按股票分组，病进行滚动操作，查找指定期限内，符合阈值条件的多个系列
+        if group_column is None:
+            target_data = handle(data,wave_threhold,forecast_horizon,over_time)
+            return target_data
         target_data = data.groupby(group_column).apply(lambda data:handle(data,wave_threhold,forecast_horizon,over_time))
         print("do loop choice:{}".format(len(target_data)))
         target_data = target_data.dropna()

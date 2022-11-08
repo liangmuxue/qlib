@@ -55,7 +55,7 @@ task:
             n_epochs : -1
             optargs:
                data_type: 'combine'
-               data_path: 'custom/data/aug/darts/all_nor.npy'
+               data_path: 'custom/data/aug/darts/all_nor_price.npy'
                work_dir: 'custom/data/darts'
                model_name: 'test6_tft'
                wave_period : &wave_period 30
@@ -72,9 +72,11 @@ task:
                 train: [2008-01-01, 2014-12-31]
                 valid: [2015-01-01, 2016-12-31]
                 test: [2020-08-01, 2020-12-01]
-            data_path: 'custom/data/aug/darts/all_nor.npy'
+            data_path: 'custom/data/aug/darts/all_nor_price.npy'
             aug_type: 'no'
+            data_type: 'date_range'
             scaler_type: 'norm'
+            model_type: 'tft'
             step_len: *wave_period
             pred_len: *forecast_horizon
             over_time: 2          

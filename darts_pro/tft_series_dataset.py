@@ -82,8 +82,9 @@ class TFTSeriesDataset(TFTDataset):
             cut_size = s_transformed.pd_dataframe().shape[0] - self.pred_len
             val_ser,_ = s_transformed.split_after(cut_size)        
             # 生成未来协变量       
-            future = self.build_future_covariates(s_transformed)     
-            future_covariates.append(future)  
+            if self.model_type=="tft":
+                future = self.build_future_covariates(s_transformed)     
+                future_covariates.append(future)  
             # 生成过去协变量
             past = self.build_past_covariates(s_transformed,past_columns=past_columns) 
             past_covariates.append(past)

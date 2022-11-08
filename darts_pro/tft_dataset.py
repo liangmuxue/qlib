@@ -36,11 +36,6 @@ class TFTDataset(DatasetH):
         self.pred_len = pred_len
         self.scaler_type = kwargs['scaler_type']
         
-        if self.scaler_type == "norm":
-            self.scaler = MinMaxScaler()
-        else:
-            self.scaler = StandardScaler()  
-                     
     def config(self, **kwargs):
         if "step_len" in kwargs:
             self.step_len = kwargs.pop("step_len")
@@ -192,7 +187,13 @@ class TFTDataset(DatasetH):
     def get_target_column(self):
         """取得目标字段"""
         return self.col_def["target_column"]   
-        
+
+    def get_group_column_index(self):
+        """取得分组变量段对应下标"""
+        columns = self.get_seq_columns()
+        group_column = self.col_def["group_column"]
+        return columns.index(group_column)
+            
     def get_past_column_index(self):
         """取得过去协变量段对应下标"""
         columns = self.get_seq_columns()
@@ -217,14 +218,21 @@ class TFTDataset(DatasetH):
         target_column = self.col_def["time_column"]    
         return columns.index(target_column)
     
-    def get_feature_column_index(self):
+    def get_future_column_index(self):
         """取得特征字段对应下标"""
         columns = self.get_seq_columns()
         feature_columns = self.col_def["future_covariate_col"]    
         return [columns.index(column) for column in feature_columns]
  
-    def get_feature_and_target_column_index(self):
+    def get_future_and_target_column_index(self):
         """取得目标字段及特征字段对应下标"""
-        columns_index = self.get_feature_column_index() + [self.get_target_column_index()]
-        return columns_index        
+        columns_index = self.get_future_column_index() + [self.get_target_column_index()]
+        return columns_index       
+    
+    def get_scaler(self):
+        if self.scaler_type == "norm":
+            scaler = MinMaxScaler(feature_range=(0, 1))
+        else:
+            scaler = StandardScaler()    
+        return scaler      
     

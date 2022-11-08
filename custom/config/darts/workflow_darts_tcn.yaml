@@ -13,7 +13,8 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              col_list: &col_list ["STD5", "TURNOVER_CLOSE","PRICE_SCOPE"]               
+              # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","CLOSE0"]      
+              col_list: &col_list ["STD5", "TURNOVER_CLOSE","PRICE_SCOPE"]            
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -43,21 +44,20 @@ port_analysis_config: &port_analysis_config
             min_cost: 5
 task:
     model:
-        class: LstmNumpyModel
-        module_path: darts_pro.lstm_process
+        class: TcnNumpyModel
+        module_path: darts_pro.tcn_process
         kwargs:
             GPU: 0
-            batch_size: 16
+            batch_size: 2048
             seed: 0
             n_jobs: 20
             type: 'train'
-            n_epochs : 3000
+            n_epochs : 300
             optargs:
                work_dir: 'custom/data/darts'
-               model_name: 'test6_lstm'
+               model_name: 'test6_tcn'
                load_weight: False
                wave_period : &wave_period 30
-               wave_window : 5
                forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTNumpyDataset
@@ -68,18 +68,17 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2020-08-31]
-                valid: [2020-09-01, 2020-10-15]
+                train: [2010-01-01, 2010-08-31]
+                valid: [2010-09-01, 2010-12-31]
                 test: [2017-01-01, 2020-08-01]
-            data_path: 'custom/data/aug/darts/all_nor_price.npy'
+            data_path: 'custom/data/aug/darts/all_nor.npy'
             data_type: 'date_range'
-            instrument_pick: [600520,600521]
             aug_type: 'no'
+            model_type: 'tcn'
             scaler_type: 'norm'
-            model_type: 'lstm'
             step_len: *wave_period
             pred_len: *forecast_horizon
-            over_time: 2         
+            over_time: 1         
             low_threhold: -5
             high_threhold: 5   
             col_def:
@@ -88,7 +87,8 @@ task:
                 target_column: 'label'
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek']   
-                past_covariate_col: ["STD5", "PRICE_SCOPE"]   
+                past_covariate_col: *col_list
+                past_covariate_standard_col: ["TURNOVER_CLOSE", "TMA5"]
                 static_covariate_col: ['instrument']    
 
     record: 

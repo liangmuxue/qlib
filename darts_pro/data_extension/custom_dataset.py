@@ -4,6 +4,7 @@ from darts.utils.data.sequential_dataset import (
 
 from typing import Optional, List, Tuple, Union
 import numpy as np
+from numba.core.types import none
 
 class CustomNumpyDataset(SplitCovariatesTrainingDataset):
     def __init__(
@@ -62,12 +63,29 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
             )
         
         if self.model_type=="lstm":
+            past_target = row[:self.input_chunk_length,self.target_index:self.target_index+1]
+            past_covariate = row[:self.input_chunk_length,self.past_covariate_index]
+            if len(self.future_covariate_index)==0:
+                future_covariate = None
+                historic_future_covariate = None
+            else:
+                future_covariate = row[self.input_chunk_length:,self.future_covariate_index]
+                historic_future_covariate = row[self.output_chunk_length:,self.future_covariate_index]
+            future_target = row[self.output_chunk_length:,self.target_index:self.target_index+1]
+            static_covariate = np.expand_dims(row[0,self.static_covariate_index],axis=0)           
             return (
                 past_target,
                 past_covariate,
+                future_covariate,
                 None,
                 future_target
             )            
             
-            
+        if self.model_type=="tcn":
+            return (
+                past_target,
+                past_covariate,
+                None,
+                future_target.transpose(1,0)
+            )             
             
