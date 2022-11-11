@@ -31,6 +31,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR,CosineAnnealingWarmRestar
 
 from tft.tft_dataset import TFTDataset
 from darts.utils.likelihood_models import QuantileRegression
+from .tft_comp_stock import process
 
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
@@ -85,10 +86,15 @@ class TftNumpyModel(BaseNumpyModel):
             # 只进行数据处理模式
             self.build_aug_data(dataset)
             return      
+        
         if self.type.startswith("data_view"):
             # 只进行数据处理模式
             self.data_view(dataset)
-            return           
+            return      
+        if self.type.startswith("train_dataframe"):
+            # 只进行数据处理模式
+            self.train_dataframe(dataset)
+            return               
         if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
@@ -190,8 +196,27 @@ class TftNumpyModel(BaseNumpyModel):
         if model_name is not None:
             my_model = TFTCusModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"])      
         my_model.numpy_predict(data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
-    
+
+    def train_dataframe(self, dataset: TFTSeriesDataset):
+         
+        def view_df(df,target_title):
+            viz_input = TensorViz(env="data_hist")
+            view_data = df[["label"]].values
+            viz_input.viz_matrix_var(view_data,win=target_title,title=target_title)  
+                    
+        df = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
+        view_df(df,"ori_label")
+        # 使用后5天的移动平均值作为目标数值
+        df["label"]  = df.groupby("instrument")["label"].shift(5).rolling(window=5,min_periods=1).mean()   
+        df = df.dropna()    
+        view_df(df,"mean_label")
+        process(df)
+            
     def predict(self, dataset: TFTSeriesDataset):
+        if self.type=="predict_dataframe":
+            self.predict_dataframe(dataset)
+            return        
         if self.type!="predict":
             return 
            

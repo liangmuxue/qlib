@@ -131,7 +131,7 @@ class TestsNumpyModel(BaseNumpyModel):
             n_rnn_layers=1,
             batch_size=self.batch_size,
             n_epochs=self.n_epochs,
-            dropout=0,
+            dropout=0.1,
             model_name=model_name,
             random_state=45,
             force_reset=True,

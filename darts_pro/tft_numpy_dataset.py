@@ -135,6 +135,19 @@ class TFTNumpyDataset(TFTDataset):
         
         time_begin = self.data[:,:,-1].min()
         time_end = self.data[:,:,-1].max()
+        data = self.data
+        # 选择指定股票
+        if self.instrument_pick is not None:
+            ins_index = self.get_group_column_index()
+            data_array = None
+            for instrument in self.instrument_pick:
+                data_item = self.data[self.data[:,0,ins_index]==instrument,:,:]
+                if data_array is None:
+                    data_array = data_item
+                else:
+                    data_array = np.concatenate((data_array,data_item),axis=0)
+            data = data_array
+            
         # 使用时间范围筛选数据
         if self.data_type=="date_range":
             train_range = self.segments["train"]
@@ -143,31 +156,14 @@ class TFTNumpyDataset(TFTDataset):
             valid_range = self.segments["valid"]
             valid_start = int(valid_range[0].strftime('%Y%m%d'))
             valid_end = int(valid_range[1].strftime('%Y%m%d'))         
-            training_data = self.data[(self.data[:,-1,-1]> train_start) & (self.data[:,-1,-1]<train_end)]
-            val_data = self.data[(self.data[:,0,-1]> valid_start) & (self.data[:,0,-1]<valid_end)]
-            # 选择指定股票
-            if self.instrument_pick is not None:
-                ins_index = self.get_group_column_index()
-                training_data_array = None
-                val_data_array = None
-                for instrument in self.instrument_pick:
-                    training_data_item = training_data[training_data[:,0,ins_index]==instrument,:,:]
-                    val_data_item = val_data[val_data[:,0,ins_index]==instrument,:,:]
-                    if training_data_array is None:
-                        training_data_array = training_data_item
-                        val_data_array = val_data_item
-                    else:
-                        training_data_array = np.concatenate((training_data_array,training_data_item),axis=0)
-                        val_data_array = np.concatenate((val_data_array,val_data_item),axis=0)
-                training_data = training_data_array
-                val_data = val_data_array
+
         else:
             # 根据长度取得切分点
             sp_index = time_begin + (time_end - time_begin)*self.training_cutoff
             # 训练集使用时间序列最后一个时间点进行切分
-            training_data = self.data[self.data[:,-1,-1]<sp_index]
+            training_data = data[data[:,-1,-1]<sp_index]
             # 测试集使用时间序列第一个时间点进行切分
-            val_data = self.data[self.data[:,0,-1]>sp_index]
+            val_data = data[data[:,0,-1]>sp_index]
             
         # 根据条件决定是否筛选数据，取得均衡
         if self.aug_type=="yes":
@@ -181,29 +177,47 @@ class TFTNumpyDataset(TFTDataset):
             # val_data = self.filter_balance_data_by_bins(val_data,bins=bins)
             
         # 归一化处理
-        training_data = self.normolize(training_data)
-        val_data = self.normolize(val_data)
+        training_data,val_data = self.normolize(data,(train_start,train_end),(valid_start,valid_end))
         
         return training_data,val_data
     
-    def normolize(self,data):
-        # 对目标值进行归一化
-
+    def normolize(self,data,training_range=None,val_range=None):
+        """对数据进行归一化"""
+        
+        train_start,train_end = training_range
+        valid_start,valid_end = val_range
+        training_data = data[(data[:,-1,-1]> train_start) & (data[:,-1,-1]<train_end)]
+        val_data = data[(data[:,0,-1]> valid_start) & (data[:,0,-1]<valid_end)]
+        
+        # 目标数据归一化
+        target_scaler = self.get_scaler()
         target_index = self.get_target_column_index()
-        data[:,:,target_index] = self.scaler.fit_transform(data[:,:,target_index])     
-        # 对协变量值进行标准化(归一化)
+        training_data[:,:,target_index] = target_scaler.fit_transform(training_data[:,:,target_index])   
+        val_data[:,:,target_index] = target_scaler.transform(val_data[:,:,target_index]) 
+                
+        def transfer_data(column_index):
+            scaler = self.get_scaler()
+            scaler.fit(training_data[:,:,column_index])      
+            t_data = scaler.transform(training_data[:,:,column_index])     
+            v_data = scaler.transform(val_data[:,:,column_index]) 
+            return  t_data, v_data    
+        
+        # 对过去协变量值进行标准化(归一化)
         for index in self.get_past_column_index():
-            if index==self.get_target_column_index():
-                continue
-            # 相关字段需要首先进行标准化
-            # if index in self.get_past_standard_column_index():
-            #     self.data[:,:,index] = stanard_scaler.fit_transform(self.data[:,:,index]) 
-            data[:,:,index] = self.scaler.fit_transform(data[:,:,index])          
-        return data
+            training_data[:,:,index],val_data[:,:,index] = transfer_data(index)
+
+        # 对未来协变量值进行标准化(归一化)
+        for index in self.get_future_column_index():
+            training_data[:,:,index],val_data[:,:,index] = transfer_data(index)
+                        
+        return training_data,val_data
     
-    def view_datatime(self,training_data,val_data):
-        t_time = training_data[:,:,-1]
-        v_time = val_data[:,:,-1]
-        print("training time max:{},val time min:{}".format(t_time.max(), v_time.min()))
+    # def get_seq_columns(self):  
+    #     time_column = self.col_def["time_column"]
+    #     target_column = self.col_def["target_column"]      
+    #     future_columns = self.col_def["future_covariate_col"]  
+    #     columns = [time_column] + future_columns + [target_column]
+    #     return columns 
+           
         
     

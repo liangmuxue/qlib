@@ -69,8 +69,9 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
                 future_covariate = None
                 historic_future_covariate = None
             else:
-                future_covariate = row[self.input_chunk_length:,self.future_covariate_index]
+                future_covariate = row[self.output_chunk_length:,self.future_covariate_index]
                 historic_future_covariate = row[self.output_chunk_length:,self.future_covariate_index]
+            # lstm模式下，shift一直为1，因此使用滚动数据
             future_target = row[self.output_chunk_length:,self.target_index:self.target_index+1]
             static_covariate = np.expand_dims(row[0,self.static_covariate_index],axis=0)           
             return (

@@ -264,7 +264,15 @@ def test_viz():
     ts.plot()
     plt.show()
     print("plot end")
-             
+
+def test_shift():
+    data = [1, 2, 3, 4, 5]
+    # Creating dataframe using 'data' and 'index'
+    df = pd.DataFrame(data = data, columns = ['value'])
+    print(df)    
+    df['mean'] = df['value'].rolling(window=3,min_periods=1).mean() 
+    print("df after",df)
+                 
 def test_build_datetime():        
     begin_date = '2010-10-16'
     end_date = '2011-10-1'     
@@ -274,7 +282,8 @@ def test_build_datetime():
     
 if __name__ == "__main__":
     # test_pd_index()
-    test_pd_timeser()
+    # test_pd_timeser()
+    test_shift()
     # test_join()
     # test_merge()
     # test_columns()

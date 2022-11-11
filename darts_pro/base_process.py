@@ -53,8 +53,8 @@ class BaseNumpyModel(Model):
         # 股票代码(即分组字段)转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')
         data_filter = DataFilter()
-        # 使用后几天（根据预测长度而定）的移动平均值作为目标数值
-        # df[target_column]  = df.groupby(group_column)[target_column].shift(-wave_window).rolling(window=wave_window,min_periods=1).mean()
+        # 使用前几天（根据预测长度而定）的移动平均值作为目标数值
+        df[target_column]  = df.groupby(group_column)[target_column].shift(wave_window).rolling(window=wave_window,min_periods=1).mean()
         df = df.dropna().reset_index(drop=True)
         # 按照规则进行数据筛选
         wave_data = data_filter.filter_wave_data(df, target_column=target_column, group_column=group_column,forecast_horizon=forecast_horizon,wave_period=wave_period,

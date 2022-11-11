@@ -123,12 +123,13 @@ class LstmNumpyModel(BaseNumpyModel):
             model_name = None
         my_model = CusNorModel(
             model_type=dataset.model_type,
-            model="GRU",
+            model="LSTM",
+            training_length=input_chunk_length,
             input_chunk_length=input_chunk_length,
             output_chunk_length=self.optargs["forecast_horizon"],
-            hidden_dim=10,
+            hidden_dim=20,
             n_rnn_layers=1,
-            loss_fn=torch.nn.L1Loss(),
+            # loss_fn=torch.nn.L1Loss(),
             batch_size=self.batch_size,
             n_epochs=self.n_epochs,
             dropout=0.1,
@@ -138,10 +139,7 @@ class LstmNumpyModel(BaseNumpyModel):
             log_tensorboard=True,
             save_checkpoints=True,
             work_dir=self.optargs["work_dir"],
-            lr_scheduler_cls=scheduler,
-            lr_scheduler_kwargs=scheduler_config,
-            optimizer_cls=optimizer_cls,
-            optimizer_kwargs={"lr": 1e-2},
+            optimizer_kwargs={"lr": 1e-3},
             pl_trainer_kwargs={"accelerator": "gpu", "devices": [0]}  
         )
         return my_model          

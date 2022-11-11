@@ -235,4 +235,9 @@ class TFTDataset(DatasetH):
         else:
             scaler = StandardScaler()    
         return scaler      
+
+    def view_datatime(self,training_data,val_data):
+        t_time = training_data[:,:,-1]
+        v_time = val_data[:,:,-1]
+        print("training time max:{},val time min:{}".format(t_time.max(), v_time.min()))    
     

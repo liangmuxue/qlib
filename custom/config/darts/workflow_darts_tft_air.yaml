@@ -1,20 +1,19 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market test_single
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
-    end_time: 2021-12-31
+    end_time: 2020-12-31
     fit_start_time: 2008-01-01
-    fit_end_time: 2021-12-31
+    fit_end_time: 2020-12-31
     instruments: *market
     infer_processors:
         - class: FilterCol
           kwargs:
               fields_group: feature
-              # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]  
-              col_list: &col_list ["STD5", "TURNOVER_CLOSE","PRICE_SCOPE"]                 
+              col_list: &col_list ['Year','Month']        
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -48,21 +47,20 @@ task:
         module_path: darts_pro.tft_process
         kwargs:
             GPU: 0
-            batch_size: 128
+            batch_size: 4096
             seed: 0
             n_jobs: 20
-            type: 'predict'
-            n_epochs : -1
+            type: 'train'
+            n_epochs : 300
             optargs:
-               data_type: 'combine'
-               data_path: 'custom/data/aug/darts/all_nor_price.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft'
-               wave_period : &wave_period 30
-               forecast_horizon: &forecast_horizon 5
+               model_name: 'test6_tft_air'
+               load_weight: False
+               wave_period : &wave_period 16
+               forecast_horizon: &forecast_horizon 1
     dataset:
-        class: TFTSeriesDataset
-        module_path: darts_pro.tft_series_dataset
+        class: TFTNumpyDataset
+        module_path: darts_pro.tft_numpy_dataset
         kwargs:
             handler:
                 class: TftDataHandler
@@ -70,17 +68,17 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train: [2010-01-01, 2020-08-31]
-                valid: [2020-09-01, 2020-11-15]
-                test: [2021-01-01, 2021-03-01]
-            data_path: 'custom/data/aug/darts/all_nor.npy'
+                valid: [2020-09-01, 2020-10-15]
+                test: [2017-01-01, 2020-08-01]
+            data_path: 'custom/data/aug/tests/air.npy'
+            data_type: 'combine'
+            # instrument_pick: [600520,600521]
             aug_type: 'no'
-            data_type: 'date_range'
-            instrument_pick: [600520,600521,600522]
             scaler_type: 'norm'
             model_type: 'tft'
             step_len: *wave_period
             pred_len: *forecast_horizon
-            over_time: 2          
+            over_time: 2         
             low_threhold: -5
             high_threhold: 5   
             col_def:
@@ -88,9 +86,9 @@ task:
                 group_column: 'instrument'
                 target_column: 'label'
                 time_column: 'time_idx'    
-                future_covariate_col: ['dayofweek']   
-                past_covariate_col: ['STD5','PRICE_SCOPE'] 
-                static_covariate_col: ['instrument']    
+                future_covariate_col: ['Year','Month']   
+                past_covariate_col: []    
+                static_covariate_col: []    
 
     record: 
         - class: TftRecord

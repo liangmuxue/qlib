@@ -54,12 +54,12 @@ class TFTSeriesDataset(TFTDataset):
         df[target_column]  = df.groupby(group_column)[target_column].shift(-self.pred_len).rolling(window=self.pred_len,min_periods=1).mean()
         df = df.dropna()      
         # 对目标值进行归一化,标准化
-        df[[target_column]] = self.scaler.fit_transform(df[[target_column]])        
+        df[[target_column]] = self.get_scaler().fit_transform(df[[target_column]])        
         # 对协变量值进行归一化,标准化 
         for item in self.get_past_columns():
             if item==self.get_target_column():
                 continue
-            df[[item]] = self.scaler.fit_transform(df[[item]])                 
+            df[[item]] = self.get_scaler().fit_transform(df[[item]])                 
         # group需要转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')    
         value_cols = self.get_seq_columns()

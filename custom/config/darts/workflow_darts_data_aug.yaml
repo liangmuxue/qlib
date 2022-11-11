@@ -59,7 +59,7 @@ task:
                wave_window: 5
                over_time: 1
                wave_threhold_type: 'more'
-               save_path: 'custom/data/aug/darts/all_nor_price.npy'
+               save_path: 'custom/data/aug/darts/all_nor.npy'
                log_path: 'custom/data/lightning_logs'
     dataset:
         class: TFTDataset
