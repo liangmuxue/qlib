@@ -126,6 +126,15 @@ def test_group():
     df['val2'] = df.groupby('account')['val'].transform('nth', -1)
     print (df)
 
+def test_group2():
+    np.random.seed(2015)
+    df = pd.DataFrame({'instrument': [3, 6, 9] * 3,
+                       'val': np.random.choice([0, 1],size=9)})
+    print (df)
+    df_rank = df.instrument.rank(method='dense',ascending=False)
+    dg = df.groupby('instrument')
+    print (dg)
+    
 def test_diff():
     df = pd.DataFrame({"idx":list("11122233444446666"),"timeidx":list("13413579134561589")})
     df['idx'] = df['idx'].astype(int)
@@ -283,11 +292,11 @@ def test_build_datetime():
 if __name__ == "__main__":
     # test_pd_index()
     # test_pd_timeser()
-    test_shift()
+    # test_shift()
     # test_join()
     # test_merge()
     # test_columns()
-    # test_group()
+    test_group2()
     # test_diff()
     # test_vis()
     # test_tft_vis()

@@ -184,10 +184,23 @@ class TFTDataset(DatasetH):
         past_covariate_col = self.col_def["past_covariate_col"] 
         return past_covariate_col  
 
+    def get_group_column(self):
+        """取得分组字段"""
+        return self.col_def["group_column"]   
+
+    def get_group_rank_column(self):
+        """取得分组rank字段"""
+        return self.col_def["group_rank_column"]   
+        
     def get_target_column(self):
         """取得目标字段"""
-        return self.col_def["target_column"]   
+        return self.col_def["target_column"]       
 
+    def get_future_columns(self):
+        """取得未来协变量字段名"""
+        feature_columns = self.col_def["future_covariate_col"]    
+        return feature_columns
+    
     def get_group_column_index(self):
         """取得分组变量段对应下标"""
         columns = self.get_seq_columns()
