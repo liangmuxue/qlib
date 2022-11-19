@@ -102,7 +102,7 @@ class BaseNumpyModel(Model):
             ]
             actual_series_list.append(actual_series)   
         mape_all = 0
-        r = 10
+        r = 3
         for i in range(len(val_series_list)):
             pred_series = pred_series_list[i]
             actual_series = actual_series_list[i]

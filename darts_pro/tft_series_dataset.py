@@ -61,7 +61,7 @@ class TFTSeriesDataset(TFTDataset):
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
         return df    
         
-    def get_series_data(self):
+    def get_series_data(self,type="train"):
         """从pandas数据取得时间序列类型数据"""
         
         group_column = self.get_group_rank_column()
@@ -70,9 +70,12 @@ class TFTSeriesDataset(TFTDataset):
         past_columns = self.get_past_columns()
         future_columns = self.get_future_columns()
         
-        valid_range = self.segments["valid"]
+        # train模式表示进行训练，使用全集和验证集，test模式表示进行测试，使用全集和测试集
+        if type=="train":
+            valid_range = self.segments["valid"]
+        else:
+            valid_range = self.segments["test"]
         valid_start = int(valid_range[0].strftime('%Y%m%d'))
-        valid_end = int(valid_range[1].strftime('%Y%m%d')) 
         
         df_all = self.df_all
         df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_start))]
@@ -131,7 +134,63 @@ class TFTSeriesDataset(TFTDataset):
         # 分别返回用于训练预测的序列series_transformed，以及完整序列series
         return train_series_transformed,val_series_transformed,past_convariates,future_convariates
 
+    def get_pred_series_data(self):
+        """从pandas数据取得时间序列类型数据,用于预测过程"""
+        
+        # 首先取得pandas原始数据,使用test数据集
+        df_test = self.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        # 前处理
+        df_test = self._pre_process_df(df_test)        
+        group_column = self.get_group_rank_column()
+        target_column = self.get_target_column()
+        time_column = self.col_def["time_column"]
+        past_columns = self.get_past_columns()
+        future_columns = self.get_future_columns()
+    
+        # 分别生成训练和测试序列数据
+        pred_series = TimeSeries.from_group_dataframe(df_test,
+                                                time_col=time_column,
+                                                 group_cols=group_column,# 会自动成为静态协变量
+                                                 freq='D',
+                                                 fill_missing_dates=True,
+                                                 value_cols=target_column)    
+ 
+        series_transformed = []
+        val_series_transformed = []
+        
+        # 生成归一化的目标序列
+        for index,ts in enumerate(pred_series):
+            target_scaler = Scaler()
+            s_transformed = target_scaler.fit_transform(ts)
+            series_transformed.append(s_transformed)
+            # 去掉预测长度部分数据作为预测数据，保证数据对齐
+            cut_size = s_transformed.time_index.stop - self.pred_len - 1
+            val_transformed,_ = s_transformed.split_after(cut_size)             
+            val_series_transformed.append(val_transformed)
+        
+        def build_covariates(column_names):
+            covariates_array = []
+            for series in series_transformed:
+                group_col_val = series.static_covariates[group_column].values[0]
+                scaler = Scaler()
+                # 遍历并筛选出不同分组字段(股票)的单个dataframe
+                df_item = df_test[df_test[group_column]==group_col_val]
+                covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
+                                                         freq='D',
+                                                         fill_missing_dates=True,
+                                                         value_cols=column_names)     
+                covariates_transformed = scaler.fit_transform(covariates)    
+                covariates_array.append(covariates_transformed)
+            return covariates_array            
 
+        # 生成过去协变量，并归一化
+        past_convariates = build_covariates(past_columns)      
+        # 生成未来协变量，并归一化
+        future_convariates = build_covariates(future_columns)                   
+
+        # 分别返回用于训练预测的序列series_transformed，以及相关协变量
+        return series_transformed,val_series_transformed,past_convariates,future_convariates
+    
     def normolize(self,data,training_range=None,val_range=None):
         """对数据进行归一化"""
         

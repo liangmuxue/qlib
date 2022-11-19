@@ -61,7 +61,7 @@ task:
                forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTSeriesDataset
-        module_path: darts_pro.tft_series_dataset
+        module_path: darts_pro.tft_series_dataset_ori
         kwargs:
             handler:
                 class: TftDataHandler
@@ -73,6 +73,7 @@ task:
                 test: [2021-08-01, 2021-12-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             aug_type: 'no'
+            scaler_type: 'norm'
             step_len: *wave_period
             pred_len: *forecast_horizon
             over_time: 2          

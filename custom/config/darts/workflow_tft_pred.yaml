@@ -62,7 +62,7 @@ task:
                forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTSeriesDataset
-        module_path: darts_pro.tft_series_dataset
+        module_path: darts_pro.tft_series_dataset_ori
         kwargs:
             handler:
                 class: TftDataHandler

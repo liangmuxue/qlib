@@ -57,20 +57,20 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft_exp'
+               model_name: 'test6_tft_exp_one'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTSeriesDataset
-        module_path: darts_pro.tft_series_dataset
+        module_path: darts_pro.tft_series_dataset_ori
         kwargs:
             handler:
                 class: TftDataHandler
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2020-08-31]
-                valid: [2020-09-01, 2020-11-15]
+                train: [2010-01-01, 2021-03-01]
+                valid: [2021-01-01, 2021-03-01]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             aug_type: 'no'

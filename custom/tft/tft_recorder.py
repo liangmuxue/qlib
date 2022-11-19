@@ -44,10 +44,12 @@ class TftRecord(SignalRecord):
         if isinstance(pred, pd.Series):
             pred = pred.to_frame("score")
         self.save(**{"pred.pkl": pred})
-
+    
         logger.info(
             f"Signal record 'pred.pkl' has been saved as the artifact of the Experiment {self.recorder.experiment_id}"
         )
+        return
+    
         # print out results
         pprint(f"The following are prediction results of the {type(self.model).__name__} model.")
         pprint(pred.head(5))

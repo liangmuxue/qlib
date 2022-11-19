@@ -58,7 +58,7 @@ def process(df):
     series = series.astype(np.float32)
     
     # Create training and validation sets:
-    training_cutoff = 1560
+    training_cutoff = 2479
     train, val = series.split_after(training_cutoff)
     
     # Normalize the time series (note: we avoid fitting the transformer on the validation set)
@@ -111,36 +111,46 @@ def process(df):
     input_chunk_length = 25
     forecast_horizon = 5
     n_epochs = 100
-    my_model = TFTModel(
-        input_chunk_length=input_chunk_length,
-        output_chunk_length=forecast_horizon,
-        hidden_size=64,
-        lstm_layers=1,
-        num_attention_heads=4,
-        dropout=0.1,
-        batch_size=128,
-        n_epochs=n_epochs,
-        model_name="Stock_TFT",
-        add_relative_index=True,
-        add_encoders=None,
-        likelihood=QuantileRegression(
-            quantiles=quantiles
-        ),  # QuantileRegression is set per default
-        # loss_fn=MSELoss(),
-        random_state=42,
-        log_tensorboard=True,
-        force_reset=True,
-        save_checkpoints=True,
-        work_dir="custom/data/darts",
-        pl_trainer_kwargs={"accelerator": "gpu", "devices": [0]}     
-    )
+    # my_model = TFTModel(
+    #     input_chunk_length=input_chunk_length,
+    #     output_chunk_length=forecast_horizon,
+    #     hidden_size=64,
+    #     lstm_layers=1,
+    #     num_attention_heads=4,
+    #     dropout=0.1,
+    #     batch_size=128,
+    #     n_epochs=n_epochs,
+    #     model_name="Stock_TFT",
+    #     add_relative_index=True,
+    #     add_encoders=None,
+    #     likelihood=QuantileRegression(
+    #         quantiles=quantiles
+    #     ),  # QuantileRegression is set per default
+    #     # loss_fn=MSELoss(),
+    #     random_state=42,
+    #     log_tensorboard=True,
+    #     force_reset=True,
+    #     save_checkpoints=True,
+    #     work_dir="custom/data/darts",
+    #     pl_trainer_kwargs={"accelerator": "gpu", "devices": [0]}     
+    # )
     
     # my_model = TFTModel.load_from_checkpoint("Stock_TFT",work_dir="custom/data/darts",best=True)
-    
-    
-    my_model.fit(train_transformed, future_covariates=covariates_transformed, val_series=val_transformed[30:],
+    my_model = TFTModel.load_from_checkpoint("test6_tft_exp_one",work_dir="custom/data/darts",best=True)
+
+    # datapath = "custom/data/darts/dump_data"
+    # train_transformed.to_pickle(datapath + "/train.pkl")
+    # covariates_transformed.to_pickle(datapath + "/future.pkl")
+    # val_transformed.to_pickle(datapath + "/val.pkl")
+    # covariates_transformed_past.to_pickle(datapath + "/past.pkl")    
+    # datapath = "custom/data/darts/dump_data"
+    # train_transformed = TimeSeries.from_pickle(datapath + "/train.pkl")
+    # covariates_transformed = TimeSeries.from_pickle(datapath + "/future.pkl")
+    # val_transformed = TimeSeries.from_pickle(datapath + "/val.pkl")
+    # covariates_transformed_past = TimeSeries.from_pickle(datapath + "/past.pkl")  
+    my_model.fit(train_transformed, future_covariates=covariates_transformed, val_series=val_transformed,
                  val_future_covariates=covariates_transformed,past_covariates=covariates_transformed_past,val_past_covariates=covariates_transformed_past,
-                 verbose=True,epochs=n_epochs)
+                 verbose=True,epochs=-1)
     
     
     def eval_model(model, n, actual_series, val_series):
@@ -148,7 +158,7 @@ def process(df):
     
         # plot actual series
         plt.figure(figsize=figsize)
-        actual_series[1500: pred_series.end_time()].plot(label="actual")
+        actual_series[2400: pred_series.end_time()].plot(label="actual")
     
         # plot prediction with quantile ranges
         pred_series.plot(
@@ -159,6 +169,7 @@ def process(df):
         plt.title("MAPE: {:.2f}%".format(mape(val_series, pred_series)))
         plt.legend()
         plt.savefig('custom/data/darts/result_view/eval_exp.jpg')
+        print("MAPE: {:.2f}%".format(mape(val_series, pred_series)))
     
     eval_model(my_model, 15, series_transformed, val_transformed)
     
