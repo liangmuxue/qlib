@@ -384,48 +384,48 @@ class TFTExtModel(TFTModel):
                          add_relative_index,loss_fn,likelihood,norm_type,**kwargs)
 
 
-    def _build_train_dataset(
-        self,
-        target: Sequence[TimeSeries],
-        past_covariates: Optional[Sequence[TimeSeries]],
-        future_covariates: Optional[Sequence[TimeSeries]],
-        max_samples_per_ts: Optional[int],
-    ) -> MixedCovariatesSequentialDataset:
-
-        raise_if(
-            future_covariates is None and not self.add_relative_index,
-            "TFTModel requires future covariates. The model applies multi-head attention queries on future "
-            "inputs. Consider specifying a future encoder with `add_encoders` or setting `add_relative_index` "
-            "to `True` at model creation (read TFT model docs for more information). "
-            "These will automatically generate `future_covariates` from indexes.",
-            logger,
-        )
-
-        return MixedCovariatesSequentialDataset(
-            target_series=target,
-            past_covariates=past_covariates,
-            future_covariates=future_covariates,
-            input_chunk_length=self.input_chunk_length,
-            output_chunk_length=self.output_chunk_length,
-            max_samples_per_ts=max_samples_per_ts,
-            use_static_covariates=False,
-        )     
-        
-    def _build_inference_dataset(
-        self,
-        target: Sequence[TimeSeries],
-        n: int,
-        past_covariates: Optional[Sequence[TimeSeries]],
-        future_covariates: Optional[Sequence[TimeSeries]],
-    ) -> MixedCovariatesInferenceDataset:
-
-        return MixedCovariatesInferenceDataset(
-            target_series=target,
-            past_covariates=past_covariates,
-            future_covariates=future_covariates,
-            n=n,
-            input_chunk_length=self.input_chunk_length,
-            output_chunk_length=self.output_chunk_length,
-            use_static_covariates=False,
-        )              
+    # def _build_train_dataset(
+    #     self,
+    #     target: Sequence[TimeSeries],
+    #     past_covariates: Optional[Sequence[TimeSeries]],
+    #     future_covariates: Optional[Sequence[TimeSeries]],
+    #     max_samples_per_ts: Optional[int],
+    # ) -> MixedCovariatesSequentialDataset:
+    #
+    #     raise_if(
+    #         future_covariates is None and not self.add_relative_index,
+    #         "TFTModel requires future covariates. The model applies multi-head attention queries on future "
+    #         "inputs. Consider specifying a future encoder with `add_encoders` or setting `add_relative_index` "
+    #         "to `True` at model creation (read TFT model docs for more information). "
+    #         "These will automatically generate `future_covariates` from indexes.",
+    #         logger,
+    #     )
+    #
+    #     return MixedCovariatesSequentialDataset(
+    #         target_series=target,
+    #         past_covariates=past_covariates,
+    #         future_covariates=future_covariates,
+    #         input_chunk_length=self.input_chunk_length,
+    #         output_chunk_length=self.output_chunk_length,
+    #         max_samples_per_ts=max_samples_per_ts,
+    #         use_static_covariates=False,
+    #     )     
+    #
+    # def _build_inference_dataset(
+    #     self,
+    #     target: Sequence[TimeSeries],
+    #     n: int,
+    #     past_covariates: Optional[Sequence[TimeSeries]],
+    #     future_covariates: Optional[Sequence[TimeSeries]],
+    # ) -> MixedCovariatesInferenceDataset:
+    #
+    #     return MixedCovariatesInferenceDataset(
+    #         target_series=target,
+    #         past_covariates=past_covariates,
+    #         future_covariates=future_covariates,
+    #         n=n,
+    #         input_chunk_length=self.input_chunk_length,
+    #         output_chunk_length=self.output_chunk_length,
+    #         use_static_covariates=False,
+    #     )              
         

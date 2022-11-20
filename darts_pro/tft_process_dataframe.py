@@ -42,6 +42,7 @@ from darts_pro.data_extension.custom_model import TFTCusModel,TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from .base_process import BaseNumpyModel
 from numba.core.types import none
+from gunicorn import instrument
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
@@ -198,7 +199,7 @@ class TftDataframeModel():
         ]     
                
         categorical_embedding_sizes = {"dayofweek": 5,dataset.get_group_rank_column(): emb_size}
-        categorical_embedding_sizes = None    
+        # categorical_embedding_sizes = None    
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
         model_name = self.optargs["model_name"]
         if not use_model_name:
@@ -214,7 +215,7 @@ class TftDataframeModel():
             n_epochs=self.n_epochs,
             add_relative_index=True,
             add_encoders=None,
-            # categorical_embedding_sizes=categorical_embedding_sizes,
+            categorical_embedding_sizes=categorical_embedding_sizes,
             likelihood=QuantileRegression(
                 quantiles=quantiles
             ),  # QuantileRegression is set per default
@@ -225,10 +226,10 @@ class TftDataframeModel():
             log_tensorboard=True,
             save_checkpoints=True,
             work_dir=self.optargs["work_dir"],
-            # lr_scheduler_cls=scheduler,
-            # lr_scheduler_kwargs=scheduler_config,
-            # optimizer_cls=optimizer_cls,
-            # optimizer_kwargs={"lr": 1e-2,"weight_decay":1e-4},
+            lr_scheduler_cls=scheduler,
+            lr_scheduler_kwargs=scheduler_config,
+            optimizer_cls=optimizer_cls,
+            optimizer_kwargs={"lr": 1e-2,"weight_decay":1e-4},
             pl_trainer_kwargs={"accelerator": "gpu", "devices": [0]}  
         )
         return my_model          
@@ -243,15 +244,19 @@ class TftDataframeModel():
            
         model_name = self.optargs["model_name"]
         forecast_horizon = self.optargs["forecast_horizon"]
-        # my_model = self._build_model(dataset,emb_size=1000,use_model_name=False)
-        series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.get_series_data(type="test")
+        series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.get_series_data()
         # series_transformed,val_series_transformed,past_convariates,future_convariates = self.build_fake_data(dataset)
         self.series_data_view(dataset,series_transformed,past_convariates=past_convariates,
                               future_convariates=future_convariates,title="pred_target")
         
         # 根据参数决定是否从文件中加载权重
-        if model_name is not None:
+        if model_name is not None and model_name !="no" :
             my_model = TFTExtModel.load_from_checkpoint(model_name,work_dir=self.optargs["work_dir"],best=True)  
+            # my_model.trainer_params["accelerator"] = "cpu"
+            # my_model.trainer_params.pop("devices")
+            # my_model.batch_size = self.batch_size
+        else:
+            my_model = self._build_model(dataset,emb_size=1000,use_model_name=True) 
         # 需要进行fit设置
         my_model.fit(series_transformed,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
@@ -259,11 +264,8 @@ class TftDataframeModel():
         # 对验证集进行预测，得到预测结果   
         pred_series_list = my_model.predict(n=forecast_horizon, series=series_transformed,num_samples=200,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
-
-        # # 对验证集进行预测，得到预测结果   
-        # pred_series_list = my_model.predict(n=5, num_samples=200)
                
-        self.predict_show(val_series_transformed,pred_series_list, series_transformed)
+        self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset)
         # self.predict_fake_show(val_series_transformed,pred_series_list, series_transformed)
     
     def build_fake_data(self,dataset):
@@ -342,7 +344,7 @@ class TftDataframeModel():
         plt.savefig('custom/data/darts/result_view/eval_exp.jpg')
         print("MAPE: {:.2f}%".format(mape(val_series, pred_series)))
                
-    def predict_show(self,val_series_list,pred_series_list,series_train):       
+    def predict_show(self,val_series_list,pred_series_list,series_train,dataset=None):       
         lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
         label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
         label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"       
@@ -360,7 +362,9 @@ class TftDataframeModel():
             ]
             actual_series_list.append(ser_total)   
         mape_all = 0
-        r = 3
+        r = 5
+        view_list = random_int_list(1,len(val_series_list)-1,r)
+        group_column = dataset.get_group_rank_column()
         for i in range(len(val_series_list)):
             pred_series = pred_series_list[i]
             var_series = val_series_list[i]
@@ -373,12 +377,13 @@ class TftDataframeModel():
             # 与实际的数据集进行比较，比较的是两个数据集的交集
             mape_item = mape(var_series, pred_series)
             mape_all = mape_all + mape_item
-            if i<r:
+            if i in view_list:
                 plt.figure(figsize=figsize)
                 # 实际数据集的结尾与预测序列对齐
                 pred_series.plot(label="forecast")            
+                instrument_code = actual_series.static_covariates[group_column].values[0]
                 actual_series[pred_series.end_time()- 25 : pred_series.end_time()].plot(label="actual")           
-                plt.title("ser_{},MAPE: {:.2f}%".format(i,mape_item))
+                plt.title("ser_{},MAPE: {:.2f}%".format(instrument_code,mape_item))
                 plt.legend()
                 plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],i))
                 plt.clf()   

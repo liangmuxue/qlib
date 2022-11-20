@@ -35,6 +35,7 @@ class TFTSeriesDataset(TFTDataset):
         df_all = self.prepare("train_total", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         # 前处理
         self.df_all = self._pre_process_df(df_all)
+        print("emb size after p:",self.get_emb_size())
 
     def get_emb_size(self):
         group_column = self.get_group_rank_column()
@@ -61,7 +62,7 @@ class TFTSeriesDataset(TFTDataset):
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
         return df    
         
-    def get_series_data(self,type="train"):
+    def get_series_data(self):
         """从pandas数据取得时间序列类型数据"""
         
         group_column = self.get_group_rank_column()
@@ -70,11 +71,8 @@ class TFTSeriesDataset(TFTDataset):
         past_columns = self.get_past_columns()
         future_columns = self.get_future_columns()
         
-        # train模式表示进行训练，使用全集和验证集，test模式表示进行测试，使用全集和测试集
-        if type=="train":
-            valid_range = self.segments["valid"]
-        else:
-            valid_range = self.segments["test"]
+        # 默认使用valid配置进行数据集分割
+        valid_range = self.segments["valid"]
         valid_start = int(valid_range[0].strftime('%Y%m%d'))
         
         df_all = self.df_all
