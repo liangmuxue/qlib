@@ -1,5 +1,5 @@
 qlib_init:
-    provider_uri: '/home/qdata/qlib_data/custom_cn_data'
+    provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
 market: &market test_5
 benchmark: &benchmark SH000300
@@ -13,13 +13,13 @@ data_handler_config: &data_handler_config
         - class: FilterCol
           kwargs:
               fields_group: feature
-              # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
+              # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]  
               col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10']                 
     learn_processors:
         - class: DropnaLabel
-    # label: ['Ref($close, -1)'] 
-    label: ['$close / Ref($close, 1) - 1'] 
-    # label: ['$volume/100']
+    # label: ["Ref($close, -1)"] 
+    label: ["$close / Ref($close, 1) - 1"] 
+    # label: ["$volume/100"]
 
 port_analysis_config: &port_analysis_config
     strategy:
@@ -32,8 +32,8 @@ port_analysis_config: &port_analysis_config
             topk: 50
             n_drop: 5
     backtest:
-        start_time: 2017-01-01
-        end_time: 2020-08-01
+        start_time: 2020-09-01
+        end_time: 2020-12-01
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -48,10 +48,10 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 4096
+            batch_size: 128
             seed: 0
             n_jobs: 20
-            type: 'train_dataframe'
+            type: 'predict'
             n_epochs : 300
             optargs:
                data_type: 'combine'
@@ -86,26 +86,24 @@ task:
             high_threhold: 5   
             col_def:
                 col_list: *col_list
+                datetime_index_column: 'datetime_number'
                 group_column: 'instrument'
                 group_rank_column: 'instrument_rank'
                 target_column: 'label'
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek']   
-                past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10'] 
+                past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
                 static_covariate_col: ['instrument']    
 
     record: 
-        - class: TftRecord
+        - class: SignalRecord
           module_path: tft.tft_recorder
           kwargs: 
             model: <MODEL>
-            dataset: <DATASET>
+            dataset: <DATASET>    
         - class: SigAnaRecord
-          module_path: qlib.workflow.record_temp
+          module_path: tft.tft_recorder
           kwargs: 
             ana_long_short: False
             ann_scaler: 252
-        - class: PortAnaRecord
-          module_path: qlib.workflow.record_temp
-          kwargs: 
-            config: *port_analysis_config
+

@@ -183,7 +183,12 @@ class TFTDataset(DatasetH):
         """取得日期字段名称"""
         time_column = self.col_def["time_column"]    
         return time_column
-        
+ 
+    def get_datetime_index_column(self):
+        """取得日期索引名称"""
+        time_column = self.col_def["datetime_index_column"]    
+        return time_column
+           
     def get_past_columns(self):
         """取得过去协变量字段名称"""
         past_covariate_col = self.col_def["past_covariate_col"] 

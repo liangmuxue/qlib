@@ -5,10 +5,12 @@ from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 
 import pandas as pd
+import numpy as np
 
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 from darts_pro.tft_dataset import TFTDataset
+from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
 
 class TFTSeriesDataset(TFTDataset):
@@ -51,6 +53,7 @@ class TFTSeriesDataset(TFTDataset):
         df = data_filter.data_clean(df, self.step_len,valid_start=valid_start,group_column=group_column,time_column=time_column)        
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
+        # df["label"] = df["label"].astype("float64")
         # 使用后几天的移动平均值作为目标数值
         df["label"]  = df.groupby(self.get_group_column())[self.get_target_column()].shift(self.pred_len).rolling(window=5,min_periods=1).mean()
         df = df.dropna()       
@@ -78,6 +81,10 @@ class TFTSeriesDataset(TFTDataset):
         df_all = self.df_all
         df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_start))]
         df_val = df_all[df_all["datetime"]>=pd.to_datetime(str(valid_start))]
+        # 存储df数据，用于后续评估和回测等过程
+        self.df_train = df_train
+        self.df_val = df_val
+        
         # 分别生成训练和测试序列数据
         train_series = TimeSeries.from_group_dataframe(df_train,
                                                 time_col=time_column,
@@ -254,3 +261,38 @@ class TFTSeriesDataset(TFTDataset):
         # 整合为一个系列
         past_covariates = concatenate(past_covariates, axis=1)
         return past_covariates     
+    
+    def align_pred_and_label(self,pred_series_list,val_series_list):
+        """对齐并加工预测结果和实际结果"""
+        
+        group_column = self.get_group_rank_column()
+        time_column = self.get_time_column()
+        target_column = self.get_target_column()
+        dt_index_column = self.get_datetime_index_column()
+        
+        pred_label_df_list = []
+        for i in range(len(pred_series_list)):
+            pred_series = pred_series_list[i]
+            val_series = val_series_list[i]
+            group_col_val = val_series.static_covariates[group_column].values[0]
+            # 根据股票代码，以及时间点，取得原有df各个数据
+            pred_df = self.df_all[(self.df_all[group_column]==group_col_val) 
+                                  & (self.df_all[time_column]>=pred_series.time_index.start) 
+                                  & (self.df_all[time_column]<pred_series.time_index.stop)]
+            # 转换概率预测数据为中位数数据
+            pred_center_data = get_pred_center_value(pred_series)
+            pred_df[target_column] = pred_center_data.data
+            pred_df.set_index(dt_index_column, inplace=True)
+            
+            # 同样处理生成标签数据,注意在此和预测数据对齐
+            label_df = self.df_all[(self.df_all[group_column]==group_col_val) 
+                                  & (self.df_all[time_column]>=pred_series.time_index.start) 
+                                  & (self.df_all[time_column]<pred_series.time_index.stop)]   
+            val_df = val_series.pd_dataframe()
+            val_df = val_df[(val_df.index>=pred_series.time_index.start) 
+                                  & (val_df.index<pred_series.time_index.stop)]  
+            # 使用加工后的label数据   
+            label_df[target_column] = val_df[target_column].values
+            label_df.set_index(dt_index_column, inplace=True)
+            pred_label_df_list.append([pred_df,label_df])
+        return pred_label_df_list

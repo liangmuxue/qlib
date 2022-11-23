@@ -21,7 +21,7 @@ class TestRolling(TestAutoData):
         """
         task = copy.deepcopy(CSI300_GBDT_TASK)
 
-        task["record"] = ["qlib.workflow.record_temp.SignalRecord"]
+        task["record"] = ["qlib.workflow.record_ext.SignalRecord"]
 
         exp_name = "online_srv_test"
 
@@ -80,7 +80,7 @@ class TestRolling(TestAutoData):
 
         task["record"] = {
             "class": "SignalRecord",
-            "module_path": "qlib.workflow.record_temp",
+            "module_path": "qlib.workflow.record_ext",
             "kwargs": {"dataset": "<DATASET>", "model": "<MODEL>"},
         }
 

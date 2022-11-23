@@ -236,7 +236,7 @@ class RollingGen(TaskGen):
                     "record": [
                         {
                             "class": "SignalRecord",
-                            "module_path": "qlib.workflow.record_temp",
+                            "module_path": "qlib.workflow.record_ext",
                         },
                     ]
                 }

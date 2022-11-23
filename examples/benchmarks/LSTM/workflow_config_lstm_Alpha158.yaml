@@ -1,7 +1,7 @@
 qlib_init:
-    provider_uri: "~/.qlib/qlib_data/cn_data"
+    provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market csi300
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -61,10 +61,10 @@ task:
             hidden_size: 64
             num_layers: 2
             dropout: 0.0
-            n_epochs: 200
+            n_epochs: 1
             lr: 1e-3
             early_stop: 10
-            batch_size: 800
+            batch_size: 1024
             metric: loss
             loss: mse
             n_jobs: 20

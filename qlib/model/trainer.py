@@ -63,7 +63,7 @@ def _exe_task(task_config: dict):
         r = init_instance_by_config(
             record,
             recorder=rec,
-            default_module="qlib.workflow.record_temp",
+            default_module="qlib.workflow.record_ext",
             try_kwargs={"model": model, "dataset": dataset},
         )
         r.generate()

@@ -262,11 +262,12 @@ class TftDataframeModel():
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
         #
         # 对验证集进行预测，得到预测结果   
-        pred_series_list = my_model.predict(n=forecast_horizon, series=series_transformed,num_samples=200,
+        pred_series_list = my_model.predict(n=10, series=series_transformed,num_samples=200,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
                
         self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset)
         # self.predict_fake_show(val_series_transformed,pred_series_list, series_transformed)
+        return pred_series_list,val_series_transformed
     
     def build_fake_data(self,dataset):
         series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.get_series_data(type="test")

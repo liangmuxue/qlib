@@ -19,7 +19,7 @@ task = copy.deepcopy(CSI300_GBDT_TASK)
 
 task["record"] = {
     "class": "SignalRecord",
-    "module_path": "qlib.workflow.record_temp",
+    "module_path": "qlib.workflow.record_ext",
 }
 
 

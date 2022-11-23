@@ -34,7 +34,7 @@ GBDT_MODEL = {
 RECORD_CONFIG = [
     {
         "class": "SignalRecord",
-        "module_path": "qlib.workflow.record_temp",
+        "module_path": "qlib.workflow.record_ext",
         "kwargs": {
             "dataset": "<DATASET>",
             "model": "<MODEL>",
@@ -42,7 +42,7 @@ RECORD_CONFIG = [
     },
     {
         "class": "SigAnaRecord",
-        "module_path": "qlib.workflow.record_temp",
+        "module_path": "qlib.workflow.record_ext",
     },
 ]
 

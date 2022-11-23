@@ -192,8 +192,8 @@ class SignalRecord(RecordTemp):
             f"Signal record 'pred.pkl' has been saved as the artifact of the Experiment {self.recorder.experiment_id}"
         )
         # print out results
-        pprint(f"The following are prediction results of the {type(self.model).__name__} model.")
-        pprint(pred.head(5))
+        # pprint(f"The following are prediction results of the {type(self.model).__name__} model.")
+        # pprint(pred.head(5))
 
         if isinstance(self.dataset, DatasetH):
             raw_label = self.generate_label(self.dataset)
