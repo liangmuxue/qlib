@@ -117,6 +117,11 @@ class TftDataHandler(DataHandlerLP):
         if "price" in config:
             windows = config["price"].get("windows", range(5))
             feature = config["price"].get("feature", ["OPEN", "HIGH", "LOW", "CLOSE", "VWAP"])
+            # 添加标准指标开盘收盘等
+            for field in feature:
+                field = field.lower()
+                fields += ["${}".format(field)]
+                names += [field.upper()]                
             for field in feature:
                 field = field.lower()
                 fields += ["Ref($%s, %d)/$close" % (field, d) if d != 0 else "$%s/$close" % field for d in windows]

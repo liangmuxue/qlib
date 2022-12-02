@@ -19,15 +19,15 @@ class DataFilter():
 
     def data_clean(self,data,step_len,valid_start=0,group_column="instrument",time_column="time_idx"):
         # 清除序列长度不够的股票,需要多出训练数据的一定比例
-        thr_number = int(step_len * 1.2)
+        thr_number = step_len
         gcnt = data.groupby(group_column).count()
-        index = gcnt[gcnt[time_column]>thr_number].index
+        index = gcnt[gcnt[time_column]>=thr_number].index
         data = data[data[group_column].isin(index)]
         
         # 还需要判断验证集是否符合长度要求
         df_val = data[data["datetime_number"]>=valid_start]
         gcnt = df_val.groupby(group_column).count()
-        index = gcnt[gcnt[time_column]>thr_number].index
+        index = gcnt[gcnt[time_column]>=thr_number].index
         data = data[data[group_column].isin(index)]
         
         return data

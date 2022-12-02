@@ -6,7 +6,7 @@ from darts.dataprocessing.transformers import Scaler
 
 import pandas as pd
 import numpy as np
-
+from datetime import datetime
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 from darts_pro.tft_dataset import TFTDataset
@@ -33,41 +33,83 @@ class TFTSeriesDataset(TFTDataset):
         self.model_type = model_type
         self.columns = self.get_seq_columns()
         
-        # 首先取得pandas原始数据,使用train,valid数据集
-        df_all = self.prepare("train_total", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        # 前处理
-        self.df_all = self._pre_process_df(df_all)
-        print("emb size after p:",self.get_emb_size())
-
+        # df_all = self.prepare("train_total", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
+        
+    def _create_target_scalers(self,df):
+        scaler_dict = {}
+        group_column = self.get_group_rank_column()
+        for item in df[group_column].unique():
+            scaler_dict[item] = Scaler()
+        return scaler_dict
+            
     def get_emb_size(self):
         group_column = self.get_group_rank_column()
         return self.df_all[group_column].unique().shape[0] + 1
             
-    def _pre_process_df(self,df):
+    def _pre_process_df(self,df,val_range=None):
         data_filter = DataFilter()
         # 清除序列长度不够的股票
         group_column = self.get_group_column()
-        valid_range = self.segments["valid"]
-        valid_start = int(valid_range[0].strftime('%Y%m%d'))
+        valid_start = int(val_range[0].strftime('%Y%m%d'))
         time_column = self.col_def["time_column"]       
-        df = data_filter.data_clean(df, self.step_len,valid_start=valid_start,group_column=group_column,time_column=time_column)        
+        # 根据标志决定是否检查valid部分
+        # if no_valid_check:
+        #     valid_start = 0
+        df = data_filter.data_clean(df, (self.step_len-self.pred_len),valid_start=valid_start,group_column=group_column,time_column=time_column)        
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
         # df["label"] = df["label"].astype("float64")
         # 使用后几天的移动平均值作为目标数值
-        df["label"]  = df.groupby(self.get_group_column())[self.get_target_column()].shift(self.pred_len).rolling(window=5,min_periods=1).mean()
-        df = df.dropna()       
+        df["label_ori"]  = df["label"]
+        df["label"]  = df.groupby(group_column)[self.get_target_column()].shift(self.pred_len).rolling(window=5,min_periods=1).mean()
+        # 删除空值，并重新编号
+        df = df.dropna()    
+        new_df = None
+        for group_name,group_data in df.groupby(group_column):
+            group_data[time_column] -= group_data[time_column].min()
+            if new_df is None:
+                new_df = group_data
+            else:
+                new_df = pd.concat([new_df,group_data])
+        df = new_df
         # group字段需要转换为数值型
-        group_column = self.get_group_column()
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')   
         # 新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
         return df    
+    
+    def create_base_data(self,segments_total=None,val_range=None):
+        """创建基础数据"""
         
-    def get_series_data(self):
-        """从pandas数据取得时间序列类型数据"""
+        # 根据参数计算时间范围，动态调用
+        slc_total = slice(*segments_total)
+        kwargs = {'col_set': ['feature', 'label'], 'data_key': 'learn'}
+        # 首先取得pandas原始数据,使用train,valid数据集
+        df_all = self._prepare_seg(slc_total, **kwargs)
+        # 前处理
+        df_all = self._pre_process_df(df_all,val_range=val_range)
+        # 为每个序列生成不同的scaler
+        self.df_all = df_all
+        print("emb size after p:",self.get_emb_size())
+        self.target_scalers = self._create_target_scalers(df_all)       
         
+    def build_series_data(self):
+        """从pandas数据生成时间序列类型数据"""
+        
+        total_range = self.segments["train_total"]
+        valid_range = self.segments["valid"]
+        return self.build_series_data_step_range(total_range, valid_range)
+        
+    def build_series_data_step_range(self,total_range,val_range,fill_future=False):
+        """根据时间点参数，从pandas数据生成时间序列类型数据
+           Params:total_range--完整时间序列开始和结束时间
+                  val_range--预测时间序列开始和结束时间
+        """    
+        
+        # 生成基础数据
+        self.create_base_data(total_range,val_range)
+
         group_column = self.get_group_rank_column()
         target_column = self.get_target_column()
         time_column = self.col_def["time_column"]
@@ -75,12 +117,12 @@ class TFTSeriesDataset(TFTDataset):
         future_columns = self.get_future_columns()
         
         # 默认使用valid配置进行数据集分割
-        valid_range = self.segments["valid"]
-        valid_start = int(valid_range[0].strftime('%Y%m%d'))
-        
+        valid_start = val_range[0]
+        valid_end = val_range[1]
+        # 截取训练集与测试集
         df_all = self.df_all
         df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_start))]
-        df_val = df_all[df_all["datetime"]>=pd.to_datetime(str(valid_start))]
+        df_val = df_all[(df_all["datetime"]>=pd.to_datetime(str(valid_start))) & (df_all["datetime"]<pd.to_datetime(str(valid_end)))]
         # 存储df数据，用于后续评估和回测等过程
         self.df_train = df_train
         self.df_val = df_val
@@ -103,7 +145,7 @@ class TFTSeriesDataset(TFTDataset):
         val_series_transformed = []
         # 生成归一化的目标序列
         for index,ts in enumerate(train_series):
-            target_scaler = Scaler()
+            target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
             ts_transformed = target_scaler.fit_transform(ts)
             vs_transformed = target_scaler.transform(val_series[index])
             train_series_transformed.append(ts_transformed)
@@ -134,101 +176,49 @@ class TFTSeriesDataset(TFTDataset):
         # 生成过去协变量，并归一化
         past_convariates = build_covariates(past_columns)      
         # 生成未来协变量，并归一化
-        future_convariates = build_covariates(future_columns)                   
-
+        future_convariates = build_covariates(future_columns)    
+        # 补充未来协变量数据,与验证数据相对应    
+        if fill_future:           
+            future_convariates = self.fill_future_data(future_convariates,future_columns,self.pred_len)
         # 分别返回用于训练预测的序列series_transformed，以及完整序列series
         return train_series_transformed,val_series_transformed,past_convariates,future_convariates
 
-    def get_pred_series_data(self):
-        """从pandas数据取得时间序列类型数据,用于预测过程"""
+    def fill_future_data(self,future_convariates,column_names,fill_length):
+        """补充未来协变量数据"""
         
-        # 首先取得pandas原始数据,使用test数据集
-        df_test = self.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        # 前处理
-        df_test = self._pre_process_df(df_test)        
-        group_column = self.get_group_rank_column()
-        target_column = self.get_target_column()
-        time_column = self.col_def["time_column"]
-        past_columns = self.get_past_columns()
-        future_columns = self.get_future_columns()
-    
-        # 分别生成训练和测试序列数据
-        pred_series = TimeSeries.from_group_dataframe(df_test,
-                                                time_col=time_column,
-                                                 group_cols=group_column,# 会自动成为静态协变量
-                                                 freq='D',
-                                                 fill_missing_dates=True,
-                                                 value_cols=target_column)    
- 
-        series_transformed = []
-        val_series_transformed = []
+        def get_filling_data(last_datas,loop_values,length):
+            data_dim = len(last_datas)
+            index = [0] * data_dim
+            for idx,last_data in enumerate(last_datas):
+                # 取得需要插入的下标
+                index[idx] = loop_values[:,idx].tolist().index(last_data) + 1
+            datas = []
+            for i in range(length):
+                inner_data = [0] * data_dim
+                for idx in range(data_dim):
+                    # 根据起始标号，依次取得需要插入的标号及数据
+                    total_index = i + index[idx]
+                    real_index = total_index % len(loop_values[:,idx])
+                    inner_data[idx] = loop_values[:,idx][real_index]
+                datas.append(inner_data)
+            return datas
+            
+        rtn_convariates = []  
         
-        # 生成归一化的目标序列
-        for index,ts in enumerate(pred_series):
-            target_scaler = Scaler()
-            s_transformed = target_scaler.fit_transform(ts)
-            series_transformed.append(s_transformed)
-            # 去掉预测长度部分数据作为预测数据，保证数据对齐
-            cut_size = s_transformed.time_index.stop - self.pred_len - 1
-            val_transformed,_ = s_transformed.split_after(cut_size)             
-            val_series_transformed.append(val_transformed)
-        
-        def build_covariates(column_names):
-            covariates_array = []
-            for series in series_transformed:
-                group_col_val = series.static_covariates[group_column].values[0]
-                scaler = Scaler()
-                # 遍历并筛选出不同分组字段(股票)的单个dataframe
-                df_item = df_test[df_test[group_column]==group_col_val]
-                covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
-                                                         freq='D',
-                                                         fill_missing_dates=True,
-                                                         value_cols=column_names)     
-                covariates_transformed = scaler.fit_transform(covariates)    
-                covariates_array.append(covariates_transformed)
-            return covariates_array            
-
-        # 生成过去协变量，并归一化
-        past_convariates = build_covariates(past_columns)      
-        # 生成未来协变量，并归一化
-        future_convariates = build_covariates(future_columns)                   
-
-        # 分别返回用于训练预测的序列series_transformed，以及相关协变量
-        return series_transformed,val_series_transformed,past_convariates,future_convariates
-    
-    def normolize(self,data,training_range=None,val_range=None):
-        """对数据进行归一化"""
-        
-        train_start,train_end = training_range
-        valid_start,valid_end = val_range
-        training_data = data[(data[:,-1,-1]> train_start) & (data[:,-1,-1]<train_end)]
-        val_data = data[(data[:,0,-1]> valid_start) & (data[:,0,-1]<valid_end)]
-        
-        # 目标数据归一化
-        target_scaler = self.get_scaler()
-        target_index = self.get_target_column_index()
-        training_data[:,:,target_index] = target_scaler.fit_transform(training_data[:,:,target_index])   
-        val_data[:,:,target_index] = target_scaler.transform(val_data[:,:,target_index]) 
-                
-        def transfer_data(column_index):
-            scaler = self.get_scaler()
-            scaler.fit(training_data[:,:,column_index])      
-            t_data = scaler.transform(training_data[:,:,column_index])     
-            v_data = scaler.transform(val_data[:,:,column_index]) 
-            return  t_data, v_data    
-        
-        # 对过去协变量值进行标准化(归一化)
-        for index in self.get_past_column_index():
-            training_data[:,:,index],val_data[:,:,index] = transfer_data(index)
-
-        # 对未来协变量值进行标准化(归一化)
-        for index in self.get_future_column_index():
-            training_data[:,:,index],val_data[:,:,index] = transfer_data(index)
-                        
-        return training_data,val_data
+        for conv in future_convariates:
+            last_values = conv[-1].all_values()[:,:,0]
+            # 取得需要生成数据的唯一值
+            unique_values = np.unique(conv.all_values(),axis=0)
+            unique_values = np.sort(unique_values[:,:,0],axis=0)            
+            # 根据固定数据，循环补充实际数组
+            fill_data = get_filling_data(last_values,unique_values,fill_length)
+            conv = conv.append_values(np.expand_dims(np.array(fill_data),axis=-1))
+            rtn_convariates.append(conv)
+        return rtn_convariates
     
     def build_static_covariates(self,series):
         """生成静态协变量"""
+        
         df = series.pd_dataframe()
         columns = self.col_def["static_covariate_col"] 
         static_covariates = TimeSeries.from_times_and_values(
@@ -282,6 +272,7 @@ class TFTSeriesDataset(TFTDataset):
             # 转换概率预测数据为中位数数据
             pred_center_data = get_pred_center_value(pred_series)
             pred_df[target_column] = pred_center_data.data
+            # 为了后续进行和标签数据的比较，需要重新设置索引为日期列
             pred_df.set_index(dt_index_column, inplace=True)
             
             # 同样处理生成标签数据,注意在此和预测数据对齐
@@ -296,3 +287,66 @@ class TFTSeriesDataset(TFTDataset):
             label_df.set_index(dt_index_column, inplace=True)
             pred_label_df_list.append([pred_df,label_df])
         return pred_label_df_list
+
+
+    def get_part_time_range(self,date_position,ref_df=None):
+        """根据给定日期，取得对应部分的数据集时间范围，需要满足预测要求"""
+        
+        dt_index_column = self.get_datetime_index_column()
+        group_column = self.get_group_rank_column()
+        time_column = self.col_def["time_column"]
+        target_column = self.get_target_column()
+        redun_step = 3
+        
+        # 首先取得总数据集范围，然后根据这个范围以及当前时间点，动态计算所需要的数据集范围以及验证集范围
+        total_df_range = self.segments["train_total"]
+        total_start = total_df_range[0]
+        total_end = total_df_range[1]
+        total_range = [None,None]
+        val_range = [None,None]
+        
+        # 全集的开始时间就是配置中的开始时间
+        total_range[0] = total_start
+        # 全集的结束时间为当前分割时间点
+        total_range[1] = date_position
+        # 验证数据集的开始时间为分割时间点往前的n个长度，其中n为配置中的训练时间序列长度。由于不同股票数据长度不一致，因此需要根据参照数据集进行移动。
+        val_range[0] = self.shift_days(date_position, (self.step_len-self.pred_len),ref_df)
+        # 验证数据集的结束时间为当前分割时间点
+        val_range[1] = total_range[1]
+        # 如果计算后的结束时间超出原有数据集结束时间，则返回空用于后续异常处理
+        if total_range[1] is None:
+            return None,None
+        return total_range,val_range
+
+    def shift_days(self,date_position,n,ref_df):
+        """取得对应日期前面第n天的日期"""
+        
+        group_column = self.get_group_column()
+        time_column = self.col_def["time_column"] 
+        new_df = None
+        for group_name,group_data in ref_df.groupby(group_column):
+            # 根据时间点取得对应序号，并根据序号取得序列间隔,需要考虑到当日没有数据的情况
+            time_index = group_data[group_data["datetime"]<=str(date_position)][time_column].max()
+            shift_time_index = time_index - n 
+            # 如果越界，说明数据集中含有不具备的序列，返回空处理异常
+            if shift_time_index < 0:
+                return None
+            data = group_data[group_data[time_column]==shift_time_index]
+            if new_df is None:
+                new_df = data
+            else:
+                new_df = pd.concat([new_df,data])
+                
+        # 返回所有序列时间的最小值，以兼容全部数据集要求      
+        return new_df["datetime"].min()
+                    
+    def reverse_transform_preds(self,pres_series_list):
+        """反向归一化(标准化)"""
+        
+        group_column = self.get_group_rank_column()
+        result_list = []
+        for series in pres_series_list:
+            target_scaler = self.target_scalers[int(series.static_covariates[group_column].values[0])]
+            result_list.append(target_scaler.inverse_transform(series))
+        return result_list
+        

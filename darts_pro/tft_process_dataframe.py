@@ -93,9 +93,13 @@ class TftDataframeModel():
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
             return       
-              
+        if self.type.startswith("backtest"):
+            # 直接进行预测,只需要加载模型参数
+            print("no need fit for backtest")
+            return   
+        
         # 生成tft时间序列数据集,包括目标数据、协变量等
-        train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.get_series_data()
+        train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
         
@@ -108,12 +112,9 @@ class TftDataframeModel():
             self.model.batch_size = self.batch_size     
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
-            # self.model = self.build_exp_model()
-        # datapath = "custom/data/darts/dump_data"
-        # train_series_transformed[0].to_pickle(datapath + "/train.pkl")
-        # future_convariates[0].to_pickle(datapath + "/future.pkl")
-        # val_series_transformed[0].to_pickle(datapath + "/val.pkl")
-        # past_convariates[0].to_pickle(datapath + "/past.pkl")
+            
+  
+        
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  trainer=None,epochs=self.n_epochs,verbose=True)
@@ -236,15 +237,15 @@ class TftDataframeModel():
 
             
     def predict(self, dataset: TFTSeriesDataset):
-        if self.type=="predict_dataframe":
-            self.predict_dataframe(dataset)
+        if self.type=="backtest":
+            self.backtest(dataset)
             return        
         if self.type!="predict":
             return 
            
         model_name = self.optargs["model_name"]
         forecast_horizon = self.optargs["forecast_horizon"]
-        series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.get_series_data()
+        series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
         # series_transformed,val_series_transformed,past_convariates,future_convariates = self.build_fake_data(dataset)
         self.series_data_view(dataset,series_transformed,past_convariates=past_convariates,
                               future_convariates=future_convariates,title="pred_target")
@@ -256,7 +257,7 @@ class TftDataframeModel():
             # my_model.trainer_params.pop("devices")
             # my_model.batch_size = self.batch_size
         else:
-            my_model = self._build_model(dataset,emb_size=1000,use_model_name=True) 
+            my_model = self._build_model(dataset,emb_size=1000,use_model_name=True)            
         # 需要进行fit设置
         my_model.fit(series_transformed,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
@@ -266,26 +267,36 @@ class TftDataframeModel():
                                             past_covariates=past_convariates,future_covariates=future_convariates)
                
         self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset)
-        # self.predict_fake_show(val_series_transformed,pred_series_list, series_transformed)
+        self.model = my_model
         return pred_series_list,val_series_transformed
-    
+ 
+    def backtest(self, dataset: TFTSeriesDataset):
+        """实现回测功能"""
+        
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
+        self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
+        self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
+        
+        # 使用股票代码数量作为embbding长度
+        emb_size = dataset.get_emb_size()
+        load_weight = self.optargs["load_weight"]
+        if load_weight:
+            # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
+            self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
+            self.model.batch_size = self.batch_size     
+        else:
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
+
+
     def build_fake_data(self,dataset):
-        series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.get_series_data(type="test")
-        series_transformed = series_transformed[0]
-        val_series_transformed = val_series_transformed[0]
-        past_convariates = past_convariates[0]
-        future_convariates = future_convariates[0]
-        total_cut_off = 2441
-        val_cut_off = 2391
-        # val_series_transformed = val_series_transformed[:val_cut_off]
-        # series_transformed = series_transformed[:val_cut_off]
-        # past_convariates = past_convariates[:total_cut_off]
-        # future_convariates = future_convariates[:total_cut_off]
-        # datapath = "custom/data/darts/dump_data"
-        # series_transformed = TimeSeries.from_pickle(datapath + "/train.pkl")
-        # future_convariates = TimeSeries.from_pickle(datapath + "/future.pkl")
-        # val_series_transformed = TimeSeries.from_pickle(datapath + "/val.pkl")
-        # past_convariates = TimeSeries.from_pickle(datapath + "/past.pkl")         
+        series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()   
+        size = 93
+        series_transformed = series_transformed[:size]
+        val_series_transformed = val_series_transformed[:size]
+        past_convariates = past_convariates[:size]
+        future_convariates = future_convariates[:size]
+        val_series_transformed = [series for series in val_series_transformed]
         return series_transformed,val_series_transformed,past_convariates,future_convariates
     
     def view_df(self,df,target_title):

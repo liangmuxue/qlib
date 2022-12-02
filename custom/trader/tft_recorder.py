@@ -182,6 +182,25 @@ class SignalRecord(TftRecorder):
     def list(self):
         return ["pred_label.pkl"]  
 
+class BkSignalRecord(TftRecorder):
+    """
+    回测记录生成器
+    """
+    
+    def __init__(self, model=None, dataset=None, recorder=None):
+        super().__init__(recorder=recorder)
+        self.model = model
+        self.dataset = dataset
+
+    def generate(self, **kwargs):
+        """执行回测入口"""
+        
+        self.model.backtest(self.dataset)
+        print("backtest ok")    
+
+    def list(self):
+        return ["pred_label.pkl"]  
+    
 class SigAnaRecord(TftRecorder):
     """
     This is the Signal Analysis Record class that generates the analysis results such as IC and IR. This class inherits the ``RecordTemp`` class.

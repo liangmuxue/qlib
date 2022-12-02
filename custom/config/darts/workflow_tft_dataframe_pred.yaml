@@ -70,8 +70,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2020-11-15]
-                valid: [2020-09-01, 2020-11-15]
+                train_total: [2010-01-01, 2020-12-30]
+                valid: [2020-06-01, 2020-12-30]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             aug_type: 'no'
@@ -93,19 +93,15 @@ task:
                 future_covariate_col: ['dayofweek']   
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
                 static_covariate_col: ['instrument']    
-
+                
     record: 
-        - class: TftRecord
-          module_path: tft.tft_recorder
+        - class: SignalRecord
+          module_path: trader.tft_recorder
           kwargs: 
             model: <MODEL>
-            dataset: <DATASET>
+            dataset: <DATASET>    
         - class: SigAnaRecord
-          module_path: qlib.workflow.record_temp
+          module_path: trader.tft_recorder
           kwargs: 
             ana_long_short: False
             ann_scaler: 252
-        - class: PortAnaRecord
-          module_path: qlib.workflow.record_temp
-          kwargs: 
-            config: *port_analysis_config

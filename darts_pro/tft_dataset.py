@@ -150,7 +150,7 @@ class TFTDataset(DatasetH):
         # 使用指定字段
         data = data[self.get_seq_columns() + ["datetime_number"]]
         return data
-            
+    
     def filter_extremum_data(self,data,columns=[]):
         """清除极值数据"""
         

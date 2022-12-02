@@ -174,6 +174,7 @@ def get_strategy_executor(
     from ..strategy.base import BaseStrategy
     from .executor import BaseExecutor
 
+    trade_strategy = init_instance_by_config(strategy, accept_types=BaseStrategy)
     trade_account = create_account_instance(
         start_time=start_time, end_time=end_time, benchmark=benchmark, account=account, pos_type=pos_type
     )
