@@ -84,6 +84,7 @@ class TftDataframeModel():
         self.logger = get_module_logger("TransformerModel")
         
         self.type = type
+        self.kwargs = kwargs
         
     def fit(
         self,
@@ -273,6 +274,15 @@ class TftDataframeModel():
     def backtest(self, dataset: TFTSeriesDataset):
         """实现回测功能"""
         
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            with open(df_data_path, "rb") as fin:
+                self.df_ref = pickle.load(fin)            
+            return
+        
         # 生成tft时间序列数据集,包括目标数据、协变量等
         train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
@@ -287,7 +297,6 @@ class TftDataframeModel():
             self.model.batch_size = self.batch_size     
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
-
 
     def build_fake_data(self,dataset):
         series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()   

@@ -18,10 +18,12 @@ class TFTSeriesDataset(TFTDataset):
     自定义数据集，使用darts封装的TimeSeries类型数据
     """
 
-    def __init__(self, step_len = 30,pred_len = 5,low_threhold=-5,high_threhold=5,over_time=2,aug_type="no",model_type="lstm",col_def={},**kwargs):
+    def __init__(self, step_len = 30,pred_len = 5,low_threhold=-5,high_threhold=5,
+                 over_time=2,aug_type="no",model_type="lstm",col_def={},load_dataset_file=False,**kwargs):
+        
         # 基层数据处理器
         self.data_extractor = StockDataExtractor() 
-        super().__init__(col_def=col_def,step_len=step_len,pred_len=pred_len,**kwargs)
+        super().__init__(col_def=col_def,step_len=step_len,pred_len=pred_len,load_dataset_file=load_dataset_file,**kwargs)
         
         self.future_covariate_col = col_def['future_covariate_col']
         self.past_covariate_col = col_def['past_covariate_col']

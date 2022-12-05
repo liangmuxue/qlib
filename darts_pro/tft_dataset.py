@@ -27,14 +27,20 @@ class TFTDataset(DatasetH):
 
     DEFAULT_STEP_LEN = 30
 
-    def __init__(self, col_def={},step_len=30,pred_len=5,**kwargs):
+    def __init__(self, col_def={},step_len=30,pred_len=5,load_dataset_file=False,**kwargs):
         # 基层数据处理器
         self.data_extractor = StockDataExtractor() 
-        super().__init__(**kwargs)
+        
         self.col_def = col_def
         self.step_len = step_len
         self.pred_len = pred_len
         self.scaler_type = kwargs['scaler_type']
+        self.load_dataset_file = load_dataset_file
+        
+        # 如果加载数据文件，则不需要进行数据获取了
+        if self.load_dataset_file:
+            return        
+        super().__init__(**kwargs)
         
     def config(self, **kwargs):
         if "step_len" in kwargs:
@@ -47,12 +53,9 @@ class TFTDataset(DatasetH):
         cal = self.handler.fetch(col_set=self.handler.CS_RAW).index.get_level_values("datetime").unique()
         
         ###### 用于静态连续变量的数据字典 ######
-        
         # 商品价格指数
         self.qyspjg_data = self.data_extractor.load_data("qyspjg")
-                
         self.cal = sorted(cal)
-        
 
     @staticmethod
     def _extend_slice(slc: slice, cal: list, step_len: int) -> slice:

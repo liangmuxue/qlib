@@ -5,7 +5,7 @@ import pandas as pd
 from pprint import pprint
 from typing import Union, List, Optional
 import backtrader as bt
-
+from datetime import datetime
 from qlib.utils.exceptions import LoadObjectError
 from qlib.contrib.evaluate import risk_analysis, indicator_analysis
 
@@ -19,7 +19,7 @@ from qlib.contrib.eva.alpha import calc_ic, calc_long_short_return, calc_long_sh
 from qlib.utils import init_instance_by_config
 
 from .tft_recorder import TftRecorder
-from .bt_strategy import Strategy,QlibStrategy
+from .bt_strategy import Strategy,ResultStrategy,QlibStrategy
 
 logger = get_module_logger("workflow", logging.INFO)
 
@@ -34,9 +34,7 @@ class PortAnaRecord(TftRecorder):
         self,
         recorder,
         config,
-        risk_analysis_freq: Union[List, str] = None,
-        indicator_analysis_freq: Union[List, str] = None,
-        indicator_analysis_method=None,
+        model = None,
         **kwargs,
     ):
         """
@@ -57,7 +55,7 @@ class PortAnaRecord(TftRecorder):
 
         self.strategy_config = config["strategy"]
         self.backtest_config = config["backtest"]
-
+        self.model = model
 
     def _get_report_freq(self, executor_config):
         ret_freq = []
@@ -71,6 +69,8 @@ class PortAnaRecord(TftRecorder):
     def _get_strategy_clazz(self,class_name):
         if class_name=="Strategy":
             return Strategy
+        if class_name=="ResultStrategy":
+            return ResultStrategy        
         if class_name=="QlibStrategy":
             return QlibStrategy   
         
@@ -83,18 +83,19 @@ class PortAnaRecord(TftRecorder):
         trade_strategy_obj = init_instance_by_config(self.strategy_config, accept_types=qlib_strategy_clazz)
         cerebro = bt.Cerebro()
         # bt模式下，只能直接放置类,参数需要从已经初始化中的对象里再拿一次
-        cerebro.addstrategy(strategy_clazz,model=trade_strategy_obj.model, dataset=trade_strategy_obj.dataset,topk=trade_strategy_obj.topk)
+        cerebro.addstrategy(strategy_clazz,model=trade_strategy_obj.model,dataset=trade_strategy_obj.dataset,topk=trade_strategy_obj.topk)
         
         # 从初始化对象中，取得数据及配置，并插入bt的cerebro中
-        seg = trade_strategy_obj.dataset.segments["valid"]
-        start_date = seg[0]
-        end_date = seg[1]
+        start_time = self.backtest_config["start_time"]
+        end_time = self.backtest_config["end_time"]
         # 这里使用valid数据集,每个股票系列单独添加
         group_column = trade_strategy_obj.dataset.get_group_rank_column()
-        group = trade_strategy_obj.dataset.df_val.groupby(group_column)
+        df_val = self.model.df_ref[(self.model.df_ref["datetime"]>=pd.to_datetime(str(start_time)))&(self.model.df_ref["datetime"]<pd.to_datetime(str(end_time)))]
+        group = df_val.groupby(group_column)
         for group_name, item_df in group:
             dataname = self.transfer_to_bt_format(item_df)
-            data = bt.feeds.PandasData(dataname=dataname, name=str(group_name),fromdate=start_date, todate=end_date,datetime=-1)
+            data = bt.feeds.PandasData(dataname=dataname, name=str(group_name),
+                                       fromdate=start_time, todate=end_time,datetime="datetime")
             cerebro.adddata(data)
     
         cerebro.broker.setcash(100000.0)

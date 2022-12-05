@@ -23,7 +23,7 @@ data_handler_config: &data_handler_config
 
 port_analysis_config: &port_analysis_config
     strategy:
-        bt_class: Strategy
+        bt_class: ResultStrategy
         class: QlibStrategy
         module_path: custom.trader.bt_strategy
         kwargs:
@@ -52,6 +52,8 @@ task:
             n_jobs: 20
             type: 'backtest'
             n_epochs : 300
+            load_dataset_file: &load_dataset_file True
+            pred_data_path: "custom/data/darts/dump_data"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -73,6 +75,7 @@ task:
                 valid: [2020-09-01, 2020-11-15]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
+            load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
             instrument_pick: [600520,600521,600522]
@@ -104,3 +107,4 @@ task:
           module_path: trader.bt_recorder
           kwargs: 
             config: *port_analysis_config
+            model: <MODEL>
