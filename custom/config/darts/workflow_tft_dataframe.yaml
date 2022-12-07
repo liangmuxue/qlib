@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -48,7 +48,7 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 4096
+            batch_size: 2048
             seed: 0
             n_jobs: 20
             type: 'train_dataframe'
@@ -57,8 +57,8 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_5'
-               load_weight: True
+               model_name: 'test8_tft_100'
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:
@@ -87,6 +87,7 @@ task:
             col_def:
                 col_list: *col_list
                 group_column: 'instrument'
+                datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 target_column: 'label'
                 time_column: 'time_idx'    

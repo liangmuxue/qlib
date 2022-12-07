@@ -12,6 +12,7 @@ from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 from darts_pro.tft_dataset import TFTDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
+from numba.core.types import none
 
 class TFTSeriesDataset(TFTDataset):
     """
@@ -45,8 +46,7 @@ class TFTSeriesDataset(TFTDataset):
         return scaler_dict
             
     def get_emb_size(self):
-        group_column = self.get_group_rank_column()
-        return self.df_all[group_column].unique().shape[0] + 1
+        return self.emb_size
             
     def _pre_process_df(self,df,val_range=None):
         data_filter = DataFilter()
@@ -54,16 +54,13 @@ class TFTSeriesDataset(TFTDataset):
         group_column = self.get_group_column()
         valid_start = int(val_range[0].strftime('%Y%m%d'))
         time_column = self.col_def["time_column"]       
-        # 根据标志决定是否检查valid部分
-        # if no_valid_check:
-        #     valid_start = 0
         df = data_filter.data_clean(df, (self.step_len-self.pred_len),valid_start=valid_start,group_column=group_column,time_column=time_column)        
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
         # df["label"] = df["label"].astype("float64")
-        # 使用后几天的移动平均值作为目标数值
+        # 使用前几天的移动平均值作为目标数值
         df["label_ori"]  = df["label"]
-        df["label"]  = df.groupby(group_column)[self.get_target_column()].shift(self.pred_len).rolling(window=5,min_periods=1).mean()
+        df["label"]  = df.groupby(group_column)[self.get_target_column()].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
         # 删除空值，并重新编号
         df = df.dropna()    
         new_df = None
@@ -89,6 +86,8 @@ class TFTSeriesDataset(TFTDataset):
         kwargs = {'col_set': ['feature', 'label'], 'data_key': 'learn'}
         # 首先取得pandas原始数据,使用train,valid数据集
         df_all = self._prepare_seg(slc_total, **kwargs)
+        # 提前生成嵌入向量空间长度，使用原始的股票数量，即使后续清理了部分股票，保留的应该仍然是大多数，不影响整体使用
+        self.emb_size = df_all[self.get_group_column()].unique().shape[0] + 1
         # 前处理
         df_all = self._pre_process_df(df_all,val_range=val_range)
         # 为每个序列生成不同的scaler
@@ -351,4 +350,44 @@ class TFTSeriesDataset(TFTDataset):
             target_scaler = self.target_scalers[int(series.static_covariates[group_column].values[0])]
             result_list.append(target_scaler.inverse_transform(series))
         return result_list
+    
+    def get_series_by_group_code(self,series_list,group_code):
+        group_column = self.get_group_rank_column()
+        target_series = None
+        for series in series_list:
+            if group_code == int(series.static_covariates[group_column].values[0]):
+                target_series = series
+        return target_series
+    
+    def get_real_data(self,df_data,pred_list,instrument,range_type="train"):   
+        """根据预测数据的日期，取得数据集中的实际数值进行对照"""
+        
+        if range_type=="train":
+            df = df_data
+        time_column = self.get_time_column()
+        group_column = self.get_group_rank_column()
+        # 取得预测数据,以及对应的开始时间序号
+        pred_data = self.get_series_by_group_code(pred_list,instrument)
+        pred_begin_time = pred_data.time_index.start
+        df_item = df[(df[group_column]==instrument)]
+        # 根据预测范围参数，取得几天以内的数据
+        time_end = pred_begin_time + self.pred_len
+        df_result = df_item[(df_item[time_column]>=pred_begin_time)&(df_item[time_column]<time_end)]
+        pred_center_data = get_pred_center_value(pred_data).data
+        df_result.loc[:,"pred"] = pred_center_data
+        return df_result,pred_begin_time
+    
+    def get_data_by_trade_date(self,df,instrument,date):
+        """根据股票代码和日期，取得当天交易数据"""
+
+        time_column = self.get_time_column()
+        group_column = self.get_group_rank_column()
+        df_result = df[(df["datetime"]==str(date))&(df[group_column]==instrument)]       
+        if df_result.shape[0]==0:
+            return None
+        return df_result
+        
+        
+        
+        
         

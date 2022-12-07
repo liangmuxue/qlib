@@ -7,6 +7,7 @@ from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from darts import TimeSeries, concatenate
 from qlib import data
 from gunicorn import instrument
+from cus_utils.tensor_viz import TensorViz
 
 class Strategy(bt.Strategy):
     """自定义策略基础类,继承backtrader"""
@@ -110,8 +111,11 @@ class Strategy(bt.Strategy):
         self.process_by_pred_data(pred_series_list)
         
     def process_by_pred_data(self,pred_series_list):
+        
         # 根据预测结果，取得排序数据
         df_result = self.order_pred_result(pred_series_list)
+        # 存储预测列表
+        self.pred_series_list = pred_series_list
         topk = 3
         df_topk = df_result[:topk]
         # 取得所有持仓的股票名
@@ -126,10 +130,15 @@ class Strategy(bt.Strategy):
         
         self.log("exec_buy_logic in,top price:{}".format(df_topk.iloc[0]["price"]))
         pos_size = len(hold_bond_name)
+        cur_date = self.datas[0].datetime.date(0)
         for index, row in df_topk.iterrows():
             instrument = str(int(row["instrument"]))
+            # 如果当天股票不交易，则不处理
+            if self.dataset.get_data_by_trade_date(self.df_ref,instrument,cur_date) is None:
+                self.log("Has No Trade for:{}".format(instrument))
             # 累计涨幅超过阈值，并且不在持仓列表中，则购买
-            if row["price"] > 5 and instrument not in hold_bond_name:
+            if row["price"] > 3 and instrument not in hold_bond_name:
+                self.view_pred_buy_data(row,cur_date)
                 # 如果持仓数超过规定值，则退出
                 if self.get_trade_len() > self.topk:
                     break   
@@ -145,7 +154,6 @@ class Strategy(bt.Strategy):
     def exec_sell_logic(self,df_result,hold_bond_name):
         """卖出的逻辑"""
         
-        pos_size = len(hold_bond_name)
         size = 1
         for index, instrument in enumerate(hold_bond_name):
             data = self.get_data_by_name(instrument)
@@ -199,7 +207,7 @@ class Strategy(bt.Strategy):
         
         for item in self.trade_list:
             # 根据日期和股票代码查询，还要满足状态为未成交
-            if item["instrument"]==trade_info["instrument"] and item["date"]==trade_info["date"] and trade_info["status"]==1:
+            if item["instrument"]==trade_info["instrument"] and item["date"]==trade_info["date"] and item["status"]==1:
                 return item
         return None
         
@@ -242,14 +250,31 @@ class Strategy(bt.Strategy):
         for index,series in enumerate(pred_series_list):
             pred_center_data = get_pred_center_value(series).data
             group_col_val = series.static_covariates[group_column].values[0]
-            # 最后一个标签值减去对一个标签值，得到涨跌幅度
-            price = pred_center_data[-1] - pred_center_data[0]
+            # 由于最后一个数值反应的是这几天的均值，因此使用最后一个数据
+            price = pred_center_data[-1]
             df_result.loc[index] = [group_col_val,price]
         df_result.sort_values("price",ascending=False,inplace=True)   
         return df_result
-
+    
+    def view_pred_buy_data(self,result_row,trade_date):
+        """对于预测买入的数据，进行可视化"""
+        
+        instrument = result_row["instrument"]
+        # 根据交易日期和股票，查找出实际数值,后续使用移动平均数据以及实际数值,同时包含预测数据
+        df,time_begin = self.dataset.get_real_data(self.df_ref,self.pred_series_list,instrument)
+        viz_input = TensorViz(env="back_test")
+        title = "buy data:{}_{}".format(df["instrument"].values[0],trade_date)
+        # 按照预测时间序列，分别回执移动平均价格以及实际价格曲线
+        view_data = df[["label_ori","label","pred"]].values
+        desc = "begin time index:{},pred value:{}".format(time_begin,result_row["price"])
+        names = ["values","mean_values","pred_values"]
+        # x_range = df["datetime"].dt.strftime('%Y%m%d').astype(int).values
+        x_range = df["time_idx"].values
+        viz_input.viz_matrix_var(view_data,win=title,title=title,names=names,desc=desc,x_range=x_range)  
+    
 class ResultStrategy(Strategy):
     """使用预存储的数据进行快速回测"""
+    
     
     def __init__(self,model,dataset,topk=3,pred_data_path=None):
         """

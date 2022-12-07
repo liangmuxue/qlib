@@ -87,6 +87,7 @@ task:
             col_def:
                 col_list: *col_list
                 group_column: 'instrument'
+                datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 target_column: 'label'
                 time_column: 'time_idx'    

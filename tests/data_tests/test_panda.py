@@ -275,11 +275,11 @@ def test_viz():
     print("plot end")
 
 def test_shift():
-    data = [1, 2, 3, 4, 5]
+    data = [0.7186174392700195, -0.4756629467010498, -0.1364290714263916, -0.6151974201202393, -1.0313987731933594, 0.590062141418457, -0.13806819915771484, -2.0405828952789307, -6.1782121658325195, 1.0157227516174316, 1.0055303573608398, 0.07420778274536133, 2.8745293617248535, -0.6084561347961426, 0.9003639221191406, -3.322005271911621, 1.5148401260375977]
     # Creating dataframe using 'data' and 'index'
     df = pd.DataFrame(data = data, columns = ['value'])
-    print(df)    
-    df['mean'] = df['value'].rolling(window=3,min_periods=1).mean() 
+    print("df",df)    
+    df['mean'] = df['value'].rolling(window=5,min_periods=1).mean() 
     print("df after",df)
                  
 def test_build_datetime():        
@@ -292,11 +292,11 @@ def test_build_datetime():
 if __name__ == "__main__":
     # test_pd_index()
     # test_pd_timeser()
-    # test_shift()
+    test_shift()
     # test_join()
     # test_merge()
     # test_columns()
-    test_group2()
+    # test_group2()
     # test_diff()
     # test_vis()
     # test_tft_vis()

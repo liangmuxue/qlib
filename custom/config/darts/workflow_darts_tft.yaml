@@ -54,7 +54,7 @@ task:
             n_epochs : 3000
             optargs:
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft'
+               model_name: 'test6_tft_5'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5

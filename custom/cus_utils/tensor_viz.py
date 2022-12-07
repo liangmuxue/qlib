@@ -65,7 +65,7 @@ class TensorViz(object):
                     )
             )               
         
-    def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None):
+    def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None,x_range=None):
         length = data.shape[1]
         ts = data.shape[0]
         for i in range(length):
@@ -73,9 +73,11 @@ class TensorViz(object):
                 line_name = "{}".format(names[i])
             else:
                 line_name = "line{}".format(i+1)
+            if x_range is None:
+                x_range = np.arange(ts)
             if i==0:
                 self.viz.line(
-                    X=np.arange(ts),
+                    X=x_range,
                     Y=data[:,i],
                     win=win,
                     name=line_name,
@@ -90,7 +92,7 @@ class TensorViz(object):
                 )  
             else:
                 self.viz.line(
-                    X=np.arange(ts),
+                    X=x_range,
                     Y=data[:,i],
                     win=win,
                     name=line_name,
