@@ -13,6 +13,7 @@ from darts_pro.tft_dataset import TFTDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
 from numba.core.types import none
+from cus_utils.db_accessor import DbAccessor
 
 class TFTSeriesDataset(TFTDataset):
     """
@@ -35,7 +36,9 @@ class TFTSeriesDataset(TFTDataset):
         self.aug_type = aug_type
         self.model_type = model_type
         self.columns = self.get_seq_columns()
+        self.kwargs = kwargs
         
+        self.dbaccessor = DbAccessor({})
         # df_all = self.prepare("train_total", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         
     def _create_target_scalers(self,df):
@@ -73,11 +76,25 @@ class TFTSeriesDataset(TFTDataset):
         df = new_df
         # group字段需要转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')   
-        # 新增排序字段，用于后续embedding
+        # 按照股票代码，新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
+        self.build_group_rank_map(df)
         return df    
     
+    def build_group_rank_map(self,df_data):
+        """生成股票代码和rank序号的映射关系"""
+        
+        rank_group_column = self.get_group_rank_column()
+        group_column = self.get_group_column()
+        self.group_mapping = {}
+        df_group = df_data.groupby(rank_group_column).head(1)
+        for index, row in df_group.iterrows():
+            self.group_mapping[row[rank_group_column]] = row[group_column]
+    
+    def get_group_code_by_rank(self,group_rank):    
+        return self.group_mapping[group_rank]
+           
     def create_base_data(self,segments_total=None,val_range=None):
         """创建基础数据"""
         
@@ -359,22 +376,24 @@ class TFTSeriesDataset(TFTDataset):
                 target_series = series
         return target_series
     
-    def get_real_data(self,df_data,pred_list,instrument,range_type="train"):   
+    def get_real_data(self,df_data,pred_list,instrument,extend_begin=0):   
         """根据预测数据的日期，取得数据集中的实际数值进行对照"""
         
-        if range_type=="train":
-            df = df_data
         time_column = self.get_time_column()
         group_column = self.get_group_rank_column()
         # 取得预测数据,以及对应的开始时间序号
         pred_data = self.get_series_by_group_code(pred_list,instrument)
         pred_begin_time = pred_data.time_index.start
-        df_item = df[(df[group_column]==instrument)]
+        df_item = df_data[(df_data[group_column]==instrument)]
         # 根据预测范围参数，取得几天以内的数据
         time_end = pred_begin_time + self.pred_len
-        df_result = df_item[(df_item[time_column]>=pred_begin_time)&(df_item[time_column]<time_end)]
+        # 向前多取得一些原有数据，用于更好的可视化
+        time_begin = pred_begin_time - extend_begin
+        df_result = df_item[(df_item[time_column]>=time_begin)&(df_item[time_column]<time_end)].reset_index(drop=True)
         pred_center_data = get_pred_center_value(pred_data).data
-        df_result.loc[:,"pred"] = pred_center_data
+        # 把预测数据从后面进行对齐插入
+        pred_center_data = np.pad(pred_center_data,(extend_begin,0),'constant',constant_values=(0,0))
+        df_result["pred"] = pred_center_data
         return df_result,pred_begin_time
     
     def get_data_by_trade_date(self,df,instrument,date):
@@ -382,12 +401,34 @@ class TFTSeriesDataset(TFTDataset):
 
         time_column = self.get_time_column()
         group_column = self.get_group_rank_column()
-        df_result = df[(df["datetime"]==str(date))&(df[group_column]==instrument)]       
+        df_result = df[(df["datetime"]==pd.to_datetime(date))&(df[group_column]==instrument)]       
         if df_result.shape[0]==0:
             return None
         return df_result
+    
+    def get_data_by_group_code(self,group_code_list):   
+        """根据分组字段数值，取得df数据"""
         
+        group_column = self.get_group_column()
+        df = self.df_all[self.df_all[group_column].isin(group_code_list)]
+        return df
+    
+    def filter_pred_data_by_mape(self,pred_list,threhold=10,batch_no=0):
+        """根据得分筛选预测数据"""
         
+        group_column = self.get_group_rank_column()
+        # 如果没有指定批次号，则找到最近一个批次数据
+        if batch_no==0:
+            batch_no = self.dbaccessor.do_query("select id from pred_result order by id desc limit 1")[0][0]
+        # 从之前的预测保存数据中取得小于阈值的股票
+        results = self.dbaccessor.do_query("select instrument_rank,instrument,mape from pred_result_detail where result_id=%s and mape<=%s",params=(batch_no,threhold))     
+        resutls = np.array(results).astype(np.float)
+        filter_list = []
+        for pred_item in pred_list:
+            group_rank = int(pred_item.static_covariates[group_column].values[0])
+            if group_rank in resutls[:,0]:
+                filter_list.append(pred_item)
         
-        
-        
+        return filter_list
+    
+    

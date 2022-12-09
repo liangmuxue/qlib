@@ -35,10 +35,12 @@ class Strategy(bt.Strategy):
         else:
             # 使用上一步骤中dataset对象保存的数据集，作为当前全集参考数据
             self.df_ref = dataset.df_all
+        self.df_ref = self.df_ref.reset_index()
         
         self.has_save_data = False
         # 交易记录
         self.trade_list = []
+        self.viz_input = TensorViz(env="data_backtest")
         
     def _get_pickle_path(self,cur_date):
         if self.pred_data_path is None or len(self.pred_data_path)==0:
@@ -95,6 +97,8 @@ class Strategy(bt.Strategy):
         if self.order:
             return
         pred_series_list = self.predict_process()
+        # 只使用预测数据得分高的股票
+        pred_series_list = self.dataset.filter_pred_data_by_mape(pred_series_list)
         if self.pred_data_path is not None and len(self.pred_data_path)>0 and not self.model.load_dataset_file:
             if not self.has_save_data:
                 # 保存全集，只进行一次
@@ -129,16 +133,19 @@ class Strategy(bt.Strategy):
         """购买的逻辑"""
         
         self.log("exec_buy_logic in,top price:{}".format(df_topk.iloc[0]["price"]))
-        pos_size = len(hold_bond_name)
         cur_date = self.datas[0].datetime.date(0)
         for index, row in df_topk.iterrows():
-            instrument = str(int(row["instrument"]))
+            instrument = int(row["instrument"])
             # 如果当天股票不交易，则不处理
             if self.dataset.get_data_by_trade_date(self.df_ref,instrument,cur_date) is None:
                 self.log("Has No Trade for:{}".format(instrument))
+                continue
             # 累计涨幅超过阈值，并且不在持仓列表中，则购买
-            if row["price"] > 3 and instrument not in hold_bond_name:
-                self.view_pred_buy_data(row,cur_date)
+            if row["price"] > 1 and instrument not in hold_bond_name:
+                group_code = self.dataset.get_group_code_by_rank(instrument)
+                title = "buy data:{}_{}".format(group_code,cur_date)
+                
+                self.view_pred_and_val(self.pred_series_list,instrument,title=title)  
                 # 如果持仓数超过规定值，则退出
                 if self.get_trade_len() > self.topk:
                     break   
@@ -235,8 +242,8 @@ class Strategy(bt.Strategy):
         my_model.fit(series_transformed,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
         # 对验证集进行预测，得到预测结果   
-        pred_series_list = my_model.predict(n=self.dataset.pred_len, series=val_series_transformed[:93],num_samples=200,
-                                            past_covariates=past_convariates[:93],future_covariates=future_convariates[:93])  
+        pred_series_list = my_model.predict(n=self.dataset.pred_len, series=val_series_transformed,num_samples=200,
+                                            past_covariates=past_convariates,future_covariates=future_convariates)  
         # 归一化反置，恢复到原值
         pred_series_list = self.dataset.reverse_transform_preds(pred_series_list)
         return pred_series_list 
@@ -256,22 +263,21 @@ class Strategy(bt.Strategy):
         df_result.sort_values("price",ascending=False,inplace=True)   
         return df_result
     
-    def view_pred_buy_data(self,result_row,trade_date):
-        """对于预测买入的数据，进行可视化"""
-        
-        instrument = result_row["instrument"]
+
+    def view_pred_and_val(self,pred_list,group_rank_code,title=""):  
         # 根据交易日期和股票，查找出实际数值,后续使用移动平均数据以及实际数值,同时包含预测数据
-        df,time_begin = self.dataset.get_real_data(self.df_ref,self.pred_series_list,instrument)
-        viz_input = TensorViz(env="back_test")
-        title = "buy data:{}_{}".format(df["instrument"].values[0],trade_date)
+        df,_ = self.dataset.get_real_data(self.df_ref,pred_list,group_rank_code,extend_begin=30)
+        self.view_instrument_data(df, title=title)  
+        
+    def view_instrument_data(self,df,title=""):
         # 按照预测时间序列，分别回执移动平均价格以及实际价格曲线
         view_data = df[["label_ori","label","pred"]].values
-        desc = "begin time index:{},pred value:{}".format(time_begin,result_row["price"])
         names = ["values","mean_values","pred_values"]
-        # x_range = df["datetime"].dt.strftime('%Y%m%d').astype(int).values
         x_range = df["time_idx"].values
-        viz_input.viz_matrix_var(view_data,win=title,title=title,names=names,desc=desc,x_range=x_range)  
-    
+        self.viz_input.viz_matrix_var(view_data,win=title,title=title,names=names,x_range=x_range)  
+        
+
+                        
 class ResultStrategy(Strategy):
     """使用预存储的数据进行快速回测"""
     
@@ -299,9 +305,23 @@ class ResultStrategy(Strategy):
         if pred_series_list is None:
             self.log("pred series none")
             return
+        
+        # 只使用预测数据得分高的股票
+        pred_series_list = self.dataset.filter_pred_data_by_mape(pred_series_list)
+        # self.total_view(pred_series_list)
         self.process_by_pred_data(pred_series_list)
-            
-                    
+    
+    def total_view(self,pred_series_list):
+        """对所有跟踪的预测及实际数据进行可视化"""
+        
+        group_column = self.dataset.get_group_rank_column()
+        cur_date = self.datas[0].datetime.date(0)
+        for series in pred_series_list:
+            group_rank_code = int(series.static_covariates[group_column].values[0])
+            group_code = self.dataset.get_group_code_by_rank(group_rank_code)
+            title = "pred and result:{}_{}".format(group_code,cur_date)
+            self.view_pred_and_val(pred_series_list,group_rank_code,title=title)    
+                   
 class QlibStrategy(BaseStrategy):
     
     def __init__(self,model,dataset,topk):

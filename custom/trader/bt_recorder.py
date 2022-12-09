@@ -35,6 +35,7 @@ class PortAnaRecord(TftRecorder):
         recorder,
         config,
         model = None,
+        dataset = None,
         **kwargs,
     ):
         """
@@ -56,6 +57,13 @@ class PortAnaRecord(TftRecorder):
         self.strategy_config = config["strategy"]
         self.backtest_config = config["backtest"]
         self.model = model
+        
+        if self.model.load_dataset_file:
+            # 使用之前保存的数据作为当前全集参考数据
+            self.df_ref =  self.model.df_ref
+        else:
+            # 使用上一步骤中dataset对象保存的数据集，作为当前全集参考数据
+            self.df_ref = dataset.df_all        
 
     def _get_report_freq(self, executor_config):
         ret_freq = []
@@ -90,7 +98,7 @@ class PortAnaRecord(TftRecorder):
         end_time = self.backtest_config["end_time"]
         # 这里使用valid数据集,每个股票系列单独添加
         group_column = trade_strategy_obj.dataset.get_group_rank_column()
-        df_val = self.model.df_ref[(self.model.df_ref["datetime"]>=pd.to_datetime(str(start_time)))&(self.model.df_ref["datetime"]<pd.to_datetime(str(end_time)))]
+        df_val = self.df_ref[(self.df_ref["datetime"]>=pd.to_datetime(str(start_time)))&(self.df_ref["datetime"]<pd.to_datetime(str(end_time)))]
         group = df_val.groupby(group_column)
         for group_name, item_df in group:
             dataname = self.transfer_to_bt_format(item_df)

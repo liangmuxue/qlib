@@ -44,6 +44,8 @@ from .base_process import BaseNumpyModel
 from numba.core.types import none
 from gunicorn import instrument
 
+from cus_utils.db_accessor import DbAccessor
+
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
@@ -266,7 +268,9 @@ class TftDataframeModel():
         # 对验证集进行预测，得到预测结果   
         pred_series_list = my_model.predict(n=10, series=series_transformed,num_samples=200,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
-               
+        # 保存结果到数据库
+        self.save_pred_result(pred_series_list,val_series_transformed,dataset=dataset,update=True)      
+        # 可视化
         self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset)
         self.model = my_model
         return pred_series_list,val_series_transformed
@@ -280,7 +284,8 @@ class TftDataframeModel():
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
             with open(df_data_path, "rb") as fin:
-                self.df_ref = pickle.load(fin)            
+                self.df_ref = pickle.load(fin)        
+                dataset.build_group_rank_map(self.df_ref)    
             return
         
         # 生成tft时间序列数据集,包括目标数据、协变量等
@@ -297,7 +302,29 @@ class TftDataframeModel():
             self.model.batch_size = self.batch_size     
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
-
+    
+    def save_pred_result(self,pred_series_list,val_series_list,dataset=None,update=False):
+        """保存预测记录"""
+        
+        dbaccessor = DbAccessor({})
+        if not update:
+            # 记录主批次信息
+            sql = "insert into pred_result(batch_no) values(%s)"
+            dbaccessor.do_inserto_withparams(sql, (1)) 
+        result_id = dbaccessor.do_query("select max(id) from pred_result")[0][0]
+        dbaccessor.do_inserto_withparams("delete from pred_result_detail where result_id=%s", (result_id))
+        group_rank_column = dataset.get_group_rank_column()
+        for i in range(len(val_series_list)):
+            pred_series = pred_series_list[i]
+            var_series = val_series_list[i]           
+            group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
+            group_code = str(dataset.get_group_code_by_rank(group_rank_code))
+            # 分别为每个股票序列记录得分数据
+            mape_item = mape(var_series, pred_series)
+            sql = "insert into pred_result_detail(result_id,instrument_rank,instrument,mape) values(%s,%s,%s,%s)"
+            params = (result_id, group_rank_code,group_code, mape_item)
+            dbaccessor.do_inserto_withparams(sql, params)            
+    
     def build_fake_data(self,dataset):
         series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()   
         size = 93
@@ -383,13 +410,18 @@ class TftDataframeModel():
             ]
             actual_series_list.append(ser_total)   
         mape_all = 0
-        r = 5
-        view_list = random_int_list(1,len(val_series_list)-1,r)
-        group_column = dataset.get_group_rank_column()
+        # r = 5
+        # view_list = random_int_list(1,len(val_series_list)-1,r)
+        group_rank_column = dataset.get_group_rank_column()
+        group_column = dataset.get_group_column()
+        # 根据参数，只显示指定股票图形
+        instrument_pick = dataset.kwargs["instrument_pick"]
+        df_pick = dataset.get_data_by_group_code(instrument_pick)
         for i in range(len(val_series_list)):
             pred_series = pred_series_list[i]
             var_series = val_series_list[i]
             actual_series = actual_series_list[i]
+            group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
             # 分位数范围显示
             pred_series.plot(
                 low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
@@ -398,15 +430,17 @@ class TftDataframeModel():
             # 与实际的数据集进行比较，比较的是两个数据集的交集
             mape_item = mape(var_series, pred_series)
             mape_all = mape_all + mape_item
-            if i in view_list:
+            # 取得指定股票，如果不存在则不进行可视化
+            df_item = df_pick[df_pick[group_rank_column]==group_rank_code]
+            if df_item.shape[0]>0:
                 plt.figure(figsize=figsize)
                 # 实际数据集的结尾与预测序列对齐
                 pred_series.plot(label="forecast")            
-                instrument_code = actual_series.static_covariates[group_column].values[0]
+                instrument_code = df_item[group_column].values[0]
                 actual_series[pred_series.end_time()- 25 : pred_series.end_time()].plot(label="actual")           
                 plt.title("ser_{},MAPE: {:.2f}%".format(instrument_code,mape_item))
                 plt.legend()
-                plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],i))
+                plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
                 plt.clf()   
         mape_mean = mape_all/len(val_series_list)
         print("mape_mean:",mape_mean)            

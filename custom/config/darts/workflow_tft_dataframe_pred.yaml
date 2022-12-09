@@ -70,13 +70,13 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2020-12-30]
-                valid: [2020-06-01, 2020-12-30]
+                train_total: [2010-01-01, 2021-03-01]
+                valid: [2020-12-01, 2021-03-01]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             aug_type: 'no'
             data_type: 'date_range'
-            instrument_pick: [600520,600521,600522]
+            instrument_pick: [600025,600031,600010,600011,600012,600010,600015,600016,600017]
             scaler_type: 'norm'
             model_type: 'tft'
             step_len: *wave_period

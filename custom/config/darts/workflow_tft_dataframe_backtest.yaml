@@ -31,8 +31,8 @@ port_analysis_config: &port_analysis_config
             dataset: <DATASET>  
             topk: 3
     backtest:
-        start_time: 2020-09-01
-        end_time: 2020-12-01
+        start_time: 2021-03-01
+        end_time: 2021-05-01
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -71,8 +71,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2020-12-15]
-                valid: [2020-09-01, 2020-11-15]
+                train_total: [2010-01-01, 2021-05-01]
+                valid: [2021-01-01, 2021-05-01]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
@@ -108,3 +108,4 @@ task:
           kwargs: 
             config: *port_analysis_config
             model: <MODEL>
+            dataset: <DATASET>  
