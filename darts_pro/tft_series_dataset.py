@@ -55,9 +55,8 @@ class TFTSeriesDataset(TFTDataset):
         data_filter = DataFilter()
         # 清除序列长度不够的股票
         group_column = self.get_group_column()
-        valid_start = int(val_range[0].strftime('%Y%m%d'))
         time_column = self.col_def["time_column"]       
-        df = data_filter.data_clean(df, (self.step_len-self.pred_len),valid_start=valid_start,group_column=group_column,time_column=time_column)        
+        df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)        
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
         # df["label"] = df["label"].astype("float64")

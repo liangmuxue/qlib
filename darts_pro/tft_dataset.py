@@ -116,11 +116,6 @@ class TFTDataset(DatasetH):
         
         ext_slice = self._extend_slice(slc, self.cal, self.step_len)
         data = super()._prepare_seg(ext_slice, **kwargs)
-        # # 如果是测试阶段，则需要删除日期不在训练集中的股票
-        # if self.segments_mode=="test":
-        #     ext_slice_train = self._extend_slice(slice(*self.segments["train"]), self.cal, self.step_len)
-        #     data_train = super()._prepare_seg(ext_slice_train, **kwargs)
-        #     data = data[data.index.get_level_values(1).isin(data_train.index.get_level_values(1).values)]
         # 恢复成一维列索引
         data = data.reset_index() 
         # 重新定义动态数据字段,忽略前面几个无效字段,并手工添加label字段
