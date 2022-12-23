@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
+
 from darts.metrics import mape
 from darts.models import TFTModel
 from darts import TimeSeries, concatenate
@@ -33,7 +34,6 @@ from torch.optim.lr_scheduler import CosineAnnealingLR,CosineAnnealingWarmRestar
 
 from tft.tft_dataset import TFTDataset
 from darts.utils.likelihood_models import QuantileRegression
-from .tft_comp_stock import process
 
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
@@ -47,7 +47,8 @@ from gunicorn import instrument
 from cus_utils.db_accessor import DbAccessor
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
+from cus_utils.log_util import AppLogger
+logger = AppLogger()
 
 class TftDataframeModel():
     def __init__(
@@ -172,6 +173,7 @@ class TftDataframeModel():
                 
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         optimizer_cls = torch.optim.Adam
+        # 使用余弦退火的学习率方式
         scheduler = CosineAnnealingLR
         scheduler_config = {
             "T_max": 5, 
@@ -260,18 +262,23 @@ class TftDataframeModel():
             # my_model.trainer_params.pop("devices")
             # my_model.batch_size = self.batch_size
         else:
-            my_model = self._build_model(dataset,emb_size=1000,use_model_name=True)            
+            my_model = self._build_model(dataset,emb_size=1000,use_model_name=True)       
+        logger.info("begin fit")     
         # 需要进行fit设置
         my_model.fit(series_transformed,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
-        #
+        logger.info("begin predict")   
         # 对验证集进行预测，得到预测结果   
-        pred_series_list = my_model.predict(n=10, series=series_transformed,num_samples=200,
+        
+        pred_series_list = my_model.predict(n=10, series=series_transformed,num_samples=10,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
+        logger.info("save db")  
         # 保存结果到数据库
-        self.save_pred_result(pred_series_list,val_series_transformed,dataset=dataset,update=True)      
+        # self.save_pred_result(pred_series_list,val_series_transformed,dataset=dataset,update=False)     
+        logger.info("do predict_show")  
         # 可视化
         self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset)
+        logger.info("done predict_show") 
         self.model = my_model
         return pred_series_list,val_series_transformed
  
@@ -280,28 +287,35 @@ class TftDataframeModel():
         
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]
         
-        if self.load_dataset_file:
-            df_data_path = self.pred_data_path + "/df_all.pkl"
-            with open(df_data_path, "rb") as fin:
-                self.df_ref = pickle.load(fin)        
-                dataset.build_group_rank_map(self.df_ref)    
-            return
-        
-        # 生成tft时间序列数据集,包括目标数据、协变量等
-        train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
-        self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
-        self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
-        
-        # 使用股票代码数量作为embbding长度
-        emb_size = dataset.get_emb_size()
         load_weight = self.optargs["load_weight"]
         if load_weight:
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
             self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
             self.model.batch_size = self.batch_size     
         else:
+            # 使用股票代码数量作为embbding长度
+            emb_size = dataset.get_emb_size()            
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
+                    
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            dataset.build_series_data(df_data_path)    
+            self.df_ref = dataset.df_all
+            # self.df_ref = self.df_ref[self.df_ref["instrument"].isin([600033,600035,600036])]
+            return
+        
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
+        if self.save_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            with open(df_data_path, "wb") as fout:
+                pickle.dump(dataset.df_all, fout)           
+                
+        self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
+        self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
+
     
     def save_pred_result(self,pred_series_list,val_series_list,dataset=None,update=False):
         """保存预测记录"""
@@ -416,23 +430,26 @@ class TftDataframeModel():
         group_column = dataset.get_group_column()
         # 根据参数，只显示指定股票图形
         instrument_pick = dataset.kwargs["instrument_pick"]
-        df_pick = dataset.get_data_by_group_code(instrument_pick)
+        if len(instrument_pick)==0:
+            df_pick = dataset.df_all
+        else:
+            df_pick = dataset.get_data_by_group_code(instrument_pick)
         for i in range(len(val_series_list)):
             pred_series = pred_series_list[i]
             var_series = val_series_list[i]
             actual_series = actual_series_list[i]
             group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
-            # 分位数范围显示
-            pred_series.plot(
-                low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
-            )
-            pred_series.plot(low_quantile=low_q, high_quantile=high_q, label=label_q_inner)
             # 与实际的数据集进行比较，比较的是两个数据集的交集
             mape_item = mape(var_series, pred_series)
             mape_all = mape_all + mape_item
             # 取得指定股票，如果不存在则不进行可视化
             df_item = df_pick[df_pick[group_rank_column]==group_rank_code]
             if df_item.shape[0]>0:
+                # 分位数范围显示
+                pred_series.plot(
+                    low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
+                )
+                pred_series.plot(low_quantile=low_q, high_quantile=high_q, label=label_q_inner)                
                 plt.figure(figsize=figsize)
                 # 实际数据集的结尾与预测序列对齐
                 pred_series.plot(label="forecast")            

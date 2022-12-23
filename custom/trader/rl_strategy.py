@@ -10,8 +10,8 @@ from gunicorn import instrument
 from cus_utils.tensor_viz import TensorViz
 from datetime import datetime
 
-class Strategy(bt.Strategy):
-    """自定义策略基础类,继承backtrader"""
+class RLStrategy():
+    """深度学习策略基础类"""
     
     def __init__(self,model,dataset,topk=3):
         """
@@ -286,9 +286,8 @@ class Strategy(bt.Strategy):
         
 
                         
-class ResultStrategy(Strategy):
+class ResultStrategy(RLStrategy):
     """使用预存储的数据进行快速回测"""
-    
     
     def __init__(self,model,dataset,topk=3,pred_data_path=None):
         """
@@ -336,14 +335,6 @@ class ResultStrategy(Strategy):
             group_code = self.dataset.get_group_code_by_rank(group_rank_code)
             title = "pred and result:{}_{}".format(group_code,cur_date)
             self.view_pred_and_val(pred_series_list,group_rank_code,title=title)    
-                   
-class QlibStrategy(BaseStrategy):
-    
-    def __init__(self,model,dataset,topk):
-
-        self.model = model
-        self.dataset = dataset
-        self.order = None
-        self.topk = topk   
+  
     
     

@@ -6,6 +6,9 @@ from darts.dataprocessing.transformers import Scaler
 
 import pandas as pd
 import numpy as np
+import pickle
+import itertools
+
 from datetime import datetime
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
@@ -14,6 +17,10 @@ from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
 from numba.core.types import none
 from cus_utils.db_accessor import DbAccessor
+
+from cus_utils.log_util import AppLogger
+from gym import logger
+logger = AppLogger()
 
 class TFTSeriesDataset(TFTDataset):
     """
@@ -91,41 +98,64 @@ class TFTSeriesDataset(TFTDataset):
         for index, row in df_group.iterrows():
             self.group_mapping[row[rank_group_column]] = row[group_column]
     
+    def prepare_inner_data(self,df_data):
+        self.build_group_rank_map(df_data)
+        # self.target_scalers = self._create_target_scalers(df_data)
+    
     def get_group_code_by_rank(self,group_rank):    
         return self.group_mapping[group_rank]
            
-    def create_base_data(self,segments_total=None,val_range=None):
+    def create_base_data(self,segments_total=None,val_range=None,outer_df=None):
         """创建基础数据"""
         
-        # 根据参数计算时间范围，动态调用
-        slc_total = slice(*segments_total)
-        kwargs = {'col_set': ['feature', 'label'], 'data_key': 'learn'}
-        # 首先取得pandas原始数据,使用train,valid数据集
-        df_all = self._prepare_seg(slc_total, **kwargs)
-        # 提前生成嵌入向量空间长度，使用原始的股票数量，即使后续清理了部分股票，保留的应该仍然是大多数，不影响整体使用
-        self.emb_size = df_all[self.get_group_column()].unique().shape[0] + 1
-        # 前处理
-        df_all = self._pre_process_df(df_all,val_range=val_range)
-        # 为每个序列生成不同的scaler
-        self.df_all = df_all
-        print("emb size after p:",self.get_emb_size())
-        self.target_scalers = self._create_target_scalers(df_all)       
+        if outer_df is not None:
+            # 如果从外部传递了数据，则直接使用
+            self.df_all = outer_df
+        else:
+            # 根据参数计算时间范围，动态调用
+            slc_total = slice(*segments_total)
+            kwargs = {'col_set': ['feature', 'label'], 'data_key': 'learn'}
+            # 首先取得pandas原始数据,使用train,valid数据集
+            df_all = self._prepare_seg(slc_total, **kwargs)
+            # 提前生成嵌入向量空间长度，使用原始的股票数量，即使后续清理了部分股票，保留的应该仍然是大多数，不影响整体使用
+            self.emb_size = df_all[self.get_group_column()].unique().shape[0] + 1
+            # 前处理
+            df_all = self._pre_process_df(df_all,val_range=val_range)
+            # 为每个序列生成不同的scaler
+            self.df_all = df_all
+            print("emb size after p:",self.get_emb_size())
+        self.target_scalers = self._create_target_scalers(self.df_all)       
         
-    def build_series_data(self):
+    def build_series_data(self,data_file=None):
         """从pandas数据生成时间序列类型数据"""
         
+        if data_file is not None:
+            # 直接从文件中读取数据
+            with open(data_file, "rb") as fin:
+                df_ref = pickle.load(fin)          
+                total_range = self.kwargs["segments"]["train_total"] 
+                valid_range = self.kwargs["segments"]["valid"] 
+                logger.info("begin build_series_data_step_range")
+                # train_series_transformed,val_series_transformed,past_convariates,future_convariates = self.build_series_data_step_range(total_range, valid_range,outer_df=df_ref)
+                logger.info("begin prepare_inner_data")
+                self.prepare_inner_data(df_ref) 
+                logger.info("end prepare_inner_data")
+                self.df_all = df_ref
+            return
+            
         total_range = self.segments["train_total"]
         valid_range = self.segments["valid"]
         return self.build_series_data_step_range(total_range, valid_range)
         
-    def build_series_data_step_range(self,total_range,val_range,fill_future=False):
+    def build_series_data_step_range(self,total_range,val_range,fill_future=False,outer_df=None):
         """根据时间点参数，从pandas数据生成时间序列类型数据
            Params:total_range--完整时间序列开始和结束时间
                   val_range--预测时间序列开始和结束时间
         """    
         
+        logger.info("begin create_base_data")
         # 生成基础数据
-        self.create_base_data(total_range,val_range)
+        self.create_base_data(total_range,val_range,outer_df=outer_df)
 
         group_column = self.get_group_rank_column()
         target_column = self.get_target_column()
@@ -144,6 +174,7 @@ class TFTSeriesDataset(TFTDataset):
         self.df_train = df_train
         self.df_val = df_val
         
+        logger.info("begin from_group_dataframe")
         # 分别生成训练和测试序列数据
         train_series = TimeSeries.from_group_dataframe(df_train,
                                                 time_col=time_column,
@@ -167,6 +198,7 @@ class TFTSeriesDataset(TFTDataset):
             vs_transformed = target_scaler.transform(val_series[index])
             train_series_transformed.append(ts_transformed)
             val_series_transformed.append(vs_transformed)
+        self.target_scalers
         
         def build_covariates(column_names):
             covariates_array = []
@@ -191,6 +223,7 @@ class TFTSeriesDataset(TFTDataset):
             return covariates_array            
 
         # 生成过去协变量，并归一化
+        logger.info("begin build_covariates")
         past_convariates = build_covariates(past_columns)      
         # 生成未来协变量，并归一化
         future_convariates = build_covariates(future_columns)    
@@ -309,14 +342,8 @@ class TFTSeriesDataset(TFTDataset):
     def get_part_time_range(self,date_position,ref_df=None):
         """根据给定日期，取得对应部分的数据集时间范围，需要满足预测要求"""
         
-        dt_index_column = self.get_datetime_index_column()
-        group_column = self.get_group_rank_column()
-        time_column = self.col_def["time_column"]
-        target_column = self.get_target_column()
-        redun_step = 3
-        
         # 首先取得总数据集范围，然后根据这个范围以及当前时间点，动态计算所需要的数据集范围以及验证集范围
-        total_df_range = self.segments["train_total"]
+        total_df_range = self.kwargs["segments"]["train_total"]
         total_start = total_df_range[0]
         total_end = total_df_range[1]
         total_range = [None,None]
@@ -412,22 +439,87 @@ class TFTSeriesDataset(TFTDataset):
         df = self.df_all[self.df_all[group_column].isin(group_code_list)]
         return df
     
-    def filter_pred_data_by_mape(self,pred_list,threhold=10,batch_no=0):
+    def filter_pred_data_by_mape(self,pred_list,threhold=10,result_id=0):
         """根据得分筛选预测数据"""
         
         group_column = self.get_group_rank_column()
         # 如果没有指定批次号，则找到最近一个批次数据
-        if batch_no==0:
-            batch_no = self.dbaccessor.do_query("select id from pred_result order by id desc limit 1")[0][0]
+        if result_id==0:
+            result_id = self.dbaccessor.do_query("select id from pred_result order by id desc limit 1")[0][0]
         # 从之前的预测保存数据中取得小于阈值的股票
-        results = self.dbaccessor.do_query("select instrument_rank,instrument,mape from pred_result_detail where result_id=%s and mape<=%s",params=(batch_no,threhold))     
-        resutls = np.array(results).astype(np.float)
+        results = self.dbaccessor.do_query("select instrument_rank,instrument,mape from pred_result_detail where result_id=%s and mape<=%s",params=(result_id,threhold))     
+        results = np.array(results).astype(np.float)
         filter_list = []
         for pred_item in pred_list:
             group_rank = int(pred_item.static_covariates[group_column].values[0])
-            if group_rank in resutls[:,0]:
+            group_code = self.get_group_code_by_rank(group_rank)
+            if group_code in results[:,1]:
                 filter_list.append(pred_item)
         
         return filter_list
     
+    def ind_column_names(self,ind_len):
+        ind_column = ["pred_{}".format(i) for i in range(ind_len)]
+        return ind_column
     
+    def build_df_data_for_pred_list(self,date_range,ind_len,pred_data_path=None,load_cache=False,type=None):
+        """把连续预测结果数据，生成为dataframe格式
+            Params:
+                pred_combine_data 字典形式，key值为日期，value为对应每天的预测数据
+        """
+        
+        cache_file = pred_data_path + "/pred_cache_{}.npy".format(type)
+        group_column = self.get_group_rank_column()
+        # 每个预测数值作为一个字段
+        ind_columns = self.ind_column_names(ind_len)
+        # 加上日期及股票代码
+        all_columns = [self.get_group_column()] + ["datetime"] + ind_columns       
+        if not load_cache:
+            data_array = []
+            for date in date_range:
+                # 动态取出之前存储的预测数据
+                pred_series_list = self.get_pred_result(pred_data_path,date)
+                logger.debug('pred_series_list process,{}'.format(date))
+                for series in pred_series_list:
+                    # 拼接预测数据到每个股票
+                    group_rank = series.static_covariates[group_column].values[0]
+                    group_item = self.get_group_code_by_rank(group_rank)
+                    pred_center_data = get_pred_center_value(series).data
+                    data_line = [float(group_item),float(date)] + pred_center_data.tolist()
+                    data_array.append(data_line)
+            data_array = np.array(data_array)
+            np.save(cache_file,data_array)
+        else:
+            data_array = np.load(cache_file)
+        df = pd.DataFrame(data_array,columns = all_columns) 
+        df["datetime"] = df["datetime"].astype(int).astype(str)
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        df[self.get_group_column()] = df[self.get_group_column()].astype(int)
+        return df
+    
+    def get_pred_result(self,pred_data_path,cur_date):
+        """取得之前生成的预测数据"""
+        
+        data_path = pred_data_path + "/" + str(cur_date) + ".pkl"
+        with open(data_path, "rb") as fin:
+            pred_series_list = pickle.load(fin)            
+            return pred_series_list        
+        
+        
+    def fill_miss_data(self,df):
+        """填充某些天没哟交易的空数据"""
+        
+        list_date = list(pd.date_range(df['datetime'].min(),df['datetime'].max()).astype(str))
+        list_ticker = df[self.get_group_column()].unique().tolist()
+        combination = list(itertools.product(list_date,list_ticker))
+        edf = pd.DataFrame(combination,columns=["datetime",self.get_group_column()])
+        edf["datetime"] = pd.to_datetime(edf["datetime"])
+        processed_full = edf.merge(df,on=["datetime",self.get_group_column()],how="left")
+        processed_full = processed_full[processed_full['datetime'].isin(df['datetime'])]
+        processed_full = processed_full.sort_values(['datetime',self.get_group_column()])        
+        processed_full = processed_full.fillna(0)
+        
+        return processed_full
+    
+    
+        
