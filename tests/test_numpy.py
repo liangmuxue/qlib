@@ -160,7 +160,9 @@ def test_each():
     v = s[:, 0] ** 2
     out = np.exp((-v / 200) - 0.5 * (s[:, 1] + 0.05 * v - 5) ** 2)
     print(out)
-
+    v = s[:, 0]
+    out = np.subtract(out,v)
+    print(out)
 
 def test_split_compute():
     arr = np.array([
@@ -357,7 +359,7 @@ if __name__ == "__main__":
     # test_condition3()
     # test_condi_remove()
     # test_group()
-    # test_each()
+    test_each()
     # test_split_compute()
     # test_variable()
     # test_index()
@@ -374,7 +376,7 @@ if __name__ == "__main__":
     # test_tensor_list()
     # test_reshape()
     # test_meshgrid()
-    test_linespace_2d()
+    # test_linespace_2d()
     # test_pd_df()
     # test_pd_trans()
     # test_pd_index()

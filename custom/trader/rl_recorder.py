@@ -209,9 +209,7 @@ class PortAnaRecord(TftRecorder):
             cur_date = item
             # 利用strategy的方法生成数据
             pred_series_list = trade_strategy_obj.predict_process(cur_date,outer_df=self.df_ref)
-            pred_series_list = self.dataset.reverse_transform_preds(pred_series_list)
-            # 存储到本地变量，后续使用
-            # pred_data[cur_date] = pred_series_list
+            # 存储数据
             data_path = trade_strategy_obj._get_pickle_path(cur_date)
             with open(data_path, "wb") as fout:
                 pickle.dump(pred_series_list, fout)              

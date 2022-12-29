@@ -34,7 +34,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR,CosineAnnealingWarmRestar
 
 from tft.tft_dataset import TFTDataset
 from darts.utils.likelihood_models import QuantileRegression
-
+from custom_model.simple_model import Trainer
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
@@ -44,7 +44,12 @@ from .base_process import BaseNumpyModel
 from numba.core.types import none
 from gunicorn import instrument
 
+from sktime.classification.hybrid import HIVECOTEV2
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import RobustScaler, StandardScaler
+from tsai.all import *
 from cus_utils.db_accessor import DbAccessor
+from threading import _enumerate
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -96,12 +101,19 @@ class TftDataframeModel():
         if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
-            return       
+            return      
+        if self.type.startswith("build_pred_result"):
+            self.build_pred_result(dataset)
+            return            
         if self.type.startswith("backtest"):
             # 直接进行预测,只需要加载模型参数
             print("no need fit for backtest")
             return   
-        
+        if self.type.startswith("classify_train"):
+            # 直接进行预测,只需要加载模型参数
+            print("no need fit for classify_train")
+            self.classify_train(dataset)
+            return           
         # 生成tft时间序列数据集,包括目标数据、协变量等
         train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
@@ -242,6 +254,9 @@ class TftDataframeModel():
 
             
     def predict(self, dataset: TFTSeriesDataset):
+        if self.type=="classify_train":
+            self.classify_train(dataset)
+            return           
         if self.type=="backtest":
             self.backtest(dataset)
             return        
@@ -281,7 +296,35 @@ class TftDataframeModel():
         logger.info("done predict_show") 
         self.model = my_model
         return pred_series_list,val_series_transformed
- 
+
+    def build_pred_result(self, dataset: TFTSeriesDataset):
+        """针对连续天，逐个生成对应的预测数据"""
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]
+        
+        load_weight = self.optargs["load_weight"]
+        if load_weight:
+            # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
+            self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
+            self.model.batch_size = self.batch_size     
+        else:
+            # 使用股票代码数量作为embbding长度
+            emb_size = dataset.get_emb_size()            
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
+                    
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            dataset.build_series_data(df_data_path)    
+            return
+        
+        dataset.build_series_data()
+        if self.save_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            with open(df_data_path, "wb") as fout:
+                pickle.dump(dataset.df_all, fout)           
+        
     def backtest(self, dataset: TFTSeriesDataset):
         """实现回测功能"""
         
@@ -316,7 +359,57 @@ class TftDataframeModel():
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
 
-    
+    def classify_train(self, dataset: TFTSeriesDataset):
+        """对预测数据进行分类训练"""
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]
+        
+        self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=True)
+                    
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            dataset.build_series_data(df_data_path)    
+        
+        # 生成分类训练数据
+        pred_data_path = self.kwargs["pred_data_path"]
+        train_data,ref_train_data_array = dataset.combine_complex_data(dataset.df_all, dataset.train_range, 
+                                                  pred_data_path=pred_data_path, load_cache=True,type="train")
+        valid_data,ref_valide_data_array = dataset.combine_complex_data(dataset.df_all, dataset.valid_range, 
+                                                  pred_data_path=pred_data_path, load_cache=True,type="valid")
+        # 执行标准化
+        scaler = StandardScaler()
+        train_data_X = train_data[:,:-1] 
+        train_data_X = scaler.fit_transform(train_data[:,:-1])
+        train_data_X = dataset.transfer_pred_data(train_data_X)
+        train_data_X = np.expand_dims(train_data_X,axis=0).transpose(1,0,2)
+        valid_data_X = valid_data[:,:-1] 
+        valid_data_X = scaler.transform(valid_data[:,:-1])
+        valid_data_X = dataset.transfer_pred_data(valid_data_X)
+        valid_data_X = np.expand_dims(valid_data_X,axis=0).transpose(1,0,2)
+        # 统一成一个数据集以及分割数组
+        total_X = np.concatenate((train_data_X,valid_data_X),axis=0)
+        total_Y = np.concatenate((train_data[:,-1],valid_data[:,-1]),axis=0)
+        self.view_classify_data(train_data_X,train_data[:,-1],ref_train_data_array,type="train")
+        self.stat_classify_data(train_data_X,train_data[:,-1],ref_train_data_array,type="train")
+        train_size = train_data_X.shape[0]
+        valid_size = valid_data_X.shape[0]
+        splits_train = [i for i in range(train_size)]
+        splits_valid = [train_size+i for i in range(valid_size)]
+        # total_X,total_Y,(splits_train,splits_valid) = self.build_fake_data(dataset)
+        
+        # 使用tsai模型进行分类训练和测试
+        n_epochs = 200
+        # batch_tfms = TSStandardize(by_sample=True)
+        # mv_clf = TSClassifier(total_X, total_Y, splits=(splits_train,splits_valid), path='models', arch=InceptionTimePlus, batch_tfms=batch_tfms, metrics=accuracy, cbs=None)
+        # mv_clf.fit_one_cycle(n_epochs, 1e-1)
+        # mv_clf.export("mv_clf.pkl")
+        trainer = Trainer(n_input=5,n_hidden=20,n_output=3,batch_size=64,n_epochs=n_epochs)
+        total_Y = total_Y - 1
+        trainer.build_dataset(total_X.reshape(total_X.shape[0],total_X.shape[2]),total_Y,(splits_train,splits_valid))
+        trainer.train()
+        
     def save_pred_result(self,pred_series_list,val_series_list,dataset=None,update=False):
         """保存预测记录"""
         
@@ -338,21 +431,45 @@ class TftDataframeModel():
             sql = "insert into pred_result_detail(result_id,instrument_rank,instrument,mape) values(%s,%s,%s,%s)"
             params = (result_id, group_rank_code,group_code, mape_item)
             dbaccessor.do_inserto_withparams(sql, params)            
-    
+        
     def build_fake_data(self,dataset):
-        series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()   
-        size = 93
-        series_transformed = series_transformed[:size]
-        val_series_transformed = val_series_transformed[:size]
-        past_convariates = past_convariates[:size]
-        future_convariates = future_convariates[:size]
-        val_series_transformed = [series for series in val_series_transformed]
-        return series_transformed,val_series_transformed,past_convariates,future_convariates
+        data = []
+        class_num = 3
+        cnt = 20000
+        for i in range(cnt):
+            r = i % class_num
+            data_item = [i*10 + r for j in range(5)]
+            data.append(data_item)
+        label = [i % class_num + 1 for i in range(20)]
+        split_train = [x for x in range(12)]
+        split_valid = [x+12 for x in range(8)]
+        data = np.expand_dims(np.array(data),axis=1).astype(np.float)
+        label = np.array(label)
+        return data,label,(split_train,split_valid)
     
-    def view_df(self,df,target_title):
-        viz_input = TensorViz(env="data_hist")
-        view_data = df[["label"]].values
-        viz_input.viz_matrix_var(view_data,win=target_title,title=target_title)  
+    def stat_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
+        pred_len = 5
+        X_data = X_data.reshape(X_data.shape[0],X_data.shape[2])   
+        Y_data = np.expand_dims(Y_data,axis=-1)
+        combine_data = np.concatenate((X_data,Y_data),axis=1)
+        columns = ["pred_{}".format(i) for i in range(pred_len-1)]
+        columns = columns + ["t_value","label"]
+        df = pd.DataFrame(combine_data,columns=columns)
+        target_df = df
+        for i in range(pred_len-1):
+            target_df = target_df[target_df["pred_{}".format(i)]>0]
+        print(target_df)   
+        target_df = target_df[target_df["t_value"]>1]
+        print(target_df)
+    
+    def view_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
+        viz_input = TensorViz(env="data_pred")
+        for i in range(10):
+            view_data = X_data[i][0]
+            view_data = np.stack((view_data,np.array(ref_data_array[i])),axis=0).transpose(1,0)
+            target_title = "classify_data_{}_{}".format(type,i)
+            names = ["line_{},class:{}".format(i,int(Y_data[i]))] + ["ref data"]
+            viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
 
     def series_data_view(self,dataset,series_list,past_convariates=None,future_convariates=None,title="train_data"): 
         target_column = dataset.get_target_column()
@@ -382,29 +499,7 @@ class TftDataframeModel():
             sub_title = title + "_past_{}".format(i)
             view_data_past = past_df[past_columns].values[:data_view_len,:]
             viz_input.viz_matrix_var(view_data_past,win=sub_title,title=sub_title,names=past_columns)        
- 
-    def predict_fake_show(self,val_series,pred_series,series_train):       
-        lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
-        label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
-        label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"       
-        forecast_horizon = self.optargs["forecast_horizon"]    
-        # 整个序列比较多，只比较某几个序列
-        figsize = (9, 6)
-        # plot actual series
-        plt.figure(figsize=figsize)
-        actual_series = series_train.concatenate(val_series)
-        actual_series[2400: pred_series.end_time()].plot(label="actual")
-    
-        # plot prediction with quantile ranges
-        pred_series.plot(
-            low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
-        )
-        pred_series.plot(low_quantile=low_q, high_quantile=high_q, label=label_q_inner)
-    
-        plt.title("MAPE: {:.2f}%".format(mape(val_series, pred_series)))
-        plt.legend()
-        plt.savefig('custom/data/darts/result_view/eval_exp.jpg')
-        print("MAPE: {:.2f}%".format(mape(val_series, pred_series)))
+
                
     def predict_show(self,val_series_list,pred_series_list,series_train,dataset=None):       
         lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 

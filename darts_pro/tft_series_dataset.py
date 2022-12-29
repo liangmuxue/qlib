@@ -3,6 +3,7 @@ from qlib.data.dataset.handler import DataHandler, DataHandlerLP
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
+from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
 
 import pandas as pd
 import numpy as np
@@ -133,13 +134,9 @@ class TFTSeriesDataset(TFTDataset):
             # 直接从文件中读取数据
             with open(data_file, "rb") as fin:
                 df_ref = pickle.load(fin)          
-                total_range = self.kwargs["segments"]["train_total"] 
-                valid_range = self.kwargs["segments"]["valid"] 
-                logger.info("begin build_series_data_step_range")
-                # train_series_transformed,val_series_transformed,past_convariates,future_convariates = self.build_series_data_step_range(total_range, valid_range,outer_df=df_ref)
-                logger.info("begin prepare_inner_data")
+                self.train_range = self.kwargs["segments"]["train_total"] 
+                self.valid_range = self.kwargs["segments"]["valid"] 
                 self.prepare_inner_data(df_ref) 
-                logger.info("end prepare_inner_data")
                 self.df_all = df_ref
             return
             
@@ -465,7 +462,8 @@ class TFTSeriesDataset(TFTDataset):
     def build_df_data_for_pred_list(self,date_range,ind_len,pred_data_path=None,load_cache=False,type=None):
         """把连续预测结果数据，生成为dataframe格式
             Params:
-                pred_combine_data 字典形式，key值为日期，value为对应每天的预测数据
+                date_range 预测结果日期范围
+                ind_len 预测结果长度
         """
         
         cache_file = pred_data_path + "/pred_cache_{}.npy".format(type)
@@ -496,7 +494,7 @@ class TFTSeriesDataset(TFTDataset):
         df["datetime"] = pd.to_datetime(df["datetime"])
         df[self.get_group_column()] = df[self.get_group_column()].astype(int)
         return df
-    
+        
     def get_pred_result(self,pred_data_path,cur_date):
         """取得之前生成的预测数据"""
         
@@ -521,5 +519,80 @@ class TFTSeriesDataset(TFTDataset):
         
         return processed_full
     
-    
+    def combine_complex_data(self,df_ref,date_range,pred_data_path=None,load_cache=False,type="train"):
+        """合并预测数据，以及实际行情数据
+           Params:
+                df_ref 数据集
+                date_range 合并数据日期范围
+        """
+        
+        cache_file = pred_data_path + "/classify_data_cache_{}.npy".format(type)
+        ref_cache_file = pred_data_path + "/classify_data_cache_ref_{}.npy".format(type)
+        group_column = self.get_group_rank_column()
+        (start_time,end_time) = date_range
+        # 取得日期列表
+        df_range = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(start_time))) & (df_ref["datetime"]<pd.to_datetime(str(end_time)))]
+        date_list = df_range["datetime"].dt.strftime('%Y%m%d').unique()
+        if not load_cache:
+            data_array = []
+            ref_price_array = []
+            for date in date_list:
+                # 动态取出之前存储的预测数据
+                try:
+                    pred_series_list = self.get_pred_result(pred_data_path,date)
+                    pred_series_list = self.filter_pred_data_by_mape(pred_series_list,result_id=3)
+                except Exception as e:
+                    print("no data for {}".format(date))
+                    continue
+                logger.debug('pred_series_list process,{}'.format(date))
+                for series in pred_series_list:
+                    # 拼接预测数据到每个股票
+                    group_rank = series.static_covariates[group_column].values[0]
+                    group_item = self.get_group_code_by_rank(group_rank)
+                    pred_center_data = get_pred_center_value(series).data
+                    # 前边是数据，最后一位是标签
+                    data_line = pred_center_data.tolist()
+                    # 取得下几个个交易日收盘涨跌幅数据，作为标签参考数据
+                    real_label_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref["datetime"]>date)]["label_ori"].values
+                    item_value = 0
+                    item_price_list = []
+                    real_range = min(self.pred_len,len(real_label_data))
+                    for i in range(real_range):
+                        item_value += real_label_data[i]
+                        item_price_list = item_price_list + [real_label_data[i]]
+                    # 连续数值进行分类
+                    p_taraget = [k for k, v in CLASS_SIMPLE_VALUES.items() if (item_value>=v[0] and item_value<v[1])]
+                    data_line = data_line + p_taraget
+                    data_array.append(data_line)
+                    ref_price_array.append(item_price_list)
+            data_array = np.array(data_array)
+            ref_data_array = np.array(ref_price_array)
+            np.save(cache_file,data_array)
+            np.save(ref_cache_file,ref_data_array)
+        else:
+            data_array = np.load(cache_file)
+            ref_data_array = np.load(ref_cache_file,allow_pickle=True)
+        return data_array,ref_data_array
+
+    def transfer_pred_data(self,pred_data):
+        """预测数据转换为逐个元素差
+           Params:
+                pred_data 原预测数据
+        """        
+        
+        mean_value = np.expand_dims(np.mean(pred_data,axis=1),axis=-1)
+        new_array = []
+        for row in range(pred_data.shape[0]): 
+            row_array = []
+            for col in range(pred_data.shape[1]):
+                if col+1>=pred_data.shape[1]:
+                    break
+                value = pred_data[row,col+1] - pred_data[row,col] 
+                row_array.append(value)    
+            new_array.append(row_array)
+        result = np.array(new_array)
+        result = np.concatenate((result,mean_value),axis=-1)
+        return result
+        
+        
         
