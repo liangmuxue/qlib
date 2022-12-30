@@ -44,10 +44,8 @@ from .base_process import BaseNumpyModel
 from numba.core.types import none
 from gunicorn import instrument
 
-from sktime.classification.hybrid import HIVECOTEV2
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import RobustScaler, StandardScaler
-from tsai.all import *
 from cus_utils.db_accessor import DbAccessor
 from threading import _enumerate
 
@@ -362,6 +360,8 @@ class TftDataframeModel():
     def classify_train(self, dataset: TFTSeriesDataset):
         """对预测数据进行分类训练"""
         
+        # from tsai.all import *
+        
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]
@@ -374,6 +374,12 @@ class TftDataframeModel():
         
         # 生成分类训练数据
         pred_data_path = self.kwargs["pred_data_path"]
+        complex_df_train = dataset.combine_complex_df_data(dataset.df_all, dataset.train_range, 
+                                                  pred_data_path=pred_data_path, load_cache=True,type="train")
+        complex_df_valid = dataset.combine_complex_df_data(dataset.df_all, dataset.valid_range, 
+                                                  pred_data_path=pred_data_path, load_cache=True,type="valid")    
+        complex_df = pd.concat([complex_df_train,complex_df_valid])
+        self.view_complex_data(complex_df,type="total",dataset=dataset)  
         train_data,ref_train_data_array = dataset.combine_complex_data(dataset.df_all, dataset.train_range, 
                                                   pred_data_path=pred_data_path, load_cache=True,type="train")
         valid_data,ref_valide_data_array = dataset.combine_complex_data(dataset.df_all, dataset.valid_range, 
@@ -382,16 +388,16 @@ class TftDataframeModel():
         scaler = StandardScaler()
         train_data_X = train_data[:,:-1] 
         train_data_X = scaler.fit_transform(train_data[:,:-1])
-        train_data_X = dataset.transfer_pred_data(train_data_X)
+        # train_data_X = dataset.transfer_pred_data(train_data_X)
         train_data_X = np.expand_dims(train_data_X,axis=0).transpose(1,0,2)
         valid_data_X = valid_data[:,:-1] 
         valid_data_X = scaler.transform(valid_data[:,:-1])
-        valid_data_X = dataset.transfer_pred_data(valid_data_X)
+        # valid_data_X = dataset.transfer_pred_data(valid_data_X)
         valid_data_X = np.expand_dims(valid_data_X,axis=0).transpose(1,0,2)
         # 统一成一个数据集以及分割数组
         total_X = np.concatenate((train_data_X,valid_data_X),axis=0)
         total_Y = np.concatenate((train_data[:,-1],valid_data[:,-1]),axis=0)
-        self.view_classify_data(train_data_X,train_data[:,-1],ref_train_data_array,type="train")
+        # self.view_classify_data(train_data_X,train_data[:,-1],ref_train_data_array,type="train")
         self.stat_classify_data(train_data_X,train_data[:,-1],ref_train_data_array,type="train")
         train_size = train_data_X.shape[0]
         valid_size = valid_data_X.shape[0]
@@ -448,20 +454,78 @@ class TftDataframeModel():
         return data,label,(split_train,split_valid)
     
     def stat_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
+        viz_input = TensorViz(env="data_pred")
         pred_len = 5
         X_data = X_data.reshape(X_data.shape[0],X_data.shape[2])   
+        X_mean = np.expand_dims(np.mean(X_data,axis=-1),axis=1)
+        X_data = np.concatenate((X_data,X_mean),axis=-1)
         Y_data = np.expand_dims(Y_data,axis=-1)
         combine_data = np.concatenate((X_data,Y_data),axis=1)
-        columns = ["pred_{}".format(i) for i in range(pred_len-1)]
-        columns = columns + ["t_value","label"]
+        columns_pred = ["pred_{}".format(i) for i in range(pred_len)]
+        columns = columns_pred + ["t_value","label"]
         df = pd.DataFrame(combine_data,columns=columns)
-        target_df = df
-        for i in range(pred_len-1):
-            target_df = target_df[target_df["pred_{}".format(i)]>0]
-        print(target_df)   
-        target_df = target_df[target_df["t_value"]>1]
-        print(target_df)
-    
+        target_df = df[df["label"]==3]
+        view_data = target_df[columns_pred].values.transpose(1,0)
+        target_title = "classify_stat_{}".format(3)
+        names = ["value_{}".format(i) for i in target_df[["t_value"]].values]
+        view_data = view_data[:,:20]
+        names = names[:20]
+        viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)              
+        # target_df = df
+        # for i in range(pred_len):
+        #     target_df = target_df[target_df["pred_{}".format(i)]>0]
+        # print(target_df)   
+        # target_df = target_df[target_df["t_value"]>1]
+        # print(target_df)
+
+    def view_complex_data(self,complex_data,type="train",dataset=None):
+        viz_input = TensorViz(env="data_complex")
+        data_columns = ["instrument","date"]
+        # 预测数据
+        pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
+        # 标签数据）
+        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len)]
+        # 实际价格（滑动窗之前的原始数据）
+        price_columns = ["price_{}".format(i) for i in range(dataset.pred_len*2)]
+        data_columns = data_columns + pred_columns + label_columns + price_columns
+        start_time = "20210201"   
+        end_time = "20210331" 
+        df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
+        date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
+        pred_threhold = 1.8
+        for date in date_list:     
+            match_cnt = 0
+            target_data = complex_data[(complex_data["date"]==date)]
+            pad_items = np.array([0.0 for i in range(dataset.pred_len)])
+            names = ["pred","label","price"]
+            for idx,row in target_data.iterrows():
+                rise_cnt = 0
+                total_price = 0
+                # 总上涨数量
+                for i in range(dataset.pred_len):
+                    total_price += row["price_{}".format(i+dataset.pred_len)]
+                    if row["pred_{}".format(i)]>0:
+                        rise_cnt += 1
+                # 最后两个数据不能连续下降
+                end_match_flag = ((row["pred_{}".format(dataset.pred_len-1)]>row["pred_{}".format(dataset.pred_len-2)]) or 
+                    (row["pred_{}".format(dataset.pred_len-2)]>row["pred_{}".format(dataset.pred_len-3)]))                   
+                if row["pred_4"]<pred_threhold or rise_cnt<4 or not end_match_flag:
+                    continue
+                # if idx<20 or idx>30:
+                #     continue
+                total_price = round(total_price, 2)
+                target_title = "{}_{}_{}".format(int(row["instrument"]),row["date"].strftime("%Y%m%d"),total_price)
+                pred_line = row[pred_columns].values
+                pred_line = np.concatenate((pad_items,pred_line),axis=0)
+                label_line = row[label_columns].values
+                label_line = np.concatenate((pad_items,label_line),axis=0)
+                price_line = row[price_columns].values
+                view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
+                viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
+                match_cnt += 1
+                # print("price mean:{} and label:{} and pred:{}".format(np.mean(price_line[5:]),label_line[-1],pred_line[-1]))
+            print("date:{} and match_cnt:{}".format(date,match_cnt))
+            
     def view_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
         viz_input = TensorViz(env="data_pred")
         for i in range(10):

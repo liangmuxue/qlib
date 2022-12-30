@@ -59,7 +59,7 @@ task:
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
-            instrument_pick: [600520,600521,600522]
+            instrument_pick: [603986,603980,603987]
             scaler_type: 'norm'
             model_type: 'tft'
             step_len: *wave_period

@@ -595,4 +595,76 @@ class TFTSeriesDataset(TFTDataset):
         return result
         
         
+    def combine_complex_df_data(self,df_ref,date_range,pred_data_path=None,load_cache=False,type="train"):
+        """合并预测数据,实际行情数据,价格数据等
+           Params:
+                df_ref 数据集
+                date_range 合并数据日期范围
+        """
+        
+        cache_file = pred_data_path + "/complex_df_cache_{}.pickel".format(type)
+        group_column = self.get_group_rank_column()
+        (start_time,end_time) = date_range
+        # 取得日期列表
+        df_range = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(start_time))) & (df_ref["datetime"]<pd.to_datetime(str(end_time)))]
+        date_list = df_range["datetime"].dt.strftime('%Y%m%d').unique()
+        if not load_cache:
+            data_array = []
+            data_columns = ["instrument","date"]
+            # 预测数据
+            pred_columns = ["pred_{}".format(i) for i in range(self.pred_len)]
+            # 标签数据）
+            label_columns = ["label_{}".format(i) for i in range(self.pred_len)]
+            # 实际价格（滑动窗之前的原始数据）
+            price_columns = ["price_{}".format(i) for i in range(self.pred_len*2)]
+            data_columns = data_columns + pred_columns + label_columns + price_columns
+            for date in date_list:
+                # 动态取出之前存储的预测数据
+                try:
+                    pred_series_list = self.get_pred_result(pred_data_path,date)
+                    pred_series_list = self.filter_pred_data_by_mape(pred_series_list,result_id=3)
+                except Exception as e:
+                    print("no data for {}".format(date))
+                    continue
+                logger.debug('pred_series_list process,{}'.format(date))
+                for series in pred_series_list:
+                    # 拼接预测数据到每个股票
+                    group_rank = series.static_covariates[group_column].values[0]
+                    group_item = self.get_group_code_by_rank(group_rank)
+                    pred_center_data = get_pred_center_value(series).data
+                    time_index_df = df_ref[(df_ref[group_column]==group_rank)&
+                                        (df_ref["datetime"]>=date)]
+                    if time_index_df.shape[0]==0:
+                        continue
+                    time_index = time_index_df.iloc[0][self.get_time_column()]                    
+                    # 预测数据
+                    data_line = [float(group_item),float(date)] + pred_center_data.tolist()
+                    # 实际数据部分
+                    label_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index)&(df_ref[self.get_time_column()]<time_index+5)]["label"].values.tolist()
+                    # 有可能长度不够，补0
+                    if len(label_data)<self.pred_len:
+                        label_data = label_data + [0.0 for i in range(self.pred_len-len(label_data))]
+                    data_line = data_line + label_data
+                    # 实际价格部分，往前取相同范围的数据
+                    pre_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index-5)&(df_ref[self.get_time_column()]<time_index)]["label_ori"].values.tolist()
+                    next_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index)&(df_ref[self.get_time_column()]<time_index+5)]["label_ori"].values.tolist()
+                    # 实际数据部分，有可能长度不够，补0
+                    if len(next_price_data)<self.pred_len:
+                        next_price_data = next_price_data + [0.0 for i in range(self.pred_len-len(next_price_data))]        
+                    data_line = data_line + pre_price_data + next_price_data
+                    # types = [isinstance(item,float) for item in data_line]
+                    # if not np.array(types).all():
+                    #     print("not float")
+                    data_array.append(data_line)          
+                     
+            data_array = np.array(data_array)
+            target_df = pd.DataFrame(data_array,columns=data_columns)
+            target_df["date"] = pd.to_datetime(target_df["date"].astype("int").astype("str"))
+            with open(cache_file, "wb") as fout:
+                pickle.dump(target_df, fout)              
+        else:
+            with open(cache_file, "rb") as fin:
+                target_df = pickle.load(fin)
+        return target_df
+       
         
