@@ -6,6 +6,15 @@ from typing import Optional, List, Tuple, Union
 import numpy as np
 from numba.core.types import none
 
+from typing import Optional, Sequence, Tuple, Union
+from sklearn.preprocessing import MinMaxScaler
+
+from darts.utils.data.sequential_dataset import MixedCovariatesSequentialDataset,DualCovariatesSequentialDataset
+from darts.utils.data.inference_dataset import InferenceDataset,PastCovariatesInferenceDataset,DualCovariatesInferenceDataset
+from darts.utils.data.shifted_dataset import GenericShiftedDataset,MixedCovariatesTrainingDataset
+from darts.utils.data.utils import CovariateType
+from darts import TimeSeries
+
 class CustomNumpyDataset(SplitCovariatesTrainingDataset):
     def __init__(
         self,
@@ -90,3 +99,156 @@ class CustomNumpyDataset(SplitCovariatesTrainingDataset):
                 future_target.transpose(1,0)
             )             
             
+class CustomSequentialDataset(MixedCovariatesTrainingDataset):
+    """重载MixedCovariatesSequentialDataset，用于定制加工数据"""
+    
+    def __init__(
+        self,
+        target_series: Union[TimeSeries, Sequence[TimeSeries]],
+        past_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        future_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        input_chunk_length: int = 12,
+        output_chunk_length: int = 1,
+        max_samples_per_ts: Optional[int] = None,
+        use_static_covariates: bool = True,
+        mode="train"
+    ):
+        """"""
+
+        super().__init__()
+        self.mode = mode
+        # This dataset is in charge of serving past covariates
+        self.ds_past = GenericShiftedDataset(
+            target_series=target_series,
+            covariates=past_covariates,
+            input_chunk_length=input_chunk_length,
+            output_chunk_length=output_chunk_length,
+            shift=input_chunk_length,
+            shift_covariates=False,
+            max_samples_per_ts=max_samples_per_ts,
+            covariate_type=CovariateType.PAST,
+            use_static_covariates=use_static_covariates,
+        )
+
+        # This dataset is in charge of serving historical and future future covariates
+        self.ds_dual = DualCovariatesSequentialDataset(
+            target_series=target_series,
+            covariates=future_covariates,
+            input_chunk_length=input_chunk_length,
+            output_chunk_length=output_chunk_length,
+            max_samples_per_ts=max_samples_per_ts,
+            use_static_covariates=use_static_covariates,
+        )
+
+    def __len__(self):
+        return len(self.ds_past)
+
+    def __getitem__(
+        self, idx
+    ) -> Tuple[
+        np.ndarray,
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        np.ndarray,
+    ]:
+
+        past_target, past_covariate, static_covariate, future_target = self.ds_past[idx]
+        _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
+        
+        # 针对价格数据，进行单独归一化，扩展数据波动范围
+        scaler = MinMaxScaler()
+        if self.mode=="train":
+            # scaler.fit(np.concatenate((past_target,future_target),axis=0))   
+            scaler.fit(past_target)
+        else:
+            scaler.fit(past_target)
+        past_target = scaler.transform(past_target)   
+        future_target = scaler.transform(future_target)    
+        
+        return (
+            past_target,
+            past_covariate,
+            historic_future_covariate,
+            future_covariate,
+            static_covariate,
+            future_target,
+        )
+        
+class CustomInferenceDataset(InferenceDataset):
+    def __init__(
+        self,
+        target_series: Union[TimeSeries, Sequence[TimeSeries]],
+        past_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        future_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        n: int = 1,
+        input_chunk_length: int = 12,
+        output_chunk_length: int = 1,
+        use_static_covariates: bool = True,
+    ):
+        """
+       
+        """
+        super().__init__()
+
+        # This dataset is in charge of serving past covariates
+        self.ds_past = PastCovariatesInferenceDataset(
+            target_series=target_series,
+            covariates=past_covariates,
+            n=n,
+            input_chunk_length=input_chunk_length,
+            output_chunk_length=output_chunk_length,
+            covariate_type=CovariateType.PAST,
+            use_static_covariates=use_static_covariates,
+        )
+
+        # This dataset is in charge of serving historic and future future covariates
+        self.ds_future = DualCovariatesInferenceDataset(
+            target_series=target_series,
+            covariates=future_covariates,
+            n=n,
+            input_chunk_length=input_chunk_length,
+            output_chunk_length=output_chunk_length,
+            use_static_covariates=use_static_covariates,
+        )   
+        
+    def __len__(self):
+        return len(self.ds_past)
+
+    def __getitem__(
+        self, idx
+    ) -> Tuple[
+        np.ndarray,
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        MinMaxScaler,
+        TimeSeries,
+    ]:
+
+        (
+            past_target,
+            past_covariate,
+            future_past_covariate,
+            static_covariate,
+            ts_target,
+        ) = self.ds_past[idx]
+        _, historic_future_covariate, future_covariate, _, _ = self.ds_future[idx]
+
+        # 针对价格数据，进行单独归一化，扩展数据波动范围
+        scaler = MinMaxScaler()
+        past_target = scaler.fit_transform(past_target)   
+        # 需要返回scaler，用于后续恢复原数据
+        return (
+            past_target,
+            past_covariate,
+            historic_future_covariate,
+            future_covariate,
+            future_past_covariate,
+            static_covariate,
+            scaler,
+            ts_target
+        )            

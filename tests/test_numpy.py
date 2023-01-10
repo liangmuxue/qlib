@@ -353,13 +353,37 @@ def test_linespace_2d():
     np_arr_2d = np.array(arr_2d)
     # arr = np.linspace(0, 10,10,dtype=np.int32)
     print(arr_2d)
-       
+
+def test_corr():
+    x_simple = np.array([-1.8430, -1.9625, -2.1838, -1.8075, -1.8022])
+    y_simple = np.array([0.2252, 0.2269, 0.2403, 0.2496, 0.2595])
+    t = np.stack((x_simple,y_simple))
+    my_rho = np.corrcoef(t)
+    # print(cov) 
+    print(my_rho)      
+    
+def test_corr_tensor():
+    from torchmetrics import PearsonCorrCoef
+    target = torch.tensor([[0.2205, 0.2276, 0.2315, 0.2313, 0.2374],
+        [0.1232, 0.1220, 0.1231, 0.1224, 0.1234],
+        [0.0429, 0.0427, 0.0443, 0.0467, 0.0480],
+        [0.0213, 0.0192, 0.0168, 0.0155, 0.0133]])
+    preds = torch.tensor([[ 0.9404,  0.9669,  0.8062,  0.8755,  0.7477],
+        [ 0.2350, -1.0773, -0.7159, -0.6425, -0.7188],
+        [-1.1237, -1.2764, -1.3003, -1.1781, -1.6030],
+        [-1.0591, -1.4384, -1.2628, -2.0782, -1.6555]])
+    pearson = PearsonCorrCoef(num_outputs=5)
+    ret = pearson(preds, target)
+    print(ret)
+         
 if __name__ == "__main__":
     # test_argwhere()
     # test_condition3()
     # test_condi_remove()
     # test_group()
-    test_each()
+    # test_corr()
+    test_corr_tensor()
+    # test_each()
     # test_split_compute()
     # test_variable()
     # test_index()

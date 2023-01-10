@@ -77,12 +77,7 @@ class PortAnaRecord(TftRecorder):
         self.model = model
         self.dataset = dataset
         
-        if self.model.load_dataset_file:
-            # 使用之前保存的数据作为当前全集参考数据
-            self.df_ref =  self.model.df_ref
-        else:
-            # 使用上一步骤中dataset对象保存的数据集，作为当前全集参考数据
-            self.df_ref = dataset.df_all     
+        self.df_ref = dataset.df_all     
                
     def _get_strategy_clazz(self,class_name):
         if class_name=="RLStrategy":

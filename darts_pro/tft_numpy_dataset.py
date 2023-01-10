@@ -10,6 +10,7 @@ from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_filter import DataFilter
 from qlib import data
 
+
 class TFTNumpyDataset(TFTDataset):
     """
     自定义数据集，直接从numpy文件中获取数据，并进行相关处理
@@ -212,12 +213,6 @@ class TFTNumpyDataset(TFTDataset):
                         
         return training_data,val_data
     
-    # def get_seq_columns(self):  
-    #     time_column = self.col_def["time_column"]
-    #     target_column = self.col_def["target_column"]      
-    #     future_columns = self.col_def["future_covariate_col"]  
-    #     columns = [time_column] + future_columns + [target_column]
-    #     return columns 
-           
+
         
     

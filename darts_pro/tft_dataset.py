@@ -124,6 +124,47 @@ class TFTDataset(DatasetH):
         # 重建字段名，添加日期和股票字段
         new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols))
         data.columns = pd.Index(new_cols_idx)    
+        # 清除NAN,INF数据
+        data = data.replace([np.inf, -np.inf], np.nan).dropna()
+        # 价格不能为负数
+        data = data[data["label"]>0]
+        # 清除极值数据
+        data = self.filter_extremum_data(data, columns=self.col_def["past_covariate_col"])
+        # 补充辅助数据,添加日期编号
+        data["month"] = data.datetime.astype("str").str.slice(0,7)
+        data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
+        data["time_idx"] -= data["time_idx"].min() 
+        # 重新编号,解决节假日以及相关日期不连续问题
+        data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
+        # 补充商品指数数据,按照月份合并
+        data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
+        # month重新编号为1到12
+        data["month"] = data["month"].str.slice(5,7)
+        data["dayofweek"] = data.datetime.dt.dayofweek    
+        # 保留时间戳
+        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)
+        # 使用指定字段
+        data = data[self.get_seq_columns() + ["datetime_number"]]
+        return data
+
+    def _prepare_seg_range(self, slc: slice, **kwargs) -> pd.DataFrame:
+        """
+        组装数据,内容加工
+        """
+        
+        # 使用成交量作为标签时的处理
+        # return self.prepare_seg_volume(slc)
+        
+        ext_slice = self._extend_slice(slc, self.cal, self.step_len)
+        data = super()._prepare_seg(ext_slice, **kwargs)
+        # 恢复成一维列索引
+        data = data.reset_index() 
+        # 重新定义动态数据字段,忽略前面几个无效字段,并手工添加label字段
+        self.reals_cols = data.columns.get_level_values(1).values[2:-1]
+        self.reals_cols  = np.concatenate((self.reals_cols,['label']))
+        # 重建字段名，添加日期和股票字段
+        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols))
+        data.columns = pd.Index(new_cols_idx)    
         # 清除NAN数据
         data = data.dropna() 
         # 清除极值数据
@@ -148,7 +189,7 @@ class TFTDataset(DatasetH):
         # 使用指定字段
         data = data[self.get_seq_columns() + ["datetime_number"]]
         return data
-    
+        
     def filter_extremum_data(self,data,columns=[]):
         """清除极值数据"""
         
