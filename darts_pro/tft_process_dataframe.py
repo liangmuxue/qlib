@@ -41,7 +41,7 @@ from custom_model.simple_model import Trainer
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
-from cus_utils.metrics import corr_dis,series_target_scale
+from cus_utils.metrics import corr_dis,series_target_scale,diff_dis
 from losses.mtl_loss import CorrLoss,UncertaintyLoss
 from darts_pro.data_extension.custom_model import TFTCusModel,TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
@@ -149,7 +149,6 @@ class TftDataframeModel():
         
         # 使用多任务下的不确定损失作为损失函数
         device = "cuda:" + str(self.gpus)
-        weighted_loss_func = UncertaintyLoss(device=device)
         
         optimizer_cls = torch.optim.Adam
         optimizer_kwargs={"lr": 1e-2,"weight_decay":1e-4}
@@ -207,9 +206,9 @@ class TftDataframeModel():
             # likelihood=QuantileRegression(
             #     quantiles=quantiles
             # ), 
-            # likelihood=None,
-            # loss_fn=torch.nn.MSELoss(),
-            loss_fn=weighted_loss_func,
+            likelihood=None,
+            loss_fn=torch.nn.MSELoss(),
+            use_weighted_loss_func=True,
             # torch_metrics=metric_collection,
             random_state=42,
             model_name=model_name,
@@ -221,7 +220,7 @@ class TftDataframeModel():
             lr_scheduler_kwargs=scheduler_config,
             optimizer_cls=optimizer_cls,
             optimizer_kwargs=optimizer_kwargs,
-            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0]}  
+            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":50}  
         )
         return my_model          
 
@@ -275,7 +274,7 @@ class TftDataframeModel():
         pred_series_list,scaler_map = my_model.predict(n=dataset.pred_len, series=series_transformed,num_samples=10,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
         # 保存结果到数据库
-        self.save_pred_result(pred_series_list,val_series_transformed,dataset=dataset,update=True)     
+        self.save_pred_result(pred_series_list,val_series_transformed,dataset=dataset,update=False)     
         logger.info("do predict_show")  
         # 可视化
         self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset,do_scale=False,scaler_map=scaler_map)
@@ -610,6 +609,7 @@ class TftDataframeModel():
             actual_series_list.append(ser_total)   
         mape_all = 0
         corr_all = 0
+        diff_all = 0
         # r = 5
         # view_list = random_int_list(1,len(val_series_list)-1,r)
         
@@ -629,7 +629,10 @@ class TftDataframeModel():
             mape_all = mape_all + mape_item
             # 计算相关度
             corr_item = corr_dis(val_series, pred_series)  
-            corr_all = corr_all + corr_item          
+            corr_all = corr_all + corr_item   
+            # 开始结束差的距离衡量
+            diff_item = diff_dis(val_series, pred_series) 
+            diff_all = diff_all + diff_item      
             # 取得指定股票，如果不存在则不进行可视化
             df_item = df_pick[df_pick[group_rank_column]==group_rank_code]
             if df_item.shape[0]>0:
@@ -642,13 +645,14 @@ class TftDataframeModel():
                 # 实际数据集的结尾与预测序列对齐
                 pred_series.plot(label="forecast")            
                 instrument_code = df_item[group_column].values[0]
-                actual_series[pred_series.end_time()- 25 : pred_series.end_time()].plot(label="actual")           
+                actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1].plot(label="actual")           
                 plt.title("ser_{},MAPE: {:.2f}%,corr:{}".format(instrument_code,mape_item,corr_item))
                 plt.legend()
                 plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
                 plt.clf()   
         mape_mean = mape_all/len(val_series_list)
         corr_mean = corr_all/len(val_series_list)
-        print("mape_mean:{},corr mean:{}".format(mape_mean,corr_mean))           
+        diff_mean = diff_all/len(val_series_list)
+        print("mape_mean:{},corr mean:{},diff mean:{}".format(mape_mean,corr_mean,diff_mean))           
         
         

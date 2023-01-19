@@ -3,7 +3,9 @@ from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 import torch
 import torchmetrics
+
 from torch import Tensor
+from darts.utils import likelihood_models
 
 class CorrLoss(_Loss):
     __constants__ = ['reduction']
@@ -25,30 +27,43 @@ class CorrLoss(_Loss):
 class UncertaintyLoss(nn.Module):
     """不确定损失"""
 
-    def __init__(self, mse_reduction="mean",device=None):
+    def __init__(self, mse_reduction="mean",device=None,loss_sigma=None):
         super(UncertaintyLoss, self).__init__()
         
-        v_num = 2
+        v_num = 3
         self.mse_reduction = mse_reduction
-        params = torch.ones(v_num, requires_grad=True)
-        self.sigma = torch.nn.Parameter(params)
+        self.sigma = loss_sigma
         self.v_num = v_num
         self.device = device
         self.epoch = 0
 
-    def forward(self, input: Tensor, target: Tensor,epoch=0):
+    def forward(self, input_ori: Tensor, target: Tensor,outer_loss=None,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
+        # 如果是似然估计下的数据，需要取中间值
+        if len(input_ori.shape)==4:
+            input = torch.mean(input_ori[:,:,0,:],dim=-1)
+        else:
+            input = input_ori
         # 相关系数损失
-        corr_loss = self.corr_loss_comp(input, target)       
-        if self.epoch<50:
-            return corr_loss
+        corr_loss = self.corr_loss_comp(input, target)   
+        # return corr_loss  
         # MSE损失
-        mse_loss = F.mse_loss(input, target, reduction=self.mse_reduction)
+        if outer_loss is not None:
+            compute_loss = outer_loss
+        else:
+            compute_loss = F.mse_loss(input, target, reduction=self.mse_reduction)     
+        
+        # 前后数值差的距离衡量
+        # input_value_diff = input[:,-1] - input[:,0]
+        # target_value_diff = target[:,-1] - target[:,0]
+        # value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
         loss_sum = 0
         # 使用不确定性损失模式进行累加
         loss_sum += 0.5 / (self.sigma[0] ** 2) * corr_loss + torch.log(1 + self.sigma[0] ** 2)
-        loss_sum += 0.5 / (self.sigma[1] ** 2) * mse_loss + torch.log(1 + self.sigma[1] ** 2)
+        loss_sum += 0.5 / (self.sigma[1] ** 2) * compute_loss + torch.log(1 + self.sigma[1] ** 2)
+        # loss_sum += 0.5 / (self.sigma[2] ** 2) * value_diff_loss + torch.log(1 + self.sigma[2] ** 2)
+        # loss_sum = 5 * corr_loss + mse_loss
         return loss_sum
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):

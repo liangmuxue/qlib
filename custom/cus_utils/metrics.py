@@ -4,7 +4,7 @@ import torch
 from torch.nn.modules.loss import _Loss
 from torch import Tensor
 import torchmetrics
-import torch.nn.functional as F
+from torchmetrics import MeanSquaredError
 
 from darts import TimeSeries
 from darts.logging import get_logger, raise_if_not, raise_log
@@ -27,6 +27,22 @@ def corr_dis(actual_series, pred_series, intersect: bool = True,pred_len=5):
     corr_obj = torchmetrics.PearsonCorrCoef()
     corr = corr_obj(torch.tensor(y_hat),torch.tensor(y_true))
     return corr.item()
+
+def diff_dis(actual_series, pred_series, intersect: bool = True,pred_len=5):
+    
+    y_true, y_hat = _get_values_or_raise(
+        actual_series, pred_series, intersect, remove_nan_union=True
+    )
+    raise_if_not(
+        (y_true != 0).all(),
+        "The actual series must be strictly positive to compute the MAPE.",
+        logger,
+    )
+    mse_metric = MeanSquaredError()
+    output_be = y_hat[[0,-1]]
+    target_be = y_true[[0,-1]]    
+    diff = mse_metric(torch.tensor(output_be), torch.tensor(target_be))
+    return diff.item()
 
 def series_target_scale(target_series,scaler=None):
     """使用训练中生成的scaler，对目标系列数据进行缩放"""

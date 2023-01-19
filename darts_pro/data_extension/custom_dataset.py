@@ -158,7 +158,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
         # 针对价格数据，进行单独归一化，扩展数据波动范围
-        scaler = MinMaxScaler()
+        scaler = MinMaxScaler(feature_range=(0.01,1))
         if self.mode=="train":
             # scaler.fit(np.concatenate((past_target,future_target),axis=0))   
             scaler.fit(past_target)
@@ -239,7 +239,7 @@ class CustomInferenceDataset(InferenceDataset):
         _, historic_future_covariate, future_covariate, _, _ = self.ds_future[idx]
 
         # 针对价格数据，进行单独归一化，扩展数据波动范围
-        scaler = MinMaxScaler()
+        scaler = MinMaxScaler(feature_range=(0.01,1))
         past_target = scaler.fit_transform(past_target)   
         # 需要返回scaler，用于后续恢复原数据
         return (
