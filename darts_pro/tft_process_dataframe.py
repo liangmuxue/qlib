@@ -271,13 +271,13 @@ class TftDataframeModel():
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
         logger.info("begin predict")   
         # 对验证集进行预测，得到预测结果   
-        pred_series_list,scaler_map = my_model.predict(n=dataset.pred_len, series=series_transformed,num_samples=10,
+        pred_series_list = my_model.predict(n=dataset.pred_len, series=series_transformed,num_samples=10,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
         # 保存结果到数据库
         self.save_pred_result(pred_series_list,val_series_transformed,dataset=dataset,update=False)     
         logger.info("do predict_show")  
         # 可视化
-        self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset,do_scale=False,scaler_map=scaler_map)
+        self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset,do_scale=False,scaler_map=None)
         self.model = my_model
         return pred_series_list,val_series_transformed
 
@@ -388,48 +388,26 @@ class TftDataframeModel():
                 with open(df_data_path, "wb") as fout:
                     pickle.dump(dataset.df_all, fout)       
                       
-        # 生成分类训练数据
+        # 生成预测数据组合，需要符合相关筛选条件
         complex_df_train = dataset.combine_complex_df_data(dataset.df_all, dataset.train_range, 
                                                   pred_data_path=self.pred_data_path, load_cache=False,type="train")
         complex_df_valid = dataset.combine_complex_df_data(dataset.df_all, dataset.valid_range, 
                                                   pred_data_path=self.pred_data_path, load_cache=False,type="valid")    
         complex_df = pd.concat([complex_df_train,complex_df_valid])
+        # 筛选出之前预测结果比较好的股票序列
+        complex_df = self.filter_series_by_db(complex_df,dataset=dataset)
         self.view_complex_data(complex_df,type="total",dataset=dataset)  
-        train_data,ref_train_data_array = dataset.combine_complex_data(dataset.df_all, dataset.train_range, 
-                                                  pred_data_path=self.pred_data_path, load_cache=True,type="train")
-        valid_data,ref_valide_data_array = dataset.combine_complex_data(dataset.df_all, dataset.valid_range, 
-                                                  pred_data_path=self.pred_data_path, load_cache=True,type="valid")
-        # 执行标准化
-        scaler = StandardScaler()
-        train_data_X = train_data[:,:-1] 
-        train_data_X = scaler.fit_transform(train_data[:,:-1])
-        # train_data_X = dataset.transfer_pred_data(train_data_X)
-        train_data_X = np.expand_dims(train_data_X,axis=0).transpose(1,0,2)
-        valid_data_X = valid_data[:,:-1] 
-        valid_data_X = scaler.transform(valid_data[:,:-1])
-        # valid_data_X = dataset.transfer_pred_data(valid_data_X)
-        valid_data_X = np.expand_dims(valid_data_X,axis=0).transpose(1,0,2)
-        # 统一成一个数据集以及分割数组
-        total_X = np.concatenate((train_data_X,valid_data_X),axis=0)
-        total_Y = np.concatenate((train_data[:,-1],valid_data[:,-1]),axis=0)
-        # self.view_classify_data(train_data_X,train_data[:,-1],ref_train_data_array,type="train")
-        self.stat_classify_data(train_data_X,train_data[:,-1],ref_train_data_array,type="train")
-        train_size = train_data_X.shape[0]
-        valid_size = valid_data_X.shape[0]
-        splits_train = [i for i in range(train_size)]
-        splits_valid = [train_size+i for i in range(valid_size)]
-        # total_X,total_Y,(splits_train,splits_valid) = self.build_fake_data(dataset)
+    
+    def filter_series_by_db(self,df_data,dataset=None): 
+        """通过之前存储在数据库中的指标,筛选更加合适的序列"""
         
-        # 使用tsai模型进行分类训练和测试
-        n_epochs = 200
-        # batch_tfms = TSStandardize(by_sample=True)
-        # mv_clf = TSClassifier(total_X, total_Y, splits=(splits_train,splits_valid), path='models', arch=InceptionTimePlus, batch_tfms=batch_tfms, metrics=accuracy, cbs=None)
-        # mv_clf.fit_one_cycle(n_epochs, 1e-1)
-        # mv_clf.export("mv_clf.pkl")
-        trainer = Trainer(n_input=5,n_hidden=20,n_output=3,batch_size=64,n_epochs=n_epochs)
-        total_Y = total_Y - 1
-        trainer.build_dataset(total_X.reshape(total_X.shape[0],total_X.shape[2]),total_Y,(splits_train,splits_valid))
-        trainer.train()
+        dbaccessor = DbAccessor({})
+        group_column = dataset.get_group_column()
+        
+        result_rows = dbaccessor.do_query("select instrument from pred_result_detail where result_id=7 and corr>0.5")
+        result_rows = np.array(result_rows)[:,0].astype(int)
+        target_df = df_data[df_data[group_column].astype(int).isin(result_rows)]
+        return target_df
         
     def save_pred_result(self,pred_series_list,val_series_list,dataset=None,update=False):
         """保存预测记录"""
@@ -509,27 +487,21 @@ class TftDataframeModel():
         end_time = "20210331" 
         df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
         date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
-        pred_threhold = 1.8
+        pred_threhold = 10
         for date in date_list:     
             match_cnt = 0
             target_data = complex_data[(complex_data["date"]==date)]
             pad_items = np.array([0.0 for i in range(dataset.pred_len)])
             names = ["pred","label","price"]
             for idx,row in target_data.iterrows():
-                # rise_cnt = 0
-                # total_price = 0
-                # # 总上涨数量
-                # for i in range(dataset.pred_len):
-                #     total_price += row["price_{}".format(i+dataset.pred_len)]
-                #     if row["pred_{}".format(i)]>0:
-                #         rise_cnt += 1
-                # # 最后两个数据不能连续下降
-                # end_match_flag = ((row["pred_{}".format(dataset.pred_len-1)]>row["pred_{}".format(dataset.pred_len-2)]) or 
-                #     (row["pred_{}".format(dataset.pred_len-2)]>row["pred_{}".format(dataset.pred_len-3)]))                   
-                # if row["pred_4"]<pred_threhold or rise_cnt<4 or not end_match_flag:
-                #     continue
-                if idx<20 or idx>30:
+                # 排除补0的数据
+                if np.any(row[label_columns].values==0):
                     continue
+                diff_scope = (row["pred_4"] - row["pred_0"]) / row["pred_0"] * 100    
+                if diff_scope<pred_threhold:
+                    continue
+                # if idx<20 or idx>30:
+                #     continue
                 total_price = row["price_{}".format(2*dataset.pred_len-1)] - row["price_0"]
                 total_price = round(total_price, 2)
                 target_title = "{}_{}_{}".format(int(row["instrument"]),row["date"].strftime("%Y%m%d"),total_price)

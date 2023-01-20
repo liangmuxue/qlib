@@ -273,7 +273,7 @@ class _TFTCusModule(_TFTModule):
             )
             for batch_idx, input_series in enumerate(batch_input_series)
         )
-        return ts_forecasts,scaler_map
+        return ts_forecasts
     
     def predict_data_eval(self,batch_predictions,batch_input_series):
         """保持scaler方式评估预测数据"""

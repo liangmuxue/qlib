@@ -55,8 +55,8 @@ task:
             n_jobs: 20
             type: 'build_pred_result'
             n_epochs : 300
-            save_dataset_file: True
-            load_dataset_file: &load_dataset_file False
+            save_dataset_file: False
+            load_dataset_file: &load_dataset_file True
             pred_data_path: "custom/data/darts/dump_data/test8"
             optargs:
                data_type: 'combine'

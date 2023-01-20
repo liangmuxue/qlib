@@ -143,7 +143,7 @@ class PortAnaRecord(TftRecorder):
         # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
         series_transformed,val_series_transformed,past_convariates,future_convariates = self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df)
         my_model.fit(series_transformed,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
-                     val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
+                     val_past_covariates=past_convariates, val_future_covariates=future_convariates,num_loader_workers=8,verbose=True,epochs=-1)            
         # 对验证集进行预测，得到预测结果   
         pred_series_list = my_model.predict(n=self.dataset.pred_len, series=val_series_transformed,num_samples=200,
                                             past_covariates=past_convariates,future_covariates=future_convariates)  

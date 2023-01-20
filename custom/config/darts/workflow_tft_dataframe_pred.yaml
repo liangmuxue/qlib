@@ -54,13 +54,13 @@ task:
             type: 'predict'
             n_epochs : 300
             save_dataset_file: False  
-            load_dataset_file: &load_dataset_file False     
-            pred_data_path: "custom/data/darts/dump_data/test7"     
+            load_dataset_file: &load_dataset_file True     
+            pred_data_path: "custom/data/darts/dump_data/test8"     
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test7_tft_all'
+               model_name: 'test8_tft_all'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -80,7 +80,7 @@ task:
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
-            instrument_pick: ['603825','603980','603937']
+            instrument_pick: [603776,603777]
             # instrument_pick: []
             scaler_type: 'norm'
             model_type: 'tft'

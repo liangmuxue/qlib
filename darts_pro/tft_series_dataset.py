@@ -462,7 +462,7 @@ class TFTSeriesDataset(TFTDataset):
         
         return filter_list
 
-    def filter_pred_data_by_corr(self,pred_list,threhold=0.8,result_id=0):
+    def filter_pred_data_by_corr(self,pred_list,threhold=0.5,result_id=0):
         """根据得分筛选预测数据"""
         
         group_column = self.get_group_rank_column()
@@ -567,7 +567,7 @@ class TFTSeriesDataset(TFTDataset):
                 try:
                     pred_series_list = self.get_pred_result(pred_data_path,date)
                     # pred_series_list = self.filter_pred_data_by_mape(pred_series_list,result_id=3)
-                    pred_series_list = self.filter_pred_data_by_corr(pred_series_list,result_id=6)
+                    # pred_series_list = self.filter_pred_data_by_corr(pred_series_list,result_id=7)
                 except Exception as e:
                     print("no data for {}".format(date))
                     continue
@@ -650,7 +650,7 @@ class TFTSeriesDataset(TFTDataset):
                 try:
                     pred_series_list = self.get_pred_result(pred_data_path,date)
                     # pred_series_list = self.filter_pred_data_by_mape(pred_series_list,result_id=6)
-                    pred_series_list = self.filter_pred_data_by_corr(pred_series_list,result_id=6)
+                    # pred_series_list = self.filter_pred_data_by_corr(pred_series_list,result_id=6)
                 except Exception as e:
                     print("no data for {}".format(date))
                     continue
