@@ -126,26 +126,32 @@ class Strategy(bt.Strategy):
         # 取得所有持仓的股票名
         hold_bond_name = [_p._name for _p in self.broker.positions if self.broker.getposition(_p).size > 0]
         # 买入逻辑执行
-        self.exec_buy_logic(df_topk, hold_bond_name)
+        self.exec_buy_logic(df_topk, hold_bond_name,pred_series_list=pred_series_list)
         # 卖出逻辑执行
-        self.exec_sell_logic(df_result, hold_bond_name)        
+        self.exec_sell_logic(df_result, hold_bond_name,pred_series_list=pred_series_list)        
             
-    def exec_buy_logic(self,df_topk,hold_bond_name):
+    def exec_buy_logic(self,df_topk,hold_bond_name,pred_series_list=None,thredhold=8):
         """购买的逻辑"""
         
         self.log("exec_buy_logic in,top price:{}".format(df_topk.iloc[0]["price"]))
         cur_date = self.datas[0].datetime.date(0)
         for index, row in df_topk.iterrows():
             instrument = int(row["instrument"])
+            group_code = self.dataset.get_group_code_by_rank(instrument)
             # 如果当天股票不交易，则不处理
             if self.dataset.get_data_by_trade_date(self.df_ref,instrument,cur_date) is None:
                 self.log("Has No Trade for:{}".format(instrument))
                 continue
+            # 取得预测数据与实际数据，进行统一筛选
+            pred_and_real = self.get_single_pred_data(pred_series_list,instrument,cur_date)
+            # 如果之前的平均日涨幅超过阈值，则不执行买入
+            price_range = self.real_price_range(pred_and_real)
+            if price_range > 3:
+                self.log("Ignore cause price range:{},{}".format(group_code,price_range))
+                continue
             # 累计涨幅超过阈值，并且不在持仓列表中，则购买
-            if row["price"] > 1 and instrument not in hold_bond_name:
-                group_code = self.dataset.get_group_code_by_rank(instrument)
-                title = "buydata:{}_{},{}".format(group_code,cur_date,row["rise_cnt"])
-                
+            if row["price"] > thredhold and instrument not in hold_bond_name:
+                title = "buydata:{}_{},{}".format(group_code,cur_date,row["price"])
                 self.view_pred_and_val(self.pred_series_list,instrument,title=title)  
                 # 如果持仓数超过规定值，则退出
                 if self.get_trade_len() > self.topk:
@@ -160,26 +166,37 @@ class Strategy(bt.Strategy):
                     self.buy(data=data,size=size)     
                     self.add_trade_info(trade_info)   
 
-    def exec_sell_logic(self,df_result,hold_bond_name):
+    def exec_sell_logic(self,df_result,hold_bond_name,pred_series_list=None,thredhold=10):
         """卖出的逻辑"""
         
+        self.log("exec_sell_logic in,hold_bond_name:{}".format(hold_bond_name))
         size = 1
         for index, instrument in enumerate(hold_bond_name):
+            group_code = self.dataset.get_group_code_by_rank(int(instrument))
             data = self.get_data_by_name(instrument)
             close = data.close[0]
+            # 
             pos = self.broker.getposition(data)
             # 计算涨跌幅度
             amplitude = (close - pos.price)/ pos.price * 100
             # 累计涨幅或跌幅超过阈值，则卖出止盈或止损
-            if amplitude > 5 or amplitude < -5: 
+            if amplitude > thredhold or amplitude < -3: 
                 self.sell(data=data,size=size)  
                 continue
             # 取得对应股票的预测数据
             result_obj = self.get_result_data(df_result,instrument)
             # 如果此股票后续的预测形式不好（超出卖出阈值），则卖出
-            if result_obj["price"]<-2:
+            if result_obj["price"]<-3:
                 self.sell(data=data,size=size)  
-                
+    
+    def real_price_range(self,pred_and_real):
+        """取得实际平均涨幅"""
+        
+        data_columns = self.dataset.pred_data_columns()
+        pred_len = self.dataset.pred_len
+        r = (pred_and_real["price_{}".format(pred_len-1)] - pred_and_real["price_0"]) / pred_and_real["price_0"] / pred_len * 100
+        return r.values[0]
+            
     def get_result_data(self,df_result,instrument):     
         """根据股票代码，取得计算结果集中对应的预测数据"""      
         
@@ -254,38 +271,70 @@ class Strategy(bt.Strategy):
         
         target_column = self.dataset.get_target_column()
         group_column = self.dataset.get_group_rank_column()
-        df_result = pd.DataFrame(columns=["instrument", "price","rise_cnt"])
+        df_result = pd.DataFrame(columns=["instrument", "price"])
         for index,series in enumerate(pred_series_list):
             pred_center_data = get_pred_center_value(series).data
             group_col_val = series.static_covariates[group_column].values[0]
-            # 由于最后一个数值反应的是这几天的均值，因此使用最后一个数据
-            price = pred_center_data[-1]
-            rise_cnt = 0
-            data_value = 0
-            # 取得数值上涨的总天数
-            for i,data_item in enumerate(pred_center_data):
-                if data_item>0:
-                    rise_cnt+=1
-            df_result.loc[index] = [group_col_val,price,rise_cnt]
-        # 针对多个指标进行排序
-        df_result.sort_values(by=["rise_cnt","price"],ascending=False,inplace=True)   
+            # 取得区间内涨跌幅度（最后一天的数值减去第一天的数值，并除以第一天数值）
+            price_range = (pred_center_data[-1] - pred_center_data[0]) / pred_center_data[0] * 100
+            df_result.loc[index] = [group_col_val,price_range]
+        # 针对指标进行排序
+        df_result.sort_values(by=["price"],ascending=False,inplace=True)   
         return df_result
     
-
+    def get_single_pred_data(self,pred_series_list,group_rank,date):
+        """取得单只股票预测及原始数据"""
+        
+        group_column = self.dataset.get_group_rank_column()
+        time_column = self.dataset.get_time_column()
+        df_ref = self.df_ref
+        for index,series in enumerate(pred_series_list):
+            group_rank_in = series.static_covariates[group_column].values[0]
+            # 取得给定股票的数据
+            if group_rank==group_rank_in:
+                # 取得预测数据
+                pred_center_data = get_pred_center_value(series).data
+                # 拼接预测数据到每个股票
+                group_item = self.dataset.get_group_code_by_rank(group_rank)
+                time_index_df = df_ref[(df_ref[group_column]==group_rank)&(df_ref["datetime"]>=str(date).replace("-",""))]
+                if time_index_df.shape[0]==0:
+                    return None
+                
+                pred_len = self.dataset.pred_len
+                data_columns = self.dataset.pred_data_columns()
+                time_index = time_index_df.iloc[0][time_column]                 
+                # 预测数据
+                data_line = [float(group_item),float(str(date).replace("-",""))] + pred_center_data.tolist()
+                # 实际数据部分
+                label_data = df_ref[(df_ref[group_column]==group_rank)&
+                                    (df_ref[time_column]>=time_index)&
+                                    (df_ref[time_column]<time_index+5)]["label"].values.tolist()
+                # 拼接到一起
+                data_line = data_line + label_data 
+                # 实际价格部分，往前取相同范围的数据
+                pre_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[time_column]>=time_index-5)&(df_ref[time_column]<time_index)]["label_ori"].values.tolist()
+                next_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[time_column]>=time_index)&(df_ref[time_column]<time_index+5)]["label_ori"].values.tolist()
+                # 实际数据部分，有可能长度不够，补0
+                if len(next_price_data)<pred_len:
+                    next_price_data = next_price_data + [0.0 for i in range(pred_len-len(next_price_data))]        
+                data_line = data_line + pre_price_data + next_price_data       
+                target_df = pd.DataFrame([data_line],columns=data_columns)
+                return target_df
+        return None
+        
     def view_pred_and_val(self,pred_list,group_rank_code,title=""):  
         # 根据交易日期和股票，查找出实际数值,后续使用移动平均数据以及实际数值,同时包含预测数据
-        df,_ = self.dataset.get_real_data(self.df_ref,pred_list,group_rank_code,extend_begin=30)
+        df,_ = self.dataset.get_real_data(self.df_ref,pred_list,group_rank_code,extend_begin=10)
         self.view_instrument_data(df, title=title)  
         
     def view_instrument_data(self,df,title=""):
         # 按照预测时间序列，分别回执移动平均价格以及实际价格曲线
         view_data = df[["label_ori","label","pred"]].values
-        names = ["values","mean_values","pred_values"]
+        names = ["price","mean_prices","pred_values"]
         x_range = df["time_idx"].values
         self.viz_input.viz_matrix_var(view_data,win=title,title=title,names=names,x_range=x_range)  
+        pass
         
-
-                        
 class ResultStrategy(Strategy):
     """使用预存储的数据进行快速回测"""
     
@@ -307,7 +356,8 @@ class ResultStrategy(Strategy):
         
         cur_date = self.datas[0].datetime.date(0)
         # 直接读取预存的结果文件
-        pred_data_path = self._get_pickle_path(cur_date)
+        cur_date_str = str(cur_date).replace("-","")
+        pred_data_path = self._get_pickle_path(cur_date_str)
         with open(pred_data_path, "rb") as fin:
             pred_series_list = pickle.load(fin)
         if pred_series_list is None:
@@ -315,7 +365,7 @@ class ResultStrategy(Strategy):
             return
         
         # 只使用预测数据得分高的股票
-        pred_series_list = self.dataset.filter_pred_data_by_mape(pred_series_list)
+        pred_series_list = self.dataset.filter_pred_data_by_corr(pred_series_list,result_id=7)
         # self.total_view(pred_series_list)
         self.process_by_pred_data(pred_series_list)
     

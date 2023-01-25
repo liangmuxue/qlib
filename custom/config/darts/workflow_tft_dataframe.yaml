@@ -54,16 +54,16 @@ task:
             type: 'train_dataframe'
             n_epochs : 300
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
-            pred_data_path: "custom/data/darts/dump_data/test7"            
+            load_dataset_file: &load_dataset_file False
+            pred_data_path: "custom/data/darts/dump_data/test6"            
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test7_tft_all'
+               model_name: 'test6_tft_all_step8'
                load_weight: False
                wave_period : &wave_period 30
-               forecast_horizon: &forecast_horizon 5
+               forecast_horizon: &forecast_horizon 8
     dataset:
         class: TFTSeriesDataset
         module_path: darts_pro.tft_series_dataset

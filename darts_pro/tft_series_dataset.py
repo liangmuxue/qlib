@@ -127,7 +127,7 @@ class TFTSeriesDataset(TFTDataset):
             print("emb size after p:",self.get_emb_size())
         self.target_scalers = self._create_target_scalers(self.df_all)       
         
-    def build_series_data(self,data_file=None):
+    def build_series_data(self,data_file=None,no_series_data=False):
         """从pandas数据生成时间序列类型数据"""
         
         if data_file is not None:
@@ -140,7 +140,9 @@ class TFTSeriesDataset(TFTDataset):
                 self.df_all = df_ref
                 df_train = df_ref[df_ref["datetime"]<pd.to_datetime(str(self.valid_range[0]))]
                 df_val = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(self.valid_range[0]))) & (df_ref["datetime"]<=pd.to_datetime(str(self.valid_range[1])))]
-                self.target_scalers = self._create_target_scalers(self.df_all)                      
+                self.target_scalers = self._create_target_scalers(self.df_all)
+            if no_series_data:
+                return None                      
             return self.create_series_data(df_ref,df_train,df_val,fill_future=False)
             
         total_range = self.segments["train_total"]
@@ -710,14 +712,7 @@ class TFTSeriesDataset(TFTDataset):
         date_list = df_range["datetime"].dt.strftime('%Y%m%d').unique()
         if not load_cache:
             data_array = []
-            data_columns = ["instrument","date"]
-            # 预测数据
-            pred_columns = ["pred_{}".format(i) for i in range(self.pred_len)]
-            # 标签数据
-            label_columns = ["label_{}".format(i) for i in range(self.pred_len)]
-            # 实际价格（滑动窗之前的原始数据）
-            price_columns = ["price_{}".format(i) for i in range(self.pred_len*2)]
-            data_columns = data_columns + pred_columns + label_columns + price_columns
+            data_columns = self.pred_data_columns()
             for date in date_list:
                 # 动态取出之前存储的预测数据
                 try:
@@ -767,6 +762,16 @@ class TFTSeriesDataset(TFTDataset):
                 target_df = pickle.load(fin)
         return target_df      
 
-        
+    def pred_data_columns(self):
+        pred_len = self.pred_len
+        data_columns = ["instrument","date"]
+        # 预测数据
+        pred_columns = ["pred_{}".format(i) for i in range(pred_len)]
+        # 标签数据
+        label_columns = ["label_{}".format(i) for i in range(pred_len)]
+        # 实际价格（滑动窗之前的原始数据）
+        price_columns = ["price_{}".format(i) for i in range(pred_len*2)]
+        data_columns = data_columns + pred_columns + label_columns + price_columns      
+        return data_columns 
         
         

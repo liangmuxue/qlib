@@ -54,7 +54,7 @@ task:
             n_epochs : 300
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            pred_data_path: "custom/data/darts/dump_data"
+            pred_data_path: "custom/data/darts/dump_data/test8"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'

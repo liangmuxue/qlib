@@ -55,14 +55,14 @@ class UncertaintyLoss(nn.Module):
             compute_loss = F.mse_loss(input, target, reduction=self.mse_reduction)     
         
         # 前后数值差的距离衡量
-        # input_value_diff = input[:,-1] - input[:,0]
-        # target_value_diff = target[:,-1] - target[:,0]
-        # value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
+        input_value_diff = input[:,-1] - input[:,0]
+        target_value_diff = target[:,-1] - target[:,0]
+        value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
         loss_sum = 0
         # 使用不确定性损失模式进行累加
         loss_sum += 0.5 / (self.sigma[0] ** 2) * corr_loss + torch.log(1 + self.sigma[0] ** 2)
-        loss_sum += 0.5 / (self.sigma[1] ** 2) * compute_loss + torch.log(1 + self.sigma[1] ** 2)
-        # loss_sum += 0.5 / (self.sigma[2] ** 2) * value_diff_loss + torch.log(1 + self.sigma[2] ** 2)
+        # loss_sum += 0.5 / (self.sigma[1] ** 2) * compute_loss + torch.log(1 + self.sigma[1] ** 2)
+        loss_sum += 0.5 / (self.sigma[2] ** 2) * value_diff_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum = 5 * corr_loss + mse_loss
         return loss_sum
     

@@ -3,6 +3,7 @@
 from __future__ import division
 from __future__ import print_function
 
+import datetime
 import os
 import numpy as np
 from collections import Counter
@@ -206,7 +207,7 @@ class TftDataframeModel():
             # likelihood=QuantileRegression(
             #     quantiles=quantiles
             # ), 
-            likelihood=None,
+            # likelihood=None,
             loss_fn=torch.nn.MSELoss(),
             use_weighted_loss_func=True,
             # torch_metrics=metric_collection,
@@ -328,7 +329,7 @@ class TftDataframeModel():
                     
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
-            dataset.build_series_data(df_data_path)    
+            dataset.build_series_data(df_data_path,no_series_data=True)    
             self.df_ref = dataset.df_all
             # self.df_ref = self.df_ref[self.df_ref["instrument"].isin([600033,600035,600036])]
             return
@@ -366,6 +367,7 @@ class TftDataframeModel():
                                                   pred_data_path=pred_data_path, load_cache=True,type="valid")    
         complex_df = pd.concat([complex_df_train,complex_df_valid])
         self.view_complex_data(complex_df,type="total",dataset=dataset)  
+        pass
         
     def classify_train(self, dataset: TFTSeriesDataset):
         """对预测数据进行分类训练"""
@@ -380,7 +382,7 @@ class TftDataframeModel():
                     
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
-            dataset.build_series_data(df_data_path)    
+            dataset.build_series_data(df_data_path,no_series_data=True)    
         else:
             series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
             if self.save_dataset_file:
@@ -390,9 +392,9 @@ class TftDataframeModel():
                       
         # 生成预测数据组合，需要符合相关筛选条件
         complex_df_train = dataset.combine_complex_df_data(dataset.df_all, dataset.train_range, 
-                                                  pred_data_path=self.pred_data_path, load_cache=False,type="train")
+                                                  pred_data_path=self.pred_data_path, load_cache=True,type="train")
         complex_df_valid = dataset.combine_complex_df_data(dataset.df_all, dataset.valid_range, 
-                                                  pred_data_path=self.pred_data_path, load_cache=False,type="valid")    
+                                                  pred_data_path=self.pred_data_path, load_cache=True,type="valid")    
         complex_df = pd.concat([complex_df_train,complex_df_valid])
         # 筛选出之前预测结果比较好的股票序列
         complex_df = self.filter_series_by_db(complex_df,dataset=dataset)
@@ -415,10 +417,11 @@ class TftDataframeModel():
         dbaccessor = DbAccessor({})
         if not update:
             # 记录主批次信息
-            sql = "insert into pred_result(batch_no) values(%s)"
-            dbaccessor.do_inserto_withparams(sql, (1)) 
+            dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            sql = "insert into pred_result(batch_no,create_time) values(%s,%s)"
+            dbaccessor.do_inserto_withparams(sql, (1,dt)) 
         result_id = dbaccessor.do_query("select max(id) from pred_result")[0][0]
-        dbaccessor.do_inserto_withparams("delete from pred_result_detail where result_id=%s", (result_id))
+        dbaccessor.do_inserto_withparams("delete from pred_result_detail where result_id=%s", (result_id,))
         group_rank_column = dataset.get_group_rank_column()
         for i in range(len(val_series_list)):
             pred_series = pred_series_list[i]
@@ -487,8 +490,8 @@ class TftDataframeModel():
         end_time = "20210331" 
         df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
         date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
-        pred_threhold = 10
-        for date in date_list:     
+        pred_threhold = 3
+        for date in date_list[:1]:     
             match_cnt = 0
             target_data = complex_data[(complex_data["date"]==date)]
             pad_items = np.array([0.0 for i in range(dataset.pred_len)])
@@ -497,8 +500,9 @@ class TftDataframeModel():
                 # 排除补0的数据
                 if np.any(row[label_columns].values==0):
                     continue
-                diff_scope = (row["pred_4"] - row["pred_0"]) / row["pred_0"] * 100    
-                if diff_scope<pred_threhold:
+                diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_0"]) / row["pred_0"] * 100    
+                last_diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_{}".format(dataset.pred_len-2)]) / row["pred_{}".format(dataset.pred_len-2)] * 100
+                if diff_scope<3 or last_diff_scope<1:
                     continue
                 # if idx<20 or idx>30:
                 #     continue
@@ -506,11 +510,11 @@ class TftDataframeModel():
                 total_price = round(total_price, 2)
                 target_title = "{}_{}_{}".format(int(row["instrument"]),row["date"].strftime("%Y%m%d"),total_price)
                 pred_line = row[pred_columns].values
-                # pred_line = np.concatenate((pad_items,pred_line),axis=0)
+                pred_line = np.concatenate((pad_items,pred_line),axis=0)
                 label_line = row[label_columns].values
-                # label_line = np.concatenate((pad_items,label_line),axis=0)
+                label_line = np.concatenate((pad_items,label_line),axis=0)
                 price_line = row[price_columns].values
-                view_data = np.stack((pred_line,label_line),axis=0).transpose(1,0)
+                view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
                 viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
                 match_cnt += 1
                 # print("price mean:{} and label:{} and pred:{}".format(np.mean(price_line[5:]),label_line[-1],pred_line[-1]))

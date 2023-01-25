@@ -54,7 +54,7 @@ task:
             type: 'predict'
             n_epochs : 300
             save_dataset_file: False  
-            load_dataset_file: &load_dataset_file True     
+            load_dataset_file: &load_dataset_file False     
             pred_data_path: "custom/data/darts/dump_data/test8"     
             optargs:
                data_type: 'combine'
@@ -80,7 +80,7 @@ task:
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
-            instrument_pick: [603776,603777]
+            instrument_pick: [600766,603707,600751]
             # instrument_pick: []
             scaler_type: 'norm'
             model_type: 'tft'

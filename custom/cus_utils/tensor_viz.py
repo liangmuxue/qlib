@@ -68,17 +68,23 @@ class TensorViz(object):
     def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None,x_range=None):
         length = data.shape[1]
         ts = data.shape[0]
+        if x_range is None:
+            x_range = np.arange(ts)        
         for i in range(length):
             if names is not None:
                 line_name = "{}".format(names[i])
             else:
                 line_name = "line{}".format(i+1)
-            if x_range is None:
-                x_range = np.arange(ts)
+
+            viz_line_data = np.copy(data[:,i])
+            index_arr = np.where(viz_line_data!=0)
+            # 忽略值为0的数据，不划线
+            viz_line_data = viz_line_data[index_arr]
+            x_range_in = x_range[index_arr]
             if i==0:
                 self.viz.line(
-                    X=x_range,
-                    Y=data[:,i],
+                    X=x_range_in,
+                    Y=viz_line_data,
                     win=win,
                     name=line_name,
                     update=None,
@@ -92,8 +98,8 @@ class TensorViz(object):
                 )  
             else:
                 self.viz.line(
-                    X=x_range,
-                    Y=data[:,i],
+                    X=x_range_in,
+                    Y=viz_line_data,
                     win=win,
                     name=line_name,
                     update='append',
