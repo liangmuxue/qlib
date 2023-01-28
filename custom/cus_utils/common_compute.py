@@ -78,6 +78,24 @@ def enhance_data(ori_data,mode="smote",bins=None):
     amplitude = np.squeeze(amplitude,axis=1)     
     return amplitude,y_res
 
+def normalization(data):
+    _range = np.max(data) - np.min(data)
+    return (data - np.min(data)) / _range
+
+def compute_series_slope(series_data):
+    """计算序列斜率,分段计算"""
+    
+    slope_arr = []
+    for index in range(len(series_data)):
+        if index==len(series_data)-1:
+            break
+        x = [1,2]
+        y = series_data[index:index+2]
+        slope, intercept = np.polyfit(x,y,1)
+        slope_arr.append(slope)
+        
+    return slope_arr
+        
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 5)

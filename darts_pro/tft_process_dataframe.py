@@ -43,6 +43,7 @@ from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
 from cus_utils.metrics import corr_dis,series_target_scale,diff_dis
+from cus_utils.common_compute import normalization,compute_series_slope
 from losses.mtl_loss import CorrLoss,UncertaintyLoss
 from darts_pro.data_extension.custom_model import TFTCusModel,TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
@@ -204,11 +205,11 @@ class TftDataframeModel():
             add_relative_index=True,
             add_encoders=None,
             categorical_embedding_sizes=categorical_embedding_sizes,
-            # likelihood=QuantileRegression(
-            #     quantiles=quantiles
-            # ), 
+            likelihood=QuantileRegression(
+                quantiles=quantiles
+            ), 
             # likelihood=None,
-            loss_fn=torch.nn.MSELoss(),
+            # loss_fn=torch.nn.MSELoss(),
             use_weighted_loss_func=True,
             # torch_metrics=metric_collection,
             random_state=42,
@@ -254,8 +255,8 @@ class TftDataframeModel():
                 with open(df_data_path, "wb") as fout:
                     pickle.dump(dataset.df_all, fout)  
                     
-        self.series_data_view(dataset,series_transformed,past_convariates=past_convariates,
-                              future_convariates=future_convariates,title="pred_target")
+        # self.series_data_view(dataset,series_transformed,past_convariates=past_convariates,
+        #                       future_convariates=future_convariates,title="pred_target")
         
         # 根据参数决定是否从文件中加载权重
         load_weight = self.optargs["load_weight"]
@@ -367,7 +368,7 @@ class TftDataframeModel():
                                                   pred_data_path=pred_data_path, load_cache=True,type="valid")    
         complex_df = pd.concat([complex_df_train,complex_df_valid])
         self.view_complex_data(complex_df,type="total",dataset=dataset)  
-        pass
+        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset)  
         
     def classify_train(self, dataset: TFTSeriesDataset):
         """对预测数据进行分类训练"""
@@ -378,8 +379,6 @@ class TftDataframeModel():
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]
         
-        self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=True)
-                    
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
             dataset.build_series_data(df_data_path,no_series_data=True)    
@@ -398,7 +397,8 @@ class TftDataframeModel():
         complex_df = pd.concat([complex_df_train,complex_df_valid])
         # 筛选出之前预测结果比较好的股票序列
         complex_df = self.filter_series_by_db(complex_df,dataset=dataset)
-        self.view_complex_data(complex_df,type="total",dataset=dataset)  
+        # self.view_complex_data(complex_df,type="total",dataset=dataset)  
+        self.view_complex_pred_data(complex_df,type="total",dataset=dataset)  
     
     def filter_series_by_db(self,df_data,dataset=None): 
         """通过之前存储在数据库中的指标,筛选更加合适的序列"""
@@ -476,13 +476,14 @@ class TftDataframeModel():
         # target_df = target_df[target_df["t_value"]>1]
         # print(target_df)
 
-    def view_complex_data(self,complex_data,type="train",dataset=None):
-        viz_input = TensorViz(env="data_complex")
+    def view_complex_pred_data(self,complex_data,type="train",dataset=None):
+        viz_input = TensorViz(env="data_complex_pred")
+        viz_input.remove_env(env="data_complex_pred")
         data_columns = ["instrument","date"]
         # 预测数据
         pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
         # 标签数据）
-        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len)]
+        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len*2)]
         # 实际价格（滑动窗之前的原始数据）
         price_columns = ["price_{}".format(i) for i in range(dataset.pred_len*2)]
         data_columns = data_columns + pred_columns + label_columns + price_columns
@@ -491,7 +492,7 @@ class TftDataframeModel():
         df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
         date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
         pred_threhold = 3
-        for date in date_list[:1]:     
+        for date in date_list:     
             match_cnt = 0
             target_data = complex_data[(complex_data["date"]==date)]
             pad_items = np.array([0.0 for i in range(dataset.pred_len)])
@@ -500,9 +501,10 @@ class TftDataframeModel():
                 # 排除补0的数据
                 if np.any(row[label_columns].values==0):
                     continue
+                # 总涨幅
                 diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_0"]) / row["pred_0"] * 100    
-                last_diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_{}".format(dataset.pred_len-2)]) / row["pred_{}".format(dataset.pred_len-2)] * 100
-                if diff_scope<3 or last_diff_scope<1:
+                match_flag = self.pred_data_jud(row, dataset=dataset)
+                if not match_flag:
                     continue
                 # if idx<20 or idx>30:
                 #     continue
@@ -512,14 +514,120 @@ class TftDataframeModel():
                 pred_line = row[pred_columns].values
                 pred_line = np.concatenate((pad_items,pred_line),axis=0)
                 label_line = row[label_columns].values
-                label_line = np.concatenate((pad_items,label_line),axis=0)
                 price_line = row[price_columns].values
                 view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
                 viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
                 match_cnt += 1
                 # print("price mean:{} and label:{} and pred:{}".format(np.mean(price_line[5:]),label_line[-1],pred_line[-1]))
             print("date:{} and match_cnt:{}".format(date,match_cnt))
-            
+ 
+    def view_complex_data(self,complex_data,type="train",dataset=None):
+        viz_input = TensorViz(env="data_complex")
+        data_columns = ["instrument","date"]
+        # 预测数据
+        pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
+        # 标签数据）
+        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len*2)]
+        # 实际价格（滑动窗之前的原始数据）
+        price_columns = ["price_{}".format(i) for i in range(dataset.pred_len*2)]
+        data_columns = data_columns + pred_columns + label_columns + price_columns
+        start_time = "20210201"   
+        end_time = "20210331" 
+        df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
+        date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
+        pred_threhold = 3
+        for date in date_list[:18]:     
+            match_cnt = 0
+            target_data = complex_data[(complex_data["date"]==date)]
+            pad_items = np.array([0.0 for i in range(dataset.pred_len)])
+            names = ["pred","label","price"]
+            for idx,row in target_data.iterrows():
+                # 排除补0的数据
+                if np.any(row[label_columns].values==0):
+                    continue
+                # 根据均线形态取得上涨模式
+                match_flag = self.label_data_jud(row,dataset=dataset)
+                if not match_flag:
+                    continue
+                # if idx<20 or idx>30:
+                #     continue
+                total_price = row["price_{}".format(2*dataset.pred_len-1)] - row["price_0"]
+                total_price = round(total_price, 2)
+                target_title = "{}_{}_{}".format(int(row["instrument"]),row["date"].strftime("%Y%m%d"),total_price)
+                pred_line = row[pred_columns].values
+                pred_line = np.concatenate((pad_items,pred_line),axis=0)
+                label_line = row[label_columns].values
+                price_line = row[price_columns].values
+                view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
+                viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
+                match_cnt += 1
+                # print("price mean:{} and label:{} and pred:{}".format(np.mean(price_line[5:]),label_line[-1],pred_line[-1]))
+            print("date:{} and match_cnt:{}".format(date,match_cnt))
+    
+    def label_data_jud(self,row,dataset=None):
+        """均线价值判断"""
+        
+        from visdom import Visdom
+        # viz = Visdom(env="test",port=8098)  
+        
+        each_diff = []
+        label_arr = []
+        for i in range(2*dataset.pred_len):
+            label_arr.append(row["label_{}".format(i)])
+            if i<dataset.pred_len-1:
+                each_diff.append(row["label_{}".format(i+1)] - row["label_{}".format(i)]) 
+                
+        label_arr = normalization(np.array(label_arr))    
+        # 计算均线斜率
+        slope_arr = compute_series_slope(label_arr)  
+        # viz.line(
+        #             X=[i for i in range(label_arr.shape[0])],
+        #             Y=label_arr,
+        #             win="test_label",
+        #             name="label",
+        #             update=None,
+        #             opts={
+        #                 'showlegend': True, 
+        #                 'title': "test_label",
+        #                 'xlabel': "step", 
+        #                 'ylabel': "values", 
+        #             },
+        # )
+        match_flag = False
+        # 前平后起，符合
+        if slope_arr[-1]>slope_arr[-2] and slope_arr[-2]>0.2:
+            if abs(slope_arr[-3])<0.1 and abs(slope_arr[-4])<0.1 and abs(slope_arr[-5])<0.1:
+                match_flag = True
+        # 前起后平，符合
+   
+        return match_flag        
+    
+    def pred_data_jud(self,row,dataset=None):
+        """预测均线价值判断"""
+        
+        label_arr = []
+        for i in range(2*dataset.pred_len):
+            label_arr.append(row["label_{}".format(i)])
+        label_arr = normalization(np.array(label_arr))      
+        # 计算均线斜率
+        label_slope_arr = compute_series_slope(label_arr)
+                     
+        pred_arr = []
+        for i in range(dataset.pred_len):
+            pred_arr.append(row["pred_{}".format(i)])
+                
+        pred_arr = normalization(np.array(pred_arr))    
+        # 计算预测均线斜率
+        slope_arr = compute_series_slope(pred_arr)  
+        match_flag = False
+        # 前平后起，符合
+        if slope_arr[-1]>slope_arr[-2] and slope_arr[-2]>0.2:
+            if abs(slope_arr[-3])<0.1 and abs(slope_arr[-4])<0.1 and abs(label_slope_arr[-5])<0.1 and abs(label_slope_arr[-6])<0.1:
+                match_flag = True
+        # 前起后平，符合
+   
+        return match_flag        
+                                  
     def view_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
         viz_input = TensorViz(env="data_pred")
         for i in range(10):

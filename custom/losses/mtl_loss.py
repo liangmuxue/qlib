@@ -49,10 +49,10 @@ class UncertaintyLoss(nn.Module):
         corr_loss = self.corr_loss_comp(input, target)   
         # return corr_loss  
         # MSE损失
-        if outer_loss is not None:
-            compute_loss = outer_loss
-        else:
-            compute_loss = F.mse_loss(input, target, reduction=self.mse_reduction)     
+        # if outer_loss is not None:
+        #     compute_loss = outer_loss
+        # else:
+        #     compute_loss = F.mse_loss(input, target, reduction=self.mse_reduction)     
         
         # 前后数值差的距离衡量
         input_value_diff = input[:,-1] - input[:,0]

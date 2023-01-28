@@ -546,62 +546,6 @@ class TFTSeriesDataset(TFTDataset):
         processed_full = processed_full.fillna(0)
         
         return processed_full
-    
-    def combine_complex_data(self,df_ref,date_range,pred_data_path=None,load_cache=False,type="train"):
-        """合并预测数据，以及实际行情数据
-           Params:
-                df_ref 数据集
-                date_range 合并数据日期范围
-        """
-        
-        cache_file = pred_data_path + "/classify_data_cache_{}.npy".format(type)
-        ref_cache_file = pred_data_path + "/classify_data_cache_ref_{}.npy".format(type)
-        group_column = self.get_group_rank_column()
-        (start_time,end_time) = date_range
-        # 取得日期列表
-        df_range = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(start_time))) & (df_ref["datetime"]<pd.to_datetime(str(end_time)))]
-        date_list = df_range["datetime"].dt.strftime('%Y%m%d').unique()
-        if not load_cache:
-            data_array = []
-            ref_price_array = []
-            for date in date_list:
-                # 动态取出之前存储的预测数据
-                try:
-                    pred_series_list = self.get_pred_result(pred_data_path,date)
-                    # pred_series_list = self.filter_pred_data_by_mape(pred_series_list,result_id=3)
-                    # pred_series_list = self.filter_pred_data_by_corr(pred_series_list,result_id=7)
-                except Exception as e:
-                    print("no data for {}".format(date))
-                    continue
-                logger.debug('pred_series_list process,{}'.format(date))
-                for series in pred_series_list:
-                    # 拼接预测数据到每个股票
-                    group_rank = series.static_covariates[group_column].values[0]
-                    group_item = self.get_group_code_by_rank(group_rank)
-                    pred_center_data = get_pred_center_value(series).data
-                    # 前边是数据，最后一位是标签
-                    data_line = pred_center_data.tolist()
-                    # 取得下几个个交易日收盘涨跌幅数据，作为标签参考数据
-                    real_label_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref["datetime"]>date)]["label_ori"].values
-                    item_value = 0
-                    item_price_list = []
-                    real_range = min(self.pred_len,len(real_label_data))
-                    for i in range(real_range):
-                        item_value += real_label_data[i]
-                        item_price_list = item_price_list + [real_label_data[i]]
-                    # 连续数值进行分类
-                    p_taraget = [k for k, v in CLASS_SIMPLE_VALUES.items() if (item_value>=v[0] and item_value<v[1])]
-                    data_line = data_line + p_taraget
-                    data_array.append(data_line)
-                    ref_price_array.append(item_price_list)
-            data_array = np.array(data_array)
-            ref_data_array = np.array(ref_price_array)
-            np.save(cache_file,data_array)
-            np.save(ref_cache_file,ref_data_array)
-        else:
-            data_array = np.load(cache_file)
-            ref_data_array = np.load(ref_cache_file,allow_pickle=True)
-        return data_array,ref_data_array
 
     def transfer_pred_data(self,pred_data):
         """预测数据转换为逐个元素差
@@ -623,7 +567,6 @@ class TFTSeriesDataset(TFTDataset):
         result = np.concatenate((result,mean_value),axis=-1)
         return result
         
-        
     def combine_complex_df_data(self,df_ref,date_range,pred_data_path=None,load_cache=False,type="train"):
         """合并预测数据,实际行情数据,价格数据等
            Params:
@@ -643,7 +586,7 @@ class TFTSeriesDataset(TFTDataset):
             # 预测数据
             pred_columns = ["pred_{}".format(i) for i in range(self.pred_len)]
             # 标签数据）
-            label_columns = ["label_{}".format(i) for i in range(self.pred_len)]
+            label_columns = ["label_{}".format(i) for i in range(2*self.pred_len)]
             # 实际价格（滑动窗之前的原始数据）
             price_columns = ["price_{}".format(i) for i in range(self.pred_len*2)]
             data_columns = data_columns + pred_columns + label_columns + price_columns
@@ -651,12 +594,10 @@ class TFTSeriesDataset(TFTDataset):
                 # 动态取出之前存储的预测数据
                 try:
                     pred_series_list = self.get_pred_result(pred_data_path,date)
-                    # pred_series_list = self.filter_pred_data_by_mape(pred_series_list,result_id=6)
-                    # pred_series_list = self.filter_pred_data_by_corr(pred_series_list,result_id=6)
                 except Exception as e:
-                    print("no data for {}".format(date))
+                    logger.warn("no data for {}".format(date))
                     continue
-                logger.debug('pred_series_list process,{}'.format(date))
+                
                 for series in pred_series_list:
                     # 拼接预测数据到每个股票
                     group_rank = series.static_covariates[group_column].values[0]
@@ -670,23 +611,27 @@ class TFTSeriesDataset(TFTDataset):
                     # 预测数据
                     data_line = [float(group_item),float(date)] + pred_center_data.tolist()
                     # 实际数据部分
-                    label_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index)&(df_ref[self.get_time_column()]<time_index+5)]["label"].values.tolist()
+                    label_data = df_ref[(df_ref[group_column]==group_rank)&
+                                        (df_ref[self.get_time_column()]>=(time_index-self.pred_len))&
+                                        (df_ref[self.get_time_column()]<(time_index+self.pred_len))]["label"].values.tolist()
                     # 有可能长度不够，补0
-                    if len(label_data)<self.pred_len:
-                        label_data = label_data + [0.0 for i in range(self.pred_len-len(label_data))]
+                    if len(label_data)<2*self.pred_len:
+                        label_data = label_data + [0.0 for i in range(2*self.pred_len-len(label_data))]
                     data_line = data_line + label_data
                     # 实际价格部分，往前取相同范围的数据
-                    pre_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index-5)&(df_ref[self.get_time_column()]<time_index)]["label_ori"].values.tolist()
-                    next_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index)&(df_ref[self.get_time_column()]<time_index+5)]["label_ori"].values.tolist()
+                    pre_price_data = df_ref[(df_ref[group_column]==group_rank)&
+                                            (df_ref[self.get_time_column()]>=time_index-self.pred_len)&
+                                            (df_ref[self.get_time_column()]<time_index)]["label_ori"].values.tolist()
+                    next_price_data = df_ref[(df_ref[group_column]==group_rank)&
+                                             (df_ref[self.get_time_column()]>=time_index)&
+                                             (df_ref[self.get_time_column()]<time_index+self.pred_len)]["label_ori"].values.tolist()
                     # 实际数据部分，有可能长度不够，补0
                     if len(next_price_data)<self.pred_len:
                         next_price_data = next_price_data + [0.0 for i in range(self.pred_len-len(next_price_data))]        
                     data_line = data_line + pre_price_data + next_price_data
-                    # types = [isinstance(item,float) for item in data_line]
-                    # if not np.array(types).all():
-                    #     print("not float")
                     data_array.append(data_line)          
-                     
+                logger.debug('end pred_series_list process,{}'.format(date))
+                
             data_array = np.array(data_array)
             target_df = pd.DataFrame(data_array,columns=data_columns)
             target_df["date"] = pd.to_datetime(target_df["date"].astype("int").astype("str"))
@@ -696,71 +641,6 @@ class TFTSeriesDataset(TFTDataset):
             with open(cache_file, "rb") as fin:
                 target_df = pickle.load(fin)
         return target_df
-
-    def combine_pred_df_data(self,df_ref,date_range,pred_data_path=None,load_cache=False,type="train"):
-        """合并预测数据,实际行情数据,价格数据等
-           Params:
-                df_ref 数据集
-                date_range 合并数据日期范围
-        """
-        
-        cache_file = pred_data_path + "/pred_df_cache_{}.pickel".format(type)
-        group_column = self.get_group_rank_column()
-        (start_time,end_time) = date_range
-        # 取得日期列表
-        df_range = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(start_time))) & (df_ref["datetime"]<pd.to_datetime(str(end_time)))]
-        date_list = df_range["datetime"].dt.strftime('%Y%m%d').unique()
-        if not load_cache:
-            data_array = []
-            data_columns = self.pred_data_columns()
-            for date in date_list:
-                # 动态取出之前存储的预测数据
-                try:
-                    pred_series_list = self.get_pred_result(pred_data_path,date)
-                    pred_series_list = self.filter_pred_data_by_mape(pred_series_list,result_id=3)
-                except Exception as e:
-                    print("no data for {}".format(date))
-                    continue
-                logger.debug('pred_series_list process,{}'.format(date))
-                for series in pred_series_list:
-                    # 拼接预测数据到每个股票
-                    group_rank = series.static_covariates[group_column].values[0]
-                    group_item = self.get_group_code_by_rank(group_rank)
-                    pred_center_data = get_pred_center_value(series).data
-                    time_index_df = df_ref[(df_ref[group_column]==group_rank)&
-                                        (df_ref["datetime"]>=date)]
-                    if time_index_df.shape[0]==0:
-                        continue
-                    time_index = time_index_df.iloc[0][self.get_time_column()]                    
-                    # 预测数据
-                    data_line = [float(group_item),float(date)] + pred_center_data.tolist()
-                    # 实际数据部分
-                    label_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index)&(df_ref[self.get_time_column()]<time_index+5)]["label"].values.tolist()
-                    # 有可能长度不够，补0
-                    if len(label_data)<self.pred_len:
-                        label_data = label_data + [0.0 for i in range(self.pred_len-len(label_data))]
-                    data_line = data_line + label_data
-                    # 实际价格部分，往前取相同范围的数据
-                    pre_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index-5)&(df_ref[self.get_time_column()]<time_index)]["label_ori"].values.tolist()
-                    next_price_data = df_ref[(df_ref[group_column]==group_rank)&(df_ref[self.get_time_column()]>=time_index)&(df_ref[self.get_time_column()]<time_index+5)]["label_ori"].values.tolist()
-                    # 实际数据部分，有可能长度不够，补0
-                    if len(next_price_data)<self.pred_len:
-                        next_price_data = next_price_data + [0.0 for i in range(self.pred_len-len(next_price_data))]        
-                    data_line = data_line + pre_price_data + next_price_data
-                    # types = [isinstance(item,float) for item in data_line]
-                    # if not np.array(types).all():
-                    #     print("not float")
-                    data_array.append(data_line)          
-                     
-            data_array = np.array(data_array)
-            target_df = pd.DataFrame(data_array,columns=data_columns)
-            target_df["date"] = pd.to_datetime(target_df["date"].astype("int").astype("str"))
-            with open(cache_file, "wb") as fout:
-                pickle.dump(target_df, fout)              
-        else:
-            with open(cache_file, "rb") as fin:
-                target_df = pickle.load(fin)
-        return target_df      
 
     def pred_data_columns(self):
         pred_len = self.pred_len

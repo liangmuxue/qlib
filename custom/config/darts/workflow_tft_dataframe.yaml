@@ -48,22 +48,22 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 3072
+            batch_size: 2048
             seed: 0
             n_jobs: 20
             type: 'train_dataframe'
             n_epochs : 300
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            pred_data_path: "custom/data/darts/dump_data/test6"            
+            pred_data_path: "custom/data/darts/dump_data/test5"            
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft_all_step8'
+               model_name: 'test5_tft_all_step10'
                load_weight: False
                wave_period : &wave_period 30
-               forecast_horizon: &forecast_horizon 8
+               forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTSeriesDataset
         module_path: darts_pro.tft_series_dataset
@@ -73,8 +73,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2020-11-15]
-                valid: [2020-09-01, 2020-11-15]
+                train_total: [2010-01-01, 2020-12-30]
+                valid: [2020-09-01, 2020-12-30]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             aug_type: 'no'

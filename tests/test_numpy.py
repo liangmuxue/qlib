@@ -375,14 +375,23 @@ def test_corr_tensor():
     pearson = PearsonCorrCoef(num_outputs=5)
     ret = pearson(preds, target)
     print(ret)
-         
+
+def test_slope():
+    import numpy as np
+    x = [1, 2]
+    y = [1,0.5]
+    slope, intercept = np.polyfit(x,y,1)
+    print(slope)
+
+        
 if __name__ == "__main__":
     # test_argwhere()
     # test_condition3()
     # test_condi_remove()
     # test_group()
     # test_corr()
-    test_corr_tensor()
+    # test_corr_tensor()
+    test_slope()
     # test_each()
     # test_split_compute()
     # test_variable()
