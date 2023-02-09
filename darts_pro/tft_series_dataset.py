@@ -88,7 +88,29 @@ class TFTSeriesDataset(TFTDataset):
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
         self.build_group_rank_map(df)
         return df    
-    
+ 
+    def check_clear_valid_df(self):
+        """清理验证集合长度不符合的数据"""
+
+        group_column = self.get_group_rank_column()
+        time_column = self.get_time_column()
+        accord_groups = []
+        # 遍历全集，找出时间序号不足的数据
+        for group_name,group_data in self.df_val.groupby(group_column):
+            if group_data[time_column].max()==1987:
+                print("ggg")
+            # 取得验证集最大时间序号，加上一定的长度（预测长度2倍），全集中的时间序号需要大于这个序号
+            total_time_index = group_data[time_column].max() + self.pred_len * 2
+            df_target = self.df_all[(self.df_all[group_column]==group_name)&(self.df_all[time_column]>=total_time_index)]
+            if df_target.shape[0]>0:
+                accord_groups.append(group_name)
+            else:
+                logger.debug("not match:{}".format(group_name))
+        
+        self.df_all = self.df_all[self.df_all[group_column].isin(accord_groups)]
+        self.df_val = self.df_val[self.df_val[group_column].isin(accord_groups)]
+        self.df_train = self.df_train[self.df_train[group_column].isin(accord_groups)]
+       
     def build_group_rank_map(self,df_data):
         """生成股票代码和rank序号的映射关系"""
         
@@ -127,7 +149,7 @@ class TFTSeriesDataset(TFTDataset):
             print("emb size after p:",self.get_emb_size())
         self.target_scalers = self._create_target_scalers(self.df_all)       
         
-    def build_series_data(self,data_file=None,no_series_data=False):
+    def build_series_data(self,data_file=None,no_series_data=False,val_ds_filter=False):
         """从pandas数据生成时间序列类型数据"""
         
         if data_file is not None:
@@ -142,14 +164,16 @@ class TFTSeriesDataset(TFTDataset):
                 df_val = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(self.valid_range[0]))) & (df_ref["datetime"]<=pd.to_datetime(str(self.valid_range[1])))]
                 self.target_scalers = self._create_target_scalers(self.df_all)
             if no_series_data:
-                return None                      
+                return None          
+            self.df_train = df_train
+            self.df_val = df_val 
             return self.create_series_data(df_ref,df_train,df_val,fill_future=False)
             
         total_range = self.segments["train_total"]
         valid_range = self.segments["valid"]
-        return self.build_series_data_step_range(total_range, valid_range)
+        return self.build_series_data_step_range(total_range, valid_range,val_ds_filter=val_ds_filter)
         
-    def build_series_data_step_range(self,total_range,val_range,fill_future=False,outer_df=None):
+    def build_series_data_step_range(self,total_range,val_range,fill_future=False,outer_df=None,val_ds_filter=False):
         """根据时间点参数，从pandas数据生成时间序列类型数据
            Params:total_range--完整时间序列开始和结束时间
                   val_range--预测时间序列开始和结束时间
@@ -170,7 +194,11 @@ class TFTSeriesDataset(TFTDataset):
         self.df_train = df_train
         self.df_val = df_val
         
-        return self.create_series_data(df_all,df_train,df_val,fill_future=fill_future)
+        # 根据标志，决定是否进行验证集数据检查清理
+        if val_ds_filter:
+            self.check_clear_valid_df()
+        
+        return self.create_series_data(self.df_all,self.df_train,self.df_val,fill_future=fill_future)
         
     def create_series_data(self,df_all,df_train,df_val,fill_future=False):
         
@@ -193,19 +221,29 @@ class TFTSeriesDataset(TFTDataset):
                                                  freq='D',
                                                  fill_missing_dates=True,
                                                  value_cols=target_column) 
-              
+        total_series = TimeSeries.from_group_dataframe(df_all,
+                                                time_col=time_column,
+                                                 group_cols=group_column,# 会自动成为静态协变量
+                                                 freq='D',
+                                                 fill_missing_dates=True,
+                                                 value_cols=target_column)               
         train_series_transformed = []
         val_series_transformed = []
+        total_series_transformed = []
         # 生成归一化的目标序列
         for index,ts in enumerate(train_series):
             target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
             ts_transformed = target_scaler.fit_transform(ts)
             vs_transformed = target_scaler.transform(val_series[index])
+            total_transformed = target_scaler.transform(total_series[index])
+            # 添加label原值，用于后续使用。--cancal
+            # ts_transformed = ts_transformed.concatenate(ts,axis=1)
+            # vs_transformed = vs_transformed.concatenate(val_series[index],axis=1)
             train_series_transformed.append(ts_transformed)
             val_series_transformed.append(vs_transformed)
-        self.target_scalers
-        
-        def build_covariates(column_names):
+            total_series_transformed.append(total_transformed)
+            
+        def build_covariates(column_names,no_transform_columns=None):
             covariates_array = []
             for series in train_series_transformed:
                 group_col_val = series.static_covariates[group_column].values[0]
@@ -224,11 +262,19 @@ class TFTSeriesDataset(TFTDataset):
                 # 使用训练数据fit，并transform到整个序列    
                 scaler.fit(train_covariates)
                 covariates_transformed = scaler.transform(covariates)    
+                # 对于补充类字段，不需要transform，在此进行拼接
+                if no_transform_columns is not None:
+                    att_covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
+                                                         freq='D',
+                                                         fill_missing_dates=True,
+                                                         value_cols=no_transform_columns)  
+                    covariates_transformed = covariates_transformed.concatenate(att_covariates,axis=1)
                 covariates_array.append(covariates_transformed)
             return covariates_array            
 
         # 生成过去协变量，并归一化
         logger.info("begin build_covariates")
+        # 过去变量中添加label原值，用于后续使用
         past_convariates = build_covariates(past_columns)      
         # 生成未来协变量，并归一化
         future_convariates = build_covariates(future_columns)    
@@ -236,7 +282,7 @@ class TFTSeriesDataset(TFTDataset):
         if fill_future:           
             future_convariates = self.fill_future_data(future_convariates,future_columns,self.pred_len)
         # 分别返回用于训练预测的序列series_transformed，以及完整序列series
-        return train_series_transformed,val_series_transformed,past_convariates,future_convariates
+        return train_series_transformed,val_series_transformed,total_series_transformed,past_convariates,future_convariates
             
 
     def fill_future_data(self,future_convariates,column_names,fill_length):
@@ -445,6 +491,18 @@ class TFTSeriesDataset(TFTDataset):
         df = self.df_all[self.df_all[group_column].isin(group_code_list)]
         return df
     
+    def filter_pred_data_by_instrument(self,pred_list,instrument=[]):
+        group_column = self.get_group_rank_column()
+        filter_list = []
+        for pred_item in pred_list:
+            group_rank = int(pred_item.static_covariates[group_column].values[0])
+            group_code = self.get_group_code_by_rank(group_rank)
+            if group_code in instrument:
+                filter_list.append(pred_item)
+        
+        return filter_list        
+        
+        
     def filter_pred_data_by_mape(self,pred_list,threhold=10,result_id=0):
         """根据得分筛选预测数据"""
         
@@ -589,16 +647,20 @@ class TFTSeriesDataset(TFTDataset):
             label_columns = ["label_{}".format(i) for i in range(2*self.pred_len)]
             # 实际价格（滑动窗之前的原始数据）
             price_columns = ["price_{}".format(i) for i in range(self.pred_len*2)]
-            data_columns = data_columns + pred_columns + label_columns + price_columns
+            # 预测分类数据
+            class_columns = ["class_1","class_2","vr_class"]        
+            time_columns = ["time_index"]    
+            data_columns = data_columns + pred_columns + label_columns + price_columns + class_columns + time_columns
             for date in date_list:
                 # 动态取出之前存储的预测数据
                 try:
-                    pred_series_list = self.get_pred_result(pred_data_path,date)
+                    pred_combine = self.get_pred_result(pred_data_path,date)
+                    (pred_series_list,pred_class_total,vr_class_total) = pred_combine
                 except Exception as e:
                     logger.warn("no data for {}".format(date))
                     continue
                 
-                for series in pred_series_list:
+                for index,series in enumerate(pred_series_list):
                     # 拼接预测数据到每个股票
                     group_rank = series.static_covariates[group_column].values[0]
                     group_item = self.get_group_code_by_rank(group_rank)
@@ -610,6 +672,8 @@ class TFTSeriesDataset(TFTDataset):
                     time_index = time_index_df.iloc[0][self.get_time_column()]                    
                     # 预测数据
                     data_line = [float(group_item),float(date)] + pred_center_data.tolist()
+                    # 时间序号
+                    time_index_range = [time_index-self.pred_len,time_index+self.pred_len]
                     # 实际数据部分
                     label_data = df_ref[(df_ref[group_column]==group_rank)&
                                         (df_ref[self.get_time_column()]>=(time_index-self.pred_len))&
@@ -627,8 +691,15 @@ class TFTSeriesDataset(TFTDataset):
                                              (df_ref[self.get_time_column()]<time_index+self.pred_len)]["label_ori"].values.tolist()
                     # 实际数据部分，有可能长度不够，补0
                     if len(next_price_data)<self.pred_len:
-                        next_price_data = next_price_data + [0.0 for i in range(self.pred_len-len(next_price_data))]        
-                    data_line = data_line + pre_price_data + next_price_data
+                        next_price_data = next_price_data + [0.0 for i in range(self.pred_len-len(next_price_data))]   
+                    
+                    # 走势分类信息处
+                    pred_class = pred_class_total[index]
+                    class1_data = pred_class[0].tolist()
+                    class2_data = pred_class[1].tolist()
+                    # 涨跌幅分类信息
+                    vr_class_data = vr_class_total[index][0].numpy().tolist()
+                    data_line = data_line + pre_price_data + next_price_data + [class1_data] + [class2_data] + [vr_class_data] + [time_index_range]
                     data_array.append(data_line)          
                 logger.debug('end pred_series_list process,{}'.format(date))
                 

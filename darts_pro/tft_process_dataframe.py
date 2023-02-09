@@ -17,6 +17,7 @@ import random
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -34,7 +35,7 @@ from qlib.data.dataset import DatasetH, TSDatasetH
 from qlib.data.dataset.handler import DataHandlerLP
 from pytorch_forecasting.metrics import MAE, RMSE, SMAPE, PoissonLoss, QuantileLoss
 from pytorch_forecasting import GroupNormalizer, TemporalFusionTransformer, TimeSeriesDataSet
-from torch.optim.lr_scheduler import CosineAnnealingLR,CosineAnnealingWarmRestarts,StepLR
+from torch.optim.lr_scheduler import CosineAnnealingLR,CosineAnnealingWarmRestarts,StepLR,MultiStepLR
 
 from tft.tft_dataset import TFTDataset
 from darts.utils.likelihood_models import QuantileRegression
@@ -42,10 +43,11 @@ from custom_model.simple_model import Trainer
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
-from cus_utils.metrics import corr_dis,series_target_scale,diff_dis
-from cus_utils.common_compute import normalization,compute_series_slope
+from cus_utils.metrics import corr_dis,series_target_scale,diff_dis,cel_acc_compute,vr_acc_compute
+from cus_utils.common_compute import normalization,compute_series_slope,slope_classify_compute,comp_max_and_rate
+from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from losses.mtl_loss import CorrLoss,UncertaintyLoss
-from darts_pro.data_extension.custom_model import TFTCusModel,TFTExtModel
+from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from .base_process import BaseNumpyModel
 from numba.core.types import none
@@ -119,16 +121,13 @@ class TftDataframeModel():
             print("no need fit for classify_train")
             self.classify_train(dataset)
             return  
-        if self.type.startswith("pred_data_view"):
-            print("no need fit for pred_data_view")
-            self.pred_data_view(dataset)
-            return         
+             
         """对预测数据进行分类训练"""
         
         # 生成tft时间序列数据集,包括目标数据、协变量等
-        train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
-        self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
-        self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
+        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+        # self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
+        # self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
         
         # 使用股票代码数量作为embbding长度
         emb_size = dataset.get_emb_size()
@@ -151,15 +150,28 @@ class TftDataframeModel():
         
         # 使用多任务下的不确定损失作为损失函数
         device = "cuda:" + str(self.gpus)
-        
+        log_every_n_steps = self.kwargs["log_every_n_steps"]
         optimizer_cls = torch.optim.Adam
-        optimizer_kwargs={"lr": 1e-2,"weight_decay":1e-4}
+        optimizer_kwargs={"lr": 1e-2,"weight_decay":1e-3}
+        
         # 使用余弦退火的学习率方式
         scheduler = CosineAnnealingLR
         scheduler_config = {
             "T_max": 5, 
             "eta_min": 0,
         }        
+        scheduler = MultiStepLR
+        scheduler = StepLR
+        scheduler_config = {
+            "gamma": 0.2, 
+            # "milestones": [1,2,3,4,5,7,9,11,15,18,20],
+            "step_size": 1
+        }       
+        # scheduler_config = {
+        #     "gamma": 0.8, 
+        #     # "milestones": [10, 20,30,60,70, 80,90,100],
+        #     "step_size": 10
+        # }            
         # scheduler = CosineAnnealingWarmRestarts
         # scheduler_config = {
         #     "T_0": 3,
@@ -199,18 +211,19 @@ class TftDataframeModel():
             hidden_size=64,
             lstm_layers=1,
             num_attention_heads=4,
-            dropout=0.1,
+            dropout=self.optargs["dropout"],
             batch_size=self.batch_size,
             n_epochs=self.n_epochs,
             add_relative_index=True,
             add_encoders=None,
             categorical_embedding_sizes=categorical_embedding_sizes,
-            likelihood=QuantileRegression(
-                quantiles=quantiles
-            ), 
-            # likelihood=None,
+            # likelihood=QuantileRegression(
+            #     quantiles=quantiles
+            # ), 
+            likelihood=None,
             # loss_fn=torch.nn.MSELoss(),
             use_weighted_loss_func=True,
+            loss_number=4,
             # torch_metrics=metric_collection,
             random_state=42,
             model_name=model_name,
@@ -222,7 +235,8 @@ class TftDataframeModel():
             lr_scheduler_kwargs=scheduler_config,
             optimizer_cls=optimizer_cls,
             optimizer_kwargs=optimizer_kwargs,
-            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":50}  
+            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps}  
+            # pl_trainer_kwargs={"log_every_n_steps":8}  
         )
         return my_model          
 
@@ -247,16 +261,13 @@ class TftDataframeModel():
         # 缓存全量数据
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all_pred.pkl"
-            series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data(df_data_path)    
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(df_data_path)   
         else:
-            series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(val_ds_filter=True)
             if self.save_dataset_file:
                 df_data_path = self.pred_data_path + "/df_all_pred.pkl"
                 with open(df_data_path, "wb") as fout:
                     pickle.dump(dataset.df_all, fout)  
-                    
-        # self.series_data_view(dataset,series_transformed,past_convariates=past_convariates,
-        #                       future_convariates=future_convariates,title="pred_target")
         
         # 根据参数决定是否从文件中加载权重
         load_weight = self.optargs["load_weight"]
@@ -269,20 +280,38 @@ class TftDataframeModel():
             my_model = self._build_model(dataset,emb_size=1000,use_model_name=True)       
         logger.info("begin fit")     
         # 需要进行fit设置
-        my_model.fit(series_transformed,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
+        my_model.fit(series_total,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
         logger.info("begin predict")   
         # 对验证集进行预测，得到预测结果   
-        pred_series_list = my_model.predict(n=dataset.pred_len, series=series_transformed,num_samples=10,
+        pred_combine = my_model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
-        # 保存结果到数据库
-        self.save_pred_result(pred_series_list,val_series_transformed,dataset=dataset,update=False)     
+        pred_series_list = [item[0] for item in pred_combine]
+        pred_class_total = [item[1] for item in pred_combine]       
+        vr_class_total = [item[2] for item in pred_combine]   
         logger.info("do predict_show")  
+        pred_class_total = torch.stack(pred_class_total)
+        pred_class = self.combine_pred_class(pred_class_total)
+        vr_class_total = torch.stack(vr_class_total)[:,0,:]
+        var_class = self.combine_vr_class(vr_class_total)
         # 可视化
-        self.predict_show(val_series_transformed,pred_series_list, series_transformed,dataset=dataset,do_scale=False,scaler_map=None)
+        result = self.predict_show(val_series_transformed,pred_series_list,pred_class[1],var_class[1],
+                          series_total=series_total,dataset=dataset,do_scale=False,scaler_map=None)
+        # 保存结果到数据库
+        # self.save_pred_result(result,dataset=dataset,update=False)           
         self.model = my_model
         return pred_series_list,val_series_transformed
+    
+    def combine_pred_class(self,pred_class_total):
+        pred_class = F.softmax(pred_class_total,dim=-1)
+        pred_class = torch.max(pred_class,dim=-1)
+        return pred_class
 
+    def combine_vr_class(self,vr_class_total):
+        vr_class = F.softmax(vr_class_total,dim=-1)
+        vr_class = torch.max(vr_class,dim=-1)
+        return vr_class
+       
     def build_pred_result(self, dataset: TFTSeriesDataset):
         """针对连续天，逐个生成对应的预测数据"""
         
@@ -332,11 +361,10 @@ class TftDataframeModel():
             df_data_path = self.pred_data_path + "/df_all.pkl"
             dataset.build_series_data(df_data_path,no_series_data=True)    
             self.df_ref = dataset.df_all
-            # self.df_ref = self.df_ref[self.df_ref["instrument"].isin([600033,600035,600036])]
             return
         
         # 生成tft时间序列数据集,包括目标数据、协变量等
-        train_series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
+        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
         if self.save_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
             with open(df_data_path, "wb") as fout:
@@ -345,30 +373,7 @@ class TftDataframeModel():
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
 
-    def pred_data_view(self, dataset: TFTSeriesDataset):
-        """对预测数据进行归纳查看"""
-        
-        # from tsai.all import *
-        
-        self.pred_data_path = self.kwargs["pred_data_path"]
-        self.load_dataset_file = self.kwargs["load_dataset_file"]
-        self.save_dataset_file = self.kwargs["save_dataset_file"]
-        
-        self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=True)
-                    
-        if self.load_dataset_file:
-            df_data_path = self.pred_data_path + "/df_all.pkl"
-            dataset.build_series_data(df_data_path)    
-        
-        # 生成分类训练数据
-        pred_data_path = self.kwargs["pred_data_path"]
-        complex_df_train = dataset.combine_complex_df_data(dataset.df_all, dataset.train_range, 
-                                                  pred_data_path=pred_data_path, load_cache=True,type="train")
-        complex_df_valid = dataset.combine_complex_df_data(dataset.df_all, dataset.valid_range, 
-                                                  pred_data_path=pred_data_path, load_cache=True,type="valid")    
-        complex_df = pd.concat([complex_df_train,complex_df_valid])
-        self.view_complex_data(complex_df,type="total",dataset=dataset)  
-        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset)  
+
         
     def classify_train(self, dataset: TFTSeriesDataset):
         """对预测数据进行分类训练"""
@@ -383,7 +388,7 @@ class TftDataframeModel():
             df_data_path = self.pred_data_path + "/df_all.pkl"
             dataset.build_series_data(df_data_path,no_series_data=True)    
         else:
-            series_transformed,val_series_transformed,past_convariates,future_convariates = dataset.build_series_data()
+            series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
             if self.save_dataset_file:
                 df_data_path = self.pred_data_path + "/df_all.pkl"
                 with open(df_data_path, "wb") as fout:
@@ -396,9 +401,10 @@ class TftDataframeModel():
                                                   pred_data_path=self.pred_data_path, load_cache=True,type="valid")    
         complex_df = pd.concat([complex_df_train,complex_df_valid])
         # 筛选出之前预测结果比较好的股票序列
-        complex_df = self.filter_series_by_db(complex_df,dataset=dataset)
-        # self.view_complex_data(complex_df,type="total",dataset=dataset)  
-        self.view_complex_pred_data(complex_df,type="total",dataset=dataset)  
+        # complex_df = self.filter_series_by_db(complex_df,dataset=dataset)
+        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset,layout_name="data_complex_label")  
+        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset,layout_name="data_complex_pred") 
+        self.stat_complex_pred_data(complex_df,type="total",dataset=dataset) 
     
     def filter_series_by_db(self,df_data,dataset=None): 
         """通过之前存储在数据库中的指标,筛选更加合适的序列"""
@@ -406,35 +412,10 @@ class TftDataframeModel():
         dbaccessor = DbAccessor({})
         group_column = dataset.get_group_column()
         
-        result_rows = dbaccessor.do_query("select instrument from pred_result_detail where result_id=7 and corr>0.5")
+        result_rows = dbaccessor.do_query("select instrument from pred_result_detail where result_id=46 and corr>0.5 and cross_metric<2")
         result_rows = np.array(result_rows)[:,0].astype(int)
         target_df = df_data[df_data[group_column].astype(int).isin(result_rows)]
         return target_df
-        
-    def save_pred_result(self,pred_series_list,val_series_list,dataset=None,update=False):
-        """保存预测记录"""
-        
-        dbaccessor = DbAccessor({})
-        if not update:
-            # 记录主批次信息
-            dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            sql = "insert into pred_result(batch_no,create_time) values(%s,%s)"
-            dbaccessor.do_inserto_withparams(sql, (1,dt)) 
-        result_id = dbaccessor.do_query("select max(id) from pred_result")[0][0]
-        dbaccessor.do_inserto_withparams("delete from pred_result_detail where result_id=%s", (result_id,))
-        group_rank_column = dataset.get_group_rank_column()
-        for i in range(len(val_series_list)):
-            pred_series = pred_series_list[i]
-            val_series = val_series_list[i]           
-            group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
-            group_code = str(dataset.get_group_code_by_rank(group_rank_code))
-            # 分别为每个股票序列记录得分数据
-            mape_item = mape(val_series, pred_series)
-            # 计算相关度
-            corr_item = corr_dis(val_series, pred_series) 
-            sql = "insert into pred_result_detail(result_id,instrument_rank,instrument,mape,corr) values(%s,%s,%s,%s,%s)"
-            params = (result_id, group_rank_code,group_code, mape_item,corr_item)
-            dbaccessor.do_inserto_withparams(sql, params)            
         
     def build_fake_data(self,dataset):
         data = []
@@ -476,9 +457,9 @@ class TftDataframeModel():
         # target_df = target_df[target_df["t_value"]>1]
         # print(target_df)
 
-    def view_complex_pred_data(self,complex_data,type="train",dataset=None):
-        viz_input = TensorViz(env="data_complex_pred")
-        viz_input.remove_env(env="data_complex_pred")
+    def view_complex_pred_data(self,complex_data,type="train",dataset=None,layout_name="data_complex_pred"):
+        viz_input = TensorViz(env=layout_name)
+        viz_input.remove_env(env=layout_name)
         data_columns = ["instrument","date"]
         # 预测数据
         pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
@@ -495,34 +476,52 @@ class TftDataframeModel():
         for date in date_list:     
             match_cnt = 0
             target_data = complex_data[(complex_data["date"]==date)]
-            pad_items = np.array([0.0 for i in range(dataset.pred_len)])
-            names = ["pred","label","price"]
             for idx,row in target_data.iterrows():
+                instrument = int(row["instrument"])
                 # 排除补0的数据
                 if np.any(row[label_columns].values==0):
                     continue
                 # 总涨幅
                 diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_0"]) / row["pred_0"] * 100    
-                match_flag = self.pred_data_jud(row, dataset=dataset)
+                (match_flag,pred_class_real,vr_class,vr_class_confidence) = self.pred_data_jud(row, dataset=dataset)
+                # match_flag = self.label_data_jud(row, dataset=dataset)
                 if not match_flag:
                     continue
-                # if idx<20 or idx>30:
-                #     continue
-                total_price = row["price_{}".format(2*dataset.pred_len-1)] - row["price_0"]
-                total_price = round(total_price, 2)
-                target_title = "{}_{}_{}".format(int(row["instrument"]),row["date"].strftime("%Y%m%d"),total_price)
-                pred_line = row[pred_columns].values
-                pred_line = np.concatenate((pad_items,pred_line),axis=0)
-                label_line = row[label_columns].values
-                price_line = row[price_columns].values
-                view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
-                viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
+                self.show_single_complex_pred_data(row,pred_class_real,vr_class,dataset=dataset,viz_input=viz_input)
                 match_cnt += 1
-                # print("price mean:{} and label:{} and pred:{}".format(np.mean(price_line[5:]),label_line[-1],pred_line[-1]))
-            print("date:{} and match_cnt:{}".format(date,match_cnt))
- 
-    def view_complex_data(self,complex_data,type="train",dataset=None):
-        viz_input = TensorViz(env="data_complex")
+            logger.debug("date:{} and match_cnt:{}".format(date,match_cnt))
+            
+    def show_single_complex_pred_data(self,row,pred_class_real,vr_class,vr_class_confidence,dataset=None,viz_input=None):
+        instrument = int(row["instrument"])
+        # 预测数据
+        pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
+        # 标签数据）
+        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len*2)]
+        # 实际价格（滑动窗之前的原始数据）
+        price_columns = ["price_{}".format(i) for i in range(dataset.pred_len*2)]
+        pad_items = np.array([0.0 for i in range(dataset.pred_len)])
+        names = ["pred","label","price"]        
+        total_price = row["price_{}".format(2*dataset.pred_len-1)] - row["price_0"]
+        total_price = round(total_price, 2)
+        vr_class_confidence = round(vr_class_confidence, 2)
+        target_title = "{}_{}_{}-{}/{}-{}".format(instrument,row["date"].strftime("%Y%m%d"),
+                                                  pred_class_real[0].item(),pred_class_real[1].item(),vr_class,vr_class_confidence)
+        pred_line = row[pred_columns].values
+        pred_line = np.concatenate((pad_items,pred_line),axis=0)
+        label_line = row[label_columns].values
+        price_line = row[price_columns].values
+        view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
+        x_range = np.arange(row["time_index"][0],row["time_index"][1])
+        viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,x_range=x_range,names=names)     
+         
+    def stat_complex_pred_data(self,complex_data,type="train",dataset=None):
+        """统计预测信息准确度，可用性"""
+        
+        viz_input_correct = TensorViz(env="data_complex_pred_correct")
+        viz_input_correct.remove_env(env="data_complex_pred_correct")
+        viz_input_incorrect = TensorViz(env="data_complex_pred_incorrect")
+        viz_input_incorrect.remove_env(env="data_complex_pred_incorrect")
+        
         data_columns = ["instrument","date"]
         # 预测数据
         pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
@@ -535,35 +534,47 @@ class TftDataframeModel():
         end_time = "20210331" 
         df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
         date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
-        pred_threhold = 3
-        for date in date_list[:18]:     
+        match_columns = ["date","instrument","correct","class","price_range"]
+        match_list = []
+        match_cnt = 0
+        df = pd.DataFrame(columns=match_columns)
+        for date in date_list:     
             match_cnt = 0
             target_data = complex_data[(complex_data["date"]==date)]
             pad_items = np.array([0.0 for i in range(dataset.pred_len)])
             names = ["pred","label","price"]
             for idx,row in target_data.iterrows():
+                instrument = int(row["instrument"])
                 # 排除补0的数据
                 if np.any(row[label_columns].values==0):
                     continue
-                # 根据均线形态取得上涨模式
-                match_flag = self.label_data_jud(row,dataset=dataset)
+                # 总涨幅
+                diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_0"]) / row["pred_0"] * 100    
+                (match_flag,pred_class_real,vr_class,vr_class_confidence) = self.pred_data_jud(row, dataset=dataset)
                 if not match_flag:
                     continue
-                # if idx<20 or idx>30:
-                #     continue
-                total_price = row["price_{}".format(2*dataset.pred_len-1)] - row["price_0"]
-                total_price = round(total_price, 2)
-                target_title = "{}_{}_{}".format(int(row["instrument"]),row["date"].strftime("%Y%m%d"),total_price)
-                pred_line = row[pred_columns].values
-                pred_line = np.concatenate((pad_items,pred_line),axis=0)
-                label_line = row[label_columns].values
-                price_line = row[price_columns].values
-                view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
-                viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
+                price_list = np.array([row["price_{}".format(i)] for i in range(2*dataset.pred_len-1)])
+                price_range = (price_list.max() - price_list[0])/price_list[0]
+                if price_range > 0.05:
+                    correct = True
+                    self.show_single_complex_pred_data(row,pred_class_real,vr_class,vr_class_confidence,dataset=dataset,viz_input=viz_input_correct)
+                else:
+                    correct = False
+                    self.show_single_complex_pred_data(row,pred_class_real,vr_class,vr_class_confidence,dataset=dataset,viz_input=viz_input_incorrect)
+                match_item = [date,instrument,correct,pred_class_real.tolist(),price_range]
+                df.loc[match_cnt] = match_item
                 match_cnt += 1
-                # print("price mean:{} and label:{} and pred:{}".format(np.mean(price_line[5:]),label_line[-1],pred_line[-1]))
-            print("date:{} and match_cnt:{}".format(date,match_cnt))
-    
+            logger.debug("date:{} and match_cnt:{}".format(date,match_cnt))
+            
+        cache_file = self.pred_data_path + "/pred_stat.pickel"
+        with open(cache_file, "wb") as fout:
+            pickle.dump(df, fout)         
+        self.pred_data_path
+        corr_df = df[df["correct"]]
+        corr_rate = corr_df.shape[0]/df.shape[0]
+        
+        print("corr_rate:{}".format(corr_rate))
+            
     def label_data_jud(self,row,dataset=None):
         """均线价值判断"""
         
@@ -577,9 +588,11 @@ class TftDataframeModel():
             if i<dataset.pred_len-1:
                 each_diff.append(row["label_{}".format(i+1)] - row["label_{}".format(i)]) 
                 
-        label_arr = normalization(np.array(label_arr))    
+        label_arr_nor = normalization(np.array(label_arr))    
         # 计算均线斜率
-        slope_arr = compute_series_slope(label_arr)  
+        slope_arr = compute_series_slope(label_arr_nor)  
+        max_value = np.max(label_arr)
+        raise_range = (max_value - label_arr[0])/label_arr[0]
         # viz.line(
         #             X=[i for i in range(label_arr.shape[0])],
         #             Y=label_arr,
@@ -595,9 +608,11 @@ class TftDataframeModel():
         # )
         match_flag = False
         # 前平后起，符合
-        if slope_arr[-1]>slope_arr[-2] and slope_arr[-2]>0.2:
+        if slope_arr[-1]>0.2 and slope_arr[-2]>0.2:
             if abs(slope_arr[-3])<0.1 and abs(slope_arr[-4])<0.1 and abs(slope_arr[-5])<0.1:
-                match_flag = True
+                # 根据断涨跌幅类别进行筛选
+                if raise_range> 0.05:
+                    match_flag = True
         # 前起后平，符合
    
         return match_flag        
@@ -619,15 +634,56 @@ class TftDataframeModel():
         pred_arr = normalization(np.array(pred_arr))    
         # 计算预测均线斜率
         slope_arr = compute_series_slope(pred_arr)  
+        
+        # 分类信息判断
+        pred_class = np.array([row["class_1"],row["class_2"]])
+        pred_class = torch.tensor(pred_class)
+        pred_class_max = self.combine_pred_class(pred_class)   
+        pred_class_real = pred_class_max[1].numpy()
+        vr_class = row["vr_class"]
+        vr_class,vr_class_confidence = comp_max_and_rate(np.array(vr_class))
+                
         match_flag = False
+        rtn_obj = [match_flag,pred_class_real,vr_class,vr_class_confidence]
+        target_class, target_scaler = slope_classify_compute(np.expand_dims(pred_arr,axis=-1),2)
+        if target_class[0]!=pred_class_real[0] and target_class[1]!=pred_class_real[1]:      
+            return rtn_obj
+        
+        # 首先检查之前的实际均线形态，要求是比较平
+        status = self.slope_status(label_slope_arr)
+        if status != SLOPE_SHAPE_SMOOTH:
+            return rtn_obj
+        # 预测最后一个时间段数据需要上涨
+        if slope_arr[-1]< 0:
+            return rtn_obj
+        # 整体需要上涨
+        if pred_arr[-1] - pred_arr[0] < 0:
+            return rtn_obj         
+
+        # 需要符合涨跌幅类别
+        if vr_class!=2 or vr_class_confidence<0.4:
+            return rtn_obj
+        # 一直起，符合
+        if pred_class_real[0]==0 and pred_class_real[1]==0:
+            rtn_obj[0] = True           
         # 前平后起，符合
-        if slope_arr[-1]>slope_arr[-2] and slope_arr[-2]>0.2:
-            if abs(slope_arr[-3])<0.1 and abs(slope_arr[-4])<0.1 and abs(label_slope_arr[-5])<0.1 and abs(label_slope_arr[-6])<0.1:
-                match_flag = True
+        if pred_class_real[0]==2 and pred_class_real[1]==0:
+            rtn_obj[0] = True
         # 前起后平，符合
-   
-        return match_flag        
-                                  
+        # if pred_class_real[0]==0 and pred_class_real[1]==2:
+        #     match_flag = True   
+        return rtn_obj
+    
+    def slope_status(self,slope_arr,index_range=[]):
+        """均线形态判断，0：上升 1：下降 2：平缓 3：波动 """
+        if abs(slope_arr[-5])<0.1 and abs(slope_arr[-6])<0.1 and (slope_arr[-5]>0 or slope_arr[-6]>0):
+            return 2
+        if slope_arr[-5]>0.1 and slope_arr[-6]>0.1:
+            return 0        
+        if slope_arr[-5]<-0.1 and slope_arr[-6]<-0.1:
+            return 1        
+        return 3
+                                    
     def view_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
         viz_input = TensorViz(env="data_pred")
         for i in range(10):
@@ -667,7 +723,7 @@ class TftDataframeModel():
             viz_input.viz_matrix_var(view_data_past,win=sub_title,title=sub_title,names=past_columns)        
 
                
-    def predict_show(self,val_series_list,pred_series_list,series_train,dataset=None,do_scale=False,scaler_map=None):       
+    def predict_show(self,val_series_list,pred_series_list,pred_class_list,vr_class_list,series_total=None,dataset=None,do_scale=False,scaler_map=None):       
         lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
         label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
         label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"       
@@ -678,14 +734,8 @@ class TftDataframeModel():
         group_column = dataset.get_group_column()
         # 创建比较序列，后面保持所有，或者自己指定长度
         actual_series_list = []
-        for index,ser_val in enumerate(val_series_list):
-            # 根据标志，对实际数据进行缩放，与同样保持缩放的预测数据进行比较
-            if do_scale:
-                group_rank_code = ser_val.static_covariates[group_rank_column].values[0]
-                scaler = scaler_map[group_rank_code]
-                ser_val = series_target_scale(ser_val,scaler=scaler)            
-            ser_train = series_train[index]
-            ser_total = ser_train.concatenate(ser_val)
+        for index,ser_val in enumerate(val_series_list):          
+            ser_total = series_total[index]
             # 从数据集后面截取一定长度的数据，作为比较序列
             actual_series = ser_total[
                 ser_total.end_time() - (3 * forecast_horizon - 1) * ser_total.freq : 
@@ -694,6 +744,10 @@ class TftDataframeModel():
         mape_all = 0
         corr_all = 0
         diff_all = 0
+        cross_all = 0
+        vr_acc_all = 0
+        vr_acc_imp_all = 0
+        vr_acc_imp_recall = 0
         # r = 5
         # view_list = random_int_list(1,len(val_series_list)-1,r)
         
@@ -703,22 +757,38 @@ class TftDataframeModel():
             df_pick = dataset.df_all
         else:
             df_pick = dataset.get_data_by_group_code(instrument_pick)
-        for i in range(len(val_series_list)):
+        result = []
+        for i in range(len(pred_series_list)):
             pred_series = pred_series_list[i]
+            pred_class = pred_class_list[i]
+            vr_class = vr_class_list[i]
             val_series = val_series_list[i]
+            total_series = series_total[i]
             actual_series = actual_series_list[i]
             group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
             # 与实际的数据集进行比较，比较的是两个数据集的交集
-            mape_item = mape(val_series, pred_series)
+            mape_item = mape(total_series, pred_series)
             mape_all = mape_all + mape_item
             # 计算相关度
-            corr_item = corr_dis(val_series, pred_series)  
+            corr_item = corr_dis(total_series, pred_series)  
             corr_all = corr_all + corr_item   
+            # 分类数值偏差
+            cross_item = cel_acc_compute(total_series, pred_series,pred_class)   
+            cross_all = cross_all + cross_item        
+            # 涨跌幅度类别的准确率
+            vr_acc_item = vr_acc_compute(total_series, pred_series,vr_class)  
+            vr_acc_all = vr_acc_all + vr_acc_item[0]  
+            # 重点关注上涨类别的召回率
+            if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
+                vr_acc_imp_all += 1
+                vr_acc_imp_recall = vr_acc_imp_recall + vr_acc_item[0]          
             # 开始结束差的距离衡量
-            diff_item = diff_dis(val_series, pred_series) 
+            diff_item = diff_dis(total_series, pred_series) 
             diff_all = diff_all + diff_item      
             # 取得指定股票，如果不存在则不进行可视化
             df_item = df_pick[df_pick[group_rank_column]==group_rank_code]
+            result.append({"instrument":group_rank_code,"corr_item":corr_item,"cross_item":cross_item,
+                           "vr_acc_item":vr_acc_item,"mape_item":mape_item})
             if df_item.shape[0]>0:
                 # 分位数范围显示
                 pred_series.plot(
@@ -729,14 +799,41 @@ class TftDataframeModel():
                 # 实际数据集的结尾与预测序列对齐
                 pred_series.plot(label="forecast")            
                 instrument_code = df_item[group_column].values[0]
-                actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1].plot(label="actual")           
-                plt.title("ser_{},MAPE: {:.2f}%,corr:{}".format(instrument_code,mape_item,corr_item))
+                actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1].plot(label="actual")   
+                pred_class_str = "{}-{}/{}".format(pred_class[0],pred_class[1],vr_class)
+                plt.title("ser_{},MAPE: {:.2f}%,corr:{},class:{}".format(instrument_code,mape_item,corr_item,pred_class_str))
                 plt.legend()
                 plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
                 plt.clf()   
         mape_mean = mape_all/len(val_series_list)
         corr_mean = corr_all/len(val_series_list)
         diff_mean = diff_all/len(val_series_list)
-        print("mape_mean:{},corr mean:{},diff mean:{}".format(mape_mean,corr_mean,diff_mean))           
+        cross_mean = cross_all/len(val_series_list)
+        vr_acc_mean = vr_acc_all/len(val_series_list)   
+        vr_acc_imp_mean = vr_acc_imp_recall/vr_acc_imp_all    
+        print("mape_mean:{},corr mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_acc_imp_mean:{}".
+              format(mape_mean,corr_mean,diff_mean,cross_mean,vr_acc_mean,vr_acc_imp_mean))     
+        return result
         
+    def save_pred_result(self,result,dataset=None,update=False):
+        """保存预测记录"""
+        
+        dbaccessor = DbAccessor({})
+        if not update:
+            # 记录主批次信息
+            dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            sql = "insert into pred_result(batch_no,create_time) values(%s,%s)"
+            dbaccessor.do_inserto_withparams(sql, (1,dt)) 
+        for item in result:
+            group_rank_code = item["instrument"]   
+            group_code = dataset.get_group_code_by_rank(group_rank_code)
+            mape_item = item["instrument"]         
+            corr_item = item["corr_item"] 
+            cross_item = item["cross_item"] 
+            mape_item = item["instrument"]   
+            result_id = dbaccessor.do_query("select max(id) from pred_result")[0][0]
+            dbaccessor.do_inserto_withparams("delete from pred_result_detail where result_id=%s", (result_id,))
+            sql = "insert into pred_result_detail(result_id,instrument_rank,instrument,mape,corr,cross_metric) values(%s,%s,%s,%s,%s,%s)"
+            params = (result_id, group_rank_code,group_code, mape_item,corr_item,cross_item)
+            dbaccessor.do_inserto_withparams(sql, params)            
         

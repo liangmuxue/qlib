@@ -30,7 +30,6 @@ from darts.utils.likelihood_models import QuantileRegression
 from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
-from darts_pro.data_extension.custom_model import TFTCusModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 
 class BaseNumpyModel(Model):

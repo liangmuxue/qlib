@@ -68,7 +68,7 @@ class TensorViz(object):
                     )
             )               
         
-    def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None,x_range=None):
+    def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None,x_range=None,ytickmin=None,ytickmax=None):
         length = data.shape[1]
         ts = data.shape[0]
         if x_range is None:
@@ -85,19 +85,23 @@ class TensorViz(object):
             viz_line_data = viz_line_data[index_arr]
             x_range_in = x_range[index_arr]
             if i==0:
+                opts={
+                    'showlegend': True, 
+                    'title': title,
+                    'caption':desc,
+                    'xlabel': "time", 
+                    'ylabel': "values", 
+                }           
+                if ytickmin is not None:
+                    opts["ytickmin"] = ytickmin
+                    opts["ytickmax"] = ytickmax
                 self.viz.line(
                     X=x_range_in,
                     Y=viz_line_data,
                     win=win,
                     name=line_name,
                     update=None,
-                    opts={
-                        'showlegend': True, 
-                        'title': title,
-                        'caption':desc,
-                        'xlabel': "time", 
-                        'ylabel': "values", 
-                    },
+                    opts=opts,
                 )  
             else:
                 self.viz.line(

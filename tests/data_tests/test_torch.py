@@ -24,8 +24,18 @@ def test_zip():
     t_reverse =  list(zip(*t))
     target = torch.stack(t_reverse[0]).squeeze(1)
     print(t_reverse)
-    
+
+def test_softmax():
+    m = nn.LogSoftmax(dim=1)
+    input = torch.randn(2, 3)
+    print(input)
+    output = m(input)
+    print(output)
+    index = torch.argmax(output, dim=-1)
+    print(index)
+          
 if __name__ == "__main__":
     # test_tensor()    
     # test_embedding()
-    test_zip()
+    # test_zip()
+    test_softmax()

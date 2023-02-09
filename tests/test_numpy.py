@@ -249,16 +249,24 @@ def test_pd_index():
 
                   
 def test_norm():
-    from torch import nn
-    from torchvision import transforms
-    bn = nn.BatchNorm1d(num_features=3, eps=0, affine=False, track_running_stats=False)
-    x = torch.rand(10, 3, 5)*10000
-    official_bn = bn(x)    
-    print(official_bn)
-    vmax = official_bn.max()
-    print("vmax:",vmax)
-    official_bn = official_bn/vmax
-    print(official_bn)
+    # from torch import nn
+    # from torchvision import transforms
+    # bn = nn.BatchNorm1d(num_features=3, eps=0, affine=False, track_running_stats=False)
+    # x = torch.rand(10, 3, 5)*10000
+    # official_bn = bn(x)    
+    # print(official_bn)
+    # vmax = official_bn.max()
+    # print("vmax:",vmax)
+    # official_bn = official_bn/vmax
+    # print(official_bn)
+    a = np.array([0.1,0.4,0.3])
+    ratio = 2/(np.max(a)-np.min(a)) 
+    #as you want your data to be between -1 and 1, everything should be scaled to 2, 
+    #if your desired min and max are other values, replace 2 with your_max - your_min
+    shift = (np.max(a)+np.min(a))/2 
+    #now you need to shift the center to the middle, this is not the average of the values.
+    rtn = (a - shift)*ratio
+    print(rtn)
    
 def test_torch_vision():
     test_data = cv2.imread("/home/bavon/face_test/capture_lmx_gfc3.jpg")
@@ -378,7 +386,7 @@ def test_corr_tensor():
 
 def test_slope():
     import numpy as np
-    x = [1, 2]
+    x = [1, 3]
     y = [1,0.5]
     slope, intercept = np.polyfit(x,y,1)
     print(slope)
@@ -391,7 +399,7 @@ if __name__ == "__main__":
     # test_group()
     # test_corr()
     # test_corr_tensor()
-    test_slope()
+    # test_slope()
     # test_each()
     # test_split_compute()
     # test_variable()
@@ -413,4 +421,6 @@ if __name__ == "__main__":
     # test_pd_df()
     # test_pd_trans()
     # test_pd_index()
-    # test_norm()
+    test_norm()
+    
+    

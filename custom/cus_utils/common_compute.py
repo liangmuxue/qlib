@@ -1,7 +1,9 @@
 from visdom import Visdom
 import torch
-import numpy as np
+import torch.nn.functional as F
 from torch import nn
+
+import numpy as np
 
 from imblearn.over_sampling import RandomOverSampler
 from imblearn.over_sampling import SMOTE, ADASYN, BorderlineSMOTE,KMeansSMOTE
@@ -9,7 +11,36 @@ from collections import Counter
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 
-             
+from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH
+
+def slope_classify_compute(target_ori,class1_len,threhold=0.05):
+    """生成基于斜率的目标分类"""
+    
+    # 再次归一化，只衡量目标数据部分--取消
+    # target = target_scale(target_ori)
+    target = target_ori
+    # 给每段计算斜率,由于刻度一致，因此就是相邻元素的差
+    target_slope = target[1:,0]  - target[:-1,0]
+    # 分为2个部分，分别分类
+    split_arr = [target_slope[:class1_len],target_slope[class1_len:]]    
+    result = [0,0]
+    for index,item in enumerate(split_arr):
+        # 每一段斜率都比较小，则类型为平稳
+        if np.sum(np.abs(item)<threhold)==item.shape[0]:
+            result[index] = SLOPE_SHAPE_SMOOTH
+            continue
+        # 持续上升
+        if np.sum(item>0)==item.shape[0]:
+            result[index] = SLOPE_SHAPE_RAISE
+            continue        
+        # 持续下降
+        if np.sum(item<0)==item.shape[0]:
+            result[index] = SLOPE_SHAPE_FALL
+            continue 
+        # 以上情况都不是，则为震荡
+        result[index] = SLOPE_SHAPE_SHAKE
+    return np.array(result),target
+
 def mae_comp(input,target):
     loss_fn = torch.nn.L1Loss(reduce=False, size_average=False)
     loss = loss_fn(input.float(), target.float())
@@ -95,7 +126,33 @@ def compute_series_slope(series_data):
         slope_arr.append(slope)
         
     return slope_arr
-        
+
+def target_scale(target_ori,range=0.1):
+    """针对股市涨跌幅度，实现期间缩放"""
+    
+    # 把负数处理到正区间
+    min_value = np.min(target_ori)
+    if min_value<0:
+        target = target_ori + abs(min_value)
+        min_value = 0
+    else:
+        target = target_ori
+    # 设定最大值为最大涨幅--即每天涨停的情况下的总涨幅    
+    total_range = range * target.shape[0]
+    max_value = min_value * (1+total_range)
+    _range = max_value - min_value
+    # 归一化，避免出现0值
+    result = (target - min_value + 0.01)/_range
+    return result
+
+def comp_max_and_rate(np_arr):
+    """计算最大值类别以及置信度"""
+    
+    arr = torch.tensor(np_arr)
+    pred_class = F.softmax(arr,dim=-1)
+    pred_class = torch.max(pred_class,dim=-1)    
+    return pred_class[1].item(),pred_class[0].item()
+
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 5)

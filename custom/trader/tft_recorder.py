@@ -170,8 +170,8 @@ class SignalRecord(TftRecorder):
         # 返回值包括预测列表，以及原数据列表，列表中对象为TimeSeries类别
         pred_list,val_list = self.model.predict(self.dataset)
         # 预测数据进行加工，生成复合数据进行保存
-        pred_label_df_list = self.dataset.align_pred_and_label(pred_list,val_list)
-        self.save(**{"pred_label.pkl": pred_label_df_list})
+        # pred_label_df_list = self.dataset.align_pred_and_label(pred_list,val_list)
+        # self.save(**{"pred_label.pkl": pred_label_df_list})
         
         pred_save_path = "pred.pkl"
         label_save_path = "label.pkl"

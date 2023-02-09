@@ -1,6 +1,7 @@
 import numpy as np
 
 import torch
+from torch import nn
 from torch.nn.modules.loss import _Loss
 from torch import Tensor
 import torchmetrics
@@ -11,9 +12,106 @@ from darts.logging import get_logger, raise_if_not, raise_log
 
 from typing import Callable, Optional, Sequence, Tuple, Union
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
+
+from cus_utils.common_compute import target_scale,slope_classify_compute
 from cus_utils.log_util import AppLogger
+from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class
+
 logger = AppLogger()
 
+def vr_acc_compute(actual_series, pred_series, vr_class,intersect: bool = True):
+    """涨跌幅度类别的准确率计算"""
+    
+    # 通过预测系列，取得实际目标数据
+    y_true, y_hat = _get_values_or_raise(
+        actual_series, pred_series, intersect, remove_nan_union=True
+    )
+    raise_if_not(
+        (y_true != 0).all(),
+        "The actual series must be strictly positive to compute the vr_acc_compute.",
+        logger,
+    )
+    
+    # 根据实际数据取得涨跌幅类别
+    vr_target = value_range_class_compute(y_true)    
+    # 返回结果中包含目标分类值，用于后续进行重点类统计
+    rtn_flag = [0,vr_target]
+    if vr_target==vr_class.item():
+        rtn_flag[0] = 1
+    else:
+        rtn_flag[0] = 0
+    return rtn_flag
+
+def value_range_class_compute(value_arr):
+    """根据走势数据计算涨跌幅类别"""
+    
+    max_value = np.max(value_arr)
+    min_value = np.min(value_arr)
+    
+    begin_value = value_arr[0]
+    # 比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
+    if max_value - begin_value > begin_value - min_value:
+        raise_range = (max_value -begin_value)/begin_value * 100
+    else:
+        raise_range = (min_value -begin_value)/begin_value * 100    
+        
+    p_taraget_class = get_simple_class(raise_range)
+    return p_taraget_class
+    
+def cel_compute(actual_series, pred_series, pred_class,intersect: bool = True):
+    """走势分类交叉熵距离计算"""
+    
+    # 通过预测系列，取得实际目标数据
+    y_true, y_hat = _get_values_or_raise(
+        actual_series, pred_series, intersect, remove_nan_union=True
+    )
+    raise_if_not(
+        (y_true != 0).all(),
+        "The actual series must be strictly positive to compute the cel_compute.",
+        logger,
+    )
+    # 目标数据生成实际分类数据
+    class1_len = int((y_true.shape[0]-1)/2)
+    target_class, target_scaler = slope_classify_compute(np.expand_dims(y_true,axis=-1),class1_len)
+    # 使用交叉熵衡量分类差距
+    cross_metric = compute_cross_metrics(torch.unsqueeze(pred_class,0), torch.unsqueeze(torch.tensor(target_class),0))
+    return cross_metric.item()
+
+def cel_acc_compute(actual_series, pred_series, pred_class,intersect: bool = True):
+    """走势分类准确度计算"""
+    
+    # 通过预测系列，取得实际目标数据
+    y_true, y_hat = _get_values_or_raise(
+        actual_series, pred_series, intersect, remove_nan_union=True
+    )
+    raise_if_not(
+        (y_true != 0).all(),
+        "The actual series must be strictly positive to compute the cel_compute.",
+        logger,
+    )
+    # 目标数据生成实际分类数据
+    class1_len = int((y_true.shape[0]-1)/2)
+    target_class, target_scaler = slope_classify_compute(np.expand_dims(y_true,axis=-1),class1_len)
+    # 与预测分类数据进行比较
+    acc_score = 0
+    if target_class[0]==pred_class[0].item():
+        acc_score += 0.5
+    if target_class[1]==pred_class[1].item():
+        acc_score += 0.5        
+    return acc_score    
+    
+def compute_cross_metrics(output_class,target_class):
+    loss_func = [nn.CrossEntropyLoss(),nn.CrossEntropyLoss()]
+    classify_arr = [output_class[:,0,:],output_class[:,1,:]]
+    cross_loss = 0
+    for i in range(2):
+        cross_loss += loss_func[i](classify_arr[i],target_class[:,i])
+    return cross_loss   
+
+def compute_vr_metrics(output_class,target_class):
+    value_range_loss = nn.CrossEntropyLoss()(output_class,target_class)  
+    return value_range_loss
+    
 def corr_dis(actual_series, pred_series, intersect: bool = True,pred_len=5):
     
     y_true, y_hat = _get_values_or_raise(

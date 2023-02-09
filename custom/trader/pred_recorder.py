@@ -116,11 +116,13 @@ class PortAnaRecord(TftRecorder):
         for item in date_range:
             cur_date = item
             # 利用strategy的方法生成数据
-            pred_series_list = self.predict_process(cur_date,outer_df=self.df_ref)
+            pred_series_list,pred_class_total,vr_class_total = self.predict_process(cur_date,outer_df=self.df_ref)
             # 存储数据
             data_path = self._get_pickle_path(cur_date)
             with open(data_path, "wb") as fout:
-                pickle.dump(pred_series_list, fout)              
+                pickle.dump((pred_series_list,pred_class_total,vr_class_total), fout)     
+            logger.debug("dump ok:{}".format(cur_date))
+                         
         return pred_data
 
     def _get_pickle_path(self,cur_date):
@@ -141,12 +143,17 @@ class PortAnaRecord(TftRecorder):
         # 从执行器模型中取得已经生成好的模型变量
         my_model = self.model.model
         # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
-        series_transformed,val_series_transformed,past_convariates,future_convariates = self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df)
-        my_model.fit(series_transformed,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
+        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df)
+        my_model.fit(series_total,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,num_loader_workers=8,verbose=True,epochs=-1)            
         # 对验证集进行预测，得到预测结果   
-        pred_series_list = my_model.predict(n=self.dataset.pred_len, series=val_series_transformed,num_samples=200,
-                                            past_covariates=past_convariates,future_covariates=future_convariates)  
+        pred_combine = my_model.predict(n=self.dataset.pred_len, series=val_series_transformed,num_samples=200,num_loader_workers=8,
+                                            past_covariates=past_convariates,future_covariates=future_convariates)
+        pred_series_list = [item[0] for item in pred_combine]
+        pred_class_total = [item[1] for item in pred_combine]
+        vr_class_total = [item[2] for item in pred_combine] 
         # 归一化反置，恢复到原值
         pred_series_list = self.dataset.reverse_transform_preds(pred_series_list)
-        return pred_series_list    
+        return pred_series_list,pred_class_total,vr_class_total
+
+

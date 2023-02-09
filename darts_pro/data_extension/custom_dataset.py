@@ -5,7 +5,7 @@ from darts.utils.data.sequential_dataset import (
 from typing import Optional, List, Tuple, Union
 import numpy as np
 from numba.core.types import none
-
+import torch
 from typing import Optional, Sequence, Tuple, Union
 from sklearn.preprocessing import MinMaxScaler
 
@@ -14,6 +14,8 @@ from darts.utils.data.inference_dataset import InferenceDataset,PastCovariatesIn
 from darts.utils.data.shifted_dataset import GenericShiftedDataset,MixedCovariatesTrainingDataset
 from darts.utils.data.utils import CovariateType
 from darts import TimeSeries
+from cus_utils.common_compute import target_scale,slope_classify_compute
+from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class
 
 class CustomNumpyDataset(SplitCovariatesTrainingDataset):
     def __init__(
@@ -113,7 +115,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         use_static_covariates: bool = True,
         mode="train"
     ):
-        """"""
+        """初始化，分为过去数据集和未来数据集"""
 
         super().__init__()
         self.mode = mode
@@ -139,7 +141,11 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             max_samples_per_ts=max_samples_per_ts,
             use_static_covariates=use_static_covariates,
         )
-
+        
+        self.output_chunk_length = output_chunk_length
+        self.class1_len = int((output_chunk_length-1)/2)
+        self.class2_len = output_chunk_length -1 - self.class1_len
+        
     def __len__(self):
         return len(self.ds_past)
 
@@ -152,20 +158,35 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         Optional[np.ndarray],
         Optional[np.ndarray],
         np.ndarray,
+        np.ndarray,
     ]:
 
         past_target, past_covariate, static_covariate, future_target = self.ds_past[idx]
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
+        # 添加总体走势分类输出
+        max_value = np.max(future_target)
+        min_value = np.min(future_target)
+        
+        # 比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
+        if max_value - future_target[0,0] > future_target[0,0] - min_value:
+            raise_range = (max_value - future_target[0,0])/future_target[0,0]*100
+        else:
+            raise_range = (min_value - future_target[0,0])/future_target[0,0]*100
+        p_taraget_class = get_simple_class(raise_range)
+        p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)
+        # if p_taraget_class==0:
+        #     print("ggg")
+                
         # 针对价格数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
-        if self.mode=="train":
-            # scaler.fit(np.concatenate((past_target,future_target),axis=0))   
-            scaler.fit(past_target)
-        else:
-            scaler.fit(past_target)
+        scaler.fit(past_target)
         past_target = scaler.transform(past_target)   
         future_target = scaler.transform(future_target)    
+        # 添加分段走势分类目标输出
+        target_class, target_scaler = slope_classify_compute(future_target,self.class1_len)
+        target_class = np.expand_dims(target_class,axis=-1)
+        target_class = np.concatenate((target_class,p_taraget_class),axis=0)
         
         return (
             past_target,
@@ -173,6 +194,8 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             historic_future_covariate,
             future_covariate,
             static_covariate,
+            scaler,
+            target_class,
             future_target,
         )
         
@@ -237,7 +260,7 @@ class CustomInferenceDataset(InferenceDataset):
             ts_target,
         ) = self.ds_past[idx]
         _, historic_future_covariate, future_covariate, _, _ = self.ds_future[idx]
-
+        
         # 针对价格数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
         past_target = scaler.fit_transform(past_target)   
@@ -251,4 +274,4 @@ class CustomInferenceDataset(InferenceDataset):
             static_covariate,
             scaler,
             ts_target
-        )            
+        )         
