@@ -127,6 +127,16 @@ def compute_series_slope(series_data):
         
     return slope_arr
 
+def compute_price_range(price_arr):
+    """根据价格，计算涨跌幅"""
+    
+    if isinstance(price_arr, list):
+        price_arr = np.array(price_arr)
+    price_arr_before = price_arr[:-1]
+    price_arr_after = price_arr[1:]   
+    slope_range = (price_arr_after - price_arr_before)/price_arr_before*100
+    return slope_range
+
 def target_scale(target_ori,range=0.1):
     """针对股市涨跌幅度，实现期间缩放"""
     

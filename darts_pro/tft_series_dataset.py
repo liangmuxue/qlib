@@ -10,6 +10,10 @@ import numpy as np
 import pickle
 import itertools
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 from datetime import datetime
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
@@ -97,15 +101,13 @@ class TFTSeriesDataset(TFTDataset):
         accord_groups = []
         # 遍历全集，找出时间序号不足的数据
         for group_name,group_data in self.df_val.groupby(group_column):
-            if group_data[time_column].max()==1987:
-                print("ggg")
             # 取得验证集最大时间序号，加上一定的长度（预测长度2倍），全集中的时间序号需要大于这个序号
             total_time_index = group_data[time_column].max() + self.pred_len * 2
             df_target = self.df_all[(self.df_all[group_column]==group_name)&(self.df_all[time_column]>=total_time_index)]
             if df_target.shape[0]>0:
                 accord_groups.append(group_name)
             else:
-                logger.debug("not match:{}".format(group_name))
+                logger.info("not match:{}".format(group_name))
         
         self.df_all = self.df_all[self.df_all[group_column].isin(accord_groups)]
         self.df_val = self.df_val[self.df_val[group_column].isin(accord_groups)]
@@ -625,94 +627,19 @@ class TFTSeriesDataset(TFTDataset):
         result = np.concatenate((result,mean_value),axis=-1)
         return result
         
-    def combine_complex_df_data(self,df_ref,date_range,pred_data_path=None,load_cache=False,type="train"):
-        """合并预测数据,实际行情数据,价格数据等
-           Params:
-                df_ref 数据集
-                date_range 合并数据日期范围
-        """
-        
-        cache_file = pred_data_path + "/complex_df_cache_{}.pickel".format(type)
-        group_column = self.get_group_rank_column()
-        (start_time,end_time) = date_range
-        # 取得日期列表
-        df_range = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(start_time))) & (df_ref["datetime"]<pd.to_datetime(str(end_time)))]
-        date_list = df_range["datetime"].dt.strftime('%Y%m%d').unique()
-        if not load_cache:
-            data_array = []
-            data_columns = ["instrument","date"]
-            # 预测数据
-            pred_columns = ["pred_{}".format(i) for i in range(self.pred_len)]
-            # 标签数据）
-            label_columns = ["label_{}".format(i) for i in range(2*self.pred_len)]
-            # 实际价格（滑动窗之前的原始数据）
-            price_columns = ["price_{}".format(i) for i in range(self.pred_len*2)]
-            # 预测分类数据
-            class_columns = ["class_1","class_2","vr_class"]        
-            time_columns = ["time_index"]    
-            data_columns = data_columns + pred_columns + label_columns + price_columns + class_columns + time_columns
-            for date in date_list:
-                # 动态取出之前存储的预测数据
-                try:
-                    pred_combine = self.get_pred_result(pred_data_path,date)
-                    (pred_series_list,pred_class_total,vr_class_total) = pred_combine
-                except Exception as e:
-                    logger.warn("no data for {}".format(date))
-                    continue
-                
-                for index,series in enumerate(pred_series_list):
-                    # 拼接预测数据到每个股票
-                    group_rank = series.static_covariates[group_column].values[0]
-                    group_item = self.get_group_code_by_rank(group_rank)
-                    pred_center_data = get_pred_center_value(series).data
-                    time_index_df = df_ref[(df_ref[group_column]==group_rank)&
-                                        (df_ref["datetime"]>=date)]
-                    if time_index_df.shape[0]==0:
-                        continue
-                    time_index = time_index_df.iloc[0][self.get_time_column()]                    
-                    # 预测数据
-                    data_line = [float(group_item),float(date)] + pred_center_data.tolist()
-                    # 时间序号
-                    time_index_range = [time_index-self.pred_len,time_index+self.pred_len]
-                    # 实际数据部分
-                    label_data = df_ref[(df_ref[group_column]==group_rank)&
-                                        (df_ref[self.get_time_column()]>=(time_index-self.pred_len))&
-                                        (df_ref[self.get_time_column()]<(time_index+self.pred_len))]["label"].values.tolist()
-                    # 有可能长度不够，补0
-                    if len(label_data)<2*self.pred_len:
-                        label_data = label_data + [0.0 for i in range(2*self.pred_len-len(label_data))]
-                    data_line = data_line + label_data
-                    # 实际价格部分，往前取相同范围的数据
-                    pre_price_data = df_ref[(df_ref[group_column]==group_rank)&
-                                            (df_ref[self.get_time_column()]>=time_index-self.pred_len)&
-                                            (df_ref[self.get_time_column()]<time_index)]["label_ori"].values.tolist()
-                    next_price_data = df_ref[(df_ref[group_column]==group_rank)&
-                                             (df_ref[self.get_time_column()]>=time_index)&
-                                             (df_ref[self.get_time_column()]<time_index+self.pred_len)]["label_ori"].values.tolist()
-                    # 实际数据部分，有可能长度不够，补0
-                    if len(next_price_data)<self.pred_len:
-                        next_price_data = next_price_data + [0.0 for i in range(self.pred_len-len(next_price_data))]   
-                    
-                    # 走势分类信息处
-                    pred_class = pred_class_total[index]
-                    class1_data = pred_class[0].tolist()
-                    class2_data = pred_class[1].tolist()
-                    # 涨跌幅分类信息
-                    vr_class_data = vr_class_total[index][0].numpy().tolist()
-                    data_line = data_line + pre_price_data + next_price_data + [class1_data] + [class2_data] + [vr_class_data] + [time_index_range]
-                    data_array.append(data_line)          
-                logger.debug('end pred_series_list process,{}'.format(date))
-                
-            data_array = np.array(data_array)
-            target_df = pd.DataFrame(data_array,columns=data_columns)
-            target_df["date"] = pd.to_datetime(target_df["date"].astype("int").astype("str"))
-            with open(cache_file, "wb") as fout:
-                pickle.dump(target_df, fout)              
-        else:
-            with open(cache_file, "rb") as fin:
-                target_df = pickle.load(fin)
-        return target_df
+    def combine_pred_class(self,pred_class_total):
+        pred_class = F.softmax(pred_class_total,dim=-1)
+        pred_class = torch.max(pred_class,dim=-1)
+        return pred_class
 
+    def build_pred_class_real(self,pred_class):
+        """根据softmax数据，生成实际分类信息"""
+        
+        pred_class = torch.tensor(pred_class)
+        pred_class_max = self.combine_pred_class(pred_class)   
+        pred_class_real = pred_class_max[1].item()    
+        return pred_class_real
+        
     def pred_data_columns(self):
         pred_len = self.pred_len
         data_columns = ["instrument","date"]

@@ -1,6 +1,7 @@
 from qlib.contrib.data.handler import DataHandlerLP,check_transform_proc,_DEFAULT_LEARN_PROCESSORS
 from qlib.data.dataset.loader import QlibDataLoader
 from qlib.data.ops import Mad
+from .factor_ext import build_rsi_factor_str
 
 class TftDataHandler(DataHandlerLP):
     """负责从底层取得原始数据"""
@@ -102,6 +103,7 @@ class TftDataHandler(DataHandlerLP):
                 "(Less($open, $close)-$low)/($high-$low+1e-12)",
                 "(2*$close-$high-$low)/$open",
                 "(2*$close-$high-$low)/($high-$low+1e-12)",
+                "(EMA($close, 12) - EMA($close, 26))/$close - EMA((EMA($close, 12) - EMA($close, 26))/$close, 9)/$close"
             ]
             names += [
                 "KMID",
@@ -113,6 +115,7 @@ class TftDataHandler(DataHandlerLP):
                 "KLOW2",
                 "KSFT",
                 "KSFT2",
+                "MACD",
             ]
         if "price" in config:
             windows = config["price"].get("windows", range(5))
@@ -276,7 +279,11 @@ class TftDataHandler(DataHandlerLP):
                     % (d, d)
                     for d in windows
                 ]
-                names += ["TSUMP%d" % d for d in windows]                
+                names += ["TSUMP%d" % d for d in windows]       
+            if use("RSI"):
+                # 自定义rsi指标
+                fields += [build_rsi_factor_str(d) for d in windows]
+                names += ["RSI%d" % d for d in windows]           
         return fields, names
     
     

@@ -175,8 +175,6 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             raise_range = (min_value - future_target[0,0])/future_target[0,0]*100
         p_taraget_class = get_simple_class(raise_range)
         p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)
-        # if p_taraget_class==0:
-        #     print("ggg")
                 
         # 针对价格数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))

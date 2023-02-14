@@ -73,8 +73,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2021-01-31]
-                valid: [2020-09-01, 2021-01-15]
+                train_total: [2010-01-01, 2021-03-31]
+                valid: [2020-09-01, 2020-12-15]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

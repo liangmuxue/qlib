@@ -44,7 +44,6 @@ from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
 from cus_utils.metrics import corr_dis,series_target_scale,diff_dis,cel_acc_compute,vr_acc_compute
-from cus_utils.common_compute import normalization,compute_series_slope,slope_classify_compute,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from losses.mtl_loss import CorrLoss,UncertaintyLoss
 from darts_pro.data_extension.custom_model import TFTExtModel
@@ -291,7 +290,7 @@ class TftDataframeModel():
         vr_class_total = [item[2] for item in pred_combine]   
         logger.info("do predict_show")  
         pred_class_total = torch.stack(pred_class_total)
-        pred_class = self.combine_pred_class(pred_class_total)
+        pred_class = dataset.combine_pred_class(pred_class_total)
         vr_class_total = torch.stack(vr_class_total)[:,0,:]
         var_class = self.combine_vr_class(vr_class_total)
         # 可视化
@@ -302,11 +301,6 @@ class TftDataframeModel():
         self.model = my_model
         return pred_series_list,val_series_transformed
     
-    def combine_pred_class(self,pred_class_total):
-        pred_class = F.softmax(pred_class_total,dim=-1)
-        pred_class = torch.max(pred_class,dim=-1)
-        return pred_class
-
     def combine_vr_class(self,vr_class_total):
         vr_class = F.softmax(vr_class_total,dim=-1)
         vr_class = torch.max(vr_class,dim=-1)
@@ -394,17 +388,6 @@ class TftDataframeModel():
                 with open(df_data_path, "wb") as fout:
                     pickle.dump(dataset.df_all, fout)       
                       
-        # 生成预测数据组合，需要符合相关筛选条件
-        complex_df_train = dataset.combine_complex_df_data(dataset.df_all, dataset.train_range, 
-                                                  pred_data_path=self.pred_data_path, load_cache=True,type="train")
-        complex_df_valid = dataset.combine_complex_df_data(dataset.df_all, dataset.valid_range, 
-                                                  pred_data_path=self.pred_data_path, load_cache=True,type="valid")    
-        complex_df = pd.concat([complex_df_train,complex_df_valid])
-        # 筛选出之前预测结果比较好的股票序列
-        # complex_df = self.filter_series_by_db(complex_df,dataset=dataset)
-        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset,layout_name="data_complex_label")  
-        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset,layout_name="data_complex_pred") 
-        self.stat_complex_pred_data(complex_df,type="total",dataset=dataset) 
     
     def filter_series_by_db(self,df_data,dataset=None): 
         """通过之前存储在数据库中的指标,筛选更加合适的序列"""
@@ -431,267 +414,6 @@ class TftDataframeModel():
         data = np.expand_dims(np.array(data),axis=1).astype(np.float)
         label = np.array(label)
         return data,label,(split_train,split_valid)
-    
-    def stat_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
-        viz_input = TensorViz(env="data_pred")
-        pred_len = 5
-        X_data = X_data.reshape(X_data.shape[0],X_data.shape[2])   
-        X_mean = np.expand_dims(np.mean(X_data,axis=-1),axis=1)
-        X_data = np.concatenate((X_data,X_mean),axis=-1)
-        Y_data = np.expand_dims(Y_data,axis=-1)
-        combine_data = np.concatenate((X_data,Y_data),axis=1)
-        columns_pred = ["pred_{}".format(i) for i in range(pred_len)]
-        columns = columns_pred + ["t_value","label"]
-        df = pd.DataFrame(combine_data,columns=columns)
-        target_df = df[df["label"]==3]
-        view_data = target_df[columns_pred].values.transpose(1,0)
-        target_title = "classify_stat_{}".format(3)
-        names = ["value_{}".format(i) for i in target_df[["t_value"]].values]
-        view_data = view_data[:,:20]
-        names = names[:20]
-        viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)              
-        # target_df = df
-        # for i in range(pred_len):
-        #     target_df = target_df[target_df["pred_{}".format(i)]>0]
-        # print(target_df)   
-        # target_df = target_df[target_df["t_value"]>1]
-        # print(target_df)
-
-    def view_complex_pred_data(self,complex_data,type="train",dataset=None,layout_name="data_complex_pred"):
-        viz_input = TensorViz(env=layout_name)
-        viz_input.remove_env(env=layout_name)
-        data_columns = ["instrument","date"]
-        # 预测数据
-        pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
-        # 标签数据）
-        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len*2)]
-        # 实际价格（滑动窗之前的原始数据）
-        price_columns = ["price_{}".format(i) for i in range(dataset.pred_len*2)]
-        data_columns = data_columns + pred_columns + label_columns + price_columns
-        start_time = "20210201"   
-        end_time = "20210331" 
-        df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
-        date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
-        pred_threhold = 3
-        for date in date_list:     
-            match_cnt = 0
-            target_data = complex_data[(complex_data["date"]==date)]
-            for idx,row in target_data.iterrows():
-                instrument = int(row["instrument"])
-                # 排除补0的数据
-                if np.any(row[label_columns].values==0):
-                    continue
-                # 总涨幅
-                diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_0"]) / row["pred_0"] * 100    
-                (match_flag,pred_class_real,vr_class,vr_class_confidence) = self.pred_data_jud(row, dataset=dataset)
-                # match_flag = self.label_data_jud(row, dataset=dataset)
-                if not match_flag:
-                    continue
-                self.show_single_complex_pred_data(row,pred_class_real,vr_class,dataset=dataset,viz_input=viz_input)
-                match_cnt += 1
-            logger.debug("date:{} and match_cnt:{}".format(date,match_cnt))
-            
-    def show_single_complex_pred_data(self,row,pred_class_real,vr_class,vr_class_confidence,dataset=None,viz_input=None):
-        instrument = int(row["instrument"])
-        # 预测数据
-        pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
-        # 标签数据）
-        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len*2)]
-        # 实际价格（滑动窗之前的原始数据）
-        price_columns = ["price_{}".format(i) for i in range(dataset.pred_len*2)]
-        pad_items = np.array([0.0 for i in range(dataset.pred_len)])
-        names = ["pred","label","price"]        
-        total_price = row["price_{}".format(2*dataset.pred_len-1)] - row["price_0"]
-        total_price = round(total_price, 2)
-        vr_class_confidence = round(vr_class_confidence, 2)
-        target_title = "{}_{}_{}-{}/{}-{}".format(instrument,row["date"].strftime("%Y%m%d"),
-                                                  pred_class_real[0].item(),pred_class_real[1].item(),vr_class,vr_class_confidence)
-        pred_line = row[pred_columns].values
-        pred_line = np.concatenate((pad_items,pred_line),axis=0)
-        label_line = row[label_columns].values
-        price_line = row[price_columns].values
-        view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
-        x_range = np.arange(row["time_index"][0],row["time_index"][1])
-        viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,x_range=x_range,names=names)     
-         
-    def stat_complex_pred_data(self,complex_data,type="train",dataset=None):
-        """统计预测信息准确度，可用性"""
-        
-        viz_input_correct = TensorViz(env="data_complex_pred_correct")
-        viz_input_correct.remove_env(env="data_complex_pred_correct")
-        viz_input_incorrect = TensorViz(env="data_complex_pred_incorrect")
-        viz_input_incorrect.remove_env(env="data_complex_pred_incorrect")
-        
-        data_columns = ["instrument","date"]
-        # 预测数据
-        pred_columns = ["pred_{}".format(i) for i in range(dataset.pred_len)]
-        # 标签数据）
-        label_columns = ["label_{}".format(i) for i in range(dataset.pred_len*2)]
-        # 实际价格（滑动窗之前的原始数据）
-        price_columns = ["price_{}".format(i) for i in range(dataset.pred_len*2)]
-        data_columns = data_columns + pred_columns + label_columns + price_columns
-        start_time = "20210201"   
-        end_time = "20210331" 
-        df_range = complex_data[(complex_data["date"]>=pd.to_datetime(start_time)) & (complex_data["date"]<pd.to_datetime(end_time))]
-        date_list = df_range["date"].dt.strftime('%Y%m%d').unique()   
-        match_columns = ["date","instrument","correct","class","price_range"]
-        match_list = []
-        match_cnt = 0
-        df = pd.DataFrame(columns=match_columns)
-        for date in date_list:     
-            match_cnt = 0
-            target_data = complex_data[(complex_data["date"]==date)]
-            pad_items = np.array([0.0 for i in range(dataset.pred_len)])
-            names = ["pred","label","price"]
-            for idx,row in target_data.iterrows():
-                instrument = int(row["instrument"])
-                # 排除补0的数据
-                if np.any(row[label_columns].values==0):
-                    continue
-                # 总涨幅
-                diff_scope = (row["pred_{}".format(dataset.pred_len-1)] - row["pred_0"]) / row["pred_0"] * 100    
-                (match_flag,pred_class_real,vr_class,vr_class_confidence) = self.pred_data_jud(row, dataset=dataset)
-                if not match_flag:
-                    continue
-                price_list = np.array([row["price_{}".format(i)] for i in range(2*dataset.pred_len-1)])
-                price_range = (price_list.max() - price_list[0])/price_list[0]
-                if price_range > 0.05:
-                    correct = True
-                    self.show_single_complex_pred_data(row,pred_class_real,vr_class,vr_class_confidence,dataset=dataset,viz_input=viz_input_correct)
-                else:
-                    correct = False
-                    self.show_single_complex_pred_data(row,pred_class_real,vr_class,vr_class_confidence,dataset=dataset,viz_input=viz_input_incorrect)
-                match_item = [date,instrument,correct,pred_class_real.tolist(),price_range]
-                df.loc[match_cnt] = match_item
-                match_cnt += 1
-            logger.debug("date:{} and match_cnt:{}".format(date,match_cnt))
-            
-        cache_file = self.pred_data_path + "/pred_stat.pickel"
-        with open(cache_file, "wb") as fout:
-            pickle.dump(df, fout)         
-        self.pred_data_path
-        corr_df = df[df["correct"]]
-        corr_rate = corr_df.shape[0]/df.shape[0]
-        
-        print("corr_rate:{}".format(corr_rate))
-            
-    def label_data_jud(self,row,dataset=None):
-        """均线价值判断"""
-        
-        from visdom import Visdom
-        # viz = Visdom(env="test",port=8098)  
-        
-        each_diff = []
-        label_arr = []
-        for i in range(2*dataset.pred_len):
-            label_arr.append(row["label_{}".format(i)])
-            if i<dataset.pred_len-1:
-                each_diff.append(row["label_{}".format(i+1)] - row["label_{}".format(i)]) 
-                
-        label_arr_nor = normalization(np.array(label_arr))    
-        # 计算均线斜率
-        slope_arr = compute_series_slope(label_arr_nor)  
-        max_value = np.max(label_arr)
-        raise_range = (max_value - label_arr[0])/label_arr[0]
-        # viz.line(
-        #             X=[i for i in range(label_arr.shape[0])],
-        #             Y=label_arr,
-        #             win="test_label",
-        #             name="label",
-        #             update=None,
-        #             opts={
-        #                 'showlegend': True, 
-        #                 'title': "test_label",
-        #                 'xlabel': "step", 
-        #                 'ylabel': "values", 
-        #             },
-        # )
-        match_flag = False
-        # 前平后起，符合
-        if slope_arr[-1]>0.2 and slope_arr[-2]>0.2:
-            if abs(slope_arr[-3])<0.1 and abs(slope_arr[-4])<0.1 and abs(slope_arr[-5])<0.1:
-                # 根据断涨跌幅类别进行筛选
-                if raise_range> 0.05:
-                    match_flag = True
-        # 前起后平，符合
-   
-        return match_flag        
-    
-    def pred_data_jud(self,row,dataset=None):
-        """预测均线价值判断"""
-        
-        label_arr = []
-        for i in range(2*dataset.pred_len):
-            label_arr.append(row["label_{}".format(i)])
-        label_arr = normalization(np.array(label_arr))      
-        # 计算均线斜率
-        label_slope_arr = compute_series_slope(label_arr)
-                     
-        pred_arr = []
-        for i in range(dataset.pred_len):
-            pred_arr.append(row["pred_{}".format(i)])
-                
-        pred_arr = normalization(np.array(pred_arr))    
-        # 计算预测均线斜率
-        slope_arr = compute_series_slope(pred_arr)  
-        
-        # 分类信息判断
-        pred_class = np.array([row["class_1"],row["class_2"]])
-        pred_class = torch.tensor(pred_class)
-        pred_class_max = self.combine_pred_class(pred_class)   
-        pred_class_real = pred_class_max[1].numpy()
-        vr_class = row["vr_class"]
-        vr_class,vr_class_confidence = comp_max_and_rate(np.array(vr_class))
-                
-        match_flag = False
-        rtn_obj = [match_flag,pred_class_real,vr_class,vr_class_confidence]
-        target_class, target_scaler = slope_classify_compute(np.expand_dims(pred_arr,axis=-1),2)
-        if target_class[0]!=pred_class_real[0] and target_class[1]!=pred_class_real[1]:      
-            return rtn_obj
-        
-        # 首先检查之前的实际均线形态，要求是比较平
-        status = self.slope_status(label_slope_arr)
-        if status != SLOPE_SHAPE_SMOOTH:
-            return rtn_obj
-        # 预测最后一个时间段数据需要上涨
-        if slope_arr[-1]< 0:
-            return rtn_obj
-        # 整体需要上涨
-        if pred_arr[-1] - pred_arr[0] < 0:
-            return rtn_obj         
-
-        # 需要符合涨跌幅类别
-        if vr_class!=2 or vr_class_confidence<0.4:
-            return rtn_obj
-        # 一直起，符合
-        if pred_class_real[0]==0 and pred_class_real[1]==0:
-            rtn_obj[0] = True           
-        # 前平后起，符合
-        if pred_class_real[0]==2 and pred_class_real[1]==0:
-            rtn_obj[0] = True
-        # 前起后平，符合
-        # if pred_class_real[0]==0 and pred_class_real[1]==2:
-        #     match_flag = True   
-        return rtn_obj
-    
-    def slope_status(self,slope_arr,index_range=[]):
-        """均线形态判断，0：上升 1：下降 2：平缓 3：波动 """
-        if abs(slope_arr[-5])<0.1 and abs(slope_arr[-6])<0.1 and (slope_arr[-5]>0 or slope_arr[-6]>0):
-            return 2
-        if slope_arr[-5]>0.1 and slope_arr[-6]>0.1:
-            return 0        
-        if slope_arr[-5]<-0.1 and slope_arr[-6]<-0.1:
-            return 1        
-        return 3
-                                    
-    def view_classify_data(self,X_data,Y_data,ref_data_array,type="train"):
-        viz_input = TensorViz(env="data_pred")
-        for i in range(10):
-            view_data = X_data[i][0]
-            view_data = np.stack((view_data,np.array(ref_data_array[i])),axis=0).transpose(1,0)
-            target_title = "classify_data_{}_{}".format(type,i)
-            names = ["line_{},class:{}".format(i,int(Y_data[i]))] + ["ref data"]
-            viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,names=names)  
 
     def series_data_view(self,dataset,series_list,past_convariates=None,future_convariates=None,title="train_data"): 
         target_column = dataset.get_target_column()
@@ -721,7 +443,6 @@ class TftDataframeModel():
             sub_title = title + "_past_{}".format(i)
             view_data_past = past_df[past_columns].values[:data_view_len,:]
             viz_input.viz_matrix_var(view_data_past,win=sub_title,title=sub_title,names=past_columns)        
-
                
     def predict_show(self,val_series_list,pred_series_list,pred_class_list,vr_class_list,series_total=None,dataset=None,do_scale=False,scaler_map=None):       
         lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 

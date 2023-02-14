@@ -14,7 +14,7 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10']                 
+              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','MACD','RESI10']                 
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -56,12 +56,12 @@ task:
             n_epochs : 300
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            pred_data_path: "custom/data/darts/dump_data/test8"            
+            pred_data_path: "custom/data/darts/dump_data/test5"            
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_all_step5'
+               model_name: 'test5_tft_all_step5'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -97,7 +97,7 @@ task:
                 target_column: 'label'
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek']   
-                past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10'] 
+                past_covariate_col: ['STD5','PRICE_SCOPE','MACD'] 
                 static_covariate_col: ['instrument']    
 
     record: 

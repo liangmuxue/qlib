@@ -480,7 +480,6 @@ class TimeSeriesCrfDataset(TimeSeriesDataSet):
         # data_cont= np.pad(data_cont,((0,1),(0,0)),'constant', constant_values=(0)) 
         # data_cat = torch.empty(data_cat.shape[0],data_cat.shape[1])
         # if self.predict_mode:
-        #     print("ggg")
         return (
             dict(
                 x_cat=data_cat,
