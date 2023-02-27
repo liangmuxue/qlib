@@ -41,7 +41,7 @@ from .tft_recorder import TftRecorder
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-class PortAnaRecord(TftRecorder):
+class BackTestRecord(TftRecorder):
     """
     自定义recorder，实现策略应用以及回测，使用深度学习框架模式
     """
@@ -56,20 +56,8 @@ class PortAnaRecord(TftRecorder):
         dataset = None,
         **kwargs,
     ):
-        """
-        config["strategy"] : dict
-            define the strategy class as well as the kwargs.
-        config["executor"] : dict
-            define the executor class as well as the kwargs.
-        config["backtest"] : dict
-            define the backtest kwargs.
-        risk_analysis_freq : str|List[str]
-            risk analysis freq of report
-        indicator_analysis_freq : str|List[str]
-            indicator analysis freq of report
-        indicator_analysis_method : str, optional, default by None
-            the candidated values include 'mean', 'amount_weighted', 'value_weighted'
-        """
+        """init config"""
+        
         super().__init__(recorder=recorder, **kwargs)
 
         self.strategy_config = config["strategy"]
@@ -159,14 +147,7 @@ class PortAnaRecord(TftRecorder):
         trained_ddpg = agent.train_model(model=model_ddpg, 
                                      tb_log_name='ddpg',
                                      total_timesteps=50000)     
-        
-        # df_account_value, df_actions = DRLAgent.DRL_prediction(
-        #     model=trained_ddpg, 
-        #     environment = e_trade_gym)     
-        
-          
-        # data_risk_indicator = processed_full[(processed_full.date<TRAIN_END_DATE) & (processed_full.date>=TRAIN_START_DATE)]
-        # insample_risk_indicator = data_risk_indicator.drop_duplicates(subset=['date'])        
+
             
     def transfer_to_finrl_format(self,ori_df,type="train"):
         """转化为FinRL的数据格式"""

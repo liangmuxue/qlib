@@ -125,8 +125,8 @@ class TftDataframeModel():
         
         # 生成tft时间序列数据集,包括目标数据、协变量等
         train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
-        # self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
-        # self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
+        self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
+        self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
         
         # 使用股票代码数量作为embbding长度
         emb_size = dataset.get_emb_size()
@@ -366,7 +366,6 @@ class TftDataframeModel():
                 
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
-
 
         
     def classify_train(self, dataset: TFTSeriesDataset):

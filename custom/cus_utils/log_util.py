@@ -15,9 +15,13 @@ def singleton(cls):
 
 @singleton
 class AppLogger:
-    def __init__(self):
+    def __init__(self,instance_name=None):
         self.app_logger = lg
-        filename = "app.log"
+        if instance_name is None:
+            self.instance_name = "app"
+        else:
+            self.instance_name = instance_name
+        filename = self.instance_name + ".log"
         self.set_logger(filename)
 
     def set_logger(self, filename, filter_type=None, level='DEBUG'):

@@ -21,46 +21,25 @@ data_handler_config: &data_handler_config
     label: ["$close"] 
     # label: ["$volume/100"]
 
-port_analysis_config: &port_analysis_config
-    strategy:
-        class: RLStrategy
-        module_path: custom.trader.rl_strategy
-        kwargs:
-            model: <MODEL>
-            dataset: <DATASET>  
-            topk: 3
-    backtest:
-        work_dir: "custom/data/rl"
-        pred_start_time: 2021-05-01
-        pred_end_time: 2021-05-31
-        build_data: True 
-        account: 100000000
-        benchmark: *benchmark
-        exchange_kwargs:
-            limit_threshold: 0.095
-            deal_price: close
-            open_cost: 0.0005
-            close_cost: 0.0015
-            min_cost: 5
 task:
     model:
         class: TftDataframeModel
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 1024
+            batch_size: 128
             seed: 0
             n_jobs: 20
-            type: 'build_pred_result'
+            type: 'classify_train'
             n_epochs : 300
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file False
-            pred_data_path: "custom/data/darts/dump_data/test5"
+            load_dataset_file: &load_dataset_file True
+            pred_data_path: "custom/data/darts/dump_data/test7_0501"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test5_tft_all_step5'
+               model_name: 'test7_tft_all_step5'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -73,14 +52,15 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2022-03-31]
-                valid: [2020-09-01, 2020-11-15]
-                test: [2021-01-01, 2021-03-01]
+                train_total: [2010-01-01, 2022-12-31]
+                valid: [2021-02-01, 2021-03-31]
+                test: [2021-01-01, 2021-03-01]         
+                classify_range: [2021-01-01, 2021-02-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
-            instrument_pick: [600520,600521,600522]
+            instrument_pick: [603986,603980,603987]
             scaler_type: 'norm'
             model_type: 'tft'
             step_len: *wave_period
@@ -98,16 +78,33 @@ task:
                 future_covariate_col: ['dayofweek']   
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
                 static_covariate_col: ['instrument']    
+    backtest:
+       run_file: "./custom/trader/rqalpha/backtest.py"
+       rqalpha:
+          base: 
+             start_date: "2021-05-06"
+             end_date: "2021-05-30"
+             benchmark: "000300.XSHG"
+             accounts: 
+                stock: 100000
+          extra: 
+             log_level: "verbose"
+             context_vars:
+                strategy_class: 
+                   class: DayStrategy
+                   module_path: trader.rqalpha.strategy_class.backtest_day      
+                   config_path: "custom/config/workflow/backtest_day.yaml"
+                   provider_uri: "/home/qdata/qlib_data/custom_cn_data"     
+                strategy:
+                   position_max_number: 3
+                   single_buy_mount_percent: 20
+                   keep_day_number: 3                   
+          mod: 
+             sys_analyser: 
+                enabled: True
+                plot: True
+                report_save_path: "custom/data/trader/report"
 
-    record: 
-        - class: BkSignalRecord
-          module_path: trader.tft_recorder
-          kwargs: 
-            model: <MODEL>
-            dataset: <DATASET>    
-        - class: PortAnaRecord
-          module_path: trader.pred_recorder
-          kwargs: 
-            config: *port_analysis_config
-            model: <MODEL>
-            dataset: <DATASET>  
+            
+        
+            

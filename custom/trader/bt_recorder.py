@@ -19,11 +19,12 @@ from qlib.contrib.eva.alpha import calc_ic, calc_long_short_return, calc_long_sh
 from qlib.utils import init_instance_by_config
 
 from .tft_recorder import TftRecorder
+from .pred_recorder import ClassifyRecord
 from .bt_strategy import Strategy,ResultStrategy,QlibStrategy
 
 logger = get_module_logger("workflow", logging.INFO)
 
-class PortAnaRecord(TftRecorder):
+class BackTestRecord(ClassifyRecord):
     """
     自定义recorder，实现策略应用以及回测，使用backtrader框架模式
     """
@@ -38,32 +39,8 @@ class PortAnaRecord(TftRecorder):
         dataset = None,
         **kwargs,
     ):
-        """
-        config["strategy"] : dict
-            define the strategy class as well as the kwargs.
-        config["executor"] : dict
-            define the executor class as well as the kwargs.
-        config["backtest"] : dict
-            define the backtest kwargs.
-        risk_analysis_freq : str|List[str]
-            risk analysis freq of report
-        indicator_analysis_freq : str|List[str]
-            indicator analysis freq of report
-        indicator_analysis_method : str, optional, default by None
-            the candidated values include 'mean', 'amount_weighted', 'value_weighted'
-        """
-        super().__init__(recorder=recorder, **kwargs)
-
-        self.strategy_config = config["strategy"]
-        self.backtest_config = config["backtest"]
-        self.model = model
-        
-        if self.model.load_dataset_file:
-            # 使用之前保存的数据作为当前全集参考数据
-            self.df_ref =  self.model.df_ref
-        else:
-            # 使用上一步骤中dataset对象保存的数据集，作为当前全集参考数据
-            self.df_ref = dataset.df_all        
+        """回测组件，继承前面的预测分析组件"""
+        super().__init__(recorder=recorder, **kwargs)  
 
     def _get_report_freq(self, executor_config):
         ret_freq = []
@@ -91,6 +68,7 @@ class PortAnaRecord(TftRecorder):
         trade_strategy_obj = init_instance_by_config(self.strategy_config, accept_types=qlib_strategy_clazz)
         cerebro = bt.Cerebro()
         # bt模式下，只能直接放置类,参数需要从已经初始化中的对象里再拿一次
+        pred_df = self.load_pred_data()    
         cerebro.addstrategy(strategy_clazz,model=trade_strategy_obj.model,dataset=trade_strategy_obj.dataset,topk=trade_strategy_obj.topk)
         
         # 从初始化对象中，取得数据及配置，并插入bt的cerebro中

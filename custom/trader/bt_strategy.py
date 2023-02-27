@@ -13,7 +13,7 @@ from datetime import datetime
 class Strategy(bt.Strategy):
     """自定义策略基础类,继承backtrader"""
     
-    def __init__(self,model,dataset,topk=3):
+    def __init__(self,model,dataset,pred_df,topk=3):
         """
         Parmas:
             model 训练好的模型
@@ -22,6 +22,7 @@ class Strategy(bt.Strategy):
         
         self.model = model
         self.dataset = dataset
+        self.pred_df = pred_df
 
         # 跟踪订单
         self.order = None
@@ -37,7 +38,6 @@ class Strategy(bt.Strategy):
             # 使用上一步骤中dataset对象保存的数据集，作为当前全集参考数据
             self.df_ref = dataset.df_all
         self.df_ref = self.df_ref.reset_index()
-        
         self.has_save_data = False
         # 交易记录
         self.trade_list = []

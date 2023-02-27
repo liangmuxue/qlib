@@ -38,6 +38,7 @@ from cus_utils.common_compute import normalization,compute_series_slope,compute_
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.log_util import AppLogger
+from trader.busi_compute import slope_status
 logger = AppLogger()
 
 class PortAnaRecord(TftRecorder):
@@ -55,15 +56,17 @@ class PortAnaRecord(TftRecorder):
     ):
         """predict result build"""
         super().__init__(recorder=recorder, **kwargs)
-
-        self.strategy_config = config["strategy"]
-        self.backtest_config = config["backtest"]
+        
+        if isinstance(config,dict):
+            self.strategy_config = config["strategy"]
+            self.backtest_config = config["backtest"]
         self.model = model
         self.dataset = dataset
         
         self.df_ref = dataset.df_all     
         self.pred_result_columns = ['pred_date','time_idx','instrument','class1','class2','vr_class','pred_data'] 
-        self.data_viewer = DataViewer()
+        self.data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
+        self.data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
         
     def _get_report_freq(self, executor_config):
         ret_freq = []
@@ -209,14 +212,19 @@ class PortAnaRecord(TftRecorder):
         df_item = df_ref[(df_ref[group_column]==instrument)&
                             (df_ref[time_index_column]>=time_index_range[0])&
                             (df_ref[time_index_column]<time_index_range[1])]
-            
+        # 如果全量数据里不包括当前股票，则返回空
+        if  df_item.shape[0]==0:
+            return None   
         # 新增补充的列值
         new_columns = df_item.columns.tolist() + ["pred_date","pred_data","class1","class2","vr_class"]
         df_item = df_item.reindex(columns=new_columns)
         df_item["pred_date"] = [pred_date for i in range(df_item.shape[0])] 
         # 预测数据,前面补0
         pred_data = df_pred_item["pred_data"].values
-        data_line = np.pad(pred_data,(df_item.shape[0]-pred_data.shape[0],0),'constant',constant_values=(0,0))          
+        pad_len = df_item.shape[0]-pred_data.shape[0]
+        if pad_len<0:
+            print("ggg") 
+        data_line = np.pad(pred_data,(pad_len,0),'constant',constant_values=(0,0))          
         df_item["pred_data"] = data_line
         # 走势分类信息处
         class1 = df_pred_item["class1"].values[0]
@@ -246,19 +254,16 @@ class ClassifyRecord(PortAnaRecord):
         
     def generate(self, **kwargs):
         self.classify_analysis(self.dataset)
+        # self.show_correct_pred(self.dataset)
+        return self
 
     def classify_analysis(self, dataset: TFTSeriesDataset):
         """对预测数据进行分类训练"""
         
         ext_length = 25
-        # 生成预测数据组合，需要符合相关筛选条件
-        classify_range = dataset.kwargs["segments"]["classify_range"] 
         # 筛选出之前预测结果比较好的股票序列
         # complex_df = self.filter_series_by_db(complex_df,dataset=dataset)
-        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset,layout_name="data_complex_label")  
-        # self.view_complex_pred_data(complex_df,type="total",dataset=dataset,layout_name="data_complex_pred") 
-        self.stat_complex_pred_data(dataset=dataset,ext_length=ext_length,load_cache=True) 
-        # self.view_stat_result(dataset=dataset)
+        self.stat_complex_pred_data(dataset=dataset,ext_length=ext_length,load_cache=False) 
         
     def stat_complex_pred_data(self,dataset=None,ext_length=25,load_cache=False):
         """统计预测信息准确度，可用性"""
@@ -270,13 +275,17 @@ class ClassifyRecord(PortAnaRecord):
             match_columns = ["date","instrument","correct","pred_class","vr_class","price_raise_range","price_down_range"]
             match_list = []
             match_cnt = 0
+            logger.debug("date_list len:{}".format(len(date_list)))
             for pred_date in date_list:   
                 pred_date = int(pred_date)  
                 match_cnt = 0
                 date_pred_df = pred_df[(pred_df["pred_date"]==pred_date)]
                 for instrument,group_data in date_pred_df.groupby("instrument"):
                     # 生成对应日期的单个股票的综合数据
-                    complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=date_pred_df,df_ref=dataset.df_all,ext_length=ext_length)                
+                    complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=pred_df,df_ref=dataset.df_all,ext_length=ext_length)   
+                    if complex_df is None:
+                        continue
+                    # 使用收盘价格进行衡量         
                     price_values = complex_df["label_ori"].values
                     # 根据预测数据综合判断，取得匹配标志
                     (match_flag,pred_class_real,vr_class) = self.pred_data_jud(complex_df, dataset=dataset,ext_length=ext_length)
@@ -286,8 +295,10 @@ class ClassifyRecord(PortAnaRecord):
                     
                     # 取得实际价格信息，进行准确率判断
                     price_list = price_values[-(dataset.pred_len):]
-                    price_raise_range = (price_list.max() - price_list[0])/price_list[0]
-                    price_down_range = (price_list.min() - price_list[0])/price_list[0]
+                    # 以昨日收盘价为基准
+                    cur_price = price_values[-(dataset.pred_len+1)]
+                    price_raise_range = (price_list.max() - cur_price)/cur_price
+                    price_down_range = (price_list.min() - cur_price)/cur_price
                     if price_raise_range > 0.05:
                         correct = 2
                     elif price_raise_range > 0.03:
@@ -302,8 +313,9 @@ class ClassifyRecord(PortAnaRecord):
                         correct = -2                                                     
                     match_item = [pred_date,instrument,correct,pred_class_real,vr_class,price_raise_range,price_down_range]
                     match_list.append(match_item)
-                    # self.data_viewer.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.model.pred_data_path+"/plot")
-                    # self.data_viewer.show_single_complex_pred_data_visdom(complex_df,dataset=dataset)
+                    # if correct!=2:
+                    #     self.data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.model.pred_data_path+"/plot")
+                    #     self.data_viewer_correct.show_single_complex_pred_data_visdom(complex_df,dataset=dataset)
                     match_cnt += 1
                 logger.debug("date:{} and match_cnt:{}".format(pred_date,match_cnt))
             
@@ -311,13 +323,35 @@ class ClassifyRecord(PortAnaRecord):
             with open(cache_file, "wb") as fout:
                 pickle.dump(df, fout)               
         else:
-             with open(cache_file, "rb") as fin:
+            with open(cache_file, "rb") as fin:
                 df = pickle.load(fin)             
         corr_2_rate = df[df["correct"]==2].shape[0]/df.shape[0]
         corr_1_rate = df[df["correct"]==1].shape[0]/df.shape[0]
         corr_0_rate = df[df["correct"]==0].shape[0]/df.shape[0]
         print("corr_rate:{},corr_1:{},corr_0:{}".format(corr_2_rate,corr_1_rate,corr_0_rate))    
-
+    
+    def show_correct_pred(self,dataset=None):
+        
+        cache_file = self.model.pred_data_path + "/pred_stat.pickel"
+        with open(cache_file, "rb") as fin:
+            stat_df = pickle.load(fin)  
+        complex_df = self.load_pred_data()
+        show_num = 5
+        incorrect_df = stat_df[stat_df["correct"]<0].iloc[:show_num]
+        correct_df = stat_df[stat_df["correct"]==2].iloc[:show_num]
+        show_df = pd.concat([incorrect_df,correct_df])
+        for index,group_data in show_df.groupby(["instrument","date"]):
+            instrument = int(group_data["instrument"].values[0])
+            date = int(group_data["date"].values[0])
+            correct = group_data["correct"].values[0]
+            complex_item_df = self.combine_complex_df_data(date,instrument,pred_df=complex_df,df_ref=dataset.df_all) 
+            if correct==2:
+                self.data_viewer_correct.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
+            else:
+                self.data_viewer_incorrect.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
+            self.data_viewer_correct.show_single_complex_pred_data(complex_item_df,correct=correct,dataset=dataset,save_path=self.model.pred_data_path+"/plot")
+            logger.debug("correct:{}".format(correct))
+        
     def label_data_jud(self,row,dataset=None):
         """均线价值判断"""
         
@@ -378,10 +412,20 @@ class ClassifyRecord(PortAnaRecord):
         match_flag = False
         rtn_obj = [match_flag,pred_class,vr_class]
         
-        # 首先检查之前的实际均线形态，要求是比较平
-        status = self.slope_status(label_slope_arr,dataset=dataset)
+        # RSI指标需要在50以上
+        rsi = ins_data["RSI20"].values[-2*dataset.pred_len:-dataset.pred_len]
+        if np.any(rsi<50):
+            return rtn_obj
+        # MACD指标需要在0以上
+        macd = ins_data["MACD"].values[-2*dataset.pred_len:-dataset.pred_len]
+        if np.any(macd<0):
+            return rtn_obj
+                
+        # 检查之前的实际均线形态，要求是比较平
+        status = slope_status(label_slope_arr,dataset=dataset)
         if status != SLOPE_SHAPE_SMOOTH:
             return rtn_obj
+        
         # 预测最后一个时间段数据需要上涨
         if slope_arr[-1]< 0:
             return rtn_obj
@@ -402,21 +446,5 @@ class ClassifyRecord(PortAnaRecord):
         # if pred_class_real[0]==0 and pred_class_real[1]==2:
         #     match_flag = True   
         return rtn_obj
-    
-    def slope_status(self,slope_arr,dataset=None,mea_sum=3,threhold=2):
-        """均线形态判断，0：上升 1：下降 2：平缓 3：波动 
-            mea_sum 标志至少有几条线段需要满足同一要求
-            threhold 幅度阈值，单位为百分点
-        """
-        
-        if isinstance(slope_arr,list):
-            slope_arr = np.array(slope_arr)
-        if np.sum(np.absolute(slope_arr)<threhold)>=mea_sum:
-            return 2
-        if np.sum(slope_arr>threhold)>=mea_sum:
-            return 0        
-        if  np.sum(slope_arr<-threhold)>=mea_sum:
-            return 1        
-        return 3            
 
 
