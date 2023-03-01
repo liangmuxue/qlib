@@ -16,7 +16,7 @@ logger = AppLogger()
 TRADE_COLUMNS = ["trade_date","instrument","side","price","quantity","total_price","status","order_id"]
 
 class MinuteStrategy(BaseStrategy):
-    """交易策略类，分钟模式"""
+    """交易对象策略类,分钟级别"""
     
     def __init__(self):
         super().__init__()
