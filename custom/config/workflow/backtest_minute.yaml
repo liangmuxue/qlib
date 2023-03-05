@@ -34,12 +34,12 @@ task:
             n_epochs : 300
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            pred_data_path: "custom/data/darts/dump_data/test7_0501"
+            pred_data_path: "custom/data/darts/dump_data/test6"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test7_tft_all_step5'
+               model_name: 'test6_tft_all_step5'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -82,9 +82,10 @@ task:
        run_file: "./custom/trader/rqalpha/backtest.py"
        rqalpha:
           base: 
-             start_date: "2021-05-06"
-             end_date: "2021-05-30"
-             benchmark: "000300.XSHG"
+             start_date: "2022-01-05"
+             end_date: "2022-01-12"
+             benchmark: "000001.XSHG"
+             frequency: "1m"
              accounts: 
                 stock: 100000
           extra: 
@@ -98,12 +99,20 @@ task:
                 strategy:
                    position_max_number: 3
                    single_buy_mount_percent: 20
-                   keep_day_number: 3                   
+                   keep_day_number: 3        
+                   sell_opt:
+                      stop_fall_sell_continue_rate: 0.5     
+                      pred_sell_continue_rate: 0.5    
+                   buy_opt:
+                      pred_buy_exceed_rate: 1                         
           mod: 
              sys_analyser: 
-                enabled: True
-                plot: True
-                report_save_path: "custom/data/trader/report"
+                 enabled: True
+                 plot: True
+                 report_save_path: "custom/data/trader/report"
+             ext_ds_mod:
+                 enabled: True
+                 lib: "data_extract.rqalpha.ext_ds_mod"
 
             
         

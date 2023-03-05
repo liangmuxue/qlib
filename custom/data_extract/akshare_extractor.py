@@ -18,13 +18,13 @@ logger = AppLogger()
 class AkExtractor(HisDataExtractor):
     """akshare数据源"""
 
-    def __init__(self, backend_channel="ak",savepath="./custom/data/stock_data/ak"):
+    def __init__(self, backend_channel="ak",savepath=None):
         
         super().__init__(backend_channel=backend_channel,savepath=savepath)
         self.session = requests.Session()
         self.session.mount("http://", TimeoutHTTPAdapter(timeout=(5,10)))
       
-    def load_code_data(self):  
+    def extract_code_data(self):  
         """取得所有股票代码"""
         
         all_sz = ak.stock_info_sz_name_code(indicator="A股列表")
@@ -34,43 +34,13 @@ class AkExtractor(HisDataExtractor):
         data_sz = all_sz[["A股代码","A股简称","market"]].values
         data_sh = all_sh[["证券代码","证券简称","market"]].values
         return np.concatenate((data_sh,data_sz),axis=0)
-                            
-    def load_all_data(self,load_record=False):
-        """取得所有股票历史行情数据"""
-        
-        record_path = self.CODE_DATA_SAVEPATH + "/item_record.npy"
-        if load_record:
-            record_arr = np.load(record_path)
-        else:
-            record_list = []
-            record_arr = np.array(record_list)
-        stock_item = {'sz': self.stock_sz, 'sh': self.stock_sh}
-        stock_item = {'sh': self.stock_sh}
-        
-        index = 0
-        for key, value in stock_item.items():
-            for single_stock in value:
-                index += 1
-                # 如果已经导入过，则忽略
-                if np.any(np.isin([single_stock],record_arr)):
-                    # logger.debug("has record,ignore:{}".format(key))
-                    continue
-                try:
-                    item_data = self.load_item_data(single_stock)
-                    if item_data is None:
-                        logger.warning("load item None:{}".format(single_stock))
-                    else:
-                        logger.info("save item data ok:{}".format(single_stock))
-                        record_arr = np.append(record_arr,single_stock)
-                except Exception as e:
-                    logger.warning("load item {} err:{}".format(single_stock,e))
-                
-                if index%3==0:
-                    # 保存已导入列表，用于后续断点续传
-                    np.save(record_path,record_arr)
           
-    def load_item_data(self,instrument_code,start_date=None,end_date=None,period="day"):   
+    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value):  
         """取得单个股票历史行情数据"""
+        
+        # AKSHARE目前只支持按照日导入
+        if period!=PeriodType.DAY.value:
+            raise NotImplementedError
         
         # 取得日线数据，后复权
         if start_date is None:
@@ -92,7 +62,7 @@ class AkExtractor(HisDataExtractor):
             return None
                     
         item_data = get_data()
-        if item_data is None:
+        if item_data is None or item_data.shape[0]==0:
             return None
         item_data.insert(loc=0, column='code', value=instrument_code)
         # 中文标题改英文 

@@ -34,12 +34,12 @@ task:
             n_epochs : 300
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            pred_data_path: "custom/data/darts/dump_data/test7_0501"
+            pred_data_path: "custom/data/darts/dump_data/test6"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test7_tft_all_step5'
+               model_name: 'test6_tft_all_step5'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -82,8 +82,8 @@ task:
        run_file: "./custom/trader/rqalpha/backtest.py"
        rqalpha:
           base: 
-             start_date: "2021-05-06"
-             end_date: "2021-05-30"
+             start_date: "2022-01-01"
+             end_date: "2022-01-31"
              benchmark: "000300.XSHG"
              accounts: 
                 stock: 100000

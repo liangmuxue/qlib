@@ -15,7 +15,7 @@ logger = AppLogger()
 # 交易信息表字段，分别为交易日期，股票代码，成交价格，成交量,总价格，成交状态，订单编号
 TRADE_COLUMNS = ["trade_date","instrument","side","price","quantity","total_price","status","order_id"]
 
-class MinuteStrategy(BaseStrategy):
+class DayStrategy(BaseStrategy):
     """交易策略类，分钟模式"""
     
     def __init__(self):

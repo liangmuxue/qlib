@@ -1,14 +1,24 @@
 from rqalpha.apis import *
 import rqalpha
 
+from enum import Enum, unique
+
 from trader.rqalpha.ml_context import MlIntergrate
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
 from trader.rqalpha.trade_entity import TradeEntity
 from trader.utils.date_util import tradedays
 
+from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
+@unique
+class SellReason(Enum):
+    """卖出类别，1.根据预测数据 2.止盈 3.止损 4.超期卖出"""
+    PRED = 1 
+    STOP_RAISE = 2
+    STOP_FALL = 3
+    EXPIRE_DAY = 4
 
 # 交易信息表字段，分别为交易日期，股票代码，成交价格，成交量,总价格，成交状态，订单编号
 TRADE_COLUMNS = ["trade_date","instrument","side","price","quantity","total_price","status","order_id"]
@@ -35,6 +45,13 @@ class BaseStrategy():
         context.fired = False
         subscribe_event(EVENT.TRADE, self.on_trade_handler)
         subscribe_event(EVENT.ORDER_CREATION_PASS, self.on_order_handler)           
+    
+    def first_period_of_day(self,dt,frequency=PeriodType.MIN5.value):
+        if frequency==PeriodType.MIN5.value:
+            if dt.minute==35:
+                return True
+            return False
+        raise NotImplemented
     
     def before_trading(self,context):
         pass

@@ -2,10 +2,13 @@
 # Licensed under the MIT License.
 
 import os
+import glob
+
 import numpy as np
 import datetime
 from tqdm import tqdm
 import pandas as pd
+import pickle
 
 from cus_utils.db_accessor import DbAccessor
 from cus_utils.log_util import AppLogger
@@ -46,36 +49,38 @@ class DataTaskType(Enum):
 class HisDataExtractor:
     """历史证券数据采集"""
 
-    def __init__(self, backend_channel="ak",savepath="./custom/data/stock_data"):
+    def __init__(self, backend_channel="ak",savepath=None):
         """
 
         Parameters
         ----------
         backend_channel : 采集源    ak: akshare数据源
         """
-        
-        self.savepath = savepath
-        self.item_savepath = savepath + "/" + backend_channel + "/item"
+        if savepath is None:
+            savepath="./custom/data/stock_data"
+            
+        self.savepath = savepath + "/" + backend_channel 
+        self.item_savepath = self.savepath + "/item"
         self.backend_channel = backend_channel
         self.dbaccessor = DbAccessor({})
         
-        self.busi_columns = ["code","date","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
+        self.busi_columns = ["code","datetime","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
            
     def create_code_data(self):
         """生成所有股票代码"""
         
-        code_data = self.load_code_data()
+        code_data = self.extract_code_data()
         # 把股票列表信息保存到数据库
         for item in code_data:
             sql = "insert into instrument_info(code,name,market) values(%s,%s,%s)"
             self.dbaccessor.do_inserto_withparams(sql, tuple(item))             
         
-    def load_code_data(self):  
+    def extract_code_data(self):  
         """取得所有股票代码，子类实现"""
         pass
         
-                
-    def imoprt_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY):
+              
+    def imoprt_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value):
         """
             取得所有股票历史行情数据
             Params:
@@ -98,46 +103,106 @@ class HisDataExtractor:
                 task_batch = 1
             else:
                 task_batch += 1
-            insert_sql = "insert into data_task(task_type,task_batch,backend_channel,start_date,end_date,status) values(%s,%s,%s,%s,%s,%s)"
+            insert_sql = "insert into data_task(task_type,task_batch,backend_channel,start_date,end_date,status,period) values(%s,%s,%s,%s,%s,%s,%s)"
             self.dbaccessor.do_inserto_withparams(insert_sql, 
-                        (DataTaskType.DataImport.value,task_batch,self.backend_channel,start_date,end_date,DataTaskStatus.Start.value))
+                        (DataTaskType.DataImport.value,task_batch,self.backend_channel,start_date,end_date,DataTaskStatus.Start.value,period))
         # 股票编码从数据库表中获得
         sql = "select code,market from instrument_info order by code"
         if last_item_code is not None:
             # 断点处继续
             sql = "select code,market from instrument_info where code>='{}' order by code".format(last_item_code)
         result_rows = self.dbaccessor.do_query(sql)            
-        index = 0
         savepath = "{}/{}".format(self.item_savepath,period)
         if not os.path.exists(savepath):
             os.makedirs(savepath) 
-            
+        
+        total_data = None   
         for row in result_rows:
             code = row[0]
             market = row[1]
             # 取得相关数据，子类实现
-            item_data = self.load_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market)
+            item_data = self.extract_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market)
             if item_data is not None:
                 # 每个股票分别保存csv到本地
                 save_file_path = "{}/{}.csv".format(savepath,code)
                 item_data.to_csv(save_file_path, index=False)   
+                # 合并为一个总DataFrame，最后保存
+                if total_data is None:
+                    total_data = item_data
+                else:
+                    total_data = pd.concat([total_data,item_data],axis=0)
             # 记录最后一条子任务号码，以便后续断点继续
             self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=%s where task_batch=%s", (code,task_batch))
+            
+        # 最后统一保存一个文件   
+        self.save_total_df(total_data,period=period)
         # 任务结束后设置状态为已成功  
         self.dbaccessor.do_inserto_withparams("update data_task set status=%s where task_batch=%s", (DataTaskStatus.Success.value,task_batch))
         
-    def load_item_data(self,instrument_code,start_date=None,end_date=None,period="day"):   
-        """取得单个股票历史行情数据"""
+    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None):   
+        """取得单个股票历史行情数据,子类实现"""
         pass
-
-
+    
+    def get_total_file_save_path(self,period):
+        return self.savepath + "/all_{}.pickle".format(period)
+        
+    def save_total_df(self,df,period=None):
+        data_file = self.get_total_file_save_path(period)
+        with open(data_file, "wb") as fout:
+            pickle.dump(df, fout)           
+    
+    def load_item_df(self,instrument,period=PeriodType.MIN5.value):
+        """加载单个股票"""
+        
+        item_savepath = self.item_savepath + "/{}".format(period)
+        f =  "{}/{}.csv".format(item_savepath,instrument)
+        item_df = pd.read_csv(f)  
+        # 对时间字段进行检查及清洗
+        if self.backend_channel=="ak":
+            item_df["datetime"] = item_df["date"]
+        if self.backend_channel=="tdx":
+            item_df["volume"] = item_df["vol"]            
+        item_df["datetime"] = pd.to_datetime(item_df["datetime"],errors="coerce")
+        item_df = item_df.dropna()
+        return item_df
+    
+    def load_total_df(self,period=PeriodType.MIN5.value):
+        """加载之前保存的数据"""
+        
+        data_file = self.get_total_file_save_path(period)
+        # 如果没有保存，则从每个单独数据里加载
+        if not os.path.exists(data_file):
+            total_df = None
+            item_savepath = self.item_savepath + "/{}".format(period)
+            csv_files = glob.glob(os.path.join(item_savepath, "*.csv"))
+            for f in csv_files:
+                try:
+                    instrument_code = f.split("/")[-1].split(".")[0]
+                    df = self.load_item_df(instrument_code)  
+                    df["instrument"] = instrument_code
+                    logger.debug("item load suc:{}".format(f))  
+                except Exception as e:
+                    logger.warning("item load fail:{},reason:{}".format(f,e))  
+                    continue
+                if total_df is None:
+                    total_df = df
+                else:
+                    total_df = pd.concat([total_df,df],axis=0)    
+            # 合并以后保存
+            self.save_total_df(total_df,period=period)                
+        else:
+            with open(data_file, "rb") as fin:
+                total_df = pickle.load(fin)            
+        return total_df
+    
 if __name__ == "__main__":    
     from data_extract.akshare_extractor import AkExtractor
     from data_extract.tdx_extractor import TdxExtractor
     # extractor = AkExtractor()   
     # extractor.create_code_data()
-    # extractor.imoprt_data(task_batch=1)
-    extractor = TdxExtractor(savepath="./custom/data/stock_data")
-    extractor.imoprt_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
-    
+    # extractor.imoprt_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
+    # extractor = TdxExtractor(savepath="./custom/data/stock_data")
+    # extractor.imoprt_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
+    extractor = AkExtractor(savepath="./custom/data/stock_data")
+    extractor.imoprt_data(task_batch=0,period=PeriodType.DAY.value,start_date=20220101,end_date=20221231)    
         

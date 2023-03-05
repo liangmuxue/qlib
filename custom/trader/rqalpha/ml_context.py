@@ -42,8 +42,10 @@ class MlIntergrate():
         model = init_instance_by_config(self.model_cfg)
         dataset = init_instance_by_config(self.dataset_cfg)   
          
+        # 加载预测数据
         self.pred_data_path = self.model_cfg["kwargs"]["pred_data_path"]  
         df_data_path = self.pred_data_path + "/df_all.pkl"
+        # 加载全量数据
         dataset.build_series_data(df_data_path,no_series_data=True)      
              
         self.model = model

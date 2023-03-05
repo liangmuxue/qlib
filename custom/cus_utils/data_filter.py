@@ -12,6 +12,16 @@ def check_time_ser_data(file_path):
     cnt = df.groupby("instrument").count()
     print(cnt)
 
+def get_topN_dict(ori_dict,n):
+    """取得字典前n条数据"""
+    
+    new_dict = {}
+    for i,(k,v) in enumerate(ori_dict.items()):
+        new_dict[k]=v
+        if i==n:
+            break    
+    return new_dict
+    
 class DataFilter():
     def __init__(self):
         self.wave_period = 30
