@@ -247,13 +247,18 @@ class ClassifyRecord(PortAnaRecord):
         config,
         model = None,
         dataset = None,
+        entity_mode=False,
         **kwargs,
     ):
         """classify result analysis"""
         super().__init__(recorder=recorder, config=config,model=model,dataset=dataset,**kwargs)
         self.classify_range = self.dataset.kwargs["segments"]["classify_range"] 
+        self.entity_mode = entity_mode
         
     def generate(self, **kwargs):
+        if self.entity_mode:
+            return self
+        
         self.classify_analysis(self.dataset)
         # self.show_correct_pred(self.dataset)
         return self

@@ -7,8 +7,9 @@ from trader.rqalpha.ml_context import MlIntergrate
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
 from trader.rqalpha.trade_entity import TradeEntity
 from trader.utils.date_util import tradedays
-
+from cus_utils.db_accessor import DbAccessor
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
+
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
@@ -27,7 +28,12 @@ class BaseStrategy():
     """交易对象处理BASE类"""
     
     def __init__(self):
-        pass
+        dbaccessor = DbAccessor({})
+        # 只处理具备数据的股票,因此生成库内股票字典
+        result_rows = dbaccessor.do_query("select code from instrument_info")
+        self.instruments_dict = {}  
+        for row in result_rows:
+            self.instruments_dict[int(row[0])] = row
     
     def __build_with_context__(self,context):
         self.context = context
@@ -40,7 +46,7 @@ class BaseStrategy():
         # 创建预测的集成数据
         context.ml_context.create_bt_env()
         # 交易对象上下文
-        context.trade_entity = TradeEntity()
+        self.trade_entity = TradeEntity()
         # 注册订单事件
         context.fired = False
         subscribe_event(EVENT.TRADE, self.on_trade_handler)

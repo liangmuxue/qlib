@@ -74,7 +74,10 @@ class DayStrategy(BaseStrategy):
         # 买入逻辑，检查持仓列表，匹配卖出
         self.buy_logic(context,bar_dict=bar_dict)        
 
-
+    def open_auction(self,context, bar_dict):
+        """集合竞价入口"""
+        pass
+        
     def expire_day_logic(self,context,bar_dict=None):
         """持有股票超期卖出逻辑"""
         
@@ -153,7 +156,7 @@ class DayStrategy(BaseStrategy):
         logger.info(order)
         logger.info(account)
         # 保存交易对象
-        context.trade_entity.add_trade(trade)
+        # context.trade_entity.add_trade(trade)
     
     def on_order_handler(self,context, event):
         order = event.order

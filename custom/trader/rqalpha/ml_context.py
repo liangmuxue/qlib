@@ -8,15 +8,19 @@ from qlib.config import C
 from qlib.model.trainer import task_train
 from qlib.utils import init_instance_by_config
 from qlib.config import REG_CN
+from qlib.workflow import R
+from qlib.model.trainer import fill_placeholder
 import qlib
 
 import ruamel.yaml as yaml
 
+from darts_pro.data_extension.custom_model import TFTExtModel
 from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from trader.busi_compute import slope_status
 
 from cus_utils.log_util import AppLogger
+from trader import pred_recorder
 logger = AppLogger()
 
 class MlIntergrate():
@@ -39,17 +43,30 @@ class MlIntergrate():
         self.backtest_cfg = config["task"]["backtest"]
         
         # 初始化
-        model = init_instance_by_config(self.model_cfg)
-        dataset = init_instance_by_config(self.dataset_cfg)   
-         
-        # 加载预测数据
-        self.pred_data_path = self.model_cfg["kwargs"]["pred_data_path"]  
+        self.pred_data_path = self.model_cfg["kwargs"]["pred_data_path"]
+        self.load_dataset_file = self.model_cfg["kwargs"]["load_dataset_file"]
+        self.save_dataset_file = self.model_cfg["kwargs"]["save_dataset_file"]
+        # 初始化model和dataset
+        optargs = self.model_cfg["kwargs"]["optargs"]
+        model = TFTExtModel.load_from_checkpoint(optargs["model_name"],work_dir=optargs["work_dir"],best=False)
+        dataset = init_instance_by_config(self.dataset_cfg)
         df_data_path = self.pred_data_path + "/df_all.pkl"
-        # 加载全量数据
-        dataset.build_series_data(df_data_path,no_series_data=True)      
+        dataset.build_series_data(df_data_path,no_series_data=True)    
+        # 生成recorder,用于后续预测数据处理
+        record_cfg = config["task"]["record"]
+        placehorder_value = {"<MODEL>": model, "<DATASET>": dataset}
+        record_cfg = fill_placeholder(record_cfg, placehorder_value)        
+        
+        with R.start(experiment_name="workflow", recorder_name=None):
+            rec = R.get_recorder()
+            recorder = init_instance_by_config(
+                record_cfg,
+                recorder=rec,
+            )      
              
         self.model = model
         self.dataset = dataset
+        self.pred_recorder = recorder
         self.kwargs = kwargs
         
     def create_bt_env(self):   
@@ -196,11 +213,8 @@ class MlIntergrate():
         # 取得预测趋势分类信息
         pred_class = np.array([complex_item_df["class1"].values[0],complex_item_df["class2"].values[0]])
         vr_class = complex_item_df["vr_class"].values[0]
-        # 如果趋势分类分数小于0，则卖出
-        if vr_class<0:
-            return True
-        # 如果走势阶段至少有一个阶段是下跌类型，则卖出
-        if np.sum(pred_class==SLOPE_SHAPE_FALL)>=1:
+        # 如果趋势分类分数小于0，并且走势阶段至少有一个阶段是下跌类型，则卖出
+        if vr_class==0 and np.sum(pred_class==SLOPE_SHAPE_FALL)>=1:
             return True
         return False
         

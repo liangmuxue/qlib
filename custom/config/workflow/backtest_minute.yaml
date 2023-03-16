@@ -78,12 +78,22 @@ task:
                 future_covariate_col: ['dayofweek']   
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
                 static_covariate_col: ['instrument']    
+    record: 
+          class: ClassifyRecord
+          module_path: trader.pred_recorder
+          kwargs: 
+            config: None
+            entity_mode: True
+            model: <MODEL>
+            dataset: <DATASET>                
+                
     backtest:
        run_file: "./custom/trader/rqalpha/backtest.py"
        rqalpha:
+          ignore_mode: True
           base: 
-             start_date: "2022-01-05"
-             end_date: "2022-01-12"
+             start_date: "2022-02-01"
+             end_date: "2022-02-28"
              benchmark: "000001.XSHG"
              frequency: "1m"
              accounts: 
@@ -98,13 +108,17 @@ task:
                    provider_uri: "/home/qdata/qlib_data/custom_cn_data"     
                 strategy:
                    position_max_number: 3
-                   single_buy_mount_percent: 20
-                   keep_day_number: 3        
+                   single_buy_mount_percent: 30
+                   keep_day_number: 2        
                    sell_opt:
+                      stop_fall_percent: -5
+                      stop_raise_percent: 5
                       stop_fall_sell_continue_rate: 0.5     
                       pred_sell_continue_rate: 0.5    
                    buy_opt:
-                      pred_buy_exceed_rate: 1                         
+                      pred_buy_exceed_rate: 1        
+                      pred_buy_ignore_rate: 0.1
+                      try_cnt_limit: 5                   
           mod: 
              sys_analyser: 
                  enabled: True
@@ -113,7 +127,8 @@ task:
              ext_ds_mod:
                  enabled: True
                  lib: "data_extract.rqalpha.ext_ds_mod"
-
+                 report_save_path: "custom/data/trader/report" 
+                 load_trade_df: True
             
         
             

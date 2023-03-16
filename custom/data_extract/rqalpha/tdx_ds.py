@@ -27,7 +27,7 @@ class TdxDataSource(BaseDataSource):
         # 加载完整数据，之前已经从源头下载好了，直接从文件加载
         # self.total_data = self.extractor.load_total_df(period=PeriodType.MIN5.value)        
 
-    def get_k_data(self, instrument, start_dt, end_dt,frequency=None,need_prev=True):
+    def get_k_data(self, instrument, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
         """从已下载的文件中，加载K线数据"""
         
         # 可以加载不同的频次类型数据，5分钟频次数据为主，目前需要忽略rqalpha的1m，转换为5m
@@ -42,8 +42,10 @@ class TdxDataSource(BaseDataSource):
             end_dt = dt_obj(end_dt.year, end_dt.month, end_dt.day) 
         
         # 筛选对应日期以及股票的相关数据
-        item_data = extractor.load_item_df(instrument.order_book_id.split(".")[0],period=period)
+        item_data = extractor.load_item_df(instrument.order_book_id.split(".")[0],period=period,institution=institution)
         item_data = item_data[(item_data["datetime"]>=start_dt)&(item_data["datetime"]<=end_dt)]
+        if item_data.shape[0]==0:
+            return None
         # 改变为rqalpha格式
         item_data["last"] = item_data["close"]
         # 取得前一个交易时段收盘
@@ -63,7 +65,7 @@ class TdxDataSource(BaseDataSource):
         else:
             return bar_data.iloc[0].to_dict()
 
-    def history_bars(self, instrument, bar_count, frequency, fields, dt, skip_suspended=True,include_now=False, adjust_orig=None):
+    def history_bars(self, instrument, bar_count, frequency, fields, dt, skip_suspended=True,include_now=False, adjust_type=None, adjust_orig=None):
         """历史数据查询"""
         
         cal_df_index = self.get_trading_calendars()[TRADING_CALENDAR_TYPE.EXCHANGE]
@@ -73,7 +75,7 @@ class TdxDataSource(BaseDataSource):
         bar_data = self.get_k_data(instrument, start_dt, dt,frequency=frequency)
 
         if bar_data is None or bar_data.empty:
-            return super(TdxDataSource, self).get_bar(instrument, dt, frequency)
+            return None
         else:
             if isinstance(fields, six.string_types):
                 fields = [fields]
@@ -130,7 +132,19 @@ class TdxDataSource(BaseDataSource):
         if bar is None or len(bar) < 1:
             return np.nan
         return bar["last"]
-            
+
+    def get_open_auction_bar(self, instrument, dt):
+        """重载原方法"""
+        
+        day_bar = self.get_bar(instrument, dt, "1d")
+        if day_bar is None:
+            bar = dict.fromkeys(self.OPEN_AUCTION_BAR_FIELDS, np.nan)
+        else:
+            # 此处修改为对字典数据的检查
+            bar = {k: day_bar[k] if k in day_bar else np.nan for k in self.OPEN_AUCTION_BAR_FIELDS}
+        bar["last"] = bar["open"]
+        return bar
+                
     def available_data_range(self, frequency):
         return date(2004, 1, 1), date.today() - relativedelta(days=1)
     

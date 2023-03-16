@@ -18,7 +18,7 @@ def get_topN_dict(ori_dict,n):
     new_dict = {}
     for i,(k,v) in enumerate(ori_dict.items()):
         new_dict[k]=v
-        if i==n:
+        if i>=n-1:
             break    
     return new_dict
     

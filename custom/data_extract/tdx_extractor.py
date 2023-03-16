@@ -53,7 +53,7 @@ class TdxExtractor(HisDataExtractor):
         # 任务结束时关闭连接
         self.api.disconnect()
         
-    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value):   
+    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value,institution=False):   
         """取得单个股票历史行情数据"""
         
         if period<=PeriodType.MIN1.value:

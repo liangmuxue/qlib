@@ -8,6 +8,10 @@ def test_minute():
     stock_zh_a_hist_min_em_df = ak.stock_zh_a_hist_min_em(symbol="000001", start_date="2023-02-01 09:32:00", end_date="2023-02-06 09:32:00", period='5', adjust='')
     print(stock_zh_a_hist_min_em_df)
 
+def test_base_info():
+    stock_individual_info_em_df = ak.stock_individual_info_em(symbol="600519")
+    print(stock_individual_info_em_df)
 
 if __name__ == "__main__":
-    test_minute()
+    # test_minute()
+    test_base_info()

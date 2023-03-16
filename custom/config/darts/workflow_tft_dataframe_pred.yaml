@@ -55,14 +55,14 @@ task:
             n_epochs : 300
             save_dataset_file: False  
             load_dataset_file: &load_dataset_file False     
-            pred_data_path: "custom/data/darts/dump_data/test6"     
+            pred_data_path: "custom/data/darts/dump_data/test7"     
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft_all_step5'
+               model_name: 'test7_tft_all_step5'
                load_weight: True
-               wave_period : &wave_period 30
+               wave_period : &wave_period 20
                forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTSeriesDataset
@@ -74,7 +74,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2010-01-01, 2022-12-31]
-                valid: [2021-10-01, 2021-12-31]
+                valid: [2021-11-15, 2021-12-31]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

@@ -24,14 +24,22 @@ def init(context):
 def before_trading(context):
     """交易前准备"""
     
+    if context.config.ignore_mode:
+        return     
     context.strategy_class.before_trading(context)
 
 def handle_bar(context, bar_dict):
     """主要的算法逻辑入口"""
+    
+    if context.config.ignore_mode:
+        return      
     context.strategy_class.handle_bar(context,bar_dict)
     
 def open_auction(context, bar_dict):
     """主要的算法逻辑入口"""
+    
+    if context.config.ignore_mode:
+        return      
     context.strategy_class.open_auction(context,bar_dict)
 
     

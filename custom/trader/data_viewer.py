@@ -42,8 +42,11 @@ class DataViewer():
         ]
         title = "date:{},instrument:{},correct:{}".format(target_data["pred_date"].values[0],target_data["instrument"].values[0],correct)
         # 绘制图形，包括均线和成交量
-        correct_path = "correct" if correct==2 else "incorrect"
-        file_path = save_path + "/" + correct_path + "/" + str(target_data["pred_date"].values[0]) + "_" + str(target_data["instrument"].values[0]) +".png"
+        if correct<0:
+            file_path = save_path + "/" + str(target_data["pred_date"].values[0]) + "_" + str(target_data["instrument"].values[0]) +".png"
+        else:
+            correct_path = "correct" if correct==2 else "incorrect"
+            file_path = save_path + "/" + correct_path + "/" + str(target_data["pred_date"].values[0]) + "_" + str(target_data["instrument"].values[0]) +".png"
         mav = (5, 10, 20)
         mav = ()
         mpf.plot(target_data, title=title,type='candle',addplot=apds, mav=mav,volume=True,savefig=file_path,figsize=(12, 8))
@@ -53,6 +56,7 @@ class DataViewer():
         # mpf.show()
         
     def show_single_complex_pred_data_visdom(self,single_data,correct=0,dataset=None,ytick_range=0.05,cut_target=False):
+        """visdom模式，显示预测数据与实际数据对比"""
         
         instrument = int(single_data["instrument"].values[0])
         date = single_data["pred_date"].values[0]
@@ -72,7 +76,26 @@ class DataViewer():
         ymax = view_data[view_data>0].max()*(1+ytick_range)
         ymin = view_data[view_data>0].min()*(1-ytick_range)
         self.viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,x_range=x_range,names=names,ytickmax=ymax,ytickmin=ymin)     
+
+    def show_trades_data_visdom(self,stat_df,pred_df,ytick_range=0.05):
+        """visdom模式，显示回测数据与实际数据对比"""
         
+        instrument = int(pred_df["instrument"].values[0])
+        date = pred_df["pred_date"].values[0]
+        class1 = pred_df["class1"].values[0]
+        class2 = pred_df["class2"].values[0]
+        vr_class = pred_df["vr_class"].values[0]
+        names = ["pred_data","label","label_ori"]        
+        target_title = "{}_{}/differ:{},duration:{}".format(date,instrument,round(stat_df["differ_range"],2),stat_df["duration"])
+        pred_line = pred_df["pred_data"].values
+        label_line = pred_df["label"].values
+        price_line = pred_df["label_ori"].values
+        view_data = np.stack((pred_line,label_line,price_line),axis=0).transpose(1,0)
+        x_range = np.arange(pred_df["time_idx"].values[0],pred_df["time_idx"].values[-1]+1)
+        ymax = view_data[view_data>0].max()*(1+ytick_range)
+        ymin = view_data[view_data>0].min()*(1-ytick_range)
+        self.viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,x_range=x_range,names=names,ytickmax=ymax,ytickmin=ymin)
+                
     def market_price(self,df_ref,date_range,instrument,dataset=None):
         """显示某个股票在指定日期范围内的行情走势"""
         

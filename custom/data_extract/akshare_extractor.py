@@ -35,7 +35,7 @@ class AkExtractor(HisDataExtractor):
         data_sh = all_sh[["证券代码","证券简称","market"]].values
         return np.concatenate((data_sh,data_sz),axis=0)
           
-    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value):  
+    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value,institution=False):  
         """取得单个股票历史行情数据"""
         
         # AKSHARE目前只支持按照日导入
@@ -47,13 +47,18 @@ class AkExtractor(HisDataExtractor):
             start_date = "19700101"
         if end_date is None:
             end_date = "20500101"     
-             
+        
+        # 根据参数决定是否取得复权数据
+        if institution:
+            adjust="hfq"
+        else:
+            adjust=""
         def get_data():
             i = 0
             # 超时策略
             while i < 3:
                 try:
-                    item_data = self.stock_zh_a_hist(symbol=instrument_code, period="daily", start_date=start_date,end_date=end_date,adjust="hfq")
+                    item_data = self.stock_zh_a_hist(symbol=instrument_code, period="daily", start_date=start_date,end_date=end_date,adjust=adjust)
                     return item_data
                 except requests.exceptions.RequestException:
                     logger.warning("request timeout:{},try again".format(instrument_code)) 
