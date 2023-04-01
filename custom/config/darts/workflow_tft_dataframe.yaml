@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market all
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -14,7 +14,7 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','MACD','RESI10']                 
+              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10','CLOSE','OPEN','HIGH', 'LOW','VOLUME_CLOSE','RSI20','MACD']                 
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -54,16 +54,22 @@ task:
             log_every_n_steps: 50
             type: 'train_dataframe'
             n_epochs : 300
-            save_dataset_file: False
+            save_dataset_file: True
             load_dataset_file: &load_dataset_file False
-            pred_data_path: "custom/data/darts/dump_data/test8"            
+            pred_data_path: "custom/data/darts/dump_data/test8"   
+            scheduler_config: 
+               gamma: 0.3     
+               step_size: 1    
+            optimizer_kwargs:
+               lr: 0.01
+               weight_decay: 0.001
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
                model_name: 'test8_tft_all_step5'
                load_weight: False
-               wave_period : &wave_period 10
+               wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5
     dataset:
@@ -76,7 +82,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2010-01-01, 2022-12-31]
-                valid: [2021-12-01, 2021-12-31]
+                valid: [2021-11-01, 2021-12-31]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             aug_type: 'no'
@@ -96,22 +102,18 @@ task:
                 group_rank_column: 'instrument_rank'
                 target_column: 'label'
                 time_column: 'time_idx'    
-                future_covariate_col: ['dayofweek']   
+                future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
-                static_covariate_col: ['instrument']    
+                static_covariate_col: ['industry','tradable_shares']    
 
     record: 
-        - class: TftRecord
-          module_path: tft.tft_recorder
+        - class: SignalRecord
+          module_path: trader.tft_recorder
           kwargs: 
             model: <MODEL>
-            dataset: <DATASET>
+            dataset: <DATASET>    
         - class: SigAnaRecord
-          module_path: qlib.workflow.record_temp
+          module_path: trader.tft_recorder
           kwargs: 
             ana_long_short: False
             ann_scaler: 252
-        - class: PortAnaRecord
-          module_path: qlib.workflow.record_temp
-          kwargs: 
-            config: *port_analysis_config

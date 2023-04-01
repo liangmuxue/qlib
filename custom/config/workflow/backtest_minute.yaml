@@ -90,7 +90,7 @@ task:
     backtest:
        run_file: "./custom/trader/rqalpha/backtest.py"
        rqalpha:
-          ignore_mode: True
+          ignore_mode: False
           base: 
              start_date: "2022-02-01"
              end_date: "2022-02-28"
@@ -128,7 +128,7 @@ task:
                  enabled: True
                  lib: "data_extract.rqalpha.ext_ds_mod"
                  report_save_path: "custom/data/trader/report" 
-                 load_trade_df: True
+                 load_trade_df: False
             
         
             

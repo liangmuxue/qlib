@@ -250,6 +250,11 @@ class TFTDataset(DatasetH):
         feature_columns = self.col_def["future_covariate_col"]    
         return feature_columns
     
+    def get_static_columns(self):
+        """取得静态协变量字段名"""
+        static_columns = self.col_def["static_covariate_col"]    
+        return static_columns
+       
     def get_group_column_index(self):
         """取得分组变量段对应下标"""
         columns = self.get_seq_columns()

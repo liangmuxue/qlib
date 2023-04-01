@@ -85,6 +85,7 @@ class PortAnaRecord(TftRecorder):
  
         # 生成预测数据
         self.pred_data = self.build_pred_result(start_time,end_time)
+        return self.pred_data
     
     def load_pred_data(self):
         pred_data_path = self.model.pred_data_path + "/pred_df_total.pkl"
@@ -99,8 +100,6 @@ class PortAnaRecord(TftRecorder):
         """逐天生成预测数据"""
         
         df = self.df_ref[(self.df_ref["datetime"]>=pd.to_datetime(str(start_time)))&(self.df_ref["datetime"]<pd.to_datetime(str(end_time)))]
-        pred_data = {}
-        
         date_range = df["datetime"].dt.strftime('%Y%m%d').unique()
         # 取得日期范围，并遍历生成预测数据
         data_total = None
@@ -117,7 +116,7 @@ class PortAnaRecord(TftRecorder):
         # 一并生成DataFrame
         df_total = pd.DataFrame(data_total,columns=self.pred_result_columns)
         # 存储数据
-        pred_data_path = self.model.pred_data_path + "/pred_df_total.pkl"
+        pred_data_path = self.model.pred_data_path + "/" + self.model.pred_data_file
         with open(pred_data_path, "wb") as fout:
             pickle.dump(df_total, fout)     
         return df_total

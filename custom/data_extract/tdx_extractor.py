@@ -13,9 +13,9 @@ logger = AppLogger()
 class TdxExtractor(HisDataExtractor):
     """通达信数据源"""
 
-    def __init__(self, backend_channel="tdx",savepath=None):
+    def __init__(self, backend_channel="tdx",savepath=None,**kwargs):
         
-        super().__init__(backend_channel=backend_channel,savepath=savepath)
+        super().__init__(backend_channel=backend_channel,savepath=savepath,kwargs=kwargs)
         # 初始化pytdx的调用接口对象
         self.api = TdxHq_API(auto_retry=True,raise_exception=True)
         self.host = '119.147.212.81'
@@ -33,8 +33,21 @@ class TdxExtractor(HisDataExtractor):
     def load_code_data(self):  
         """取得所有股票代码"""
         pass     
-    
-    def imoprt_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY):
+
+    def import_data_within_workflow(self,wf_task_id,start_date=19700101,end_date=20500101,period=None,
+                                    is_complete=False,contain_institution=True,fill_history=False):
+        
+        # 任务开始时初始化连接，后续保持使用此连接
+        self.api.connect(self.host,self.port)       
+        try: 
+            super().import_data_within_workflow(wf_task_id,start_date=start_date,end_date=end_date,period=period,
+                                    is_complete=is_complete,contain_institution=contain_institution,fill_history=fill_history)
+        except Exception as e:
+            logger.error("import_data fail:",e)            
+        # 任务结束时关闭连接
+        self.api.disconnect()
+                    
+    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False):
         """
             取得所有股票历史行情数据
             Params:
@@ -45,13 +58,16 @@ class TdxExtractor(HisDataExtractor):
         """
         
         # 任务开始时初始化连接，后续保持使用此连接
-        self.api.connect(self.host,self.port)       
+        self.api.connect(self.host,self.port)     
+        results = None  
         try: 
-            super().imoprt_data(task_batch, start_date, end_date, period)
+            results = super().import_data(task_batch=task_batch, start_date=start_date, end_date=end_date,
+                                           period=period,contain_institution=contain_institution,resume=resume)
         except Exception as e:
-            logger.error("imoprt_data fail:",e)            
+            logger.exception("tdx import_data fail:")            
         # 任务结束时关闭连接
         self.api.disconnect()
+        return results
         
     def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value,institution=False):   
         """取得单个股票历史行情数据"""
@@ -64,45 +80,56 @@ class TdxExtractor(HisDataExtractor):
         # 此接口只支持2004年以后的数据
         if int(str(start_date)[:4])<2004:
             start_date = 20040101
+        # 分钟级别数据，最早只能从2022年开始
+        if int(str(start_date)[:4])<2022 and period>=PeriodType.MIN1.value:
+            start_date = 20220101            
         if int(str(end_date)[:4])>2023:
             today = datetime.date.today().strftime('%Y%m%d')
             end_date = int(today)
                         
         if period==PeriodType.MIN5.value:
             category = 0
-            offset = -800
         if period==PeriodType.MIN15.value:
             category = 1            
         # 计算开始节点编号（前推多少个数量），以及需要查询的K线数量
-        before_number,exceed_number = self.compute_period_space(str(start_date), str(end_date), period,offset=offset)
+        before_number,exceed_number = self.compute_period_space(str(start_date), str(end_date), period)
+        range_number = before_number - exceed_number
+        # 计算每个轮次，请求多少个批次的K线
+        loop_call_number = range_number if self.maxcnt_once_call>range_number else self.maxcnt_once_call
+        # 注意，由于api接口规定的单批次查询数量是往前查，因此这里需要把before_number减去单次查询数
+        before_number = before_number - loop_call_number 
         api = self.api
         inner_batch = 0
         item_data = None
-        while True:
-            inner_batch += 1
-            # 滚动查询，每次减少前推间隔
-            data = api.get_security_bars(category,market, instrument_code, before_number, self.maxcnt_once_call)
-            before_number -= self.maxcnt_once_call
-            if data is None:
+        while(True):
+            # 滚动查询，每次减少前推间隔.
+            # category：0--为5分钟K线 market：0深圳 1上海
+            data = api.get_security_bars(category,market, instrument_code, before_number, loop_call_number)
+            if data is None or len(data)==0:
                 logger.warning("data none,instrument_code:{},inner_batch:{}".format(instrument_code,inner_batch))
-                continue
+                break
             df_data = api.to_df(data)
-            df_data["volume"] = df_data["vol"]
-            logger.debug("inner_batch:{},data size:{}".format(inner_batch,len(data)))   
+            # 附加股票代码
+            df_data["code"] = instrument_code
+            df_data["volume"] = df_data["vol"] 
             if item_data is None:
                 item_data = df_data   
             else:
                 item_data = pd.concat([item_data,df_data])
-            total_number = inner_batch * self.maxcnt_once_call
-            # 如果超出结束期限，退出循环
-            if total_number>=before_number or before_number<=0:
-                logger.info("exceed number,break:{}".format(instrument_code))
-                break
-                          
+            if before_number<=exceed_number:
+                break                
+            # 如果与结束间隔不足一次循环，则把其余的补上并退出
+            if before_number-exceed_number<loop_call_number:
+                loop_call_number = before_number-exceed_number                
+            before_number -= loop_call_number
         return item_data
     
-    def compute_period_space(self,start_date=None,end_date=None,period=None,offset=0):
-        """取得指定日期下的间隔数"""
+    def compute_period_space(self,start_date=None,end_date=None,period=None):
+        """取得指定日期下的间隔数
+            Return:
+                start_number： 起始时间的前推数
+                end_number： 结束时间的前推数
+        """
         
         min_number = 1
         if period==PeriodType.MIN1.value:
@@ -116,12 +143,15 @@ class TdxExtractor(HisDataExtractor):
         day_item_number = 4 * 60 / min_number
         # 计算需要向前退多少天，根据当前日期以及开始日期进行计算
         today = datetime.date.today().strftime('%Y%m%d')
-        days_to_now = tradedays(start_date,today)
+        days_to_begin = tradedays(start_date,today)
         # 前推数量为天数乘以每天K线数
-        before_number = int(day_item_number * days_to_now) + offset
+        start_number = int(day_item_number * days_to_begin)
         # 根据结束日期，计算需要查询的K线数量
-        days_to_end = tradedays(start_date,end_date)
-        item_number = int(day_item_number * days_to_end) + offset
-        return before_number,item_number
+        days_to_end = tradedays(end_date,today)
+        end_number = int(day_item_number * days_to_end)
+        # exceed_number = before_number - item_number
+        return start_number,end_number
+
         
+           
     

@@ -51,7 +51,6 @@ class TFTSeriesDataset(TFTDataset):
         self.kwargs = kwargs
         
         self.dbaccessor = DbAccessor({})
-        # df_all = self.prepare("train_total", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
         
     def _create_target_scalers(self,df):
         scaler_dict = {}
@@ -64,6 +63,17 @@ class TFTSeriesDataset(TFTDataset):
         return self.emb_size
             
     def _pre_process_df(self,df,val_range=None):
+        """数据预处理"""
+        
+        # 从数据库表中读取股票基础信息
+        instrument_list = self.dbaccessor.do_query("select code,industry,tradable_shares from instrument_info where delete_flag=0")
+        instrument_base_info = {}
+        for item in instrument_list:
+            code = item[0]
+            industry = item[1]
+            tradable_shares = item[2]
+            instrument_base_info[code] = {"industry":industry,"tradable_shares":tradable_shares}
+            
         data_filter = DataFilter()
         # 清除序列长度不够的股票
         group_column = self.get_group_column()
@@ -80,6 +90,15 @@ class TFTSeriesDataset(TFTDataset):
         new_df = None
         for group_name,group_data in df.groupby(group_column):
             group_data[time_column] -= group_data[time_column].min()
+            # 在这里顺便放入数据库中的股票基础信息
+            if group_name in instrument_base_info:
+                base_info = instrument_base_info[group_name]
+                group_data["industry"] = base_info["industry"]
+                group_data["tradable_shares"] = base_info["tradable_shares"]
+            else:
+                logger.warning("no base_info:{}".format(group_name))
+                continue
+            # 组合为新的数据集
             if new_df is None:
                 new_df = group_data
             else:
@@ -209,6 +228,7 @@ class TFTSeriesDataset(TFTDataset):
         time_column = self.col_def["time_column"]
         past_columns = self.get_past_columns()
         future_columns = self.get_future_columns()
+        static_columns = self.get_static_columns()
         
         # 分别生成训练和测试序列数据
         train_series = TimeSeries.from_group_dataframe(df_train,
@@ -216,18 +236,21 @@ class TFTSeriesDataset(TFTDataset):
                                                  group_cols=group_column,# 会自动成为静态协变量
                                                  freq='D',
                                                  fill_missing_dates=True,
+                                                 static_cols=static_columns,
                                                  value_cols=target_column)    
         val_series = TimeSeries.from_group_dataframe(df_val,
                                                 time_col=time_column,
                                                  group_cols=group_column,# 会自动成为静态协变量
                                                  freq='D',
                                                  fill_missing_dates=True,
+                                                 static_cols=static_columns,
                                                  value_cols=target_column) 
         total_series = TimeSeries.from_group_dataframe(df_all,
                                                 time_col=time_column,
                                                  group_cols=group_column,# 会自动成为静态协变量
                                                  freq='D',
                                                  fill_missing_dates=True,
+                                                 static_cols=static_columns,
                                                  value_cols=target_column)               
         train_series_transformed = []
         val_series_transformed = []
@@ -276,10 +299,12 @@ class TFTSeriesDataset(TFTDataset):
 
         # 生成过去协变量，并归一化
         logger.info("begin build_covariates")
-        # 过去变量中添加label原值，用于后续使用
         past_convariates = build_covariates(past_columns)      
         # 生成未来协变量，并归一化
         future_convariates = build_covariates(future_columns)    
+        # 生成静态协变量，并归一化
+        static_convariates = build_covariates(static_columns)   
+        
         # 补充未来协变量数据,与验证数据相对应    
         if fill_future:           
             future_convariates = self.fill_future_data(future_convariates,future_columns,self.pred_len)
@@ -310,13 +335,22 @@ class TFTSeriesDataset(TFTDataset):
         rtn_convariates = []  
         
         for conv in future_convariates:
-            last_values = conv[-1].all_values()[:,:,0]
-            # 取得需要生成数据的唯一值
-            unique_values = np.unique(conv.all_values(),axis=0)
-            unique_values = np.sort(unique_values[:,:,0],axis=0)            
-            # 根据固定数据，循环补充实际数组
-            fill_data = get_filling_data(last_values,unique_values,fill_length)
-            conv = conv.append_values(np.expand_dims(np.array(fill_data),axis=-1))
+            conv_values = conv.all_values()
+            fill_datas = None
+            for index in range(conv_values.shape[1]):
+                conv_value = conv_values[:,index,:]
+                last_values = [conv_value[-1,0]]
+                # 取得需要生成数据的唯一值
+                unique_values = np.unique(conv_value)
+                unique_values = np.expand_dims(np.sort(unique_values),axis=-1)          
+                # 根据固定数据，循环补充实际数组
+                fill_data = get_filling_data(last_values,unique_values,fill_length)
+                fill_data = np.array(fill_data)
+                if fill_datas is None:
+                    fill_datas = fill_data
+                else:
+                    fill_datas = np.concatenate((fill_datas,fill_data),axis=-1)
+            conv = conv.append_values(fill_datas)
             rtn_convariates.append(conv)
         return rtn_convariates
     

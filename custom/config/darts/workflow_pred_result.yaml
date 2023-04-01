@@ -14,7 +14,7 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]  
-              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10','CLOSE','OPEN','HIGH', 'LOW','VOLUME_CLOSE','RSI20','MACD']                 
+              col_list: &col_list  ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10','CLOSE','OPEN','HIGH', 'LOW','VOLUME_CLOSE','RSI20','MACD']               
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
@@ -55,14 +55,15 @@ task:
             n_epochs : 300
             save_dataset_file: True
             load_dataset_file: &load_dataset_file False
-            pred_data_path: "custom/data/darts/dump_data/test7"
+            pred_data_path: "custom/data/darts/dump_data/test8"
+            pred_data_file: "pred_df_total.pkl"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test7_tft_all_step5'
+               model_name: 'test8_tft_all_step5'
                load_weight: True
-               wave_period : &wave_period 20
+               wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
     dataset:
         class: TFTSeriesDataset
@@ -95,9 +96,9 @@ task:
                 group_rank_column: 'instrument_rank'
                 target_column: 'label'
                 time_column: 'time_idx'    
-                future_covariate_col: ['dayofweek']   
+                future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
-                static_covariate_col: ['instrument']    
+                static_covariate_col: ['industry','tradable_shares']   
 
     record: 
         - class: BkSignalRecord

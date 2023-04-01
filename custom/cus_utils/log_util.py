@@ -75,7 +75,10 @@ class AppLogger:
 
     def error(self, msg):
         self.app_logger.error(msg)
-
+    
+    def exception(self,msg):
+        self.app_logger.exception(msg)
+    
     def critical(self, msg):
         self.app_logger.critical(msg)
 

@@ -1,0 +1,32 @@
+indiv: True
+qlib_init:
+    provider_uri: '/home/qdata/qlib_data/custom_cn_data'
+    region: cn
+market: &market all
+benchmark: &benchmark SH000300
+task:
+   import_task:
+     - period: DAY
+       class: AkExtractor
+       module_path: data_extract.akshare_extractor
+       kwargs: 
+          savepath: './custom/data/stock_data'
+          is_complete: True
+          fill_history: False
+          contain_institution: True
+          start_date: 20080101  
+          end_date: 20230301
+          data_task_batch: 0
+          local_source_type: 'dataframe'
+     - period: MIN5
+       class: TdxExtractor
+       module_path: data_extract.tdx_extractor
+       kwargs: 
+          savepath: './custom/data/stock_data'
+          start_date: 20220101 
+          end_date: 20221231
+          is_complete: True
+          fill_history: False  
+          contain_institution: False
+          data_task_batch: 0
+          local_source_type: 'dataframe'

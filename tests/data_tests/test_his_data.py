@@ -18,7 +18,7 @@ def test_pytdx():
     from pytdx.hq import TdxHq_API
     api = TdxHq_API()
     with api.connect('119.147.212.81', 7709):
-        data = api.get_security_bars(0,0, '000001', 3000, 6)
+        data = api.get_security_bars(0,5, '000001', 14448-480, 480)
         print("data size:{}".format(len(data)))
 
 def test_pytdx_code():
@@ -32,5 +32,5 @@ def test_pytdx_code():
 if __name__ == "__main__":
     # test_tushare_day()
     # test_efinance()
-    # test_pytdx()
-    test_pytdx_code()
+    test_pytdx()
+    # test_pytdx_code()

@@ -3,6 +3,7 @@
 
 import os
 import glob
+import shutil  
 
 import numpy as np
 import datetime
@@ -12,6 +13,10 @@ import pickle
 
 from cus_utils.db_accessor import DbAccessor
 from cus_utils.log_util import AppLogger
+from persistence.common_dict import CommonDictType,CommonDict
+from pandas._libs.tslibs import period
+
+from scripts.dump_bin import DumpDataAll
 
 logger = AppLogger()
 
@@ -46,6 +51,12 @@ def get_period_name(period_value):
         return "5m"    
     if period_value==PeriodType.MIN15.value:
         return "15m"
+
+def get_period_value(period_name):
+    for item in PeriodType:
+        if item.name==period_name:
+            return item.value
+    return None
                 
 @unique
 class DataTaskStatus(Enum):
@@ -63,7 +74,7 @@ class DataTaskType(Enum):
 class HisDataExtractor:
     """历史证券数据采集"""
 
-    def __init__(self, backend_channel="ak",savepath=None):
+    def __init__(self, backend_channel="ak",savepath=None,**kwargs):
         """
 
         Parameters
@@ -77,6 +88,7 @@ class HisDataExtractor:
         self.item_savepath = self.savepath + "/item"
         self.backend_channel = backend_channel
         self.dbaccessor = DbAccessor({})
+        self.common_dict = CommonDict()
         
         self.busi_columns = ["code","datetime","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
            
@@ -93,23 +105,87 @@ class HisDataExtractor:
         """取得所有股票代码，子类实现"""
         pass
         
-              
-    def imoprt_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=True):
-        """
-            取得所有股票历史行情数据
-            Params:
-                task_batch 任务批次号
-                begin_date 导入数据的开始日期
-                end_date 导入数据的结束日期
-                period 频次类别
-                contain_institution 是否包含复权数据
-        """
+    def create_base_info(self):  
+        """生成股票的基础信息"""
         
-        last_item_code = None
-        # 任务记录处理
+        instrument_list = self.dbaccessor.do_query("select code from instrument_info where delete_flag=0")
+        for instrument in instrument_list:
+            instrument = instrument[0]
+            base_data = self.extract_base_info(instrument)
+            industry_dict = {"type": CommonDictType.INDUSTRY_TYPE.value,
+                             "code": base_data["industry"],"value": base_data["industry"]}
+            # 查询并补充数据字典
+            industry_dict_db = self.common_dict.get_or_insert_dict(industry_dict)
+            sql = "update instrument_info set industry=%s,total_capital=%s,tradable_shares=%s where code=%s"
+            self.dbaccessor.do_inserto_withparams(sql, (industry_dict_db["id"],base_data["total_capital"],base_data["tradable_shares"],instrument))   
+            logger.debug("create_base_info instrument ok:{}".format(instrument))
+
+    def extract_base_info(self,instrument):  
+        """取得股票的基础信息,子类实现"""
+        pass
+        
+    def export_item_data(self,code,item_data,period=None,is_complete=False,savepath=None,institution=False):
+        """生成单个文件，兼顾全量和增量"""
+        
+        save_file_path = "{}/{}.csv".format(savepath,code)
+        if institution:
+            save_file_path = "{}/{}_institution.csv".format(savepath,code)        
+        if is_complete:
+            # 如果是全量，则覆盖
+            item_data.to_csv(save_file_path, index=False)   
+        else:
+            # 如果是增量，则取出原来文件，合并后覆盖
+            ori_item_data = self.load_item_df(code,period=period,institution=institution)
+            item_data = pd.concat([ori_item_data,item_data],axid=0)
+            item_data.to_csv(save_file_path, index=False)        
+
+    def export_whole_item_data(self,period=None,institution=False):
+        """把全量df文件拆成每个股票分别存储为csv格式的单独文件"""
+        
+        df_total = self.load_total_df(period, institution)
+        path = self.get_whole_item_datapath(period,institution=institution)
+        if not os.path.exists(path):
+            os.makedirs(path) 
+            
+        group_column = "code"
+        for group_name,group_data in df_total.groupby(group_column):
+            if isinstance(group_name, int):
+                group_name = self.code_transfer_to_string(group_name)
+            
+            save_file_path = "{}/{}.csv".format(path,group_name)  
+            group_data.to_csv(save_file_path, index=False)     
+    
+    def get_whole_item_datapath(self,period,institution=False):
+        period_name = get_period_name(period)
+        if institution:
+            return "{}/whole_data/{}/institution".format(self.savepath,period_name)
+        return "{}/whole_data/{}".format(self.savepath,period_name)
+    
+    def export_to_qlib(self,qlib_dir,period,file_name="all.txt",institution=False):
+        """csv格式的单独文件导入到qlib"""
+        
+        source_path = self.get_whole_item_datapath(period,institution=institution)
+        dump_all = DumpDataAll(csv_path=source_path,qlib_dir=qlib_dir,date_field_name="datetime")
+        # 设置文件名
+        dump_all.INSTRUMENTS_FILE_NAME = file_name
+        dump_all.dump()
+                    
+    def get_last_local_data_date(self,code,savepath=None,period=None):            
+        """取得本地数据里最后一天"""
+        
+        item_data = self.load_item_df(code,period=period)        
+        if item_data is None or item_data.shape[0]==0:
+            return self.get_init_begin_date()
+        return item_data["datetime"].max()
+    
+    def get_init_begin_date(self):    
+        return "19700101"
+    
+    def prepare_import_batch(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value):    
+        """任务记录处理"""
+        
         if task_batch>0:
             # 如果设置了任务编号，说明需要从之前的任务继续,需要修改之前的任务表状态
-            last_item_code = self.dbaccessor.do_query("select last_item_code from data_task where task_batch={}".format(task_batch))[0][0]
             self.dbaccessor.do_inserto_withparams("update data_task set status=%s where task_batch=%s", (DataTaskStatus.Start.value,task_batch))
         else:
             # 新创建一个任务记录
@@ -121,54 +197,97 @@ class HisDataExtractor:
             insert_sql = "insert into data_task(task_type,task_batch,backend_channel,start_date,end_date,status,period) values(%s,%s,%s,%s,%s,%s,%s)"
             self.dbaccessor.do_inserto_withparams(insert_sql, 
                         (DataTaskType.DataImport.value,task_batch,self.backend_channel,start_date,end_date,DataTaskStatus.Start.value,period))
+        return task_batch
+ 
+    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False):
+        """
+            取得所有股票历史行情数据
+            Params:
+                task_batch 任务批次号
+                begin_date 导入数据的开始日期
+                end_date 导入数据的结束日期
+                period 频次类别
+                contain_institution 是否包含复权数据
+        """
+                
+        task_batch = self.prepare_import_batch(task_batch, start_date, end_date, period)
+        return self.import_data_part(task_batch=task_batch,start_date=start_date,end_date=end_date,period=period,contain_institution=contain_institution,resume=resume)
+                                
+    def import_data_part(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False):
+        """取得所有股票历史行情数据,去除批次号部分"""
+        
+        last_item_code = self.dbaccessor.do_query("select last_item_code from data_task where task_batch={}".format(task_batch))[0][0]
         # 股票编码从数据库表中获得
-        sql = "select code,market from instrument_info order by code"
+        sql = "select code,market from instrument_info where delete_flag=0 order by code "
         if last_item_code is not None:
             # 断点处继续
-            sql = "select code,market from instrument_info where code>='{}' order by code".format(last_item_code)
+            sql = "select code,market from instrument_info where delete_flag=0 and code>='{}' order by code".format(last_item_code)
         result_rows = self.dbaccessor.do_query(sql)            
         savepath = "{}/{}".format(self.item_savepath,get_period_name(period))
         if not os.path.exists(savepath):
             os.makedirs(savepath) 
-        
-        total_data = None  
-        total_data_institution = None  
+            
+        # 恢复模式下，需要先加载之前的已生成数据
+        if resume:
+            total_data = self.load_total_df(period,force_load_item=True)
+            total_data_institution = self.load_total_df(period, institution=True,force_load_item=False)
+        else:
+            total_data = None  
+            total_data_institution = None  
         for row in result_rows:
             code = row[0]
             market = row[1]
-            # 取得相关数据，子类实现
-            item_data = self.extract_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market)
-            if item_data is not None:
-                # 每个股票分别保存csv到本地
-                save_file_path = "{}/{}.csv".format(savepath,code)
-                item_data.to_csv(save_file_path, index=False)   
-                # 合并为一个总DataFrame，最后保存
-                if total_data is None:
-                    total_data = item_data
-                else:
-                    total_data = pd.concat([total_data,item_data],axis=0)
+            # 如果本地记录里包含，则跳过
+            if total_data is None or np.sum(total_data["code"]==int(code))==0:
+                total_data = self.data_part_process(code,total_data,
+                                    start_date=start_date,end_date=end_date,period=period,market=market,savepath=savepath,institution=False)
+            else:
+                logger.debug("has data:{}".format(code))
             # 复权模式下需要再处理一次
             if contain_institution:
-                item_data_institution = self.extract_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market,institution=True)
-                if item_data_institution is not None:
-                    # 每个股票分别保存csv到本地
-                    save_file_path = "{}/{}_institution.csv".format(savepath,code)
-                    item_data.to_csv(save_file_path, index=False)   
-                    # 合并为一个总DataFrame，最后保存
-                    if total_data_institution is None:
-                        total_data_institution = item_data_institution
-                    else:
-                        total_data_institution = pd.concat([item_data_institution,item_data],axis=0)                  
+                if total_data_institution is None or np.sum(total_data_institution["code"]==int(code))==0:
+                    total_data_institution = self.data_part_process(code,total_data_institution,
+                                    start_date=start_date,end_date=end_date,period=period,market=market,savepath=savepath,institution=True)
+                else:
+                    logger.debug("has institution data:{}".format(code))
+            logger.info("import data loop:{}".format(code))               
             # 记录最后一条子任务号码，以便后续断点继续
             self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=%s where task_batch=%s", (code,task_batch))
             
-        # 最后统一保存一个文件   
-        self.save_total_df(total_data,period=period)
-        if contain_institution:
-            self.save_total_df(total_data_institution,period=period,institution=True)
         # 任务结束后设置状态为已成功  
         self.dbaccessor.do_inserto_withparams("update data_task set status=%s where task_batch=%s", (DataTaskStatus.Success.value,task_batch))
+        return (total_data,total_data_institution)
+    
+    def data_part_process(self,code,total_data,start_date=None,end_date=None,period=None,market=None,savepath=None,institution=False):
+        # 取得相关数据，子类实现
+        item_data = self.extract_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market,institution=institution)
+        if item_data is not None:
+            # 每个股票分别保存csv到本地
+            self.export_item_data(code,item_data,is_complete=True,savepath=savepath,period=period,institution=institution)  
+            # 合并为一个总DataFrame，最后保存
+            if total_data is None:
+                total_data = item_data
+            else:
+                total_data = pd.concat([total_data,item_data],axis=0)
+        return total_data
+                    
+    def clear_local_data(self,period,data_task_batch):  
+        """清除本地数据""" 
         
+        # 清除子目录所有单独文件
+        item_savepath = self.item_savepath + "/{}".format(get_period_name(period))
+        if os.path.exists(item_savepath):
+            shutil.rmtree(item_savepath)
+        # 清除主文件
+        total_file = self.get_total_file_save_path(period)
+        institution_total_file = self.get_total_file_save_path(period,institution=True)
+        if os.path.exists(total_file):
+            os.remove(total_file)
+        if os.path.exists(institution_total_file):
+            os.remove(institution_total_file)    
+        # 清除数据库中的子记录标识
+        self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=0 where task_batch=%s", (data_task_batch))
+                
     def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,institution=True):   
         """取得单个股票历史行情数据,子类实现"""
         pass
@@ -190,9 +309,9 @@ class HisDataExtractor:
         period_name = get_period_name(period)
         item_savepath = self.item_savepath + "/{}".format(period_name)
         if institution:
-            f =  "{}/{}_institution.csv".format(item_savepath,instrument)
+            f = "{}/{}_institution.csv".format(item_savepath,instrument)
         else:
-            f =  "{}/{}.csv".format(item_savepath,instrument)
+            f = "{}/{}.csv".format(item_savepath,instrument)
         item_df = pd.read_csv(f)  
         # 对时间字段进行检查及清洗
         if self.backend_channel=="tdx":
@@ -201,21 +320,27 @@ class HisDataExtractor:
         item_df = item_df.dropna()
         return item_df
     
-    def load_total_df(self,period=PeriodType.MIN5.value):
+    def load_total_df(self,period=PeriodType.MIN5.value,institution=False,force_load_item=False):
         """加载之前保存的数据"""
         
-        data_file = self.get_total_file_save_path(period)
-        # 如果没有保存，则从每个单独数据里加载
-        if not os.path.exists(data_file):
+        data_file = self.get_total_file_save_path(period,institution=institution)
+        period_name = get_period_name(period)
+        # 如果全灵没有保存，则从每个单独数据里加载，如果设置了强制加载，则也从单项记录中加载
+        if not os.path.exists(data_file) or force_load_item:
             total_df = None
-            item_savepath = self.item_savepath + "/{}".format(period)
+            item_savepath = self.item_savepath + "/{}".format(period_name)
             csv_files = glob.glob(os.path.join(item_savepath, "*.csv"))
             for f in csv_files:
                 try:
                     instrument_code = f.split("/")[-1].split(".")[0]
-                    df = self.load_item_df(instrument_code)  
+                    if "_institution" in instrument_code:
+                        continue                    
+                    df = self.load_item_df(instrument_code,period=period,institution=institution)  
                     df["instrument"] = instrument_code
-                    logger.debug("item load suc:{}".format(f))  
+                    if institution:
+                        logger.debug("item load suc:{}_institution".format(f))  
+                    else:
+                        logger.debug("item load suc:{}".format(f)) 
                 except Exception as e:
                     logger.warning("item load fail:{},reason:{}".format(f,e))  
                     continue
@@ -224,20 +349,30 @@ class HisDataExtractor:
                 else:
                     total_df = pd.concat([total_df,df],axis=0)    
             # 合并以后保存
-            self.save_total_df(total_df,period=period)                
+            self.save_total_df(total_df,period=period,institution=institution)                
         else:
             with open(data_file, "rb") as fin:
                 total_df = pickle.load(fin)            
         return total_df
     
+    def code_transfer_to_string(self,int_code):
+        return str(int_code).zfill(6)
+        
 if __name__ == "__main__":    
+    
     from data_extract.akshare_extractor import AkExtractor
     from data_extract.tdx_extractor import TdxExtractor
+    
+    # 导入股票代码
     # extractor = AkExtractor()   
     # extractor.create_code_data()
-    # extractor.imoprt_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
-    # extractor = TdxExtractor(savepath="./custom/data/stock_data")
-    # extractor.imoprt_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
-    extractor = AkExtractor(savepath="./custom/data/stock_data")
-    extractor.imoprt_data(task_batch=0,period=PeriodType.DAY.value,start_date=20220101,end_date=20221231)    
+    # extractor.import_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
+    # 导入分钟数据
+    extractor = TdxExtractor(savepath="./custom/data/stock_data")
+    extractor.import_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
+    # 导入日K数据
+    # extractor = AkExtractor(savepath="./custom/data/stock_data")
+    # extractor.import_data(task_batch=0,period=PeriodType.DAY.value,start_date=20220101,end_date=20221231)    
+    # 导入基础信息
+    # extractor.create_base_info()
         

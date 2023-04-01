@@ -1,7 +1,10 @@
 import akshare as ak
 
-# stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol="600528", period="daily", start_date="20170301", end_date='20210907', adjust="hfq")
-# print(stock_zh_a_hist_df)
+
+
+def test_day():
+    stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol="600528", period="daily", start_date="20080101", end_date='20221231', adjust="hfq")
+    print(stock_zh_a_hist_df.datetime.min())
 
 def test_minute():
     
@@ -14,4 +17,5 @@ def test_base_info():
 
 if __name__ == "__main__":
     # test_minute()
-    test_base_info()
+    # test_base_info()
+    test_day()

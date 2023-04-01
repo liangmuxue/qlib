@@ -137,8 +137,6 @@ class TftDataframeModel():
             self.model.batch_size = self.batch_size     
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
-            
-  
         
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
@@ -147,25 +145,25 @@ class TftDataframeModel():
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         """生成模型"""
         
-        # 使用多任务下的不确定损失作为损失函数
-        device = "cuda:" + str(self.gpus)
         log_every_n_steps = self.kwargs["log_every_n_steps"]
         optimizer_cls = torch.optim.Adam
-        optimizer_kwargs={"lr": 1e-2,"weight_decay":1e-3}
-        
-        # 使用余弦退火的学习率方式
-        scheduler = CosineAnnealingLR
-        scheduler_config = {
-            "T_max": 5, 
-            "eta_min": 0,
-        }        
-        scheduler = MultiStepLR
         scheduler = StepLR
-        scheduler_config = {
-            "gamma": 0.2, 
-            # "milestones": [1,2,3,4,5,7,9,11,15,18,20],
-            "step_size": 1
-        }       
+        scheduler_config = self.kwargs["scheduler_config"]
+        optimizer_kwargs = self.kwargs["optimizer_kwargs"]
+        
+        # # 使用余弦退火的学习率方式
+        # scheduler = CosineAnnealingLR
+        # scheduler_config = {
+        #     "T_max": 5, 
+        #     "eta_min": 0,
+        # }        
+        # scheduler = MultiStepLR
+        # scheduler = StepLR
+        # scheduler_config = {
+        #     "gamma": 0.3, 
+        #     # "milestones": [1,2,3,4,5,7,9,11,15,18,20],
+        #     "step_size": 1
+        # }       
         # scheduler_config = {
         #     "gamma": 0.8, 
         #     # "milestones": [10, 20,30,60,70, 80,90,100],
@@ -176,6 +174,7 @@ class TftDataframeModel():
         #     "T_0": 3,
         #     "T_mult": 3
         # }     
+        
         quantiles = [
             0.01,
             0.05,
@@ -310,6 +309,7 @@ class TftDataframeModel():
         """针对连续天，逐个生成对应的预测数据"""
         
         self.pred_data_path = self.kwargs["pred_data_path"]
+        self.pred_data_file = self.kwargs["pred_data_file"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]
         

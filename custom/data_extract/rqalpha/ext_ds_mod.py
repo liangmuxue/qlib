@@ -72,7 +72,7 @@ class ExtDataMod(AbstractMod):
             buy_complex_df = pred_recorder.combine_complex_df_data(buy_trade_date_str,instrument,pred_df=buy_pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
             data_viewer.show_single_complex_pred_data(buy_complex_df,correct=-1,save_path=save_path)
             data_viewer.show_single_complex_pred_data_visdom(buy_complex_df)
-            logger.debug("complex_df data:{}".format(complex_df))
+            # logger.debug("complex_df data:{}".format(complex_df))
          
     def build_stat_df(self,strategy_obj,load_trade_df=False,load_cache=False):
         """生成统计数据"""
