@@ -21,6 +21,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
+import gc
 
 from darts.metrics import mape
 from darts.models import TFTModel
@@ -29,6 +30,7 @@ from torchmetrics import (
     PearsonCorrCoef,
     MetricCollection,
 )
+from qlib.utils import flatten_dict, get_callable_kwargs, init_instance_by_config
 from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 from qlib.data.dataset import DatasetH, TSDatasetH
@@ -102,7 +104,7 @@ class TftDataframeModel():
         
     def fit(
         self,
-        dataset: TFTSeriesDataset
+        dataset: TFTSeriesDataset,
     ):
         if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
@@ -122,9 +124,22 @@ class TftDataframeModel():
             return  
              
         """对预测数据进行分类训练"""
-        
-        # 生成tft时间序列数据集,包括目标数据、协变量等
-        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+          
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(df_data_path)   
+        else:
+            # 生成tft时间序列数据集,包括目标数据、协变量等
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+            if self.save_dataset_file:
+                df_data_path = self.pred_data_path + "/df_all.pkl"
+                with open(df_data_path, "wb") as fout:
+                    pickle.dump(dataset.df_all, fout)    
+                           
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
         
@@ -141,7 +156,7 @@ class TftDataframeModel():
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  trainer=None,epochs=self.n_epochs,verbose=True)
-    
+        
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         """生成模型"""
         
@@ -203,6 +218,17 @@ class TftDataframeModel():
         model_name = self.optargs["model_name"]
         if not use_model_name:
             model_name = None
+        
+        # 自定义回调函数
+        lightning_callbacks = []
+        if "lightning_callbacks" in  self.kwargs:
+            lightning_callbacks_config = self.kwargs.get("lightning_callbacks", [])
+            for config in lightning_callbacks_config:
+                callback = init_instance_by_config(
+                    config,
+                )   
+                lightning_callbacks.append(callback)             
+            
         my_model = TFTExtModel(
             input_chunk_length=input_chunk_length,
             output_chunk_length=self.optargs["forecast_horizon"],
@@ -233,8 +259,8 @@ class TftDataframeModel():
             lr_scheduler_kwargs=scheduler_config,
             optimizer_cls=optimizer_cls,
             optimizer_kwargs=optimizer_kwargs,
-            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps}  
-            # pl_trainer_kwargs={"log_every_n_steps":8}  
+            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+            # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
         )
         return my_model          
 
@@ -325,7 +351,7 @@ class TftDataframeModel():
                     
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
-            dataset.build_series_data(df_data_path)    
+            dataset.build_series_data(df_data_path,val_ds_filter=True,no_series_data=True)    
             return
         
         dataset.build_series_data()
@@ -374,6 +400,7 @@ class TftDataframeModel():
         # from tsai.all import *
         
         self.pred_data_path = self.kwargs["pred_data_path"]
+        self.pred_data_file = self.kwargs["pred_data_file"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]
         

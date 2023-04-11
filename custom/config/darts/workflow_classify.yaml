@@ -79,7 +79,7 @@ task:
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
                 static_covariate_col: ['industry','tradable_shares']   
     record: 
-        - class: BkSignalRecord
+        - class: SignalRecord
           module_path: trader.tft_recorder
           kwargs: 
             model: <MODEL>

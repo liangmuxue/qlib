@@ -1,4 +1,5 @@
 from datetime import datetime,timedelta
+import calendar
 from chinese_calendar import is_holiday
     
 def tradedays(start,end):
@@ -69,3 +70,39 @@ def date_string_transfer(ori_date,direction=1):
         arr = ori_date.split("-")
         target_date = arr[0] + arr[1] + arr[2]
     return target_date
+
+def get_first_and_last_day(year,month):
+    """取得每个月第一天和最后一天"""
+    
+    weekDay,monthCountDay = calendar.monthrange(year,month)
+    firstDay = datetime.date(year,month,day=1)
+    lastDay = datetime.date(year,month,day=monthCountDay)
+    return firstDay,lastDay
+
+
+def get_tradedays(start,end):
+    '''
+    计算指定日期之间的工作日
+    start:开始日期
+    end:结束日期
+    '''
+
+    cal_list = []
+    if type(start) == str:
+        start = datetime.strptime(start,'%Y%m%d').date()
+    if type(end) == str:
+        end = datetime.strptime(end,'%Y%m%d').date()
+    if start > end:
+        start,end = end,start
+        
+    counts = 0
+    while True:
+        if start > end:
+            break
+        if is_holiday(start) or start.weekday()==5 or start.weekday()==6:
+            start += timedelta(days=1)
+            continue
+        cal_list.append(datetime.strftime(start,'%Y%m%d'))
+        counts += 1
+        start += timedelta(days=1)
+    return cal_list

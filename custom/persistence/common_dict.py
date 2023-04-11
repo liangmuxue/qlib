@@ -8,7 +8,14 @@ class CommonDictType(Enum):
     """数据字典类别"""
     
     INDUSTRY_TYPE = "industry_type" # 行业类别
+    WORK_TYPE = "work_type" # 工作流类型
 
+class CommonDictEnum(Enum):
+    """数据字典"""
+    
+    WORK_TYPE__TRAIN = "train"
+    WORK_TYPE__PRED = "pred_result"
+    WORK_TYPE__CLASSIFY = "classify"
     
 class CommonDict(BasePersistence):
     """数据库字典处理"""
@@ -44,3 +51,21 @@ class CommonDict(BasePersistence):
         row = results[0]
         rtn = {"id":row[0],"code":row[1],"value":row[2]}   
         return rtn 
+    
+    def get_dict_by_type_and_code(self,dict_type,code):
+        """根据字典类别以及编码，取得字典数据
+            Params：
+                type 数据字典类别 
+                code 数据字典编码
+            Return:
+                数据字典对象
+        """
+        
+        sql = "select d.id,d.code,d.value from common_dict d,common_dict_type dt where d.type=dt.id and dt.code=%s and d.code=%s"
+        try:
+            row = self.dbaccessor.do_query(sql, (dict_type,code))[0]
+        except Exception as e:
+            print("query fail,sql:{},dict_type:{},code:{}".format(sql,dict_type,code))
+            raise e
+        rtn = {"id":row[0],"code":row[1],"value":row[2]}   
+        return rtn     

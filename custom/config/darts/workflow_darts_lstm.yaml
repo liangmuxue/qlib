@@ -51,7 +51,7 @@ task:
             seed: 0
             n_jobs: 20
             type: 'train'
-            n_epochs : 3000
+            n_epochs : 1
             optargs:
                work_dir: 'custom/data/darts'
                model_name: 'test6_lstm'

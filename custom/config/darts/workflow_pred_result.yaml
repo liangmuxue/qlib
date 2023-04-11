@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market all
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -53,7 +53,7 @@ task:
             n_jobs: 20
             type: 'build_pred_result'
             n_epochs : 300
-            save_dataset_file: True
+            save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             pred_data_path: "custom/data/darts/dump_data/test8"
             pred_data_file: "pred_df_total.pkl"
@@ -101,7 +101,7 @@ task:
                 static_covariate_col: ['industry','tradable_shares']   
 
     record: 
-        - class: BkSignalRecord
+        - class: SignalRecord
           module_path: trader.tft_recorder
           kwargs: 
             model: <MODEL>

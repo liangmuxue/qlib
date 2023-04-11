@@ -4,6 +4,7 @@ import rqalpha
 from enum import Enum, unique
 
 from trader.rqalpha.ml_context import MlIntergrate
+from trader.rqalpha.ml_wf_context import MlWorkflowIntergrate
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
 from trader.rqalpha.trade_entity import TradeEntity
 from trader.utils.date_util import tradedays
@@ -35,13 +36,16 @@ class BaseStrategy():
         for row in result_rows:
             self.instruments_dict[int(row[0])] = row
     
-    def __build_with_context__(self,context):
+    def __build_with_context__(self,context,workflow_mode=False):
         self.context = context
         # 使用rqalpha模式下预设值的参数
         config_path = context.config.extra.context_vars.strategy_class.config_path
         provider_uri = context.config.extra.context_vars.strategy_class.provider_uri
         # 加载qlib上下文  
-        context.ml_context = MlIntergrate(ext_length=25,config_path=config_path,provider_uri=provider_uri)
+        if workflow_mode:
+            context.ml_context = MlWorkflowIntergrate(config_path=config_path,provider_uri=provider_uri,ext_length=25,task_id=context.config.extra.task_id)
+        else:
+            context.ml_context = MlIntergrate(ext_length=25,config_path=config_path,provider_uri=provider_uri)
         self.strategy = context.config.extra.context_vars.strategy
         # 创建预测的集成数据
         context.ml_context.create_bt_env()

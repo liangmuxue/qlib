@@ -19,9 +19,7 @@ class DataViewer():
         if env_name is None:
             env_name = "stat_pred_classify"
         self.viz_input = TensorViz(env=env_name) 
-        style = mpf.make_mpf_style(base_mpf_style='charles', rc={'font.size': 8})
-        fig = mpf.figure(figsize=(18, 12), style=style)
-        
+
     def show_single_complex_pred_data(self,single_data,correct=0,dataset=None,save_path=None):
         """预测数据单条显示"""
         

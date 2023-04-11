@@ -5,6 +5,9 @@ from numba import cuda
 import _sysconfigdata_x86_64_conda_linux_gnu
 from numba.core.types import none
 
+def list_split(items, n):
+    return [items[i:i+n] for i in range(0, len(items), n)]
+
 def check_time_ser_data(file_path):
     """检查原数据的时间长度"""
         

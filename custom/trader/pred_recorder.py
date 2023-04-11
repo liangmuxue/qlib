@@ -65,8 +65,8 @@ class PortAnaRecord(TftRecorder):
         
         self.df_ref = dataset.df_all     
         self.pred_result_columns = ['pred_date','time_idx','instrument','class1','class2','vr_class','pred_data'] 
-        self.data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
-        self.data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
+        # self.data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
+        # self.data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
         
     def _get_report_freq(self, executor_config):
         ret_freq = []
@@ -87,8 +87,10 @@ class PortAnaRecord(TftRecorder):
         self.pred_data = self.build_pred_result(start_time,end_time)
         return self.pred_data
     
-    def load_pred_data(self):
-        pred_data_path = self.model.pred_data_path + "/pred_df_total.pkl"
+    def load_pred_data(self,pred_data_file=None):
+        if pred_data_file is None:
+            pred_data_file = "pred_df_total.pkl"
+        pred_data_path = self.model.pred_data_path + "/" + pred_data_file
         with open(pred_data_path, "rb") as fin:
             df_pred = pickle.load(fin)     
         df_pred["class1"] = df_pred["class1"].astype(int) 
@@ -99,7 +101,7 @@ class PortAnaRecord(TftRecorder):
     def build_pred_result(self,start_time,end_time):
         """逐天生成预测数据"""
         
-        df = self.df_ref[(self.df_ref["datetime"]>=pd.to_datetime(str(start_time)))&(self.df_ref["datetime"]<pd.to_datetime(str(end_time)))]
+        df = self.df_ref[(self.df_ref["datetime"]>=pd.to_datetime(str(start_time)))&(self.df_ref["datetime"]<=pd.to_datetime(str(end_time)))]
         date_range = df["datetime"].dt.strftime('%Y%m%d').unique()
         # 取得日期范围，并遍历生成预测数据
         data_total = None
@@ -168,16 +170,21 @@ class PortAnaRecord(TftRecorder):
         """执行预测过程"""
         
         # 根据时间点，取得对应的输入时间序列范围
-        total_range,val_range = self.dataset.get_part_time_range(cur_date,ref_df=self.df_ref)
+        total_range,val_range,missing_instruments = self.dataset.get_part_time_range(cur_date,ref_df=self.df_ref)
         # 如果不满足预测要求，则返回空
         if total_range is None:
             self.log("pred series none")
             return None
-        
+        # 如果包含不符合的数据，再次进行过滤
+        if len(missing_instruments)>0:
+            outer_df_filter = outer_df[~outer_df[self.dataset.get_group_column()].isin(missing_instruments)]
+        else:
+            outer_df_filter = outer_df     
         # 从执行器模型中取得已经生成好的模型变量
         my_model = self.model.model
         # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
-        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df)
+        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+            self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df_filter)
         my_model.fit(series_total,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,num_loader_workers=8,verbose=True,epochs=-1)            
         # 对验证集进行预测，得到预测结果   
@@ -258,9 +265,9 @@ class ClassifyRecord(PortAnaRecord):
         if self.entity_mode:
             return self
         
-        self.classify_analysis(self.dataset)
+        df = self.stat_complex_pred_data(self.dataset)
         # self.show_correct_pred(self.dataset)
-        return self
+        return df
 
     def classify_analysis(self, dataset: TFTSeriesDataset):
         """对预测数据进行分类训练"""
@@ -273,10 +280,11 @@ class ClassifyRecord(PortAnaRecord):
         cache_file = self.model.pred_data_path + "/pred_stat_2202.pickel"
         if not load_cache:
             # 加载预测结果数据
-            pred_df = self.load_pred_data()
+            pred_data_file = self.model.pred_data_file
+            pred_df = self.load_pred_data(pred_data_file=pred_data_file)
             # 根据配置取得对应日期的预测结果
             pred_df = pred_df[(pred_df["pred_date"]>=int(self.classify_range[0].strftime('%Y%m%d')))&
-                              (pred_df["pred_date"]<int(self.classify_range[1].strftime('%Y%m%d')))]
+                              (pred_df["pred_date"]<=int(self.classify_range[1].strftime('%Y%m%d')))]
             date_list = pred_df["pred_date"].unique()
             match_columns = ["date","instrument","correct","pred_class","vr_class","price_raise_range","price_down_range"]
             match_list = []
@@ -335,6 +343,7 @@ class ClassifyRecord(PortAnaRecord):
         corr_1_rate = df[df["correct"]==1].shape[0]/df.shape[0]
         corr_0_rate = df[df["correct"]==0].shape[0]/df.shape[0]
         print("corr_rate:{},corr_1:{},corr_0:{}".format(corr_2_rate,corr_1_rate,corr_0_rate))    
+        return df
     
     def show_correct_pred(self,dataset=None,show_num=5):
         

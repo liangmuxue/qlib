@@ -74,10 +74,11 @@ forecast_model,train_loader,val_loader = my_model.fit(
     future_covariates=None,
     val_series=val_transformed,
     val_future_covariates=None,
-    epochs=300,
+    epochs=1,
     verbose=True,
 )
-
+my_model.model.cpu()
+del my_model
 print("train ds len:",train_loader.dataset.__len__())
 print("val ds len:",val_loader.dataset.__len__())
 

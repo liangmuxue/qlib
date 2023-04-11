@@ -1,8 +1,7 @@
 from enum import Enum, unique
 
 from .busi_struct import BasePersistence
-from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus
-from numba.core.types import none
+from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus,FrequencyType
     
 class WfTaskStore(BasePersistence):
     """工作流数据持久化处理"""
@@ -27,6 +26,35 @@ class WfTaskStore(BasePersistence):
         self.dbaccessor.do_inserto_withparams(insert_sql,(workflow_id,task_batch,WorkflowStatus.created.value))
         return self.get_workflow_task(task_batch)
 
+    def create_workflow_task_calendar(self,task_id,batch_list):
+        """生成工作流日历 """
+
+        # 删除之前的重复日历
+        self.dbaccessor.do_inserto("delete from workflow_calendar where task_id={}".format(task_id))
+        for index,batch_item in enumerate(batch_list):
+            sequence = index + 1
+            for sub_seq,item in enumerate(batch_item):
+                insert_sql = "insert into workflow_calendar(task_id,sequence,sub_seq,working_day,type) values(%s,%s,%s,%s,%s)" 
+                self.dbaccessor.do_inserto_withparams(insert_sql,(task_id,sequence,sub_seq+1,item,FrequencyType.WEEK.value))
+ 
+    def get_workflow_task_firstday_calendar(self,task_id,working_day):
+        """获取工作日历数据，只匹配批次内首日日历"""
+
+        rows = self.dbaccessor.do_query("select id,sequence from workflow_calendar where task_id={} and type={} and " \
+                                       "working_day={} and sub_seq=1".format(task_id,FrequencyType.WEEK.value,working_day))
+        if len(rows)==0:
+            return None
+        row = rows[0]                               
+        rtn_obj = {"id":row[0],"sequence":row[1]}
+        return rtn_obj 
+ 
+    def get_workflow_task_calendar(self,task_id,sequence):
+        """根据序号，取得对应的批次日历"""
+
+        rows = self.dbaccessor.do_query("select id,sequence,working_day from workflow_calendar where task_id={} and type={} and " \
+                                       "sequence={}".format(task_id,FrequencyType.WEEK.value,sequence))
+        return [row[2] for row in rows] 
+                                     
     def get_workflow_task(self,task_batch):
         """获取工作流数据 """
 
@@ -80,9 +108,16 @@ class WfTaskStore(BasePersistence):
     
     def create_subtask(self,main_task,config,working_day):
         """生成工作流数据 """
-
+        
+        # 累加本次主任务以及子任务类型对应的序号
+        sequence = self.dbaccessor.do_query("select max(sequence) from workflow_task_detail where main_task_id=%s and workflow_detail_id=%s",
+                                            (main_task["id"],config["id"]))[0][0]
+        if sequence is None:
+            sequence = 1
+        else:
+            sequence += 1
         insert_sql = "insert into workflow_task_detail(main_task_id,workflow_detail_id,sequence,status,working_day) values(%s,%s,%s,%s,%s)" 
-        self.dbaccessor.do_inserto_withparams(insert_sql,(main_task["id"],config["id"],config["sequence"],WorkflowSubStatus.created.value,working_day))
+        self.dbaccessor.do_inserto_withparams(insert_sql,(main_task["id"],config["id"],sequence,WorkflowSubStatus.created.value,working_day))
         return self.get_subtask(task_id=None, main_task_id=main_task["id"], config_id=config["id"], working_day=working_day)
         
     def get_subtask(self,task_id=None,main_task_id=None,config_id=None,working_day=None):
@@ -104,12 +139,35 @@ class WfTaskStore(BasePersistence):
         row = rows[0]
         rtn_obj = {"id":row[0],"main_task_id":row[1],"workflow_detail_id":row[2],"sequence":row[3],"status":row[4],"working_day":row[5]}
         return rtn_obj  
-    
-    def update_workflow_subtask_status(self,id,status):
+
+    def get_subtask_by_type_and_seq(self,main_task_id,config_id,sequence):
+        """根据序号以及子任务类型获取子工作任务数据 
+            Params:
+                 main_task: 主任务标识
+                 task_type: 子任务类别
+                 sequence： 子任务序号
+        """        
+        
+        sql = "select id,main_task_id,workflow_detail_id,sequence,status,working_day from workflow_task_detail" \
+                " where main_task_id={} and workflow_detail_id={} and sequence={}".format(main_task_id,config_id,int(sequence))
+        rows = self.dbaccessor.do_query(sql)
+        if len(rows)==0:
+            return None
+        row = rows[0]
+        rtn_obj = {"id":row[0],"main_task_id":row[1],"workflow_detail_id":row[2],"sequence":row[3],"status":row[4],"working_day":row[5]}
+        return rtn_obj  
+        
+    def update_workflow_subtask_status(self,id,status,reset_sequence=False,init_sequence=False):
         """修改子工作流任务状态"""
         
         update_sql = "update workflow_task_detail set status=%s where id=%s"
-        self.dbaccessor.do_inserto_withparams(update_sql,(status,id))    
+        params = (status,id)
+        # 根据标志，决定是否重置序号
+        if reset_sequence:
+            update_sql = "update workflow_task_detail set status=%s,sequence=0 where id=%s"
+        if init_sequence:
+            update_sql = "update workflow_task_detail set status=%s,sequence=1 where id=%s"            
+        self.dbaccessor.do_inserto_withparams(update_sql,params)    
 
     def get_busi_task_id(self,subtask_id):    
         row = self.dbaccessor.do_query("select busi_task_id from workflow_task_detail where id={}".format(subtask_id))[0]

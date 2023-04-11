@@ -25,7 +25,9 @@ from workflow.busi_process.pred_result_processor import PredResultProcessor
 from workflow.busi_process.backtest_processor import BacktestProcessor
 from workflow.busi_process.offer_processor import OfferProcessor
 from workflow.busi_process.data_processor import DataProcessor
-from trader.utils.date_util import get_tradedays_dur
+from workflow.busi_process.classify_processor import ClassifyProcessor
+from trader.utils.date_util import get_tradedays_dur,get_tradedays
+from cus_utils.data_filter import list_split
 
 logger = AppLogger()
 
@@ -91,6 +93,8 @@ class WorkflowTask(object):
         if not self.resume:
             # 如果不是任务恢复，则初始化数据库任务表中的当前工作日，设置为工作流计划中的开始日期
             self.task_store.update_workflow_working_day(self.task_obj["task_batch"],self.config["start_date"])
+            # 生成周任务的工作日历
+            self.split_period_region(self.task_obj["id"],self.config["start_date"],self.config["end_date"])
             # 还需要清除相关配置文件，以及产生的中间数据     
             self.clear_data()   
         # 以当前日期为基准，循环执行任务
@@ -101,6 +105,8 @@ class WorkflowTask(object):
             sub_task = WorkflowSubTask(self,config=sub_config)
             self.prepare_subtask_env(sub_task,sub_config,start_date)
             subtask_list.append(sub_task)
+        # 记录到本地变量，后续可以提取
+        self.subtask_list = subtask_list
         g_flag = True
         next_working_day = 0
         while True:
@@ -120,17 +126,17 @@ class WorkflowTask(object):
                     else:
                         # 非动态配置，每次只需要初始化相关工作环境，不需要生成配置文件
                         task_entity = self.subtask_working_init(sub_task,sub_task.config,working_day)   
-                        if task_entity["status"]==WorkflowSubStatus.success.value:
+                        if self.status_judge(task_entity["status"]):
                             continue
                 else:        
                     task_entity = self.task_store.get_subtask(main_task_id=self.task_obj["id"],config_id=sub_task.config["id"],working_day=working_day)
                     # 如果之前的状态是已成功，则跳过
-                    if task_entity["status"]==WorkflowSubStatus.success.value:
+                    if self.status_judge(task_entity["status"]):
                         continue    
                 # 启动子任务         
                 flag = sub_task.start_task(working_day,resume=self.resume)
                 # 出错后终止进程
-                if not flag:
+                if flag==WorkflowSubStatus.fail.value:
                     g_flag = False
                     break  
             if not g_flag:
@@ -144,7 +150,18 @@ class WorkflowTask(object):
             # 如果超出结束日期，则退出
             if next_working_day>self.config["end_date"]:
                 break
-
+    
+    def status_judge(self,status):
+        if status==WorkflowSubStatus.success.value or status==WorkflowSubStatus.freq_ignore.value or status==WorkflowSubStatus.busi_ignore.value:
+            return True
+        return False
+    
+    def get_subtask_by_type(self,task_type_id):
+        """根据任务类型，获取对应的子任务"""
+        
+        for sub_task in self.subtask_list:
+            if sub_task.config["type"]==task_type_id:
+                return sub_task
     
     def next_working_day(self,working_day):
         """取得下一工作日"""
@@ -168,22 +185,30 @@ class WorkflowTask(object):
         if task_entity is None:
             # 生成子任务
             task_entity = self.task_store.create_subtask(self.task_obj,sub_config,working_day)
+            sub_task.task_entity = task_entity      
             # 生成实际处理类
-            sub_task.processor = sub_task.build_processor()    
+            sub_task.build_processor()    
             # 处理配置文件，置换可配置项
             sub_task.process_config_file(sub_config,working_day=working_day)                   
         else:
+            if task_entity["sequence"]==0:
+                task_entity["sequence"] = 1
+                init_sequence = True
+            else:
+                init_sequence = False
+            sub_task.task_entity = task_entity
             # 重新设置状态
             if task_entity["status"]==WorkflowSubStatus.success.value:     
                 # 如果之前的状态是已成功，则不处理
                 pass
             else:
-                self.task_store.update_workflow_subtask_status(task_entity["id"],WorkflowSubStatus.created.value)  
+                self.task_store.update_workflow_subtask_status(task_entity["id"],WorkflowSubStatus.created.value,init_sequence=init_sequence)  
             # 生成实际处理类
-            sub_task.processor = sub_task.build_processor()
-            
-        sub_task.task_entity = task_entity          
-
+            sub_task.build_processor()
+            if self.resume:
+                # 如果是恢复模式，仍然需要生成配置文件
+                sub_task.process_config_file(sub_config,working_day=working_day)                    
+        
     def subtask_working_init(self,sub_task,sub_config,working_day):
         """每日工作环境准备"""
         
@@ -191,16 +216,27 @@ class WorkflowTask(object):
         task_entity = self.task_store.get_subtask(main_task_id=self.task_obj["id"],config_id=sub_config["id"],working_day=working_day)
         if task_entity is None:
             # 生成子任务数据库记录
-            task_entity = self.task_store.create_subtask(self.task_obj,sub_config,working_day)                
+            task_entity = self.task_store.create_subtask(self.task_obj,sub_config,working_day)   
+            sub_task.task_entity = task_entity                   
         else:
             # 如果之前的状态是已成功，则不处理
             if task_entity["status"]!=WorkflowSubStatus.success.value:
                 # 重新设置数据库状态
                 self.task_store.update_workflow_subtask_status(task_entity["id"],WorkflowSubStatus.created.value)  
-            
-        sub_task.task_entity = task_entity    
+                sub_task.task_entity = task_entity    
         return task_entity
+
+    def split_period_region(self,task_id,start_date,end_date,batch_size=5):
+        """根据工作流日期范围，切割为指定长度的多个任务批次,长度一般为5个交易日"""
         
+        # 取得区间内所有交易日
+        cal_list = get_tradedays(str(start_date),str(end_date))
+        # 按照周长度切分为多个批次
+        batch_list = list_split(cal_list, batch_size)
+        # 入库
+        self.task_store.create_workflow_task_calendar(task_id,batch_list)
+        return batch_list
+            
     def clear_data(self):
         """清除目录文件"""
         
@@ -222,6 +258,7 @@ class WorkflowSubTask(object):
         self.main_task = main_task
         self.config = config
         self.common_dict = CommonDict()
+        self.processor = None
 
     def get_main_dir(self):
         return self.main_task.config["work_dir"]
@@ -262,7 +299,7 @@ class WorkflowSubTask(object):
         with open(template_filepath, "r") as f:
             template = yaml.safe_load(f)    
             # 生成实际配置文件
-            template_real = self.processor.build_real_template(template,config=config)
+            template_real = self.processor.build_real_template(template,config=config,working_day=working_day)
             # 保存到任务路径中
             config_path,his_filepath = self.get_task_config_filepath()
             if not os.path.exists(config_path):
@@ -284,6 +321,17 @@ class WorkflowSubTask(object):
         filepath = "{}/task/{}/dump_data".format(self.get_main_dir(),self.main_task.task_batch) 
         return filepath
 
+    def get_dumpdata_part_path(self):
+        """内部数据文件存储路径"""
+        
+        filepath = "{}/task/{}/dump_data/pred_part".format(self.get_main_dir(),self.main_task.task_batch) 
+        return filepath
+
+    def get_pred_data_part_path(self,base_file_name,working_day):
+        """预测结果存储文件相对路径"""
+        
+        return "pred_part/{}".format(base_file_name)
+       
     def get_pred_data_part_filepath(self,base_file_name,working_day):
         """预测结果存储文件路径"""
         
@@ -303,29 +351,62 @@ class WorkflowSubTask(object):
         filepath = "{}/stock_data".format(self.get_main_dir()) 
         return filepath 
     
+    def get_trader_data_path(self):
+        """数据文件路径"""
+        
+        filepath = "{}/trader_data".format(self.get_main_dir()) 
+        return filepath 
+    
+       
     def get_model_path(self):
         """模型文件存储路径"""
         
         filepath = "{}/task/{}/model".format(self.get_main_dir(),self.main_task.task_batch) 
         return filepath
     
-    def get_model_name(self):
+    def get_model_name(self,working_day=None):
         """模型文件名称,命名规范中添加当前日期"""
         
-        month_str = datetime.strptime(str(self.working_day),"%Y%m")
+        month_str = str(working_day)[:6]
         name = self.config["name"] + "_{}".format(month_str)
         return name
      
-    def get_matched_model_file_name(self,working_day): 
+    def get_matched_model_file_name(self,working_day,task_type=None): 
         """取得与指定工作日匹配的模型文件名称"""
         
-        date = datetime.strptime(str(working_day),"%Y%m%d")
-        month_str = date.strftime(date,"%Y%m")
-        name = self.config["name"] + "_{}".format(month_str)
+        month_str = str(working_day)[:6]
+        if task_type is not None:
+            type_name = task_type
+        else:
+            type_name = self.config["name"]
+        name = type_name + "_{}".format(month_str)
         return name
-                         
+
+    def get_subtask_by_type(self,task_type_code):
+        """根据任务类型，获取对应的子任务"""
+        
+        task_type_dict = self.common_dict.get_dict_by_type_and_code(CommonDictType.WORK_TYPE.value,task_type_code)
+        return self.main_task.get_subtask_by_type(task_type_dict["id"])
+    
+    def get_subtask_by_seq(self,sequence):
+        
+        main_task_id = self.main_task.task_obj["id"]
+        config_id = self.config["id"]
+        sub_task = self.main_task.task_store.get_subtask_by_type_and_seq(main_task_id,config_id,sequence)
+        return sub_task
+
+    def get_calendar_by_seq(self,sequence):
+        
+        main_task_id = self.main_task.task_obj["id"]
+        day_list = self.main_task.task_store.get_workflow_task_calendar(main_task_id,sequence)
+        return day_list
+            
+    ########################################################   流程处理部分   #########################################################                                 
     def build_processor(self):    
         """生成实际处理类"""
+        
+        if self.processor is not None:
+            return self.processor
         
         dict_code = self.common_dict.get_dict_by_id(self.config["type"])["code"]
         
@@ -337,12 +418,14 @@ class WorkflowSubTask(object):
             processor = PredictProcessor(self)
         if dict_code=="pred_result":
             processor = PredResultProcessor(self)
+        if dict_code=="classify":
+            processor = ClassifyProcessor(self)
         if dict_code=="backtest":
-            processor = BacktestProcessor(self)
+            processor = BacktestProcessor(self)            
         if dict_code=="offer":
             processor = OfferProcessor(self)
         
-        return processor          
+        self.processor = processor          
     
     def start_task(self,working_day,resume=True):
         """开始执行任务"""
@@ -351,7 +434,8 @@ class WorkflowSubTask(object):
         # 任务频次类型筛选，如果不符合当天的任务频次，则忽略此任务
         frequency_types = self.get_frequency_types(str(working_day))
         if self.config["frequency"] not in frequency_types:
-            return True        
+            self.task_ignore_handler(ignore_status=WorkflowSubStatus.freq_ignore.value)
+            return WorkflowSubStatus.freq_ignore.value        
 
         # 在任务主表中设置当前子任务
         self.main_task.task_store.update_workflow_current_task(self.main_task.task_obj["task_batch"],self.task_entity["id"])           
@@ -367,8 +451,9 @@ class WorkflowSubTask(object):
         rtn_list = []
         # 肯定是日任务
         rtn_list.append(FrequencyType.DAY.value)
-        # 周一是周任务
-        if working_day_date.weekday()==1:
+        # 根据工作流日历，判断当天是否开启周任务
+        cal_obj = self.main_task.task_store.get_workflow_task_firstday_calendar(self.main_task.task_obj["id"],working_day)
+        if cal_obj is not None:
             rtn_list.append(FrequencyType.WEEK.value)
         # 每个与1号执行月任务
         if working_day_date.day==1:
@@ -377,6 +462,7 @@ class WorkflowSubTask(object):
         if working_day_date.month in season and working_day_date.day==1:
             rtn_list.append(FrequencyType.QUARTER.value)
         return rtn_list          
+    
     
     ########################################################   业务处理部分   #########################################################
     def attach_busi_task(self,busi_task_id):
@@ -392,30 +478,50 @@ class WorkflowSubTask(object):
             
     ########################################################   Hook回调部分   #########################################################
     
-    def task_start_handler(self,processor):
+    def task_start_handler(self,processor=None):
         """任务开始事件回调"""
         
         # 修改状态为已运行
         self.main_task.task_store.update_workflow_subtask_status(self.task_entity["id"],WorkflowSubStatus.running.value)         
 
-    def task_sucess_handler(self,processor):
+    def task_sucess_handler(self,processor=None):
         """任务完成事件回调"""
         
         # 修改状态为已完成
         self.main_task.task_store.update_workflow_subtask_status(self.task_entity["id"],WorkflowSubStatus.success.value) 
 
-    def task_fail_handler(self,processor):
+    def task_ignore_handler(self,processor=None,ignore_status=WorkflowSubStatus.freq_ignore.value):
+        """任务完忽略事件回调"""
+        
+        # 修改状态为已忽略,如果是周期原因，需要重置序号
+        reset_sequence = False
+        if ignore_status==WorkflowSubStatus.freq_ignore.value:
+            reset_sequence = True
+        self.main_task.task_store.update_workflow_subtask_status(self.task_entity["id"],ignore_status,reset_sequence=reset_sequence) 
+        # 删除之前生成的历史配置文件
+        config_file_working_day = self.get_task_config_file(working_day=self.working_day) 
+        if os.path.exists(config_file_working_day):
+            os.remove(config_file_working_day)         
+        
+    def task_fail_handler(self,processor=None):
         """任务失败事件回调"""
         
         # 修改状态为已失败
         self.main_task.task_store.update_workflow_subtask_status(self.task_entity["id"],WorkflowSubStatus.fail.value) 
                    
 if __name__ == "__main__":    
-    # task = WorkflowTask(task_batch=1,workflow_name="wf1",resume=True)
-    # task = WorkflowTask(task_batch=0,workflow_name="wf1",resume=False)
+    
+    # For Test
+    task = WorkflowTask(task_batch=73,workflow_name="wf_test",resume=True)
+    # task = WorkflowTask(task_batch=0,workflow_name="wf_test",resume=False)
     
     # 全量导入，任务只进行一次
     # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_complete",resume=False)
-    task = WorkflowTask(task_batch=1,workflow_name="wf_data_import_complete",resume=True)
+    # task = WorkflowTask(task_batch=1,workflow_name="wf_data_import_complete",resume=True)
+    
+    # 回测工作流
+    # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
+    # task = WorkflowTask(task_batch=20,workflow_name="wf_backtest_flow",resume=True)    
+    
     task.start_task()
         

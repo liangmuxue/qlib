@@ -105,12 +105,10 @@ class _TFTCusModule(_TFTModule):
         use_weighted_loss_func=False,
         loss_number=3,
         device="cpu",
+        monitor=None,
         **kwargs,
     ):
         
-
-     
-
         super().__init__(output_dim,variables_meta,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                 full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
         
@@ -132,7 +130,9 @@ class _TFTCusModule(_TFTModule):
             params = torch.ones(loss_number, requires_grad=True)
             loss_sigma = torch.nn.Parameter(params)    
             self.criterion = UncertaintyLoss(loss_sigma=loss_sigma,device=device) 
-    
+        
+        self.val_results = {}
+        
     def forward(
         self, x_in: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]
     ) -> torch.Tensor:
@@ -257,7 +257,7 @@ class _TFTCusModule(_TFTModule):
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # value_diff_loss = self.compute_value_diff_metrics(output, target)
+        value_diff_loss = self.compute_value_diff_metrics(output, target)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # 涨跌幅度类别的准确率
@@ -267,8 +267,29 @@ class _TFTCusModule(_TFTModule):
         past_target = val_batch[0]
         self.val_metric_show(output,target,out_class,target_class,vr_class[:,0,:],target_vr_class,past_target=past_target,val_batch=val_batch,scaler=scaler)
         self._calculate_metrics(output, target, self.val_metrics)
+        # 记录相关统计数据
+        record_results = {"val_loss":round(loss.item(),5),"val_corr_loss":round(corr_loss.item(),5),
+                              "ce_loss":round(cross_loss.item(),5),"value_diff_loss":round(value_diff_loss.item(),5),
+                              "value_range_loss":round(value_range_loss.item(),5),"vr_acc":round(vr_acc.item(),5),
+                              "import_vr_acc":round(import_vr_acc.item(),5)}
+        self.process_val_results(record_results,self.current_epoch)
         return loss
- 
+    
+    def process_val_results(self,results,epoch):
+        """按照批次，累加训练结果"""
+        
+        if epoch not in self.val_results:
+            self.val_results[epoch] = results
+            self.val_results[epoch]["time"] = 1 
+        else:
+            self.val_results[epoch]["val_loss"] += results["val_loss"]
+            self.val_results[epoch]["val_corr_loss"] += results["val_corr_loss"]
+            self.val_results[epoch]["ce_loss"] += results["ce_loss"]
+            self.val_results[epoch]["value_diff_loss"] += results["value_diff_loss"]
+            self.val_results[epoch]["vr_acc"] += results["vr_acc"]
+            self.val_results[epoch]["import_vr_acc"] += results["import_vr_acc"]
+            self.val_results[epoch]["time"] += 1         
+    
     def compute_vr_class_acc(self,vr_class_eva,vr_target):
         """计算涨跌幅分类准确度"""
         
@@ -281,7 +302,7 @@ class _TFTCusModule(_TFTModule):
         import_index = torch.nonzero(vr_class==CLASS_SIMPLE_VALUE_MAX)[:,0]
         import_acc_count = torch.sum(vr_target[import_index]==CLASS_SIMPLE_VALUE_MAX)
         if import_index.shape[0]==0:
-            import_acc = 0
+            import_acc = torch.tensor(0.0)
         else:
             import_acc = import_acc_count/import_index.shape[0]
         return total_acc,import_acc
@@ -688,6 +709,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         norm_type: Union[str, nn.Module] = "LayerNorm",
         use_weighted_loss_func:bool = False,
         loss_number=3,
+        monitor=None,
         **kwargs,
     ):
         """重载darts相关类"""
@@ -734,7 +756,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.add_relative_index = add_relative_index
         self.output_dim: Optional[Tuple[int, int]] = None
         self.norm_type = norm_type
-    
+        self.monitor = monitor
+        
     def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
         """重载创建模型方法，使用自定义模型"""
         (
@@ -1077,8 +1100,11 @@ class TFTExtModel(MixedCovariatesTorchModel):
             "The provided training time series dataset is too short for obtaining even one training point.",
             logger,
         )
+        flag = val_dataset is not None and (not val_length_ok or len(val_dataset) == 0)
+        if flag:
+            print("ggg")
         raise_if(
-            val_dataset is not None and (not val_length_ok or len(val_dataset) == 0),
+            flag,
             "The provided validation time series dataset is too short for obtaining even one training point.",
             logger,
         )

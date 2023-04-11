@@ -107,6 +107,7 @@ class LstmNumpyModel(BaseNumpyModel):
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
         self.model.fit(data_train,data_validation,trainer=None,epochs=self.n_epochs,verbose=True)
+        print("ok")
     
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         optimizer_cls = torch.optim.Adam

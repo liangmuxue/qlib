@@ -128,7 +128,7 @@ class DataProcessor(BaseProcessor):
                 t.export_to_qlib(qlib_dir,period,file_name=config["kwargs"]["dump_file_name"],institution=institution)
                 # 修改qlib的数据源导入日期
                 self.update_last_local_data_date(LocalDataSourceType.qlib.value,period,end_date)
-            
+        
     def get_local_data_info(self,code,period):    
         """取得本地数据里最后一天作为开始日期""" 
         

@@ -4,6 +4,7 @@ from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
+from trader.utils.date_util import tradedays,get_tradedays_dur
 
 import pandas as pd
 import numpy as np
@@ -51,6 +52,7 @@ class TFTSeriesDataset(TFTDataset):
         self.kwargs = kwargs
         
         self.dbaccessor = DbAccessor({})
+        self.emb_size = 0
         
     def _create_target_scalers(self,df):
         scaler_dict = {}
@@ -167,7 +169,7 @@ class TFTSeriesDataset(TFTDataset):
             df_all = self._pre_process_df(df_all,val_range=val_range)
             # 为每个序列生成不同的scaler
             self.df_all = df_all
-            print("emb size after p:",self.get_emb_size())
+            logger.debug("emb size after p:{}".format(self.get_emb_size()))
         self.target_scalers = self._create_target_scalers(self.df_all)       
         
     def build_series_data(self,data_file=None,no_series_data=False,val_ds_filter=False):
@@ -211,6 +213,9 @@ class TFTSeriesDataset(TFTDataset):
         df_all = self.df_all
         df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_start))]
         df_val = df_all[(df_all["datetime"]>=pd.to_datetime(str(valid_start))) & (df_all["datetime"]<pd.to_datetime(str(valid_end)))]
+        # 在筛选的过程中，有可能产生股票个数不一致的情况，取交集
+        df_train = df_train[df_train[self.get_group_column()].isin(df_val[self.get_group_column()])]
+        df_val = df_val[df_val[self.get_group_column()].isin(df_train[self.get_group_column()])]
         # 存储df数据，用于后续评估和回测等过程
         self.df_train = df_train
         self.df_val = df_val
@@ -270,12 +275,12 @@ class TFTSeriesDataset(TFTDataset):
             
         def build_covariates(column_names,no_transform_columns=None):
             covariates_array = []
-            for series in train_series_transformed:
+            for index,series in enumerate(train_series_transformed):
                 group_col_val = series.static_covariates[group_column].values[0]
                 scaler = Scaler()
                 # 遍历并筛选出不同分组字段(股票)的单个dataframe
                 df_item = df_all[df_all[group_column]==group_col_val]
-                df_item_train = df_train[df_train[group_column]==group_col_val]
+                df_item_train = df_train[df_train[group_column]==group_col_val] 
                 covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
                                                          freq='D',
                                                          fill_missing_dates=True,
@@ -427,7 +432,7 @@ class TFTSeriesDataset(TFTDataset):
         return pred_label_df_list
 
 
-    def get_part_time_range(self,date_position,ref_df=None):
+    def get_part_time_range(self,date_position,ref_df=None,offset=3):
         """根据给定日期，取得对应部分的数据集时间范围，需要满足预测要求"""
         
         # 首先取得总数据集范围，然后根据这个范围以及当前时间点，动态计算所需要的数据集范围以及验证集范围
@@ -442,35 +447,46 @@ class TFTSeriesDataset(TFTDataset):
         # 全集的结束时间为当前分割时间点
         total_range[1] = date_position
         # 验证数据集的开始时间为分割时间点往前的n个长度，其中n为配置中的训练时间序列长度。由于不同股票数据长度不一致，因此需要根据参照数据集进行移动。
-        val_range[0] = self.shift_days(date_position, (self.step_len-self.pred_len),ref_df)
+        val_range[0],missing_instruments = self.shift_days(date_position, self.step_len,ref_df)
         # 验证数据集的结束时间为当前分割时间点
         val_range[1] = total_range[1]
         # 如果计算后的结束时间超出原有数据集结束时间，则返回空用于后续异常处理
         if total_range[1] is None:
             return None,None
-        return total_range,val_range
+        return total_range,val_range,missing_instruments
 
-    def shift_days(self,date_position,n,ref_df):
+    def shift_days(self,date_position,n,ref_df,max_space=45):
         """取得对应日期前面第n天的日期"""
         
         group_column = self.get_group_column()
         time_column = self.col_def["time_column"] 
+        ref_date = get_tradedays_dur(date_position,-max_space*1)
         new_df = None
+        missing_instruments = []
+        min_date = None
         for group_name,group_data in ref_df.groupby(group_column):
             # 根据时间点取得对应序号，并根据序号取得序列间隔,需要考虑到当日没有数据的情况
             time_index = group_data[group_data["datetime"]<=str(date_position)][time_column].max()
             shift_time_index = time_index - n 
-            # 如果越界，说明数据集中含有不具备的序列，返回空处理异常
+            # 如果越界，说明数据集中含有不具备的序列，忽略并记录
             if shift_time_index < 0:
-                return None
-            data = group_data[group_data[time_column]==shift_time_index]
-            if new_df is None:
-                new_df = data
-            else:
-                new_df = pd.concat([new_df,data])
+                missing_instruments.append(group_name)
+                logger.warning("missing_instruments:{}".format(group_name))
+                continue
+            group_date = group_data[group_data[time_column]<=shift_time_index]["datetime"].max()
+            group_date = pd.to_datetime(group_date).date()
+            # 如果前推的距离对应的日期太早（超过指定参数max_space），则忽略
+            if group_date<ref_date:
+                missing_instruments.append(group_name)
+                logger.warning("missing_instruments with max_space:{}".format(group_name))
+                continue           
+            if min_date is None:
+                min_date = group_date
+            if group_date<min_date:
+                min_date = group_date
                 
         # 返回所有序列时间的最小值，以兼容全部数据集要求      
-        return new_df["datetime"].min()
+        return min_date,missing_instruments
                     
     def reverse_transform_preds(self,pres_series_list):
         """反向归一化(标准化)"""

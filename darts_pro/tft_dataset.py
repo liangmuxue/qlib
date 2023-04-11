@@ -39,6 +39,9 @@ class TFTDataset(DatasetH):
         
         # 如果加载数据文件，则不需要进行数据获取了
         if self.load_dataset_file:
+            self.segments = kwargs["segments"].copy()
+            self.fetch_kwargs = {}
+            # self.cus_setup_data(**kwargs)
             return        
         super().__init__(**kwargs)
         
@@ -49,14 +52,16 @@ class TFTDataset(DatasetH):
 
     def setup_data(self, **kwargs):
         super().setup_data(**kwargs)
+        self.cus_setup_data(**kwargs)
+    
+    def cus_setup_data(self, **kwargs):
         # make sure the calendar is updated to latest when loading data from new config
         cal = self.handler.fetch(col_set=self.handler.CS_RAW).index.get_level_values("datetime").unique()
-        
         ###### 用于静态连续变量的数据字典 ######
         # 商品价格指数
         self.qyspjg_data = self.data_extractor.load_data("qyspjg")
-        self.cal = sorted(cal)
-
+        self.cal = sorted(cal)        
+        
     @staticmethod
     def _extend_slice(slc: slice, cal: list, step_len: int) -> slice:
         # Dataset decide how to slice data(Get more data for timeseries).

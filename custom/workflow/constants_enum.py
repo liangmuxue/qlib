@@ -10,19 +10,22 @@ class WorkflowType(Enum):
 
 @unique
 class WorkflowStatus(Enum):
-    """工作流状态，0 未执行 1 运行中 2 运行失败 3 运行成功"""
+    """工作流状态，0 未执行 1 运行中 2 运行失败 3 运行成功 5 忽略此任务 """
     created = 0 
     running = 1  
     fail = 2 
-    success = 3   
+    success = 3  
+    ignore = 5 
     
 @unique
 class WorkflowSubStatus(Enum):
-    """子工作流状态，0 未执行 1 运行中 2 运行失败 3 运行成功"""
+    """子工作流状态，0 未执行 1 运行中 2 运行失败 3 运行成功 5 周期不符合忽略此任务  6 业务原因忽略此任务 """
     created = 0 
     running = 1  
     fail = 2 
-    success = 3      
+    success = 3  
+    freq_ignore = 5     
+    busi_ignore = 6    
     
 @unique
 class FrequencyType(Enum):
@@ -40,4 +43,10 @@ class LocalDataSourceType(Enum):
     
     qlib = 1 
     dataframe = 2     
+    
+@unique
+class WorkflowExceptionType(Enum):
+    """自定义工作流异常"""
+    
+    PRED_SEQ_MISS = 1 # 预测序号不足
         

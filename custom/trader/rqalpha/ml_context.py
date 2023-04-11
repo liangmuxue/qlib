@@ -85,8 +85,13 @@ class MlIntergrate():
     def filter_buy_candidate(self,pred_date):
         """根据预测计算，筛选可以买入的股票"""
         
-        ext_length = self.kwargs["ext_length"]
         date_pred_df = self.pred_df[(self.pred_df["pred_date"]==pred_date)]
+        return self.filter_buy_candidate_data(pred_date,date_pred_df)
+
+    def filter_buy_candidate_data(self,pred_date,date_pred_df):
+        """根据预测计算，筛选可以买入的股票"""
+        
+        ext_length = self.kwargs["ext_length"]
         candidate_list = []
         for instrument,group_data in date_pred_df.groupby("instrument"):
             instrument = int(instrument)
@@ -100,8 +105,8 @@ class MlIntergrate():
             if not match_flag:
                 continue   
             candidate_list.append(instrument)     
-        return candidate_list     
-    
+        return candidate_list   
+       
     def combine_complex_df_data(self,pred_date,instrument,pred_df=None,df_ref=None,ext_length=25,type="combine"):
         """合并预测数据,实际行情数据,价格数据等
            Params:
