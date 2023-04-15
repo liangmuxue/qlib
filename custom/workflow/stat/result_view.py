@@ -68,5 +68,6 @@ if __name__ == "__main__":
     # view.view_whole_data(data_file)
     # view.view_qlib_data("custom/config/stat/dataset.yaml")    
     pred_data_file = "/home/qdata/workflow/wf_backtest_flow/task/20/dump_data/pred_part/pred_df_total_20220201.pkl"
+    pred_data_file = "/home/qdata/workflow/wf_test/task/73/dump_data/pred_part/pred_df_total_20220118.pkl"
     view.view_pred_data(pred_data_file)   
     

@@ -68,8 +68,9 @@ class MlIntergrate():
         self.dataset = dataset
         self.pred_recorder = recorder
         self.kwargs = kwargs
-        
-    def create_bt_env(self):   
+
+    def prepare_data(self):   
+        # 加载预测文件
         self.pred_df = self.load_pred_data()
          
     def load_pred_data(self):
@@ -121,6 +122,8 @@ class MlIntergrate():
         time_index_column = self.dataset.get_time_column()
         # 目标预测数据
         df_pred_item = pred_df[(pred_df["instrument"]==instrument)&(pred_df["pred_date"]==pred_date)]
+        if df_pred_item.shape[0]==0:
+            return None
         time_index = df_pred_item[time_index_column].values[0]   
         # 时间序号,向前延展到指定长度，向后延展到预测长度
         time_index_range = [time_index-ext_length,time_index+self.dataset.pred_len]
@@ -213,7 +216,7 @@ class MlIntergrate():
         ext_length = self.kwargs["ext_length"]
         date_pred_df = self.pred_df[(self.pred_df["pred_date"]==pred_date)]
         if date_pred_df.shape[0]==0:
-            logger.warn("pred df empty:{}".format(pred_date))
+            logger.warning("pred df empty:{}".format(pred_date))
         complex_item_df = self.combine_complex_df_data(pred_date,instrument,pred_df=date_pred_df,df_ref=self.dataset.df_all,ext_length=ext_length)  
         # 取得预测趋势分类信息
         pred_class = np.array([complex_item_df["class1"].values[0],complex_item_df["class2"].values[0]])

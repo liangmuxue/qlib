@@ -512,7 +512,7 @@ class WorkflowSubTask(object):
 if __name__ == "__main__":    
     
     # For Test
-    task = WorkflowTask(task_batch=73,workflow_name="wf_test",resume=True)
+    # task = WorkflowTask(task_batch=73,workflow_name="wf_test",resume=True)
     # task = WorkflowTask(task_batch=0,workflow_name="wf_test",resume=False)
     
     # 全量导入，任务只进行一次
@@ -521,7 +521,7 @@ if __name__ == "__main__":
     
     # 回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
-    # task = WorkflowTask(task_batch=20,workflow_name="wf_backtest_flow",resume=True)    
+    task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)    
     
     task.start_task()
         

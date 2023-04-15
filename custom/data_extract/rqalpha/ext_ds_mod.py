@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import pickle
+import os
 
 from rqalpha.interface import AbstractMod
 from rqalpha.const import ORDER_STATUS
@@ -25,6 +26,8 @@ class ExtDataMod(AbstractMod):
 
     def start_up(self, env, mod_config):
         self.report_save_path = mod_config.report_save_path
+        if not os.path.exists(self.report_save_path):
+            os.makedirs(self.report_save_path)  
         self.env = env
         env.set_data_source(TdxDataSource(env.config.base.data_bundle_path))
 

@@ -21,6 +21,7 @@ class PredResultProcessor(BaseProcessor):
         real_template = copy.deepcopy(template)
         model_template = real_template["task"]["model"]
         dataset_template = real_template["task"]["dataset"]
+        record_template = real_template["task"]["record"][0]
         
         start_date = str(config["start_date"])
         start_date = date_string_transfer(start_date)
@@ -52,6 +53,7 @@ class PredResultProcessor(BaseProcessor):
         real_template["port_analysis_config"]["backtest"]["pred_end_time"] = pred_end_date
         # 设置内部数据存储路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
+        record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 设置模型路径
         model_template["kwargs"]["optargs"]["work_dir"] = self.wf_task.get_model_path()
         # 设置模型名称

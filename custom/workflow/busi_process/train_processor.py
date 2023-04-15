@@ -30,7 +30,7 @@ class TrainProcessor(BaseProcessor):
         
         # 如果当前序号大于1，则直接使用以前的数据文件
         cur_sequence = self.wf_task.task_entity["sequence"]
-        # 根据当前序号，前推2个周期，如果不够则不进行此次任务
+        # 只在第一次保存全量数据，后续直接加载
         if cur_sequence>1:
             # 设置忽略标志
             model_template["kwargs"]["load_dataset_file"] = True

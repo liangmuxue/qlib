@@ -27,12 +27,12 @@ class DayStrategy(BaseStrategy):
         logger.info("before_trading.now:{}".format(context.now))
         pred_date = int(context.now.strftime('%Y%m%d'))
         # 根据当前日期，进行预测计算
-        # TODO
+        context.ml_context.prepare_data(pred_date)
         
         # 根据预测计算，筛选可以买入的股票
         candidate_list = context.ml_context.filter_buy_candidate(pred_date)
         # 代码转化为rqalpha格式
-        candidate_list = [transfer_order_book_id(instrument) for instrument in candidate_list]
+        candidate_list = [transfer_order_book_id(instrument,self.instruments_dict[instrument]["market"]) for instrument in candidate_list]
         # 查看持仓，根据预测模型计算,逐一核对是否需要卖出
         sell_list = []
         for position in get_positions():

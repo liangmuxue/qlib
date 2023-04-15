@@ -308,7 +308,7 @@ class TFTSeriesDataset(TFTDataset):
         # 生成未来协变量，并归一化
         future_convariates = build_covariates(future_columns)    
         # 生成静态协变量，并归一化
-        static_convariates = build_covariates(static_columns)   
+        # static_convariates = build_covariates(static_columns)   
         
         # 补充未来协变量数据,与验证数据相对应    
         if fill_future:           

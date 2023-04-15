@@ -38,17 +38,20 @@ class MinuteStrategy(BaseStrategy):
         self.trade_day = pred_date
         
         # 根据当前日期，进行预测计算
-        # TODO
+        context.ml_context.prepare_data(pred_date)
         
+        logger.info("prepare_data end")
         # 根据预测计算，筛选可以买入的股票
         candidate_list = context.ml_context.filter_buy_candidate(pred_date)
+        logger.info("filter_buy_candidate end")
         candidate_list_buy = {}
         for instrument in candidate_list:
             # 剔除没有价格数据的股票
             if instrument not in self.instruments_dict:
                 continue
+            market = self.instruments_dict[instrument]["market"]
             # 代码转化为rqalpha格式
-            order_book_id = transfer_order_book_id(instrument)
+            order_book_id = transfer_order_book_id(instrument,type=market)
             # 如果已持仓当前股票，则忽略
             if self.get_postion_by_order_book_id(order_book_id) is not None:
                 continue

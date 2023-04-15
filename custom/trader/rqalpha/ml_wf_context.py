@@ -19,9 +19,9 @@ from darts_pro.data_extension.custom_model import TFTExtModel
 from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from trader.busi_compute import slope_status
+from persistence.wf_task_store import WfTaskStore
 
 from cus_utils.log_util import AppLogger
-from trader import pred_recorder
 logger = AppLogger()
 
 class MlWorkflowIntergrate(MlIntergrate):
@@ -29,19 +29,59 @@ class MlWorkflowIntergrate(MlIntergrate):
     
     def __init__(
         self,
-        provider_uri = "/home/qdata/qlib_data/custom_cn_data",
-        config_path="custom/config/darts/workflow_backtest.yaml",
+        config_path,
         **kwargs,
     ):
-        super().__init(provider_uri=provider_uri,config_path=config_path,kwargs=kwargs)
+        with open(config_path) as fp:
+            config = yaml.safe_load(fp)    
+            
+        # 配置文件内容
+        self.model_cfg =  config["task"]["model"]
+        self.dataset_cfg = config["task"]["dataset"]
+        self.backtest_cfg = config["task"]["backtest"]
+        
+        # 初始化
+        self.pred_data_path = self.model_cfg["kwargs"]["pred_data_path"]
+        self.load_dataset_file = self.model_cfg["kwargs"]["load_dataset_file"]
+        self.save_dataset_file = self.model_cfg["kwargs"]["save_dataset_file"]
+        
+        # 初始化dataset
+        dataset = init_instance_by_config(self.dataset_cfg)
+        df_data_path = self.pred_data_path + "/df_all.pkl"
+        dataset.build_series_data(df_data_path,no_series_data=True)  
+          
+        # 生成recorder,用于后续预测数据处理
+        record_cfg = config["task"]["record"]
+        optargs = self.model_cfg["kwargs"]["optargs"]
+        model = TFTExtModel.load_from_checkpoint(optargs["model_name"],work_dir=optargs["work_dir"],best=False)
+        placehorder_value = {"<MODEL>": model, "<DATASET>": dataset}
+        record_cfg = fill_placeholder(record_cfg, placehorder_value)   
+        rec = R.get_recorder()
+        recorder = init_instance_by_config(
+            record_cfg,
+            recorder=rec,
+        )       
+             
+        self.dataset = dataset
+        self.pred_recorder = recorder
+        self.kwargs = kwargs
+               
         self.task_id = kwargs["task_id"]
-         
-    def filter_buy_candidate(self,pred_date):
-        """根据预测计算，筛选可以买入的股票"""
+        self.task_store = WfTaskStore()
+
+    def prepare_data(self,pred_date):   
         
         # 根据日期，动态找到对应的预测文件，并加载
-        date_pred_df = self.pred_df[(self.pred_df["pred_date"]==pred_date)]
-        return self.filter_buy_candidate_data(pred_date,date_pred_df)   
+        date_pred_df_file = self.task_store.get_pred_result_by_task_and_working_day(self.task_id,pred_date)
+        dump_path = self.kwargs["dump_path"]
+        total_path = "{}/{}".format(dump_path,date_pred_df_file)
+        with open(total_path, "rb") as fin:
+            self.pred_df = pickle.load(fin)      
+                 
+    def filter_buy_candidate(self,pred_date):
+        """根据预测计算，筛选可以买入的股票"""
+
+        return self.filter_buy_candidate_data(pred_date,self.pred_df)   
     
     
     

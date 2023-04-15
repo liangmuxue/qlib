@@ -1,3 +1,4 @@
+import datetime as dt
 from datetime import datetime,timedelta
 import calendar
 from chinese_calendar import is_holiday
@@ -75,8 +76,8 @@ def get_first_and_last_day(year,month):
     """取得每个月第一天和最后一天"""
     
     weekDay,monthCountDay = calendar.monthrange(year,month)
-    firstDay = datetime.date(year,month,day=1)
-    lastDay = datetime.date(year,month,day=monthCountDay)
+    firstDay = dt.date(year,month,day=1)
+    lastDay = dt.date(year,month,day=monthCountDay)
     return firstDay,lastDay
 
 

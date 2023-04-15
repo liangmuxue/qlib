@@ -25,6 +25,7 @@ class ClassifyProcessor(BaseProcessor):
         real_template = copy.deepcopy(template)
         model_template = real_template["task"]["model"]
         dataset_template = real_template["task"]["dataset"]
+        record_template = real_template["task"]["record"][0]
         
         start_date = str(config["start_date"])
         start_date = date_string_transfer(start_date)
@@ -48,6 +49,7 @@ class ClassifyProcessor(BaseProcessor):
         
         # 设置内部数据存储路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
+        record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 映射预测文件
         cur_sequence = self.wf_task.task_entity["sequence"]
         # 根据当前序号，前推2个周期，如果不够则不进行此次任务
@@ -63,6 +65,7 @@ class ClassifyProcessor(BaseProcessor):
             # 关联到预测处理器，并取得对应的文件名
             pred_result_file = self.db_accessor.do_query(sql, ())[0][0]
             model_template["kwargs"]["pred_data_file"] = self.wf_task.get_pred_data_part_path(pred_result_file,working_day)
+            record_template["kwargs"]["pred_data_file"] = model_template["kwargs"]["pred_data_file"]
             # 数据集定义预测分类评估的开始时间，为当前指定日期（workding day）的两周前,即上2个日历批次的第一天
             working_day_list = self.wf_task.get_calendar_by_seq(pred_sequence)
             classify_begin_date = str(working_day_list[0])

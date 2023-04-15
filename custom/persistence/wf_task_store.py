@@ -2,6 +2,7 @@ from enum import Enum, unique
 
 from .busi_struct import BasePersistence
 from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus,FrequencyType
+from persistence.common_dict import CommonDictEnum
     
 class WfTaskStore(BasePersistence):
     """工作流数据持久化处理"""
@@ -186,6 +187,21 @@ class WfTaskStore(BasePersistence):
         # 给主表相关字段置空
         upt_sql = "update workflow_task set cur_task_detail_id=0,cur_working_day=0 where task_batch={}".format(task_batch)
         self.dbaccessor.do_updateto(upt_sql)
+
+    def get_pred_result_by_task_and_working_day(self,subtask_id,working_day):  
+        """根据任务标号和工作日，取得之前生成的预测数据文件"""
         
+        # 通过当前任务编号，找到对应的主任务编号。在根据工作日找到对应的序号，从而得到实际的预测任务编号，进一步取得对应的预测结果
+        seq_sql = "select wc.sequence,wtd.main_task_id from workflow_calendar wc,workflow_task_detail wtd where wc.task_id=wtd.main_task_id " \
+            "and wtd.id={} and wc.working_day={}".format(subtask_id,working_day)
+        row = self.dbaccessor.do_query(seq_sql)[0]
+        sequence = row[0]
+        main_task_id = row[1]
+        sql = "select pred_result_file from pred_result where task_id=(select wtd.id from workflow_task_detail wtd,workflow_detail wd,common_dict dict" \
+                                       " where wtd.main_task_id={} and wtd.sequence={} and wtd.workflow_detail_id=wd.id and wd.type=dict.id" \
+                                       " and dict.code='{}')".format(main_task_id,sequence,CommonDictEnum.WORK_TYPE__PRED.value)
+        row = self.dbaccessor.do_query(sql)[0]
+        return row[0]   
+            
         
         

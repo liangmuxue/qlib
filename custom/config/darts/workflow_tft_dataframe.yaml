@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market all
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
@@ -54,9 +54,9 @@ task:
             log_every_n_steps: 50
             type: 'train_dataframe'
             n_epochs : 1
-            save_dataset_file: False
+            save_dataset_file: True
             load_dataset_file: &load_dataset_file False
-            pred_data_path: "custom/data/darts/dump_data/test8"   
+            pred_data_path: "/home/qdata/workflow/wf_test/task/73/dump_data/"   
             scheduler_config: 
                gamma: 0.3     
                step_size: 1    
@@ -85,6 +85,7 @@ task:
                 valid: [2021-11-01, 2021-12-31]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
+            load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
             instrument_pick: [600520,600521,600522]

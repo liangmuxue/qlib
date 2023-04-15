@@ -7,6 +7,9 @@ from rqalpha import run_file
 from .base_processor import BaseProcessor
 from trader.utils.date_util import get_first_and_last_day
 
+from cus_utils.log_util import AppLogger
+logger = AppLogger()
+
 class BacktestProcessor(BaseProcessor):
     
     def __init__(self, workflow_subtask):
@@ -23,12 +26,19 @@ class BacktestProcessor(BaseProcessor):
         # 设置预测数据路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 回测部分
-        start_date,end_date = get_first_and_last_day(str(working_day)[:4],str(working_day)[4:6])    
+        month = int(str(working_day)[4:6])
+        year = int(str(working_day)[:4])
+        # 回测上个月数据
+        month = month - 1
+        if month==0:
+            month = 12
+            year = year - 1
+        start_date,end_date = get_first_and_last_day(year,month)    
         # 回测开始和结束日期为本月第一天和最后一天
         backtest_template["rqalpha"]["base"]["start_date"] = start_date
         backtest_template["rqalpha"]["base"]["end_date"] = end_date
         # 给回测进程植入任务号
-        backtest_template["rqalpha"]["extra"]["task_id"] = self.wf_task.task_obj["id"]
+        backtest_template["rqalpha"]["extra"]["task_id"] = self.wf_task.task_entity["id"]
         # config_path为当前文件路径
         config_file_path = self.wf_task.get_task_config_file()   
         backtest_template["rqalpha"]["extra"]["context_vars"]["strategy_class"]["config_path"] = config_file_path
@@ -37,6 +47,13 @@ class BacktestProcessor(BaseProcessor):
         cur_period_path = parent_path + "/" + str(working_day)[4:6]
         backtest_template["rqalpha"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path
+        # 映射预测数据文件路径
+        backtest_template["rqalpha"]["extra"]["dump_path"] = self.wf_task.get_dumpdata_part_path()
+        # 根据当前序号，如果不够则不进行此次任务
+        cur_sequence = self.wf_task.task_entity["sequence"]
+        if cur_sequence<=1:
+            # 设置忽略标志
+            self.task_ignore = True        
         return real_template
                             
     def sub_run(self,working_day=None,results=None,resume=True):
@@ -47,6 +64,5 @@ class BacktestProcessor(BaseProcessor):
         # 统一一个运行策略文件，后面通过不同的实现类来进行策略区分
         strategy_file_path = self.config["task"]["backtest"]["run_file"]
         run_file(strategy_file_path, rq_config)   
-
         
         

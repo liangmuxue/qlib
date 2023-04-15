@@ -52,6 +52,8 @@ class PortAnaRecord(TftRecorder):
         config,
         model = None,
         dataset = None,
+        pred_data_path = None,
+        pred_data_file = None,
         **kwargs,
     ):
         """predict result build"""
@@ -62,6 +64,8 @@ class PortAnaRecord(TftRecorder):
             self.backtest_config = config["backtest"]
         self.model = model
         self.dataset = dataset
+        self.pred_data_path = pred_data_path
+        self.pred_data_file = pred_data_file
         
         self.df_ref = dataset.df_all     
         self.pred_result_columns = ['pred_date','time_idx','instrument','class1','class2','vr_class','pred_data'] 
@@ -90,7 +94,7 @@ class PortAnaRecord(TftRecorder):
     def load_pred_data(self,pred_data_file=None):
         if pred_data_file is None:
             pred_data_file = "pred_df_total.pkl"
-        pred_data_path = self.model.pred_data_path + "/" + pred_data_file
+        pred_data_path = self.pred_data_path + "/" + pred_data_file
         with open(pred_data_path, "rb") as fin:
             df_pred = pickle.load(fin)     
         df_pred["class1"] = df_pred["class1"].astype(int) 
@@ -118,7 +122,7 @@ class PortAnaRecord(TftRecorder):
         # 一并生成DataFrame
         df_total = pd.DataFrame(data_total,columns=self.pred_result_columns)
         # 存储数据
-        pred_data_path = self.model.pred_data_path + "/" + self.model.pred_data_file
+        pred_data_path = self.pred_data_path + "/" + self.pred_data_file
         with open(pred_data_path, "wb") as fout:
             pickle.dump(df_total, fout)     
         return df_total
@@ -153,7 +157,7 @@ class PortAnaRecord(TftRecorder):
             # df_item = pd.DataFrame(data_item,columns=self.pred_result_columns)
             # df_item["pred_date"] = df_item["pred_date"].astype("int")
             # complex_df = self.combine_complex_df_data(pred_date,group_item,pred_df=df_item,df_ref=df_ref)      
-            # self.data_viewer.show_single_complex_pred_data(complex_df,dataset=self.dataset,save_path=self.model.pred_data_path+"/plot")
+            # self.data_viewer.show_single_complex_pred_data(complex_df,dataset=self.dataset,save_path=self.pred_data_path+"/plot")
             # self.data_viewer.show_single_complex_pred_data_visdom(complex_df,dataset=self.dataset)                    
             if data_pred is None:
                 data_pred = data_item
@@ -162,7 +166,7 @@ class PortAnaRecord(TftRecorder):
         return data_pred
     
     def _get_pickle_path(self,cur_date):
-        pred_data_path = self.model.pred_data_path
+        pred_data_path = self.pred_data_path
         data_path = pred_data_path + "/" + str(cur_date) + ".pkl"
         return data_path
     
@@ -277,10 +281,10 @@ class ClassifyRecord(PortAnaRecord):
     def stat_complex_pred_data(self,dataset=None,ext_length=25,load_cache=False):
         """统计预测信息准确度，可用性"""
         
-        cache_file = self.model.pred_data_path + "/pred_stat_2202.pickel"
+        cache_file = self.pred_data_path + "/pred_stat_2202.pickel"
         if not load_cache:
             # 加载预测结果数据
-            pred_data_file = self.model.pred_data_file
+            pred_data_file = self.pred_data_file
             pred_df = self.load_pred_data(pred_data_file=pred_data_file)
             # 根据配置取得对应日期的预测结果
             pred_df = pred_df[(pred_df["pred_date"]>=int(self.classify_range[0].strftime('%Y%m%d')))&
@@ -290,6 +294,8 @@ class ClassifyRecord(PortAnaRecord):
             match_list = []
             match_cnt = 0
             logger.debug("date_list len:{}".format(len(date_list)))
+            if len(date_list)==0:
+                logger.error("date_list size 0,classify_range:{},pred_data_file:{}".format(self.classify_range,pred_data_file))
             for pred_date in date_list:   
                 pred_date = int(pred_date)  
                 match_cnt = 0
@@ -328,7 +334,7 @@ class ClassifyRecord(PortAnaRecord):
                     match_item = [pred_date,instrument,correct,pred_class_real,vr_class,price_raise_range,price_down_range]
                     match_list.append(match_item)
                     # if correct!=2:
-                    #     self.data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.model.pred_data_path+"/plot")
+                    #     self.data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.pred_data_path+"/plot")
                     #     self.data_viewer_correct.show_single_complex_pred_data_visdom(complex_df,dataset=dataset)
                     match_cnt += 1
                 logger.debug("date:{} and match_cnt:{}".format(pred_date,match_cnt))
@@ -347,7 +353,7 @@ class ClassifyRecord(PortAnaRecord):
     
     def show_correct_pred(self,dataset=None,show_num=5):
         
-        cache_file = self.model.pred_data_path + "/pred_stat.pickel"
+        cache_file = self.pred_data_path + "/pred_stat.pickel"
         with open(cache_file, "rb") as fin:
             stat_df = pickle.load(fin)  
         complex_df = self.load_pred_data()
@@ -364,7 +370,7 @@ class ClassifyRecord(PortAnaRecord):
                 self.data_viewer_correct.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
             else:
                 self.data_viewer_incorrect.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
-            # self.data_viewer_correct.show_single_complex_pred_data(complex_item_df,correct=correct,dataset=dataset,save_path=self.model.pred_data_path+"/plot")
+            # self.data_viewer_correct.show_single_complex_pred_data(complex_item_df,correct=correct,dataset=dataset,save_path=self.pred_data_path+"/plot")
             logger.debug("correct:{}".format(correct))
         
     def label_data_jud(self,row,dataset=None):

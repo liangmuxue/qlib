@@ -31,10 +31,10 @@ class BaseStrategy():
     def __init__(self):
         dbaccessor = DbAccessor({})
         # 只处理具备数据的股票,因此生成库内股票字典
-        result_rows = dbaccessor.do_query("select code from instrument_info")
+        result_rows = dbaccessor.do_query("select code,market from instrument_info")
         self.instruments_dict = {}  
         for row in result_rows:
-            self.instruments_dict[int(row[0])] = row
+            self.instruments_dict[int(row[0])] = {"code":row[0],"market":row[1]}
     
     def __build_with_context__(self,context,workflow_mode=False):
         self.context = context
@@ -43,12 +43,11 @@ class BaseStrategy():
         provider_uri = context.config.extra.context_vars.strategy_class.provider_uri
         # 加载qlib上下文  
         if workflow_mode:
-            context.ml_context = MlWorkflowIntergrate(config_path=config_path,provider_uri=provider_uri,ext_length=25,task_id=context.config.extra.task_id)
+            context.ml_context = MlWorkflowIntergrate(config_path=config_path,provider_uri=provider_uri,ext_length=25
+                                        ,task_id=context.config.extra.task_id,dump_path=context.config.extra.dump_path)
         else:
             context.ml_context = MlIntergrate(ext_length=25,config_path=config_path,provider_uri=provider_uri)
         self.strategy = context.config.extra.context_vars.strategy
-        # 创建预测的集成数据
-        context.ml_context.create_bt_env()
         # 交易对象上下文
         self.trade_entity = TradeEntity()
         # 注册订单事件

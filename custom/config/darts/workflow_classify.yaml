@@ -34,7 +34,8 @@ task:
             n_epochs : 300
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            pred_data_path: "custom/data/darts/dump_data/test8"
+            pred_data_path: &pred_data_path "custom/data/darts/dump_data/test8"
+            pred_data_file: &pred_data_file "pred_stat.pickel"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -90,6 +91,7 @@ task:
             config: None
             model: <MODEL>
             dataset: <DATASET>  
-            
+            pred_data_path: *pred_data_path
+            pred_data_file: *pred_data_file               
         
             
