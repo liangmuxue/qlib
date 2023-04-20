@@ -469,6 +469,11 @@ class WorkflowSubTask(object):
         """挂接对应工作流子任务"""
         
         self.main_task.task_store.attach_busi_task_id(self.task_entity["id"],busi_task_id)
+        
+    def get_task_status(self):
+        
+        task = self.main_task.task_store.get_subtask(self.task_entity["id"])
+        return task["status"]
     
     def get_relate_dt_batch(self):
         busi_task_id = self.main_task.task_store.get_busi_task_id(self.task_entity["id"])
@@ -512,7 +517,7 @@ class WorkflowSubTask(object):
 if __name__ == "__main__":    
     
     # For Test
-    # task = WorkflowTask(task_batch=73,workflow_name="wf_test",resume=True)
+    # task = WorkflowTask(task_batch=76,workflow_name="wf_test",resume=True)
     # task = WorkflowTask(task_batch=0,workflow_name="wf_test",resume=False)
     
     # 全量导入，任务只进行一次

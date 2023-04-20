@@ -15,7 +15,7 @@ from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrume
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-# 交易扩展信息，用于统计，字段：差价、盈亏金额, 购买日期，买卖间隔天数
+# 交易扩展信息用于统计，字段包括：买入价，差价、盈亏金额, 购买日期，买卖间隔天数
 TRADE_EXT_COLUMNS = ["buy_price","differ_range","gain","buy_date","duration"]
 
 class ExtDataMod(AbstractMod):
@@ -61,20 +61,22 @@ class ExtDataMod(AbstractMod):
         
         total_gain = stat_df["gain"].sum()
         logger.info("total_gain:{}".format(total_gain))
+        ml_context.record_results(stat_df)
+        
         save_path = self.report_save_path + "/plot"
         # 取得预测数据和回测数据，并进行图形化展示
-        for index,row in stat_df.iterrows():
-            trade_date = row["trade_date"]
-            trade_date_str = trade_date.strftime('%Y%m%d')
-            instrument = int(transfer_instrument(row["order_book_id"]))
-            pred_df_item = pred_df[(pred_df["pred_date"]==int(trade_date_str))&(pred_df["instrument"]==instrument)]
-            complex_df = pred_recorder.combine_complex_df_data(trade_date_str,instrument,pred_df=pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
-            data_viewer.show_trades_data_visdom(row,complex_df)
-            buy_trade_date_str = row["buy_date"]
-            buy_pred_df_item = pred_df[(pred_df["pred_date"]==int(buy_trade_date_str))&(pred_df["instrument"]==instrument)]
-            buy_complex_df = pred_recorder.combine_complex_df_data(buy_trade_date_str,instrument,pred_df=buy_pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
-            data_viewer.show_single_complex_pred_data(buy_complex_df,correct=-1,save_path=save_path)
-            data_viewer.show_single_complex_pred_data_visdom(buy_complex_df)
+        # for index,row in stat_df.iterrows():
+        #     trade_date = row["trade_date"]
+        #     trade_date_str = trade_date.strftime('%Y%m%d')
+        #     instrument = int(transfer_instrument(row["order_book_id"]))
+        #     pred_df_item = pred_df[(pred_df["pred_date"]==int(trade_date_str))&(pred_df["instrument"]==instrument)]
+        #     complex_df = pred_recorder.combine_complex_df_data(trade_date_str,instrument,pred_df=pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
+        #     data_viewer.show_trades_data_visdom(row,complex_df)
+        #     buy_trade_date_str = row["buy_date"]
+        #     buy_pred_df_item = pred_df[(pred_df["pred_date"]==int(buy_trade_date_str))&(pred_df["instrument"]==instrument)]
+        #     buy_complex_df = pred_recorder.combine_complex_df_data(buy_trade_date_str,instrument,pred_df=buy_pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
+        #     data_viewer.show_single_complex_pred_data(buy_complex_df,correct=-1,save_path=save_path)
+        #     data_viewer.show_single_complex_pred_data_visdom(buy_complex_df)
             # logger.debug("complex_df data:{}".format(complex_df))
          
     def build_stat_df(self,strategy_obj,load_trade_df=False,load_cache=False):

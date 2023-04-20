@@ -20,6 +20,7 @@ from cus_utils.common_compute import normalization,compute_series_slope,compute_
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from trader.busi_compute import slope_status
 from persistence.wf_task_store import WfTaskStore
+from cus_utils.db_accessor import DbAccessor
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -68,6 +69,7 @@ class MlWorkflowIntergrate(MlIntergrate):
                
         self.task_id = kwargs["task_id"]
         self.task_store = WfTaskStore()
+        self.dbaccess = DbAccessor({})
 
     def prepare_data(self,pred_date):   
         
@@ -83,5 +85,15 @@ class MlWorkflowIntergrate(MlIntergrate):
 
         return self.filter_buy_candidate_data(pred_date,self.pred_df)   
     
-    
+    def record_results(self,result_df):
+        """保存回测结果"""
+
+        total_gain = result_df["gain"].sum()
+        total_transactions = result_df.shape[0]
+        avg_duration = result_df["duration"].sum()/total_transactions
+        # 保存到数据库
+        self.dbaccess.do_inserto("delete from backtest_result where task_id={}".format(self.task_id))
+        sql = "insert into backtest_result(task_id,total_gain,total_transactions,avg_duration) values(%s,%s,%s,%s)"
+        self.dbaccess.do_inserto_withparams(sql,(self.task_id,total_gain,total_transactions,avg_duration))
+        
     

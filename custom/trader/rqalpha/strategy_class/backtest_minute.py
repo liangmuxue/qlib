@@ -253,7 +253,10 @@ class MinuteStrategy(BaseStrategy):
             sys_order = self.trade_entity.get_sys_order(buy_item.order_book_id)
             buy_order = self.get_buy_order(buy_item.order_book_id,context=context)
             cur_snapshot = current_snapshot(buy_item.order_book_id)
-            price_now = cur_snapshot.last
+            try:
+                price_now = cur_snapshot.last
+            except Exception as e:
+                logger.error("cur_snapshot err:{}".format(e))
             h_bar = history_bars(buy_item.order_book_id,1,"1d",fields="close",adjust_type="none")
             price_last_day = h_bar[0,0]               
             pred_buy_exceed_rate = self.strategy.buy_opt.pred_buy_exceed_rate

@@ -225,4 +225,7 @@ class MlIntergrate():
         if vr_class==0 and np.sum(pred_class==SLOPE_SHAPE_FALL)>=1:
             return True
         return False
+    
+    def record_results(self,result_df):
+        pass
         

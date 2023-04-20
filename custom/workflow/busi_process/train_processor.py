@@ -33,9 +33,9 @@ class TrainProcessor(BaseProcessor):
         # 只在第一次保存全量数据，后续直接加载
         if cur_sequence>1:
             # 设置忽略标志
-            model_template["kwargs"]["load_dataset_file"] = True
+            model_template["kwargs"]["load_dataset_file"] = False
             model_template["kwargs"]["save_dataset_file"] = False
-            dataset_template["kwargs"]["load_dataset_file"] = True
+            dataset_template["kwargs"]["load_dataset_file"] = False
                    
         # dataset数据集定义的开始结束时间
         dataset_template["kwargs"]["segments"]["train_total"] = [start_date,end_date]
