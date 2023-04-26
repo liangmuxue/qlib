@@ -522,8 +522,12 @@ if __name__ == "__main__":
     
     # 全量导入，任务只进行一次
     # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_complete",resume=False)
-    # task = WorkflowTask(task_batch=1,workflow_name="wf_data_import_complete",resume=True)
-    
+    # task = WorkflowTask(task_batch=83,workflow_name="wf_data_import_complete",resume=True)
+
+    # 增量导入
+    # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_daily",resume=False)
+    # task = WorkflowTask(task_batch=86,workflow_name="wf_data_import_daily",resume=False)
+        
     # 回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
     task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)    

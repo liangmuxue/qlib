@@ -146,6 +146,7 @@ class TdxDataSource(BaseDataSource):
         return bar
                 
     def available_data_range(self, frequency):
-        return date(2004, 1, 1), date.today() - relativedelta(days=1)
+        # 修改原方法，有效日期的结束日期设置为后一天（原来为前一天）
+        return date(2004, 1, 1), date.today() + relativedelta(days=1)
     
     

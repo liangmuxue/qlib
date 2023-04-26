@@ -24,9 +24,10 @@ class TradeEntity():
         # 映射系统订单
         self.sys_orders = {}
         
-    def add_or_update_order(self,order,trade_day,default_status=ORDER_STATUS.PENDING_NEW):
+    def add_or_update_order(self,order,trade_day):
         """添加(或更新)订单信息"""
         
+        logger.debug("add_or_update_order in,order:{}".format(order))
         trade_date = order.datetime
         order_book_id = order.order_book_id
         side = order.side
@@ -45,6 +46,7 @@ class TradeEntity():
         row_data = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
         if self.trade_data_df.shape[0]==0:
+            logger.debug("add trade,data:{}".format(row_data))
             self.trade_data_df = pd.DataFrame(row_data,columns=TRADE_COLUMNS)
         else:
             item_df = self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
@@ -53,7 +55,9 @@ class TradeEntity():
                 # 有可能是之前撤单后新发起的订单，这类订单需要更新
                 self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
                     (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)] = pd.DataFrame(row_data,columns=TRADE_COLUMNS)
+                logger.debug("update trade,data:{}".format(row_data))
             else:
+                logger.debug("concat trade,data:{}".format(row_data))
                 self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data,columns=TRADE_COLUMNS)], axis=0)
         # 映射系统订单
         self.sys_orders[order.order_book_id] = order
@@ -161,7 +165,20 @@ class TradeEntity():
         else:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]             
         return target_df  
-    
+ 
+    def get_buy_list_reject(self,trade_date):   
+        """取得所有被拒绝买单"""
+
+        if self.trade_data_df.shape[0]==0:
+            return self.trade_data_df
+        trade_data_df = self.trade_data_df
+        if trade_date is not None:
+            target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)&
+                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]       
+        else:
+            target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
+        return target_df  
+       
     def get_buy_list_eff(self,trade_date):   
         """取得所有指定日期的有效买单(包括已成交和待成交的)"""
 

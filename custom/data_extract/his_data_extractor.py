@@ -199,7 +199,7 @@ class HisDataExtractor:
                         (DataTaskType.DataImport.value,task_batch,self.backend_channel,start_date,end_date,DataTaskStatus.Start.value,period))
         return task_batch
  
-    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False):
+    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False,no_total_file=False):
         """
             取得所有股票历史行情数据
             Params:
@@ -211,9 +211,10 @@ class HisDataExtractor:
         """
                 
         task_batch = self.prepare_import_batch(task_batch, start_date, end_date, period)
-        return self.import_data_part(task_batch=task_batch,start_date=start_date,end_date=end_date,period=period,contain_institution=contain_institution,resume=resume)
+        return self.import_data_part(task_batch=task_batch,start_date=start_date,end_date=end_date,period=period,
+                                     contain_institution=contain_institution,resume=resume,no_total_file=no_total_file)
                                 
-    def import_data_part(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False):
+    def import_data_part(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False,no_total_file=False):
         """取得所有股票历史行情数据,去除批次号部分"""
         
         last_item_code = self.dbaccessor.do_query("select last_item_code from data_task where task_batch={}".format(task_batch))[0][0]
@@ -228,7 +229,7 @@ class HisDataExtractor:
             os.makedirs(savepath) 
             
         # 恢复模式下，需要先加载之前的已生成数据
-        if resume:
+        if resume and not no_total_file:
             total_data = self.load_total_df(period,force_load_item=True)
             total_data_institution = self.load_total_df(period, institution=True,force_load_item=False)
         else:
@@ -239,15 +240,15 @@ class HisDataExtractor:
             market = row[1]
             # 如果本地记录里包含，则跳过
             if total_data is None or np.sum(total_data["code"]==int(code))==0:
-                total_data = self.data_part_process(code,total_data,
-                                    start_date=start_date,end_date=end_date,period=period,market=market,savepath=savepath,institution=False)
+                total_data = self.data_part_process(code,total_data, start_date=start_date,
+                                    end_date=end_date,period=period,market=market,savepath=savepath,institution=False,no_total_file=no_total_file)
             else:
                 logger.debug("has data:{}".format(code))
             # 复权模式下需要再处理一次
             if contain_institution:
                 if total_data_institution is None or np.sum(total_data_institution["code"]==int(code))==0:
-                    total_data_institution = self.data_part_process(code,total_data_institution,
-                                    start_date=start_date,end_date=end_date,period=period,market=market,savepath=savepath,institution=True)
+                    total_data_institution = self.data_part_process(code,total_data_institution,start_date=start_date,
+                                    end_date=end_date,period=period,market=market,savepath=savepath,institution=True,no_total_file=no_total_file)
                 else:
                     logger.debug("has institution data:{}".format(code))
             logger.info("import data loop:{}".format(code))               
@@ -258,9 +259,19 @@ class HisDataExtractor:
         self.dbaccessor.do_inserto_withparams("update data_task set status=%s where task_batch=%s", (DataTaskStatus.Success.value,task_batch))
         return (total_data,total_data_institution)
     
-    def data_part_process(self,code,total_data,start_date=None,end_date=None,period=None,market=None,savepath=None,institution=False):
+    def data_part_process(self,code,total_data,start_date=None,end_date=None,period=None,market=None,savepath=None,institution=False,no_total_file=False):
         # 取得相关数据，子类实现
         item_data = self.extract_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market,institution=institution)
+        # 如果使用股票文件独立加载，则在此加载csv文件,并合并刚刚下载的数据
+        if no_total_file:
+            try:
+                item_df = self.load_item_df(code,period=period,institution=institution) 
+                # 去重，如果之前的日期和之后导入的数据有日期有重合，则删除之前的重复部分
+                item_filter_df = item_df[~item_df["datetime"].isin(item_data["datetime"])]
+                item_data = pd.concat([item_filter_df,item_data])
+            except Exception as e:
+                logger.error("load_item_df fail:{},err:{}".format(code,e))
+            
         if item_data is not None:
             # 每个股票分别保存csv到本地
             self.export_item_data(code,item_data,is_complete=True,savepath=savepath,period=period,institution=institution)  

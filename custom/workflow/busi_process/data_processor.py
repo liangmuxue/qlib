@@ -18,7 +18,7 @@ class DataProcessor(BaseProcessor):
         # 设置全量导入完成标志
         self.has_finish_complete_import = False
      
-    def build_real_template(self,template,config=None):
+    def build_real_template(self,template,working_day=None,config=None):
         """根据原配置模板，生成实际配置文件"""
         
         real_template = copy.deepcopy(template)
@@ -65,14 +65,15 @@ class DataProcessor(BaseProcessor):
                 end_date = working_day
             elif fill_history:
                 # 根据标志,追加以前没有导入的记录
-                start_date = working_day  
+                start_date = config["kwargs"]["start_date"]  
                 end_date = working_day
             else:
                 # 只导入当天记录
                 start_date = working_day  
                 end_date = working_day        
             
-            task_batch = t.prepare_import_batch(data_task_batch, start_date, end_date, period)    
+            task_batch = t.prepare_import_batch(data_task_batch, start_date, end_date, period)  
+            no_total_file = config["kwargs"]["no_total_file"]
             # 根据批次号挂接对应工作流子任务
             self.wf_task.attach_busi_task(task_batch)
             start_date_indb = local_data_info["end_date"]
@@ -83,7 +84,8 @@ class DataProcessor(BaseProcessor):
                 # 如果是全量,并且是非恢复模式，需要清除之前的数据
                 if not resume:
                     self.clear_local_data(LocalDataSourceType.dataframe.value,period,processor=t)
-            results = t.import_data(task_batch,period=period, start_date=start_date,end_date=end_date,contain_institution=contain_institution,resume=resume) 
+            results = t.import_data(task_batch,period=period, start_date=start_date,end_date=end_date,
+                            contain_institution=contain_institution,resume=resume,no_total_file=no_total_file) 
             if results is None:
                 raise Exception("import_data fail")
             (total_data,total_data_institution) = results
@@ -94,10 +96,11 @@ class DataProcessor(BaseProcessor):
                 if contain_institution:     
                     ori_data_institution = t.load_total_df(period=period,institution=True)        
                     total_data_institution = pd.concat([ori_data_institution,total_data_institution])
-            # 最后统一保存一个文件   
-            t.save_total_df(total_data,period=period)
-            if contain_institution:
-                t.save_total_df(total_data_institution,period=period,institution=True)       
+            if not no_total_file:
+                # 最后统一保存一个文件   
+                t.save_total_df(total_data,period=period)
+                if contain_institution:
+                    t.save_total_df(total_data_institution,period=period,institution=True)       
             # 标志全量导入已完成              
             if is_complete:
                 self.has_finish_complete_import = True

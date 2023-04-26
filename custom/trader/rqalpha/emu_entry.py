@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from rqalpha import run_file
+from trader.rqalpha import run_file
 
 import qlib
 import fire
@@ -18,7 +18,7 @@ from trader.rqalpha.ml_context import MlIntergrate
 from trader.data_viewer import DataViewer
     
 def start_rqalpha(config_file):
-    """"回测入口，整合glib的工作流配置方式，与rqalpha结合"""
+    """"仿真测试入口，整合glib的工作流配置方式，与rqalpha结合"""
     
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)   

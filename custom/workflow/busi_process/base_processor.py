@@ -109,7 +109,7 @@ class BaseProcessor(object):
             try:
                 # 根据配置，决定是否全部个性化运行
                 if "indiv" in config and config["indiv"] is True:
-                    self.sub_run(working_day=working_day)
+                    self.sub_run(working_day=working_day,resume=resume)
                 else:
                     exp_manager = C["exp_manager"]
                     uri_folder = "mlruns"

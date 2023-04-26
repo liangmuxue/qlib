@@ -18,7 +18,8 @@ def test_pytdx():
     from pytdx.hq import TdxHq_API
     api = TdxHq_API()
     with api.connect('119.147.212.81', 7709):
-        data = api.get_security_bars(0,5, '000001', 14448-480, 480)
+        # data = api.get_security_bars(0,5, '000001', 14448-480, 480)
+        data = api.get_security_quotes([(0, '000001'), (1, '600300')])
         print("data size:{}".format(len(data)))
 
 def test_pytdx_code():

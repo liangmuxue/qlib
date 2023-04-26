@@ -69,7 +69,7 @@ class MlIntergrate():
         self.pred_recorder = recorder
         self.kwargs = kwargs
 
-    def prepare_data(self):   
+    def prepare_data(self,pred_date):   
         # 加载预测文件
         self.pred_df = self.load_pred_data()
          

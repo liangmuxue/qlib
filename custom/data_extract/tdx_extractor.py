@@ -39,15 +39,26 @@ class TdxExtractor(HisDataExtractor):
         
         # 任务开始时初始化连接，后续保持使用此连接
         self.api.connect(self.host,self.port)       
-        try: 
-            super().import_data_within_workflow(wf_task_id,start_date=start_date,end_date=end_date,period=period,
-                                    is_complete=is_complete,contain_institution=contain_institution,fill_history=fill_history)
-        except Exception as e:
-            logger.error("import_data fail:",e)            
+        flag = False
+        cnt = 0
+        while True:
+            if flag:
+                break
+            try: 
+                super().import_data_within_workflow(wf_task_id,start_date=start_date,end_date=end_date,period=period,
+                                        is_complete=is_complete,contain_institution=contain_institution,fill_history=fill_history)
+                flag = True   
+            except Exception as e:
+                logger.error("import_data fail:",e)    
+                self.reconnect()     
+                cnt += 1
+                logger.info("reconnect time:{}".format(cnt)) 
+                continue  
         # 任务结束时关闭连接
         self.api.disconnect()
                     
-    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False):
+    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,
+                    contain_institution=False,resume=False,no_total_file=False):
         """
             取得所有股票历史行情数据
             Params:
@@ -60,11 +71,21 @@ class TdxExtractor(HisDataExtractor):
         # 任务开始时初始化连接，后续保持使用此连接
         self.api.connect(self.host,self.port)     
         results = None  
-        try: 
-            results = super().import_data(task_batch=task_batch, start_date=start_date, end_date=end_date,
-                                           period=period,contain_institution=contain_institution,resume=resume)
-        except Exception as e:
-            logger.exception("tdx import_data fail:")            
+        flag = False
+        cnt = 0
+        while True:
+            if flag:
+                break            
+            try: 
+                results = super().import_data(task_batch=task_batch, start_date=start_date, end_date=end_date,
+                                               period=period,contain_institution=contain_institution,resume=resume,no_total_file=no_total_file)
+                flag = True  
+            except Exception as e:
+                logger.exception("tdx import_data fail:")      
+                self.reconnect()     
+                cnt += 1
+                logger.info("reconnect time:{}".format(cnt)) 
+                continue                        
         # 任务结束时关闭连接
         self.api.disconnect()
         return results
@@ -152,6 +173,11 @@ class TdxExtractor(HisDataExtractor):
         # exceed_number = before_number - item_number
         return start_number,end_number
 
+    def get_real_data(self,instrument_code,market):  
+        """取得实时数据"""
+        
+        api = self.api
+        data = api.get_security_quotes([(market, instrument_code)])
         
            
     

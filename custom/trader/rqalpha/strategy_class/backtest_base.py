@@ -28,13 +28,16 @@ TRADE_COLUMNS = ["trade_date","instrument","side","price","quantity","total_pric
 class BaseStrategy():
     """交易对象处理BASE类"""
     
-    def __init__(self):
+    def __init__(self,proxy_name="rqalpha"):
         dbaccessor = DbAccessor({})
         # 只处理具备数据的股票,因此生成库内股票字典
         result_rows = dbaccessor.do_query("select code,market from instrument_info")
         self.instruments_dict = {}  
         for row in result_rows:
             self.instruments_dict[int(row[0])] = {"code":row[0],"market":row[1]}
+    
+    def build_proxy_with_name(self,proxy_name):
+        return None
     
     def __build_with_context__(self,context,workflow_mode=False):
         self.context = context
@@ -53,7 +56,8 @@ class BaseStrategy():
         # 注册订单事件
         context.fired = False
         subscribe_event(EVENT.TRADE, self.on_trade_handler)
-        subscribe_event(EVENT.ORDER_CREATION_PASS, self.on_order_handler)           
+        subscribe_event(EVENT.ORDER_CREATION_PASS, self.on_order_handler)     
+        subscribe_event(EVENT.ORDER_CREATION_REJECT, self.on_order_handler)        
     
     def first_period_of_day(self,dt,frequency=PeriodType.MIN5.value):
         if frequency==PeriodType.MIN5.value:

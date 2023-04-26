@@ -35,7 +35,7 @@ class AkExtractor(HisDataExtractor):
         data_sh = all_sh[["证券代码","证券简称","market"]].values
         return np.concatenate((data_sh,data_sz),axis=0)
           
-    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value,institution=False):  
+    def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value,institution=False,no_total_file=False):  
         """取得单个股票历史行情数据"""
         
         # AKSHARE目前只支持按照日导入
