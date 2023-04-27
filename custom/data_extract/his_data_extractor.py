@@ -15,7 +15,7 @@ from cus_utils.db_accessor import DbAccessor
 from cus_utils.log_util import AppLogger
 from persistence.common_dict import CommonDictType,CommonDict
 from pandas._libs.tslibs import period
-
+from trader.utils.date_util import get_tradedays_dur,date_string_transfer
 from scripts.dump_bin import DumpDataAll
 
 logger = AppLogger()
@@ -199,7 +199,8 @@ class HisDataExtractor:
                         (DataTaskType.DataImport.value,task_batch,self.backend_channel,start_date,end_date,DataTaskStatus.Start.value,period))
         return task_batch
  
-    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False,no_total_file=False):
+    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,is_complet=False,
+                    contain_institution=False,resume=False,no_total_file=False,auto_import=False):
         """
             取得所有股票历史行情数据
             Params:
@@ -208,13 +209,124 @@ class HisDataExtractor:
                 end_date 导入数据的结束日期
                 period 频次类别
                 contain_institution 是否包含复权数据
+                auto_import 是否自动计算日期
+                ori_data 原数据
         """
                 
         task_batch = self.prepare_import_batch(task_batch, start_date, end_date, period)
-        return self.import_data_part(task_batch=task_batch,start_date=start_date,end_date=end_date,period=period,
+       
+        if auto_import:
+            return self.import_data_auto(task_batch=task_batch,end_date=end_date,period=period,
+                                     contain_institution=contain_institution,no_total_file=no_total_file)
+        return self.import_data_part(task_batch=task_batch,start_date=start_date,end_date=end_date,period=period,is_complet=is_complet,
                                      contain_institution=contain_institution,resume=resume,no_total_file=no_total_file)
-                                
-    def import_data_part(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,contain_institution=False,resume=False,no_total_file=False):
+
+    def import_data_auto(self,task_batch=0,end_date=20500101,period=PeriodType.DAY.value,
+                         contain_institution=False,no_total_file=False):
+        """取得所有股票历史行情数据,自动根据原有数据日期匹配导入日期范围"""
+        
+        # 股票编码从数据库表中获得
+        sql = "select code,market from instrument_info where delete_flag=0 order by code "
+        result_rows = self.dbaccessor.do_query(sql)            
+        savepath = "{}/{}".format(self.item_savepath,get_period_name(period))
+        total_data = None
+        total_data_institution = None
+        if not os.path.exists(savepath):
+            os.makedirs(savepath) 
+        
+        # 准备全量文件，用于后续日期筛选
+        if not no_total_file:
+            ori_data = self.load_total_df(period) 
+            if contain_institution:
+                ori_data_institution = self.load_total_df(period,institution=True) 
+        for row in result_rows:
+            code = row[0]
+            market = row[1]       
+            if not no_total_file:
+                # 从全量文件里摘出当前股票数据
+                ori_data_item = ori_data[ori_data["code"]==code]
+                if contain_institution:
+                    ori_data_item_institution = ori_data_institution[ori_data_institution["code"]==code]   
+            else:
+                # 从单独数据文件中加载
+                try:
+                    ori_data_item = self.load_item_df(code, period=period) 
+                except Exception as e:
+                    logger.warning("load_item_df fail:{}".format(e)) 
+                    ori_data_item = None
+                if contain_institution:
+                    try:
+                        ori_data_item_institution = self.load_item_df(code, period=period,institution=True)   
+                    except Exception as e:
+                        logger.warning("load_item_df fail:{}".format(e)) 
+                        ori_data_item_institution = None                    
+            # 单个股票数据抽取         
+            item_data = self.data_part_auto_process(code,end_date=end_date,period=period,market=market,savepath=savepath,
+                                                     institution=False,ori_data_item=ori_data_item)
+            if item_data is None:
+                continue
+            logger.debug("item data ok:{}".format(code))
+            self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=%s where task_batch=%s", (code,task_batch))
+            # 合并所有的股票数据
+            if total_data is None:
+                total_data = item_data
+            else:
+                total_data = pd.concat([total_data,item_data])
+            if contain_institution:
+                item_data_institution = self.data_part_auto_process(code,end_date=end_date,period=period,market=market,savepath=savepath,
+                                                    institution=True,ori_data_item=ori_data_item_institution)
+                if total_data_institution is None:
+                    total_data_institution = item_data_institution
+                else:
+                    total_data_institution = pd.concat([total_data_institution,item_data_institution])     
+        # 保存全量文件    
+        if not no_total_file: 
+            self.save_total_df(total_data,period=period)    
+            if contain_institution:
+                self.save_total_df(total_data_institution,period=period,institution=True)      
+        self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=%s where task_batch=%s", (code,task_batch))
+        return (total_data,total_data_institution)
+        
+    def data_part_auto_process(self,code,end_date=None,period=None,savepath=None,market=None,institution=False,ori_data_item=None):
+        """数据抽取，根据原有数据自行计算开始日期"""
+ 
+        if ori_data_item is None:
+            start_date = self.get_first_default_date()
+            origin_data = None
+        else:
+            # 根据原有数据，取得最近日期，并从下一天作为开始日期
+            start_date = self.get_last_data_date(ori_data_item,period)
+            # 清除原来数据冗余的部分
+            origin_data = self.clear_redun_data(ori_data_item,start_date)
+        # 取得相关数据，子类实现
+        item_data = self.extract_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market,institution=institution)
+        if item_data is None:
+            logger.info("item_data None:{}".format(code))
+            return origin_data
+        if ori_data_item is None:    
+            total_data = item_data
+        else:
+            total_data = pd.concat([origin_data,item_data],axis=0)
+        # 保存csv数据文件
+        self.export_item_data(code,total_data,is_complete=True,savepath=savepath,period=period,institution=institution)  
+        return total_data
+    
+    def get_first_default_date(self):
+        return "20080101"
+        
+    def get_last_data_date(self,data_item,period):    
+        """取得存储数据中的最近日期"""
+        
+        cur_date = data_item["datetime"].max()
+        tar_date = get_tradedays_dur(date_string_transfer(cur_date,direction=2),1)
+        tar_date = tar_date.strftime("%Y%m%d")
+        return tar_date     
+     
+    def clear_redun_data(self,ori_data_item,date):
+        return ori_data_item
+           
+    def import_data_part(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,is_complete=False,
+                         contain_institution=False,resume=False,no_total_file=False):
         """取得所有股票历史行情数据,去除批次号部分"""
         
         last_item_code = self.dbaccessor.do_query("select last_item_code from data_task where task_batch={}".format(task_batch))[0][0]
@@ -255,6 +367,11 @@ class HisDataExtractor:
             # 记录最后一条子任务号码，以便后续断点继续
             self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=%s where task_batch=%s", (code,task_batch))
             
+        if not no_total_file:
+            # 最后统一保存一个文件   
+            self.save_total_df(total_data,period=period)
+            if contain_institution:
+                self.save_total_df(total_data_institution,period=period,institution=True)                
         # 任务结束后设置状态为已成功  
         self.dbaccessor.do_inserto_withparams("update data_task set status=%s where task_batch=%s", (DataTaskStatus.Success.value,task_batch))
         return (total_data,total_data_institution)

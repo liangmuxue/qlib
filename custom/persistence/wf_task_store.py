@@ -100,11 +100,11 @@ class WfTaskStore(BasePersistence):
         """获取子工作流配置 """
         
         sql = "select id,name,type,sequence,main_yaml_template,start_date,end_date," \
-            "frequency,dynamic_config from workflow_detail where workflow_id={} and del_flag=0 order by sequence asc".format(workflow_id)
+            "frequency,dynamic_config,extend_config from workflow_detail where workflow_id={} and del_flag=0 order by sequence asc".format(workflow_id)
         rows = self.dbaccessor.do_query(sql)
         rtn_obj = [{"id":row[0],"name":row[1],"type":row[2],
                     "sequence":row[3],"main_yaml_template":row[4],
-                    "start_date":row[5],"end_date":row[6],"frequency":row[7],"dynamic_config":row[8]} for row in rows]
+                    "start_date":row[5],"end_date":row[6],"frequency":row[7],"dynamic_config":row[8],"extend_config":row[9]} for row in rows]
         return rtn_obj    
     
     def create_subtask(self,main_task,config,working_day):

@@ -6,6 +6,7 @@ import pandas as pd
 import datetime
 
 from trader.utils.date_util import tradedays
+from trader.utils.date_util import get_tradedays_dur,date_string_transfer
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -58,7 +59,7 @@ class TdxExtractor(HisDataExtractor):
         self.api.disconnect()
                     
     def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,
-                    contain_institution=False,resume=False,no_total_file=False):
+                    contain_institution=False,resume=False,no_total_file=False,auto_import=False):
         """
             取得所有股票历史行情数据
             Params:
@@ -77,7 +78,7 @@ class TdxExtractor(HisDataExtractor):
             if flag:
                 break            
             try: 
-                results = super().import_data(task_batch=task_batch, start_date=start_date, end_date=end_date,
+                results = super().import_data(task_batch=task_batch, start_date=start_date, end_date=end_date,auto_import=auto_import,
                                                period=period,contain_institution=contain_institution,resume=resume,no_total_file=no_total_file)
                 flag = True  
             except Exception as e:
@@ -179,5 +180,30 @@ class TdxExtractor(HisDataExtractor):
         api = self.api
         data = api.get_security_quotes([(market, instrument_code)])
         
-           
+    def get_last_data_date(self,data_item,period):    
+        """取得存储数据中的最近日期"""
+        
+        if period==PeriodType.MIN5.value:
+            cur_date = data_item["datetime"].max()
+            # 分钟模式下，如果最后时间不足15点，则说明数据不完整，需要排除
+            if cur_date.hour<15:
+                cur_date = str(cur_date.date())
+                tar_date = date_string_transfer(cur_date,direction=1)
+            else:
+                cur_date = str(cur_date.date())
+                tar_date = get_tradedays_dur(date_string_transfer(cur_date,direction=2),1)
+                tar_date = tar_date.strftime("%Y%m%d")     
+            return tar_date  
+        else:
+            return super().get_last_data_date(data_item,period)
+        
+    def clear_redun_data(self,ori_data_item,date):
+        """清除重复部分的数据"""
+        
+        data_item = ori_data_item[ori_data_item["datetime"]<date]
+        return data_item        
+        
+    def get_first_default_date(self):
+        return "20220101"        
+        
     

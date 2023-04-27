@@ -3,7 +3,7 @@ import pickle
 import yaml
 import sys, os
 from pathlib import Path
-
+from datetime import datetime
 import qlib
 from qlib.model.trainer import task_train
 from qlib.config import C
@@ -49,7 +49,10 @@ class ResultView(object):
     def view_csv_data(self,csv_file):
         with open(csv_file, "rb") as f:
             item_df = pd.read_csv(f)        
-            logger.info("df date min:{} and max:{}".format(item_df.datetime.min(),item_df.datetime.max()))     
+            logger.info("df date min:{} and max:{}".format(item_df.datetime.min(),item_df.datetime.max()))  
+            item_df["datetime_dt"] = pd.to_datetime(item_df.datetime)
+            test_df = item_df[item_df["datetime_dt"].dt.strftime("%Y%m%d").astype(int)>=20230401]
+            # logger.info("test_df datetime:{}".format(test_df.datetime.unique()))   
     
     def view_pred_data(self,pred_data_file):
         with open(pred_data_file, "rb") as fin:
@@ -60,10 +63,10 @@ if __name__ == "__main__":
     # task = WorkflowTask(task_batch=2,workflow_id=1,resume=True)
     view = ResultView()
     csv_file = "/home/qdata/stock_data/ak/whole_data/day/600008_institution.csv"
-    csv_file = "/home/qdata/stock_data/ak/item/day/600009_institution.csv"
-    csv_file = "/home/qdata/stock_data/tdx/item/5m/000539.csv"
+    csv_file = "/home/qdata/stock_data/ak/item/day/601800_institution.csv"
+    csv_file = "/home/qdata/stock_data/tdx/item/5m/000565.csv"
     view.view_csv_data(csv_file)
-    # data_file = "/home/qdata/stock_data/ak/all_day_institution.pickle"
+    data_file = "/home/qdata/stock_data/ak/all_day_institution.pickle"
     # data_file = "/home/qdata/stock_data/tdx/all_5m.pickle"
     # view.view_whole_data(data_file)
     # view.view_qlib_data("custom/config/stat/dataset.yaml")    

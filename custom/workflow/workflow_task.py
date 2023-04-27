@@ -527,10 +527,14 @@ if __name__ == "__main__":
     # 增量导入
     # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_daily",resume=False)
     # task = WorkflowTask(task_batch=86,workflow_name="wf_data_import_daily",resume=False)
-        
+    
+    # auto导入
+    # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_auto",resume=False)
+    task = WorkflowTask(task_batch=113,workflow_name="wf_data_import_auto",resume=True)
+            
     # 回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
-    task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)    
+    # task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)    
     
     task.start_task()
         
