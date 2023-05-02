@@ -29,13 +29,14 @@ class WorkflowSubStatus(Enum):
     
 @unique
 class FrequencyType(Enum):
-    """任务频次类别，1 日 2 周 3 月 4 季度 5 年"""
+    """任务频次类别，1 日 2 周 3 月 4 季度 5 年 6 半年"""
     
     DAY = 1 
     WEEK = 2  
     MONTH = 3 
     QUARTER = 4      
     YEAR = 5    
+    HALF_YEAR = 6
     
 @unique
 class LocalDataSourceType(Enum):

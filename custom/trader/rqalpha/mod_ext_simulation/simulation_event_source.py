@@ -1,4 +1,5 @@
 from datetime import timedelta, datetime, time
+import time as tm
 
 from rqalpha.environment import Environment
 from rqalpha.interface import AbstractEventSource
@@ -8,6 +9,8 @@ from rqalpha.utils.datetime_func import convert_int_to_datetime
 from rqalpha.const import DEFAULT_ACCOUNT_TYPE, INSTRUMENT_TYPE
 from rqalpha.utils.i18n import gettext as _
 
+from cus_utils.log_util import AppLogger
+logger = AppLogger()
 
 class SimulationEventSource(AbstractEventSource):
     def __init__(self, env):
@@ -38,7 +41,8 @@ class SimulationEventSource(AbstractEventSource):
         current_dt = datetime.combine(trading_date, time(9, 31))
         am_end_dt = current_dt.replace(hour=11, minute=30)
         pm_start_dt = current_dt.replace(hour=13, minute=1)
-        pm_end_dt = current_dt.replace(hour=15, minute=0)
+        # 修改收盘时间用于仿真测试
+        pm_end_dt = current_dt.replace(hour=18, minute=0)
 
         delta_minute = timedelta(minutes=1)
         while current_dt <= am_end_dt:
@@ -72,6 +76,7 @@ class SimulationEventSource(AbstractEventSource):
 
     def events(self, start_date, end_date, frequency):
         trading_dates = self._env.data_proxy.get_trading_dates(start_date, end_date)
+        frequency_sim = self._env.config.base.frequency_sim
         if frequency == "1d":
             # 根据起始日期和结束日期，获取所有的交易日，然后再循环获取每一个交易日
             for day in trading_dates:
@@ -85,7 +90,7 @@ class SimulationEventSource(AbstractEventSource):
                 yield Event(EVENT.OPEN_AUCTION, calendar_dt=dt_before_trading, trading_dt=dt_before_trading)
                 yield Event(EVENT.BAR, calendar_dt=dt_bar, trading_dt=dt_bar)
                 yield Event(EVENT.AFTER_TRADING, calendar_dt=dt_after_trading, trading_dt=dt_after_trading)
-        elif frequency == '1m':
+        elif frequency == '1m' and not frequency_sim:
             for day in trading_dates:
                 before_trading_flag = True
                 date = day.to_pydatetime()
@@ -181,10 +186,10 @@ class SimulationEventSource(AbstractEventSource):
 
                 dt = self._get_after_trading_dt(date)
                 yield Event(EVENT.AFTER_TRADING, calendar_dt=dt, trading_dt=dt)
-        elif frequency == "sim":
+        elif frequency == "1m" and frequency_sim:
             # 实时模拟仿真模式,每秒检查，分钟推送
             before_trading_flag = True
-            date = day.to_pydatetime()
+            date = trading_dates[0].to_pydatetime()
             last_dt = None
             done = False
 
@@ -220,17 +225,21 @@ class SimulationEventSource(AbstractEventSource):
                         last_dt = calendar_dt
                         exit_loop = False
                         break
-                    # 与当前实际时间比较，如果不一致则等待
-                    time_not_match = True
-                    while time_not_match:
+                    # 与当前实际时间比较，如果不一致则需要对齐
+                    while True:
                         now_time = datetime.now()
-                        if calendar_dt.hour!=now_time.hour or calendar_dt.minute!=now_time.minute:
-                            time.sleep(1)
+                        # 交易时间大于当前时间，等待
+                        if calendar_dt.hour>now_time.hour or (calendar_dt.hour==now_time.hour and calendar_dt.minute>now_time.minute):
+                            logger.debug("need wait,calendar_dt.hour:{},calendar_dt.minute:{}".format(calendar_dt.hour,calendar_dt.minute))
+                            tm.sleep(3)
                             continue
-                        else:
-                            time_not_match = False
-                    # yield handle bar
-                    yield Event(EVENT.BAR, calendar_dt=calendar_dt, trading_dt=trading_dt)
+                        # 交易时间小于当前时间，跳入下一交易时间
+                        if calendar_dt.hour>now_time.hour or (calendar_dt.hour==now_time.hour and calendar_dt.minute>now_time.minute):
+                            logger.debug("need next,calendar_dt.hour:{},calendar_dt.minute:{}".format(calendar_dt.hour,calendar_dt.minute))
+                            break                      
+                        # 交易时间等于当前时间，执行bar事件
+                        yield Event(EVENT.BAR, calendar_dt=calendar_dt, trading_dt=trading_dt)
+                        break
                 if exit_loop:
                     done = True
 

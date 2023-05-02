@@ -92,14 +92,16 @@ task:
        rqalpha:
           ignore_mode: False
           base: 
-             start_date: "2023-04-26"
-             end_date: "2023-04-27"
+             start_date: "2023-04-28"
+             end_date: "2023-04-29"
              benchmark: "000001.XSHG"
              frequency: "1m"
+             frequency_sim: True
              accounts: 
                 stock: 100000
           extra: 
              log_level: "verbose"
+             stock_data_path: /home/qdata/stock_data
              context_vars:
                 strategy_class: 
                    class: MinuteStrategy

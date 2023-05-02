@@ -9,7 +9,7 @@ from rqalpha.const import MATCHING_TYPE, RUN_TYPE
 
 from trader.rqalpha.mod_ext_simulation.simulation_broker import ExtSimulationBroker
 from rqalpha.mod.rqalpha_mod_sys_simulation.signal_broker import SignalBroker
-from rqalpha.mod.rqalpha_mod_sys_simulation.simulation_event_source import SimulationEventSource
+from trader.rqalpha.mod_ext_simulation.simulation_event_source import SimulationEventSource
 
 class SimulationMod(AbstractMod):
     def __init__(self):

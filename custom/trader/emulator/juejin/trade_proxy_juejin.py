@@ -21,7 +21,7 @@ logger = AppLogger()
 
 @unique
 class OrderMode(Enum):
-    """卖出类别，1.根据预测数据 2.止盈 3.止损 4.超期卖出"""
+    """订单编号类别，1 掘金订单 2 rq订单 3 股票代码+价格模式"""
     JUEJIN = 1 
     RQALPHA = 2
     SYMBOL = 3
@@ -29,32 +29,28 @@ class OrderMode(Enum):
 class TraderSpi(object):
     def __init__(self):
         self.cache_orders = []
-    
-    def append_order(self,order):
-        self.cache_orders.append(order)
-        logger.debug("append order,self.cache_orders:{}".format(self.cache_orders))
-    
-    def find_cache_order(self,juejin_order=None,order_id=None,mode=OrderMode.JUEJIN.value):
+
+    def find_cache_order(self,juejin_order=None):
         """查找已生成订单
            Params: 
-               order_id 订单编号
-               mode 订单编号类别，1 掘金订单 2 rq订单
+               juejin_order 掘金订单对象信息
+           Return:
+               order 订单对象
+               need_append boolean 是否需要添加到订单列表中
         """
         
-        # 新增订单阶段，只能通过股票代码和挂单金额进行查找
-        if mode==OrderMode.SYMBOL.value:
-            order_book_id = self.transfer_symbol(juejin_order.symbol, mode=1)
-            logger.debug("juejin_order.symbol:{},price:{}".format(order_book_id,juejin_order.price))
-            for order in ctx.cached_orders:
-                logger.debug("order.order_book_id:{},order.price:{}".format(order.order_book_id,order.price))
-                # 如果委托价格和股票代码都相等，则匹配该订单
-                if order.order_book_id==order_book_id and order.price==juejin_order.price:
-                    return order
-            return None
-        # 后续阶段通过订单自身的编号进行匹配
+        logger.debug("find_cache_order in, mode:{}".format(juejin_order))
+        # 匹配已存储订单
         for order in ctx.cached_orders:
-            if order["juejin_order"].cl_ord_id==order_id:
-                return order
+            # 如果当前不包含掘金订单信息，则使用代码和价格查询
+            if not hasattr(order,"juejin_order"):
+                order_book_id = self.transfer_symbol(juejin_order.symbol, mode=1)
+                if order.order_book_id==order_book_id and order.price==juejin_order.price:
+                    return order,True               
+            else:
+                if order.juejin_order.cl_ord_id==juejin_order.cl_ord_id:
+                    return order,False
+        return None,False
     
     def transfer_symbol(self,symbol,mode=1):
         """股票代码规范转换,1--掘金转RQ 2--RQ转掘金"""
@@ -84,74 +80,91 @@ class TraderSpi(object):
     
     # 委托状态变化时触发
     def on_order_status(self,juejin_order):
-        logger.info('order_stats_count:{}'.format(juejin_order))
-        # 已报单事件回调
-        if juejin_order.status==OrderStatus_New:
-            order = self.find_cache_order(juejin_order,mode=OrderMode.SYMBOL.value)
-            if order is None:
-                logger.error("not found order:{}".format(juejin_order))
-                return            
-            # 放入掘金订单信息
-            order["juejin_order"] = juejin_order            
-            order.active()
-            ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CREATION_PASS, account=account, order=order))     
-        # 成交事件回调
-        if juejin_order.status==OrderStatus_Filled:
-            order = self.find_cache_order(juejin_order.cl_ord_id,mode=OrderMode.JUEJIN.value)
-            if order is None:
-                logger.error("not found order:{}".format(juejin_order))
-                return               
-            order.status = RQ_ORDER_STATUS.FILLED
-        # 订单拒绝事件回调
-        if juejin_order.status==OrderStatus_Rejected:
-            logger.debug("reject process")
-            order = self.find_cache_order(juejin_order,mode=OrderMode.SYMBOL.value)
-            if order is None:
-                logger.error("not found order:{}".format(juejin_order))
-                return       
-            logger.debug("order get,status is:{}".format(order._status))        
-            order._status = RQ_ORDER_STATUS.REJECTED    
-            # 发布RQ事件
-            ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CREATION_REJECT, account=account, order=order))    
-        # 订单已撤单事件回调
-        if juejin_order.status==OrderStatus_Canceled:
-            order = self.find_cache_order(order_id=juejin_order.cl_ord_id,mode=OrderMode.JUEJIN.value)
-            if order is None:
-                logger.error("not found order:{}".format(juejin_order))
-                return               
-            order.status = RQ_ORDER_STATUS.CANCELLED 
-            ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CANCELLATION_PASS, account=account, order=order))
+        try:
+            logger.info('order_stats_count:{}'.format(juejin_order))
+            # 已报单事件回调
+            if juejin_order.status==OrderStatus_New:
+                order,need_append = self.find_cache_order(juejin_order)
+                if order is None:
+                    logger.error("not found order:{}".format(juejin_order))
+                    return        
+                # 放入掘金订单信息
+                if need_append:
+                    order.juejin_order = juejin_order     
+                order.active()
+                logger.info('pubelish_event creation:{}'.format(order))
+                ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CREATION_PASS, account=account, order=order))     
+            # 成交事件回调
+            if juejin_order.status==OrderStatus_Filled:
+                logger.debug("OrderStatus_Filled cl_ord_id find:{}".format(juejin_order.cl_ord_id))
+                order,_ = self.find_cache_order(juejin_order)
+                if order is None:
+                    logger.error("not found order:{}".format(juejin_order))
+                    return               
+                order._status = RQ_ORDER_STATUS.FILLED
+            # 订单拒绝事件回调
+            if juejin_order.status==OrderStatus_Rejected:
+                logger.debug("reject process")
+                order,_ = self.find_cache_order(juejin_order)
+                if order is None:
+                    logger.error("not found order:{}".format(juejin_order))
+                    return       
+                logger.debug("order get,status is:{}".format(order._status))        
+                order._status = RQ_ORDER_STATUS.REJECTED    
+                # 发布RQ事件
+                ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CREATION_REJECT, account=account, order=order))    
+            # 订单已撤单事件回调
+            if juejin_order.status==OrderStatus_Canceled:
+                logger.debug("OrderStatus_Canceled cl_ord_id find:{}".format(juejin_order.cl_ord_id))
+                order,_ = self.find_cache_order(order_id=juejin_order)
+                if order is None:
+                    logger.error("not found order:{}".format(juejin_order))
+                    return               
+                order.status = RQ_ORDER_STATUS.CANCELLED 
+                ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CANCELLATION_PASS, account=account, order=order))
+        except Exception as e:
+            logger.exception("on_order_status error")
                                  
     def on_execution_report(self,execrpt):
         """委托执行回报的事件回调，委托成交时触发"""        
-
-        order = self.find_cache_order(order_id=execrpt.cl_ord_id,mode=OrderMode.JUEJIN.value)
-        if order is None:
-            logger.error("not found order:{}".format(execrpt.cl_ord_id))
-            return     
-        trade = Trade.__from_create__(
-            order_id=order.order_id,
-            price=execrpt.price,
-            amount=execrpt.volumn,
-            side=order.side,
-            position_effect=order.position_effect,
-            order_book_id=order.order_book_id,
-            # 冻结价格取当前成交价格
-            frozen_price=execrpt.price,
-            # 当日可平仓位取0
-            close_today_amount=0
-        )
-        order.fill(trade)        
-        trade = order["trade"]   
-        # 手续费
-        trade._commission = execrpt.commission
-        # 印花税
-        trade._tax = self._env.get_trade_tax(trade)     
-        self.context.event_bus.publish_event(Event(EVENT.TRADE, account=account, trade=trade, order=order))   
-           
+        
+        try:
+            logger.info("on_execution_report in:{}".format(execrpt))        
+            order,need_append = self.find_cache_order(execrpt)
+            if order is None:
+                logger.error("not found order:{}".format(execrpt.cl_ord_id))
+                return     
+            # 有可能先执行on_execution_report事件，则在此放入掘金订单信息
+            if need_append:
+                order.juejin_order = execrpt                 
+            trade = Trade.__from_create__(
+                order_id=order.order_id,
+                price=execrpt.price,
+                amount=execrpt.volume,
+                side=order.side,
+                position_effect=order.position_effect,
+                order_book_id=order.order_book_id,
+                # 冻结价格取当前成交价格
+                frozen_price=execrpt.price,
+                # 当日可平仓位取0
+                close_today_amount=0
+            )
+            logger.debug("trade add ok")
+            order.fill(trade)       
+            logger.debug("order fill") 
+            # 手续费
+            trade._commission = execrpt.commission
+            # 印花税
+            logger.debug("get_trade_tax begin") 
+            trade._tax = ctx.context.get_trade_tax(trade)     
+            ctx.context.event_bus.publish_event(Event(EVENT.TRADE, account=account, trade=trade, order=order))   
+        except Exception as e:
+            logger.exception("on_execution_report error")
+                                            
     # 交易服务连接成功后触发
     def on_trade_data_connected(self):
-        logger.info('on_trade_data_connected in.................')
+        cash = get_cash()
+        logger.info('on_trade_data_connected in.................,cash:{}'.format(cash))
         
     # 交易服务断开后触发
     def on_trade_data_disconnected(self):

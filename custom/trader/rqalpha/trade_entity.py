@@ -100,6 +100,7 @@ class TradeEntity():
         """根据订单号查询订单"""
         
         trade_data_df = self.trade_data_df
+        logger.debug("trade_data_df columns:{}".format(trade_data_df.columns))
         target_df = trade_data_df[(trade_data_df["order_id"]==order_id)]
         return target_df
          

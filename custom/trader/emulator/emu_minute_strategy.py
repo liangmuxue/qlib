@@ -27,16 +27,20 @@ class MinuteStrategy(BaseStrategy):
         # 穿透取得自定义datasource，后续可以直接使用
         env = Environment.get_instance()
         self.ds = env.data_proxy._data_source
-           
+    
+    def init_env(self):
+
+        # 初始化交易代理对象
+        emu_args = self.context.config.mod.ext_emulation_mod.emu_args
+        self.trade_proxy = JuejinTrade(token=emu_args["token"],
+                end_point=emu_args["end_point"],account_id=emu_args["account_id"],account_alias=emu_args["account_alias"])        
+        # 初始资金需要从仿真（实盘）处获取
+        self.context._stock_starting_cash
+         
     def before_trading(self,context):
         """交易前准备"""
         
         logger.info("before_trading.now:{}".format(context.now))
-        
-        if self.trade_proxy is None:
-            emu_args = context.config.mod.ext_emulation_mod.emu_args
-            self.trade_proxy = JuejinTrade(token=emu_args["token"],
-                    end_point=emu_args["end_point"],account_id=emu_args["account_id"],account_alias=emu_args["account_alias"])
             
         pred_date = int(datetime.datetime.now().strftime("%Y%m%d"))
         self.trade_day = pred_date
@@ -185,6 +189,9 @@ class MinuteStrategy(BaseStrategy):
             price = buy_order.kwargs["buy_price"]
             quantity = buy_order.quantity
             order = submit_order(order_book_id,quantity,SIDE.BUY,price=price)
+            if order is None:
+                logger.warning("order submit fail,order_book_id:{}".format(order_book_id))
+                continue
             # 手动累加，如果购买不成功，后续还需要有流程进行再次购买
             position_number += 1
             if position_number>=position_max_number:
@@ -211,6 +218,9 @@ class MinuteStrategy(BaseStrategy):
                 sell_amount = pos_info.quantity
                 # 挂单卖出
                 order = submit_order(order_book_id,sell_amount,SIDE.SELL,price=sell_order.kwargs["sell_price"])
+                if order is None:
+                    logger.warning("order submit fail,order_book_id:{}".format(order_book_id))
+                    continue               
                 order.sell_reason = sell_order.kwargs["sell_reason"]
                 # 添加到跟踪变量
                 self.trade_entity.add_or_update_order(order,str(self.trade_day))

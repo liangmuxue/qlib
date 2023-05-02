@@ -47,17 +47,10 @@ from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
 from cus_utils.metrics import corr_dis,series_target_scale,diff_dis,cel_acc_compute,vr_acc_compute
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
-from losses.mtl_loss import CorrLoss,UncertaintyLoss
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
-from .base_process import BaseNumpyModel
-from numba.core.types import none
-from gunicorn import instrument
 
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import RobustScaler, StandardScaler
 from cus_utils.db_accessor import DbAccessor
-from threading import _enumerate
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger

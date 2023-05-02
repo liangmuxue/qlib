@@ -59,6 +59,9 @@ class BaseStrategy():
         subscribe_event(EVENT.ORDER_CREATION_PASS, self.on_order_handler)     
         subscribe_event(EVENT.ORDER_CREATION_REJECT, self.on_order_handler)        
     
+    def init_env(self):
+        pass
+    
     def first_period_of_day(self,dt,frequency=PeriodType.MIN5.value):
         if frequency==PeriodType.MIN5.value:
             if dt.minute==35:

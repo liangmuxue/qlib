@@ -20,10 +20,10 @@ _STOCK_FIELD_NAMES = [
 class TdxDataSource(BaseDataSource):
     """通达信数据源"""
     
-    def __init__(self, path):
+    def __init__(self, path,stock_data_path):
         super(TdxDataSource, self).__init__(path,{})
-        self.extractor = TdxExtractor()
-        self.extractor_ak = AkExtractor()
+        self.extractor = TdxExtractor(savepath=stock_data_path)
+        self.extractor_ak = AkExtractor(savepath=stock_data_path)
         # 加载完整数据，之前已经从源头下载好了，直接从文件加载
         # self.total_data = self.extractor.load_total_df(period=PeriodType.MIN5.value)        
 

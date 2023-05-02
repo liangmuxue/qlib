@@ -145,7 +145,7 @@ class WorkflowTask(object):
             next_working_day = self.next_working_day(working_day)
             # 如果还是同一天，则等待
             if next_working_day<=working_day:
-                logger.debug("wait for next day:",datetime.now())
+                logger.debug("wait for next day:{}".format(datetime.now()))
                 time.sleep(60)
             # 如果超出结束日期，则退出
             if next_working_day>self.config["end_date"]:
@@ -348,7 +348,7 @@ class WorkflowSubTask(object):
     def get_stock_data_path(self):
         """数据文件路径"""
         
-        filepath = "{}/stock_data".format(self.get_main_dir()) 
+        filepath = "/home/qdata/stock_data"
         return filepath 
     
     def get_trader_data_path(self):
@@ -447,7 +447,6 @@ class WorkflowSubTask(object):
         """判断频次类型"""
         
         working_day_date = datetime.strptime(working_day, '%Y%m%d')
-        season = [1,4,7,10]
         rtn_list = []
         # 肯定是日任务
         rtn_list.append(FrequencyType.DAY.value)
@@ -458,9 +457,15 @@ class WorkflowSubTask(object):
         # 每个与1号执行月任务
         if working_day_date.day==1:
             rtn_list.append(FrequencyType.MONTH.value)      
-        # 每个季度1号执行季度任务
-        if working_day_date.month in season and working_day_date.day==1:
+        # 每个季度最后一天执行季度任务
+        if (working_day_date.month in [3,12] and working_day_date.day==31) or (working_day_date.month in [6,9] and working_day_date.day==30):
             rtn_list.append(FrequencyType.QUARTER.value)
+        # 6月30日，12月31日，执行半年任务
+        if (working_day_date.month==6 and working_day_date.day==30) or (working_day_date.month==12 and working_day_date.day==31):
+            rtn_list.append(FrequencyType.HALF_YEAR.value)           
+        # 12月31日，执行年任务
+        if (working_day_date.month==12 and working_day_date.day==31):
+            rtn_list.append(FrequencyType.YEAR.value)              
         return rtn_list          
     
     
@@ -530,11 +535,11 @@ if __name__ == "__main__":
     
     # auto导入
     # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_auto",resume=False)
-    task = WorkflowTask(task_batch=113,workflow_name="wf_data_import_auto",resume=True)
+    # task = WorkflowTask(task_batch=119,workflow_name="wf_data_import_auto",resume=True)
             
     # 回测工作流
-    # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
-    # task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)    
+    # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow_2023",resume=False)
+    task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)    
     
     task.start_task()
         

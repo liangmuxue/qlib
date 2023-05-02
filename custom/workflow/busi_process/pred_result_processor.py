@@ -45,12 +45,13 @@ class PredResultProcessor(BaseProcessor):
         # 预测开始和结束日期，为当前指定日期（workding day）的下一周(间隔5天)
         pred_len = model_template["kwargs"]["optargs"]["forecast_horizon"]
         working_day_list = self.wf_task.get_calendar_by_seq(self.wf_task.task_entity["sequence"])
-        pred_begin_date = str(working_day_list[0])
-        pred_begin_date = datetime.strptime(pred_begin_date,"%Y%m%d")       
-        pred_end_date = str(working_day_list[-1])
-        pred_end_date = datetime.strptime(pred_end_date,"%Y%m%d")
-        real_template["port_analysis_config"]["backtest"]["pred_start_time"] = pred_begin_date
-        real_template["port_analysis_config"]["backtest"]["pred_end_time"] = pred_end_date
+        if len(working_day_list)>0:
+            pred_begin_date = str(working_day_list[0])
+            pred_begin_date = datetime.strptime(pred_begin_date,"%Y%m%d")       
+            pred_end_date = str(working_day_list[-1])
+            pred_end_date = datetime.strptime(pred_end_date,"%Y%m%d")
+            real_template["port_analysis_config"]["backtest"]["pred_start_time"] = pred_begin_date
+            real_template["port_analysis_config"]["backtest"]["pred_end_time"] = pred_end_date
         # 设置内部数据存储路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()

@@ -188,7 +188,7 @@ class TdxExtractor(HisDataExtractor):
             # 分钟模式下，如果最后时间不足15点，则说明数据不完整，需要排除
             if cur_date.hour<15:
                 cur_date = str(cur_date.date())
-                tar_date = date_string_transfer(cur_date,direction=1)
+                tar_date = date_string_transfer(cur_date,direction=2)
             else:
                 cur_date = str(cur_date.date())
                 tar_date = get_tradedays_dur(date_string_transfer(cur_date,direction=2),1)

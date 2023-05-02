@@ -29,7 +29,7 @@ class ExtDataMod(AbstractMod):
         if not os.path.exists(self.report_save_path):
             os.makedirs(self.report_save_path)  
         self.env = env
-        env.set_data_source(TdxDataSource(env.config.base.data_bundle_path))
+        env.set_data_source(TdxDataSource(env.config.base.data_bundle_path,env.config.extra.stock_data_path))
 
     def tear_down(self, code, exception=None):
         """统计分析入口"""
