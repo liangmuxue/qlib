@@ -34,8 +34,6 @@ class MinuteStrategy(BaseStrategy):
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
         self.trade_proxy = JuejinTrade(token=emu_args["token"],
                 end_point=emu_args["end_point"],account_id=emu_args["account_id"],account_alias=emu_args["account_alias"])        
-        # 初始资金需要从仿真（实盘）处获取
-        self.context._stock_starting_cash
          
     def before_trading(self,context):
         """交易前准备"""
@@ -46,15 +44,11 @@ class MinuteStrategy(BaseStrategy):
         self.trade_day = pred_date
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = get_previous_trading_date(self.trade_day)
-        
         # 根据当前日期，进行预测计算
         context.ml_context.prepare_data(pred_date)
-        
-        logger.info("prepare_data end")
         # 根据预测计算，筛选可以买入的股票
-        candidate_list = context.ml_context.filter_buy_candidate(pred_date)
+        # candidate_list = context.ml_context.filter_buy_candidate(pred_date)
         candidate_list = [600519,600521]
-        logger.info("filter_buy_candidate end")
         candidate_list_buy = {}
         exceed_ins = []
         for instrument in candidate_list:
@@ -74,7 +68,7 @@ class MinuteStrategy(BaseStrategy):
                 continue
             buy_price = h_bar[0,0]
             # 设定单次购买金额限制,以总资产为基准
-            portfolio = context.portfolio
+            portfolio = self.get_portfolio()
             amount = (portfolio.market_value+portfolio.cash+portfolio.frozen_cash) * self.strategy.single_buy_mount_percent / 100 / buy_price   
             # 如果数量凑不够100股，则取消
             if amount<100:
@@ -98,7 +92,7 @@ class MinuteStrategy(BaseStrategy):
             
         # 查看持仓，根据预测模型计算,逐一核对是否需要卖出
         sell_list = {}
-        for position in get_positions():
+        for position in self.get_positions():
             instrument = int(transfer_instrument(position.order_book_id))
             flag = context.ml_context.measure_pos(pred_date,instrument)
             if flag:
@@ -172,7 +166,7 @@ class MinuteStrategy(BaseStrategy):
         """买盘挂单"""
         
         # 如果持仓股票超过指定数量，则不操作
-        position_number = len(get_positions())
+        position_number = len(self.get_positions())
         position_max_number = self.strategy.position_max_number
         if position_number>=position_max_number:
             logger.info("full pos")
@@ -202,7 +196,7 @@ class MinuteStrategy(BaseStrategy):
         """卖盘挂单"""
 
         # 检查待卖出列表，匹配卖出
-        for position in get_positions():
+        for position in self.get_positions():
             order_book_id = position.order_book_id
             # 如果是当日买入的，则不处理
             if self.get_buy_order(order_book_id, context) is not None:
@@ -352,7 +346,7 @@ class MinuteStrategy(BaseStrategy):
     def get_postion_by_order_book_id(self,order_book_id,context=None):
         """查看某个股票的持仓"""
         
-        for position in get_positions():
+        for position in self.get_positions():
             if order_book_id==position.order_book_id:
                 return position
         return None
@@ -366,13 +360,29 @@ class MinuteStrategy(BaseStrategy):
             self.sell_list[order.order_book_id]._status = status
         # 同时修改交易订单状态
         self.trade_entity.update_order_status(order,status,price=price)
+
+    #####################################代理实现相关################################################# 
+    def get_portfolio(self):
+        """取得投资组合信息"""
         
+        # 通过代理类，取得仿真环境的数据
+        trade_proxy = Environment.get_instance().broker.trade_proxy
+        return trade_proxy.get_portfolio()
+    
+    def get_positions(self):
+        """取得持仓信息"""
+        
+        # 通过代理类，取得仿真环境的数据
+        trade_proxy = Environment.get_instance().broker.trade_proxy
+        return trade_proxy.get_positions()
+    
+       
     #####################################逻辑判断部分#################################################                                 
     def expire_day_logic(self,context,bar_dict=None):
         """持有股票超期卖出逻辑"""
         
         keep_day_number = self.strategy.keep_day_number
-        for position in get_positions():
+        for position in self.get_positions():
             order_book_id = position.order_book_id
             if self.get_sell_order(order_book_id,context=context) is not None:
                 # 如果已经在卖出列表中，则不操作
@@ -403,7 +413,7 @@ class MinuteStrategy(BaseStrategy):
         """止跌卖出逻辑"""
         
         stop_threhold = self.strategy.sell_opt.stop_fall_percent
-        for position in get_positions():
+        for position in self.get_positions():
             order_book_id = position.order_book_id
             if self.get_sell_order(order_book_id,context=context) is not None:
                 # 如果已经在卖出列表中，则不操作
@@ -429,7 +439,7 @@ class MinuteStrategy(BaseStrategy):
         
         stop_threhold = self.strategy.sell_opt.stop_raise_percent
         
-        for position in get_positions():
+        for position in self.get_positions():
             order_book_id = position.order_book_id
             if self.get_sell_order(order_book_id,context=context) is not None:
                 # 如果已经在卖出列表中，则不操作
@@ -453,7 +463,7 @@ class MinuteStrategy(BaseStrategy):
     def candidate_buy_logic(self,context,bar_dict=None):
         """候选买入逻辑"""
        
-        position_number = len(get_positions())
+        position_number = len(self.get_positions())
         position_max_number = self.strategy.position_max_number
         buy_list_number = self.today_buy_number(context)
         # 如果持仓股票加上待买入股票数量超过指定数量，则不操作

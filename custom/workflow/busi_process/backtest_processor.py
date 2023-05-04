@@ -71,7 +71,11 @@ class BacktestProcessor(BaseProcessor):
         # 年度频率，取得本年所有数据
         if self.wf_task.config["frequency"]==FrequencyType.YEAR.value:
             start_date = datetime.date(year,1,day=1)
-            end_date = datetime.date(year,12,day=31)           
+            end_date = datetime.date(year,12,day=31)         
+        # 实时频率，开始和结束都是当天
+        if self.wf_task.config["frequency"]==FrequencyType.REAL.value:
+            start_date = datetime.datetime.now()
+            end_date = datetime.datetime.now()               
         return start_date,end_date     
                            
     def sub_run(self,working_day=None,results=None,resume=True):

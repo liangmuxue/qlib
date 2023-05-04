@@ -2,7 +2,16 @@ import datetime as dt
 from datetime import datetime,timedelta
 import calendar
 from chinese_calendar import is_holiday
+
+def is_working_day(day):
+    """判断是否节假日"""
     
+    if type(day) == str:
+        date = datetime.strptime(day,'%Y%m%d').date()   
+    else:
+        date = day 
+    return not is_holiday(date)
+     
 def tradedays(start,end):
     '''
     计算两个日期间的工作日数量

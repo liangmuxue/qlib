@@ -36,6 +36,7 @@ from darts_pro.tft_series_dataset import TFTSeriesDataset
 from .data_viewer import DataViewer
 from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
+from trader.utils.date_util import get_tradedays
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.log_util import AppLogger
 from trader.busi_compute import slope_status
@@ -105,13 +106,14 @@ class PortAnaRecord(TftRecorder):
     def build_pred_result(self,start_time,end_time):
         """逐天生成预测数据"""
         
-        df = self.df_ref[(self.df_ref["datetime"]>=pd.to_datetime(str(start_time)))&(self.df_ref["datetime"]<=pd.to_datetime(str(end_time)))]
-        date_range = df["datetime"].dt.strftime('%Y%m%d').unique()
         # 取得日期范围，并遍历生成预测数据
+        date_range = get_tradedays(start_time,end_time)
         data_total = None
         for cur_date in date_range:
             # 动态生成数据
+            logger.debug("begin predict_process")  
             pred_combine_data = self.predict_process(cur_date,outer_df=self.df_ref)
+            logger.debug("begin build_pred_data")  
             data_pred = self.build_pred_data(cur_date,pred_combine_data,df_ref=self.df_ref)
             if data_total is None:
                 data_total = data_pred

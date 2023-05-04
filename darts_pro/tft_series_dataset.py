@@ -70,12 +70,15 @@ class TFTSeriesDataset(TFTDataset):
         # 从数据库表中读取股票基础信息
         instrument_list = self.dbaccessor.do_query("select code,industry,tradable_shares from instrument_info where delete_flag=0")
         instrument_base_info = {}
+        ext_info_arr = []
         for item in instrument_list:
             code = item[0]
             industry = item[1]
             tradable_shares = item[2]
             instrument_base_info[code] = {"industry":industry,"tradable_shares":tradable_shares}
-            
+            ext_info_arr.append([code,industry,tradable_shares])
+        ext_info = pd.DataFrame(np.array(ext_info_arr),columns=["instrument","industry","tradable_shares"]).astype(
+            {"instrument":str,"industry":int,"tradable_shares":float})   
         data_filter = DataFilter()
         # 清除序列长度不够的股票
         group_column = self.get_group_column()
@@ -85,27 +88,19 @@ class TFTSeriesDataset(TFTDataset):
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
         # df["label"] = df["label"].astype("float64")
         # 使用前几天的移动平均值作为目标数值
-        df["label_ori"]  = df["label"]
-        df["label"]  = df.groupby(group_column)[self.get_target_column()].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
+        df["label_ori"] = df["label"]
+        df["label"] = df.groupby(group_column)[self.get_target_column()].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
         # 删除空值，并重新编号
         df = df.dropna()    
-        new_df = None
-        for group_name,group_data in df.groupby(group_column):
-            group_data[time_column] -= group_data[time_column].min()
-            # 在这里顺便放入数据库中的股票基础信息
-            if group_name in instrument_base_info:
-                base_info = instrument_base_info[group_name]
-                group_data["industry"] = base_info["industry"]
-                group_data["tradable_shares"] = base_info["tradable_shares"]
-            else:
-                logger.warning("no base_info:{}".format(group_name))
-                continue
-            # 组合为新的数据集
-            if new_df is None:
-                new_df = group_data
-            else:
-                new_df = pd.concat([new_df,group_data])
-        df = new_df
+        logger.debug("begin group process")
+        columns = df.columns.values.tolist()
+        columns = columns + ["industry","tradable_shares"]
+        df["min_time"] = df.groupby(group_column)[time_column].transform("min")
+        df[time_column] = df[time_column] - df["min_time"]
+        df = df.drop(['min_time'], axis=1)
+        # 放入数据库中的股票基础信息
+        df = pd.merge(df,ext_info,on=["instrument"])        
+        logger.debug("end group process")
         # group字段需要转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')   
         # 按照股票代码，新增排序字段，用于后续embedding
@@ -162,10 +157,13 @@ class TFTSeriesDataset(TFTDataset):
             slc_total = slice(*segments_total)
             kwargs = {'col_set': ['feature', 'label'], 'data_key': 'learn'}
             # 首先取得pandas原始数据,使用train,valid数据集
+            logger.debug("begin _prepare_seg")
             df_all = self._prepare_seg(slc_total, **kwargs)
+            logger.debug("end _prepare_seg")
             # 提前生成嵌入向量空间长度，使用原始的股票数量，即使后续清理了部分股票，保留的应该仍然是大多数，不影响整体使用
             self.emb_size = df_all[self.get_group_column()].unique().shape[0] + 1
             # 前处理
+            logger.debug("begin _pre_process_df")
             df_all = self._pre_process_df(df_all,val_range=val_range)
             # 为每个序列生成不同的scaler
             self.df_all = df_all
@@ -190,13 +188,13 @@ class TFTSeriesDataset(TFTDataset):
                 return None          
             self.df_train = df_train
             self.df_val = df_val 
-            return self.create_series_data(df_ref,df_train,df_val,fill_future=False)
+            return self.create_series_data(df_ref,df_train,df_val,fill_future=False,no_series_data=no_series_data)
             
         total_range = self.segments["train_total"]
         valid_range = self.segments["valid"]
-        return self.build_series_data_step_range(total_range, valid_range,val_ds_filter=val_ds_filter)
+        return self.build_series_data_step_range(total_range, valid_range,val_ds_filter=val_ds_filter,no_series_data=no_series_data)
         
-    def build_series_data_step_range(self,total_range,val_range,fill_future=False,outer_df=None,val_ds_filter=False):
+    def build_series_data_step_range(self,total_range,val_range,fill_future=False,outer_df=None,val_ds_filter=False,no_series_data=False):
         """根据时间点参数，从pandas数据生成时间序列类型数据
            Params:total_range--完整时间序列开始和结束时间
                   val_range--预测时间序列开始和结束时间
@@ -223,7 +221,9 @@ class TFTSeriesDataset(TFTDataset):
         # 根据标志，决定是否进行验证集数据检查清理
         if val_ds_filter:
             self.check_clear_valid_df()
-        
+        # 如果只需要df数据，则不进行series数据生成
+        if no_series_data:
+            return
         return self.create_series_data(self.df_all,self.df_train,self.df_val,fill_future=fill_future)
         
     def create_series_data(self,df_all,df_train,df_val,fill_future=False):

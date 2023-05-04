@@ -1,7 +1,6 @@
 from enum import Enum, unique
 
 from rqalpha.const import SIDE,ORDER_STATUS as RQ_ORDER_STATUS
-from rqalpha.portfolio import Portfolio
 from rqalpha.portfolio.position import Position
 from rqalpha.const import POSITION_DIRECTION
 from rqalpha.core.events import EVENT, Event
@@ -26,6 +25,13 @@ class OrderMode(Enum):
     RQALPHA = 2
     SYMBOL = 3
 
+class Portfolio():
+    """仿照RQ的投资组合类"""
+    def __init__(self):
+        self.cash = None # 现金
+        self.frozen_cash = None # 冻结资金
+        self.market_value = None# 持仓资金    
+    
 class TraderSpi(object):
     def __init__(self):
         self.cache_orders = []
@@ -252,12 +258,11 @@ class JuejinTrade(BaseTrade):
             if pos.side==PositionSide_Long:
                 side = POSITION_DIRECTION.LONG
             if pos.side==PositionSide_Short:
-                side = POSITION_DIRECTION.SHORT             
-            pos_rtn = Position(pos.symbol,side)
-            # 持仓量         
-            pos_rtn.quantity = pos.volume 
+                side = POSITION_DIRECTION.SHORT   
+            symbol = self.api.transfer_symbol(pos.symbol, mode=1)          
+            pos_rtn = Position(symbol,side,init_quantity=pos.volume)
             # 持仓市值 
-            pos_rtn.market_value = pos.amount
+            pos_rtn._last_price = pos.last_price
             positions_rtn.append(pos_rtn)
         return positions_rtn
         
@@ -271,6 +276,7 @@ class JuejinTrade(BaseTrade):
         portfolio.cash = cash.available
         portfolio.frozen_cash = cash.order_frozen # 冻结资金
         portfolio.market_value = cash.frozen # 持仓资金
+        return portfolio
 
     def submit_order(self,order):
         """下单"""

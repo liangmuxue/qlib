@@ -25,11 +25,8 @@ class PredResultProcessor(BaseProcessor):
         
         start_date = str(config["start_date"])
         start_date = date_string_transfer(start_date)
-        # 如果没有设置结束时间，则取当前日期
-        if "end_date" in config:
-            end_date = str(config["end_date"])
-        else:
-            end_date = str(working_day)
+        # 结束时间取当前日期
+        end_date = str(working_day)
         end_date = date_string_transfer(end_date) 
         # 总数据集定义的开始结束时间
         real_template["data_handler_config"]["start_date"] = start_date

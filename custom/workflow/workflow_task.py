@@ -26,7 +26,8 @@ from workflow.busi_process.backtest_processor import BacktestProcessor
 from workflow.busi_process.offer_processor import OfferProcessor
 from workflow.busi_process.data_processor import DataProcessor
 from workflow.busi_process.classify_processor import ClassifyProcessor
-from trader.utils.date_util import get_tradedays_dur,get_tradedays
+from workflow.busi_process.simulation_processor import SimulationProcessor
+from trader.utils.date_util import get_tradedays_dur,get_tradedays,is_working_day
 from cus_utils.data_filter import list_split
 
 logger = AppLogger()
@@ -165,17 +166,20 @@ class WorkflowTask(object):
     
     def next_working_day(self,working_day):
         """取得下一工作日"""
-        
+
+        working_day = datetime.strptime(str(working_day),'%Y%m%d').date()
+        next_day = working_day + dt.timedelta(days=1)  
+        next_day = int(next_day.strftime("%Y%m%d"))      
         if self.config["type"]==WorkflowType.backtest.value:
             # 回测模式，直接取下一天
-            working_day = datetime.strptime(str(working_day),'%Y%m%d').date()
-            next_day = working_day + dt.timedelta(days=1)
-            # next_day = get_tradedays_dur(str(working_day),1)
-            next_day = next_day.strftime("%Y%m%d")  
+            return next_day
         else:
-            # 实盘模式，取当前时间
-            next_day = datetime.now().strftime("%Y%m%d")  
-        return int(next_day)
+            # 实盘模式
+            now_day = int(datetime.now().strftime("%Y%m%d")) 
+            # 如果工作日等于当前日期，则还使用当前日期
+            if next_day>=now_day:
+                return now_day
+            return next_day
 
     def prepare_subtask_env(self,sub_task,sub_config,working_day):
         """准备子任务环境，使用开始日期作为工作日进行初始化设置"""
@@ -424,13 +428,20 @@ class WorkflowSubTask(object):
             processor = BacktestProcessor(self)            
         if dict_code=="offer":
             processor = OfferProcessor(self)
-        
+        if dict_code=="simulation":
+            processor = SimulationProcessor(self)        
         self.processor = processor          
     
     def start_task(self,working_day,resume=True):
         """开始执行任务"""
         
         self.working_day = working_day
+        
+        # 根据任务配置，决定节假日是否不执行相关任务
+        if self.config["run_in_holiday"]==0 and (not is_working_day(str(working_day))):
+            self.task_ignore_handler(ignore_status=WorkflowSubStatus.freq_ignore.value)
+            return WorkflowSubStatus.freq_ignore.value   
+        
         # 任务频次类型筛选，如果不符合当天的任务频次，则忽略此任务
         frequency_types = self.get_frequency_types(str(working_day))
         if self.config["frequency"] not in frequency_types:
@@ -465,7 +476,11 @@ class WorkflowSubTask(object):
             rtn_list.append(FrequencyType.HALF_YEAR.value)           
         # 12月31日，执行年任务
         if (working_day_date.month==12 and working_day_date.day==31):
-            rtn_list.append(FrequencyType.YEAR.value)              
+            rtn_list.append(FrequencyType.YEAR.value)         
+        # 根据工作日以及当前日期，判断是否实时任务类型
+        now_day = int(datetime.now().strftime("%Y%m%d")) 
+        if now_day==int(working_day):
+            rtn_list.append(FrequencyType.REAL.value)  
         return rtn_list          
     
     

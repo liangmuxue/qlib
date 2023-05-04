@@ -347,7 +347,7 @@ class TftDataframeModel():
             dataset.build_series_data(df_data_path,val_ds_filter=True,no_series_data=True)    
             return
         
-        dataset.build_series_data()
+        dataset.build_series_data(no_series_data=True)
         if self.save_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
             with open(df_data_path, "wb") as fout:

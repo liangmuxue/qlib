@@ -34,7 +34,8 @@ task:
             n_epochs : 300
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            pred_data_path: "custom/data/darts/dump_data/test6"
+            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data"
+            pred_data_file: "pred_df_total.pkl"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -88,7 +89,7 @@ task:
             dataset: <DATASET>                
                 
     backtest:
-       run_file: "./custom/trader/rqalpha/backtest.py"
+       run_file: "./custom/trader/rqalpha/backtest_workflow.py"
        rqalpha:
           ignore_mode: False
           base: 
