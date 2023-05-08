@@ -1,9 +1,9 @@
+import time
+
 from rqalpha.apis import *
 import rqalpha
 from rqalpha.const import SIDE,ORDER_STATUS
-
 from trader.rqalpha.strategy_class.backtest_base import BaseStrategy,SellReason
-
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
 from trader.utils.date_util import tradedays
 from trader.emulator.juejin.trade_proxy_juejin import JuejinTrade
@@ -12,14 +12,11 @@ from cus_utils.data_filter import get_topN_dict
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-class MinuteStrategy(BaseStrategy):
+class Simtrategy(BaseStrategy):
     """仿真交易策略，分钟级别，继承回测基类"""
     
     def __init__(self,proxy_name="qidian"):
         super().__init__()
-        
-        # self.xmd_proxy = QidianXmd()
-        self.trade_proxy = None
         
         # 设置交易日期为当天
         self.trade_day = None
@@ -27,30 +24,43 @@ class MinuteStrategy(BaseStrategy):
         # 穿透取得自定义datasource，后续可以直接使用
         env = Environment.get_instance()
         self.ds = env.data_proxy._data_source
+        self.frequency_sim = env.config.base.frequency_sim
+        self.handle_bar_wait = env.config.base.handle_bar_wait
     
     def init_env(self):
 
         # 初始化交易代理对象
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
-        self.trade_proxy = JuejinTrade(token=emu_args["token"],
-                end_point=emu_args["end_point"],account_id=emu_args["account_id"],account_alias=emu_args["account_alias"])        
          
     def before_trading(self,context):
         """交易前准备"""
         
         logger.info("before_trading.now:{}".format(context.now))
             
-        pred_date = int(datetime.datetime.now().strftime("%Y%m%d"))
+        pred_date = int(context.now.strftime('%Y%m%d'))
         self.trade_day = pred_date
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = get_previous_trading_date(self.trade_day)
         # 根据当前日期，进行预测计算
         context.ml_context.prepare_data(pred_date)
         # 根据预测计算，筛选可以买入的股票
-        # candidate_list = context.ml_context.filter_buy_candidate(pred_date)
-        candidate_list = [600519,600521]
+        candidate_list = context.ml_context.filter_buy_candidate(pred_date)
+        # candidate_list = []
         candidate_list_buy = {}
         exceed_ins = []
+        # 使用额度占比
+        total_pos_value_rate = self.strategy.single_buy_mount_percent/100*self.strategy.position_max_number
+        # 持仓股票个数
+        position_number = len(self.get_positions())
+        # 通过计算使用额度占比，以及当前持仓数量和单只股票购买额度，动态计算购买数量
+        remain_number = self.strategy.position_max_number - position_number       
+        # 保持非0
+        if remain_number<=0:
+            remain_number = 1         
+        # 剩余额度为当前现金除以可以买入的股票个数额度，并乘以使用额度占比
+        portfolio = self.get_portfolio()
+        remain_quota = portfolio.cash/remain_number * total_pos_value_rate 
+      
         for instrument in candidate_list:
             # 剔除没有价格数据的股票
             if instrument not in self.instruments_dict:
@@ -67,10 +77,8 @@ class MinuteStrategy(BaseStrategy):
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
             buy_price = h_bar[0,0]
-            # 设定单次购买金额限制,以总资产为基准
-            portfolio = self.get_portfolio()
-            amount = (portfolio.market_value+portfolio.cash+portfolio.frozen_cash) * self.strategy.single_buy_mount_percent / 100 / buy_price   
-            # 如果数量凑不够100股，则取消
+            amount = remain_quota / buy_price   
+            # 如果数量凑不够100股，或者现金不足，则取消
             if amount<100:
                 logger.warning("volume exceed:{}".format(instrument))
                 exceed_ins.append(instrument)
@@ -89,6 +97,7 @@ class MinuteStrategy(BaseStrategy):
                 try_cnt=0,
             )
             candidate_list_buy[order_book_id] = order
+            position_number+=1
             
         # 查看持仓，根据预测模型计算,逐一核对是否需要卖出
         sell_list = {}
@@ -96,7 +105,7 @@ class MinuteStrategy(BaseStrategy):
             instrument = int(transfer_instrument(position.order_book_id))
             flag = context.ml_context.measure_pos(pred_date,instrument)
             if flag:
-                pos_info = get_position(position.order_book_id)
+                pos_info = self.get_position(position.order_book_id)
                 amount = pos_info.quantity
                 # 以昨日收盘价格卖出
                 h_bar = history_bars(position.order_book_id,1,"1d",fields="close",adjust_type="none")
@@ -141,7 +150,10 @@ class MinuteStrategy(BaseStrategy):
         
         
         logger.info("handle_bar.now:{}".format(context.now))
-        
+        # 如果非实时模式，则需要在相应前等待几秒，以保证先处理外部通知事件
+        if not self.handle_bar_wait:
+            time.sleep(3)
+        logger.debug("handle_bar process:{}".format(context.now))
         # 已提交卖单及买单检查
         self.verify_order_selling(context)
         self.verify_order_buying(context)
@@ -176,13 +188,14 @@ class MinuteStrategy(BaseStrategy):
         for buy_order_id in self.buy_list:
             buy_order = self.buy_list[buy_order_id]
             # 只对待买入状态进行挂单
+            logger.debug("buy order loop,status:{}".format(buy_order.status))
             if buy_order.status!=ORDER_STATUS.PENDING_NEW:
                 continue
             # 以当日收盘价格挂单买入,买入量参考单次限定购买金额
             order_book_id = buy_order.order_book_id
             price = buy_order.kwargs["buy_price"]
             quantity = buy_order.quantity
-            order = submit_order(order_book_id,quantity,SIDE.BUY,price=price)
+            order = self.submit_order(order_book_id,quantity,SIDE.BUY,price=price)
             if order is None:
                 logger.warning("order submit fail,order_book_id:{}".format(order_book_id))
                 continue
@@ -201,7 +214,11 @@ class MinuteStrategy(BaseStrategy):
             # 如果是当日买入的，则不处理
             if self.get_buy_order(order_book_id, context) is not None:
                 continue
-            pos_info = get_position(order_book_id)
+            # 检查可平仓数量是否大于0
+            if position.closable==0:
+                logger.info("closable 0 with:{}".format(order_book_id))
+                continue
+            pos_info = self.get_position(order_book_id)
             if order_book_id in self.sell_list:
                 # 取得预卖出订单
                 sell_order = self.sell_list[order_book_id]
@@ -211,14 +228,64 @@ class MinuteStrategy(BaseStrategy):
                 # 全部卖出
                 sell_amount = pos_info.quantity
                 # 挂单卖出
-                order = submit_order(order_book_id,sell_amount,SIDE.SELL,price=sell_order.kwargs["sell_price"])
+                order = self.submit_order(order_book_id,sell_amount,SIDE.SELL,price=sell_order.kwargs["sell_price"])
                 if order is None:
                     logger.warning("order submit fail,order_book_id:{}".format(order_book_id))
                     continue               
                 order.sell_reason = sell_order.kwargs["sell_reason"]
                 # 添加到跟踪变量
                 self.trade_entity.add_or_update_order(order,str(self.trade_day))
-
+    
+    def submit_order(self,id_or_ins, amount, side, price=None, position_effect=None):
+        """代理api的订单提交方法"""
+        
+        order_book_id = assure_order_book_id(id_or_ins)
+        env = Environment.get_instance()
+        
+        if (
+                env.config.base.run_type != RUN_TYPE.BACKTEST
+                and env.get_instrument(order_book_id).type == "Future"
+        ):
+            if "88" in order_book_id:
+                raise RQInvalidArgument(
+                    _(u"Main Future contracts[88] are not supported in paper trading.")
+                )
+            if "99" in order_book_id:
+                raise RQInvalidArgument(
+                    _(u"Index Future contracts[99] are not supported in paper trading.")
+                )
+        style = cal_style(price, None)
+        # 这里改为取得实时行情
+        snapshot = self.get_current_snapshot(order_book_id)
+        market_price = snapshot.open
+        if not is_valid_price(market_price):
+            print("market_price in valid:{},code:{}".format(market_price,order_book_id))
+            user_system_log.warn(
+                _(u"Order Creation Failed: [{order_book_id}] No market data").format(
+                    order_book_id=order_book_id
+                )
+            )
+            return
+    
+        amount = int(amount)
+    
+        order = Order.__from_create__(
+            order_book_id=order_book_id,
+            quantity=amount,
+            side=side,
+            style=style,
+            position_effect=position_effect,
+        )
+    
+        if order.type == ORDER_TYPE.MARKET:
+            order.set_frozen_price(market_price)
+        # 由于没有在整个环境里进行计算，这里就不进行判断了
+        if env.can_submit_order(order) or True:
+            env.broker.submit_order(order)
+            # 订单编号转换为字符串
+            order._order_id = "rq_{}".format(order._order_id)
+            return order
+    
     def verify_order_selling(self,context):
         """核查卖出订单"""
         
@@ -228,7 +295,7 @@ class MinuteStrategy(BaseStrategy):
         for index,sell_item in sell_list_active.iterrows():
             sys_order = self.trade_entity.get_sys_order(sell_item.order_book_id)
             sell_order = self.get_sell_order(sell_item.order_book_id,context=context)
-            cur_snapshot = current_snapshot(sell_item.order_book_id)
+            cur_snapshot = self.get_current_snapshot(sell_item.order_book_id)
             price_now = cur_snapshot.last
             if sell_order.kwargs["sell_reason"]==SellReason.STOP_RAISE.value:
                 # 止盈卖出未成交，不进行操作
@@ -271,11 +338,11 @@ class MinuteStrategy(BaseStrategy):
         for index,buy_item in buy_list_active.iterrows():
             sys_order = self.trade_entity.get_sys_order(buy_item.order_book_id)
             buy_order = self.get_buy_order(buy_item.order_book_id,context=context)
-            cur_snapshot = current_snapshot(buy_item.order_book_id)
-            try:
-                price_now = cur_snapshot.last
-            except Exception as e:
-                logger.error("cur_snapshot err:{}".format(e))
+            cur_snapshot = self.get_current_snapshot(buy_item.order_book_id)
+            if cur_snapshot is None:
+                logger.warning("cur_snapshot None in verify_order_buying:{}".format(buy_item))
+                continue            
+            price_now = cur_snapshot.last
             h_bar = history_bars(buy_item.order_book_id,1,"1d",fields="close",adjust_type="none")
             price_last_day = h_bar[0,0]               
             pred_buy_exceed_rate = self.strategy.buy_opt.pred_buy_exceed_rate
@@ -369,14 +436,26 @@ class MinuteStrategy(BaseStrategy):
         trade_proxy = Environment.get_instance().broker.trade_proxy
         return trade_proxy.get_portfolio()
     
+    def get_position(self,order_book_id):
+        """取得指定股票的持仓信息"""
+        
+        # 通过代理类，取得仿真环境的数据
+        trade_proxy = Environment.get_instance().broker.trade_proxy
+        return trade_proxy.get_position(order_book_id)
+
     def get_positions(self):
         """取得持仓信息"""
         
         # 通过代理类，取得仿真环境的数据
         trade_proxy = Environment.get_instance().broker.trade_proxy
         return trade_proxy.get_positions()
-    
-       
+     
+    def get_current_snapshot(self,order_book_id):  
+        """取得指定股票当前快照"""
+        
+        env = Environment.get_instance()
+        return env.data_proxy.current_snapshot(order_book_id, env.config.base.frequency,env.calendar_dt)
+        
     #####################################逻辑判断部分#################################################                                 
     def expire_day_logic(self,context,bar_dict=None):
         """持有股票超期卖出逻辑"""
@@ -387,7 +466,7 @@ class MinuteStrategy(BaseStrategy):
             if self.get_sell_order(order_book_id,context=context) is not None:
                 # 如果已经在卖出列表中，则不操作
                 continue
-            pos_info = get_position(order_book_id)
+            pos_info = self.get_position(order_book_id)
             sell_amount = pos_info.quantity
             before_date = context.now.strftime('%Y%m%d')
             # 通过之前存储的交易信息，查找到对应交易
@@ -418,7 +497,7 @@ class MinuteStrategy(BaseStrategy):
             if self.get_sell_order(order_book_id,context=context) is not None:
                 # 如果已经在卖出列表中，则不操作
                 continue
-            pos_info = get_position(order_book_id)
+            pos_info = self.get_position(order_book_id)
             sell_amount = pos_info.quantity
             # 如果下跌幅度(与买入价格比较)超过阈值(百分点)，则以当前收盘价格卖出
             if (pos_info.last_price-pos_info.avg_price)/pos_info.avg_price*100<stop_threhold:
@@ -444,7 +523,7 @@ class MinuteStrategy(BaseStrategy):
             if self.get_sell_order(order_book_id,context=context) is not None:
                 # 如果已经在卖出列表中，则不操作
                 continue
-            pos_info = get_position(order_book_id)
+            pos_info = self.get_position(order_book_id)
             sell_amount = pos_info.quantity
             # 如果下跌幅度(与买入价格比较)超过阈值(百分点)，则以当前收盘价格卖出
             if (pos_info.last_price-pos_info.avg_price)/pos_info.avg_price*100>stop_threhold:
@@ -500,6 +579,7 @@ class MinuteStrategy(BaseStrategy):
     def on_order_handler(self,context, event):
         order = event.order
         logger.info("order handler,order:{}".format(order))
+        logger.info("order handler,order.status:{}".format(order.status))
         # 如果订单被拒绝，则忽略,仍然保持新单状态，后续会继续下单
         if order.status==ORDER_STATUS.REJECTED:
             logger.warning("order reject:{},trade_date:{}".format(order.order_book_id,self.trade_day))

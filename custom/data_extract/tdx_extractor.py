@@ -24,10 +24,13 @@ class TdxExtractor(HisDataExtractor):
         # 一次性查询最大限额
         self.maxcnt_once_call = 800
     
+    def connect(self):
+        self.api.connect(self.host,self.port)  
+        
     def reconnect(self):
         try:
             self.api.disconnect()
-            self.api.connect(self.host,self.port)
+            self.connect()
         except Exception as e:
             logger.error("reconnect fail:",e)
             
@@ -39,7 +42,7 @@ class TdxExtractor(HisDataExtractor):
                                     is_complete=False,contain_institution=True,fill_history=False):
         
         # 任务开始时初始化连接，后续保持使用此连接
-        self.api.connect(self.host,self.port)       
+        self.connect() 
         flag = False
         cnt = 0
         while True:
@@ -179,6 +182,17 @@ class TdxExtractor(HisDataExtractor):
         
         api = self.api
         data = api.get_security_quotes([(market, instrument_code)])
+        # 按照规范构造返回值，有几项没有数据
+        np_data = np.array([[data[0]["code"],data[0]["servertime"],float(data[0]["open"]),float(data[0]["last_close"]),float(data[0]["high"]),
+                             float(data[0]["low"]),float(data[0]["cur_vol"]),float(data[0]["amount"]),0,0,0,0]])
+        df = pd.DataFrame(np_data,columns=self.busi_columns)
+        df["open"] = pd.to_numeric(df["open"])
+        df["close"] = pd.to_numeric(df["close"])
+        df["high"] = pd.to_numeric(df["high"])
+        df["low"] = pd.to_numeric(df["low"])
+        df["volume"] = pd.to_numeric(df["volume"])
+        df["amount"] = pd.to_numeric(df["amount"])
+        return df
         
     def get_last_data_date(self,data_item,period):    
         """取得存储数据中的最近日期"""

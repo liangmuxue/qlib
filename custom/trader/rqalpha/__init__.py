@@ -44,7 +44,7 @@ def load_ipython_extension(ipython):
 def run(config, source_code=None):
     # [Deprecated]
     from rqalpha.utils.config import parse_config
-    from rqalpha import main
+    from trader.rqalpha import main
 
     config = parse_config(config, source_code=source_code)
     return main.run(config, source_code=source_code)

@@ -28,23 +28,30 @@ class MinuteStrategy(BaseStrategy):
     def before_trading(self,context):
         """交易前准备"""
         
-        logger.info("before_trading.now:{}".format(context.now))
         pred_date = int(context.now.strftime('%Y%m%d'))
-        # 设置上一交易日，用于后续挂牌确认
-        if self.trade_day is None:
-            self.prev_day = None
-        else:
-            self.prev_day = get_previous_trading_date(self.trade_day)
         self.trade_day = pred_date
-        
+        # 设置上一交易日，用于后续挂牌确认
+        self.prev_day = get_previous_trading_date(self.trade_day)
         # 根据当前日期，进行预测计算
         context.ml_context.prepare_data(pred_date)
-        
-        logger.info("prepare_data end")
         # 根据预测计算，筛选可以买入的股票
         candidate_list = context.ml_context.filter_buy_candidate(pred_date)
-        logger.info("filter_buy_candidate end")
+        # candidate_list = [600526]
         candidate_list_buy = {}
+        exceed_ins = []
+        # 使用额度占比
+        total_pos_value_rate = self.strategy.single_buy_mount_percent/100*self.strategy.position_max_number
+        # 持仓股票个数
+        position_number = len(get_positions())
+        # 通过计算使用额度占比，以及当前持仓数量和单只股票购买额度，动态计算购买数量
+        remain_number = self.strategy.position_max_number - position_number 
+        # 保持非0
+        if remain_number<=0:
+            remain_number = 1         
+        # 剩余额度为当前现金除以可以买入的股票个数额度，并乘以使用额度占比
+        portfolio = context.portfolio
+        remain_quota = portfolio.cash/remain_number * total_pos_value_rate 
+                
         for instrument in candidate_list:
             # 剔除没有价格数据的股票
             if instrument not in self.instruments_dict:
@@ -61,9 +68,14 @@ class MinuteStrategy(BaseStrategy):
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
             buy_price = h_bar[0,0]
-            # 设定单次购买金额限制,以总资产为基准
-            amount = (context.portfolio.market_value+context.portfolio.cash+context.portfolio.frozen_cash) * self.strategy.single_buy_mount_percent / 100 / buy_price         
-            # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）
+            amount = remain_quota / buy_price   
+            # 如果数量凑不够100股，或者现金不足，则取消
+            if amount<100:
+                logger.warning("volume exceed:{}".format(instrument))
+                exceed_ins.append(instrument)
+                continue    
+            # 取100的整数倍 
+            amount = int(amount/100) * 100              
             order = Order.__from_create__(
                 order_book_id=order_book_id,
                 quantity=amount,

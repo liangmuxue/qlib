@@ -218,6 +218,8 @@ class MlIntergrate():
         if date_pred_df.shape[0]==0:
             logger.warning("pred df empty:{}".format(pred_date))
         complex_item_df = self.combine_complex_df_data(pred_date,instrument,pred_df=date_pred_df,df_ref=self.dataset.df_all,ext_length=ext_length)  
+        if complex_item_df is None:
+            return False
         # 取得预测趋势分类信息
         pred_class = np.array([complex_item_df["class1"].values[0],complex_item_df["class2"].values[0]])
         vr_class = complex_item_df["vr_class"].values[0]

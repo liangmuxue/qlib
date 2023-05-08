@@ -47,24 +47,30 @@ def get_tradedays_dur(start_date,duration):
 
     if type(start_date) == str:
         start_date = datetime.strptime(start_date,'%Y%m%d').date()
-
-    target_date = start_date
+        
     counts = 0
-    while counts!=duration:
-        if is_holiday(target_date) or target_date.weekday()==5 or target_date.weekday()==6:
+    # if is_holiday(start_date):  
+    #     if duration>0:
+    #         counts -= 1
+    #     else:
+    #         counts += 1
+    target_date = start_date
+      
+    while True:
+        if counts==duration:
+            break
+        if duration>0:
+            next_date = target_date + timedelta(days=1)
+        else:
+            next_date = target_date - timedelta(days=1)
+        if is_holiday(next_date):
+            target_date = next_date
+        else:
             if duration>0:
-                target_date += timedelta(days=1)
+                counts += 1
             else:
-                target_date -= timedelta(days=1)
-            continue
-        if duration>0:
-            counts += 1
-        else:
-            counts -= 1
-        if duration>0:
-            target_date += timedelta(days=1)
-        else:
-            target_date -= timedelta(days=1)
+                counts -= 1
+            target_date = next_date
     return target_date
 
 

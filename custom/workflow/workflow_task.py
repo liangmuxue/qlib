@@ -479,7 +479,7 @@ class WorkflowSubTask(object):
             rtn_list.append(FrequencyType.YEAR.value)         
         # 根据工作日以及当前日期，判断是否实时任务类型
         now_day = int(datetime.now().strftime("%Y%m%d")) 
-        if now_day==int(working_day):
+        if now_day==int(working_day) or True:
             rtn_list.append(FrequencyType.REAL.value)  
         return rtn_list          
     

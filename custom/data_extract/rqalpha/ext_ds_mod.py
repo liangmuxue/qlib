@@ -29,7 +29,7 @@ class ExtDataMod(AbstractMod):
         if not os.path.exists(self.report_save_path):
             os.makedirs(self.report_save_path)  
         self.env = env
-        env.set_data_source(TdxDataSource(env.config.base.data_bundle_path,env.config.extra.stock_data_path))
+        env.set_data_source(TdxDataSource(env.config.base.data_bundle_path,env.config.extra.stock_data_path,frequency_sim=env.config.base.frequency_sim))
 
     def tear_down(self, code, exception=None):
         """统计分析入口"""
@@ -37,7 +37,7 @@ class ExtDataMod(AbstractMod):
         strategy_obj = self.env.user_strategy.user_context.strategy_class
         ml_context = self.env.user_strategy.user_context.ml_context
         # self.export_trade_data(strategy_obj)
-        self.analysis_stat(strategy_obj,ml_context=ml_context)
+        # self.analysis_stat(strategy_obj,ml_context=ml_context)
         return
     
     def export_trade_data(self,strategy_obj):

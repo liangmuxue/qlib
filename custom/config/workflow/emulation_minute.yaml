@@ -103,6 +103,7 @@ task:
           extra: 
              log_level: "verbose"
              stock_data_path: /home/qdata/stock_data
+             report_save_path: &report_save_path "custom/data/trader/report"
              context_vars:
                 strategy_class: 
                    class: MinuteStrategy
@@ -110,8 +111,8 @@ task:
                    config_path: "custom/config/workflow/emulation_minute.yaml"
                    provider_uri: "/home/qdata/qlib_data/custom_cn_data"     
                 strategy:
-                   position_max_number: 3
-                   single_buy_mount_percent: 30
+                   position_max_number: 6
+                   single_buy_mount_percent: 15
                    keep_day_number: 2        
                    sell_opt:
                       stop_fall_percent: -5
@@ -126,11 +127,11 @@ task:
              sys_analyser: 
                  enabled: True
                  plot: True
-                 report_save_path: "custom/data/trader/report"
+                 report_save_path: *report_save_path
              ext_ds_mod:
                  enabled: True
                  lib: "data_extract.rqalpha.ext_ds_mod"
-                 report_save_path: "custom/data/trader/report" 
+                 report_save_path: *report_save_path
                  load_trade_df: False
              ext_emulation_mod:
                  enabled: True

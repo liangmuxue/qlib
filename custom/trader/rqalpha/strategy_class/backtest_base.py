@@ -52,7 +52,9 @@ class BaseStrategy():
             context.ml_context = MlIntergrate(ext_length=25,config_path=config_path,provider_uri=provider_uri)
         self.strategy = context.config.extra.context_vars.strategy
         # 交易对象上下文
-        self.trade_entity = TradeEntity()
+        save_path = context.config.extra.report_save_path
+        save_path = save_path + "/trade_data.csv"
+        self.trade_entity = TradeEntity(save_path=save_path)
         # 注册订单事件
         context.fired = False
         subscribe_event(EVENT.TRADE, self.on_trade_handler)

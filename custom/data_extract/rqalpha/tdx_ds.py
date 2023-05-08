@@ -2,16 +2,18 @@ import six
 import datetime
 from datetime import date,datetime as dt_obj
 import numpy as np
+import pandas as pd
 
 from dateutil.relativedelta import relativedelta
 from rqalpha.data.base_data_source import BaseDataSource
 from rqalpha.model.tick import TickObject
 from rqalpha.apis import instruments,get_previous_trading_date
 from rqalpha.const import TRADING_CALENDAR_TYPE
-
+from trader.utils.date_util import get_tradedays_dur
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 from data_extract.tdx_extractor import TdxExtractor
 from data_extract.akshare_extractor import AkExtractor
+from trader.rqalpha.dict_mapping import judge_market,transfer_instrument
 
 _STOCK_FIELD_NAMES = [
     'datetime', 'open', 'high', 'low', 'close', 'vol', 'amount'
@@ -20,12 +22,13 @@ _STOCK_FIELD_NAMES = [
 class TdxDataSource(BaseDataSource):
     """通达信数据源"""
     
-    def __init__(self, path,stock_data_path):
+    def __init__(self, path,stock_data_path,frequency_sim=True):
         super(TdxDataSource, self).__init__(path,{})
         self.extractor = TdxExtractor(savepath=stock_data_path)
+        self.extractor.connect()
         self.extractor_ak = AkExtractor(savepath=stock_data_path)
-        # 加载完整数据，之前已经从源头下载好了，直接从文件加载
-        # self.total_data = self.extractor.load_total_df(period=PeriodType.MIN5.value)        
+        # 是否实时模式
+        self.frequency_sim = frequency_sim 
 
     def get_k_data(self, instrument, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
         """从已下载的文件中，加载K线数据"""
@@ -92,16 +95,12 @@ class TdxDataSource(BaseDataSource):
     def current_snapshot(self,instrument, frequency, dt):
         """取得指定股票的当前交易信息快照"""
         
-        order_book_id = instrument.trading_code
+        order_book_id = instrument.order_book_id
+        symbol = instrument.trading_code
         
         if frequency!="1m":
-            return super(TdxDataSource, self).current_snapshot(order_book_id, frequency, dt)
+            return super(TdxDataSource, self).current_snapshot(instrument, frequency, dt)
         
-        # 目前rqalpha只支持1分钟和1天，而本数据源以5分钟为主，在此进行判别
-        if not self.valid_bar_date(dt):
-            # 如果不是5分钟间隔，则返回空
-            return None
-
         def tick_fields_for(ins):
             _STOCK_FIELD_NAMES = [
                 'datetime', 'open', 'high', 'low', 'last', 'volume', 'total_turnover', 'prev_close',
@@ -113,8 +112,17 @@ class TdxDataSource(BaseDataSource):
                 return _STOCK_FIELD_NAMES
             else:
                 return _FUTURE_FIELD_NAMES
-                    
-        bar = self.get_bar(instrument,dt,frequency)
+        
+        if self.frequency_sim:   
+            # 如果实时模式，则取得实时数据      
+            market = judge_market(order_book_id)    
+            bar = self.get_real_data(symbol,market)
+        else:
+            # 目前rqalpha只支持1分钟和1天，而本数据源以5分钟为主，在此进行判别
+            if not self.valid_bar_date(dt):
+                # 如果不是5分钟间隔，则返回空
+                return None            
+            bar = self.get_bar(instrument,dt,frequency)
         return TickObject(instrument, bar)
 
     def _get_prev_close(self, instrument, dt,frequency=None):
@@ -136,7 +144,9 @@ class TdxDataSource(BaseDataSource):
     def get_open_auction_bar(self, instrument, dt):
         """重载原方法"""
         
-        day_bar = self.get_bar(instrument, dt, "1d")
+        # 使用昨收盘模拟开盘价
+        prev_date = get_tradedays_dur(dt,-1)
+        day_bar = self.get_bar(instrument, prev_date, "1d")
         if day_bar is None:
             bar = dict.fromkeys(self.OPEN_AUCTION_BAR_FIELDS, np.nan)
         else:
@@ -149,4 +159,8 @@ class TdxDataSource(BaseDataSource):
         # 修改原方法，有效日期的结束日期设置为后一天（原来为前一天）
         return date(2004, 1, 1), date.today() + relativedelta(days=1)
     
-    
+    def get_real_data(self,instrument,market):
+        real_data = self.extractor.get_real_data(instrument,market)
+        return real_data.iloc[0].to_dict()        
+        
+        

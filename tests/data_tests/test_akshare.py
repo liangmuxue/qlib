@@ -1,7 +1,6 @@
 import akshare as ak
-
-
-
+from trader.utils.date_util import get_tradedays_dur
+from datetime import datetime
 def test_day():
     stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol="600528", period="daily", start_date="20080101", end_date='20221231', adjust="hfq")
     print(stock_zh_a_hist_df.datetime.min())
@@ -15,7 +14,13 @@ def test_base_info():
     stock_individual_info_em_df = ak.stock_individual_info_em(symbol="600519")
     print(stock_individual_info_em_df)
 
+def test_trade_date():
+    dt = datetime(2023,5,1) 
+    prev_date = get_tradedays_dur(dt,-1) 
+    print("prev_date:",prev_date)
+       
 if __name__ == "__main__":
     # test_minute()
     # test_base_info()
-    test_day()
+    # test_day()
+    test_trade_date()

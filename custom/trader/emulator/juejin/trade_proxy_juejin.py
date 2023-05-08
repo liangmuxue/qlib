@@ -1,7 +1,7 @@
 from enum import Enum, unique
 
 from rqalpha.const import SIDE,ORDER_STATUS as RQ_ORDER_STATUS
-from rqalpha.portfolio.position import Position
+from rqalpha.portfolio.position import Position as RQPosition
 from rqalpha.const import POSITION_DIRECTION
 from rqalpha.core.events import EVENT, Event
 from rqalpha.model.trade import Trade
@@ -31,7 +31,19 @@ class Portfolio():
         self.cash = None # 现金
         self.frozen_cash = None # 冻结资金
         self.market_value = None# 持仓资金    
+
+class Position(RQPosition):
+    """仿照RQ的持仓类"""
     
+    def __init__(self, order_book_id, direction, init_quantity=0, init_price=None):
+        super().__init__(order_book_id, direction, init_quantity, init_price)
+        self._closable = 0
+
+    @property
+    def closable(self):
+        """重载可平仓数量的方法属性，直接从属性里面取得"""
+        return self._closable  
+           
 class TraderSpi(object):
     def __init__(self):
         self.cache_orders = []
@@ -99,6 +111,7 @@ class TraderSpi(object):
                     order.juejin_order = juejin_order     
                 order.active()
                 logger.info('pubelish_event creation:{}'.format(order))
+                logger.info('pubelish_event creation,order status:{}'.format(order.status))
                 ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CREATION_PASS, account=account, order=order))     
             # 成交事件回调
             if juejin_order.status==OrderStatus_Filled:
@@ -108,6 +121,35 @@ class TraderSpi(object):
                     logger.error("not found order:{}".format(juejin_order))
                     return               
                 order._status = RQ_ORDER_STATUS.FILLED
+                # 此事件和on_execution_report事件先后顺序不固定，只有具备execrpt属性的时候才进行成单事件发布
+                if hasattr(order,"execrpt"):
+                    # 成交信息已经在之前的事件里预存进来了
+                    execrpt = order.execrpt
+                    # 在此构造交易对象，并发送成单事件
+                    trade = Trade.__from_create__(
+                        order_id=order.order_id,
+                        price=execrpt.price,
+                        amount=execrpt.volume,
+                        side=order.side,
+                        position_effect=order.position_effect,
+                        order_book_id=order.order_book_id,
+                        # 冻结价格取当前成交价格
+                        frozen_price=juejin_order.price,
+                        # 当日可平仓位取0
+                        close_today_amount=0
+                    )
+                    logger.debug("trade add ok")
+                    order.fill(trade)       
+                    logger.debug("order fill") 
+                    # 手续费
+                    trade._commission = execrpt.commission
+                    # 印花税
+                    logger.debug("get_trade_tax begin") 
+                    trade._tax = ctx.context.get_trade_tax(trade)                  
+                    ctx.context.event_bus.publish_event(Event(EVENT.TRADE, account=account, trade=trade, order=order))  
+                else:
+                    # 如果没有execrpt属性，则不发送事件，同时做出标记
+                    order.has_fill = True
             # 订单拒绝事件回调
             if juejin_order.status==OrderStatus_Rejected:
                 logger.debug("reject process")
@@ -115,7 +157,7 @@ class TraderSpi(object):
                 if order is None:
                     logger.error("not found order:{}".format(juejin_order))
                     return       
-                logger.debug("order get,status is:{}".format(order._status))        
+                logger.debug("order in reject,status is:{}".format(order._status))        
                 order._status = RQ_ORDER_STATUS.REJECTED    
                 # 发布RQ事件
                 ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CREATION_REJECT, account=account, order=order))    
@@ -142,7 +184,16 @@ class TraderSpi(object):
                 return     
             # 有可能先执行on_execution_report事件，则在此放入掘金订单信息
             if need_append:
-                order.juejin_order = execrpt                 
+                logger.debug("need_append execrpt")
+                order.juejin_order = execrpt   
+            
+            # 此事件和订单成单事件先后顺序不固定，如果此事件在前，则只设置execrpt属性，等待后续订单成单事件处理发布的事情
+            if not hasattr(order,"has_fill"):
+                # 保存成交信息用于后续使用
+                order.execrpt = execrpt 
+                return
+            
+            # 如果此事件在后，则由此发布成单事件            
             trade = Trade.__from_create__(
                 order_id=order.order_id,
                 price=execrpt.price,
@@ -157,11 +208,9 @@ class TraderSpi(object):
             )
             logger.debug("trade add ok")
             order.fill(trade)       
-            logger.debug("order fill") 
             # 手续费
             trade._commission = execrpt.commission
             # 印花税
-            logger.debug("get_trade_tax begin") 
             trade._tax = ctx.context.get_trade_tax(trade)     
             ctx.context.event_bus.publish_event(Event(EVENT.TRADE, account=account, trade=trade, order=order))   
         except Exception as e:
@@ -254,6 +303,8 @@ class JuejinTrade(BaseTrade):
         positions = get_positions()
         positions_rtn = []
         for pos in positions:
+            if pos.volume==0:
+                continue
             # 持仓方向
             if pos.side==PositionSide_Long:
                 side = POSITION_DIRECTION.LONG
@@ -261,8 +312,12 @@ class JuejinTrade(BaseTrade):
                 side = POSITION_DIRECTION.SHORT   
             symbol = self.api.transfer_symbol(pos.symbol, mode=1)          
             pos_rtn = Position(symbol,side,init_quantity=pos.volume)
-            # 持仓市值 
-            pos_rtn._last_price = pos.last_price
+            # 持仓品种当前价格
+            pos_rtn._last_price = pos.price
+            # 持仓均价（买入价格）
+            pos_rtn._avg_price = pos.vwap
+            # 可平仓数量
+            pos_rtn._closable = (pos.available - pos.available_today)
             positions_rtn.append(pos_rtn)
         return positions_rtn
         
@@ -287,10 +342,12 @@ class JuejinTrade(BaseTrade):
         price = order.price
         if order.side==SIDE.BUY:
             target_side = OrderSide_Buy
+            position_effect = PositionEffect_Open
         if order.side==SIDE.SELL:
-            target_side = OrderSide_Sell           
+            target_side = OrderSide_Sell  
+            position_effect = PositionEffect_Close       
          
-        order_volume(symbol=symbol, volume=volume, side=target_side, order_type=OrderType_Limit, position_effect=PositionEffect_Open, price=price)
+        order_volume(symbol=symbol, volume=volume, side=target_side, order_type=OrderType_Limit, position_effect=position_effect, price=price)
         # 加入匹配订单队列      
         ctx.cached_orders.append(order)   
         
@@ -298,7 +355,7 @@ class JuejinTrade(BaseTrade):
         """撤单"""
         
         # 根据RQ订单号，查找到对应掘金订单号，并执行 
-        order = self.find_cache_order(order_id=order.order_id,mode=OrderMode.RQALPHA.value)
+        order = self.api.find_cache_order(order_id=order.order_id,mode=OrderMode.RQALPHA.value)
         if order is None:
             logger.error("not found order:{}".format(order.order_id))
             return   

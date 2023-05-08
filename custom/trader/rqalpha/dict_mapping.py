@@ -1,7 +1,9 @@
+from data_extract.his_data_extractor import MarketType
+
 def transfer_order_book_id(instrument,type=1):
     """股票代码转换为rqalpha格式
         PARAMS:
-             type 1 沪市A股 2 深市A股
+             type 1 沪市A股 0 深市A股
     """
     
     if isinstance(instrument,int):
@@ -19,3 +21,10 @@ def transfer_instrument(order_book_id):
     if order_book_id.endswith(".XSHG"):
         return order_book_id.split(".")[0]
     return order_book_id.split(".")[0]
+
+def judge_market(order_book_id):
+    """根据代码取得市场类别,XSHE-深证A股 XSHG 上证A股"""
+    
+    if order_book_id.endswith("XSHE"):
+        return MarketType.SZ.value
+    return MarketType.SH.value

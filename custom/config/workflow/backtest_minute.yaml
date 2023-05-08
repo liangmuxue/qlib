@@ -96,10 +96,14 @@ task:
              end_date: "2022-02-28"
              benchmark: "000001.XSHG"
              frequency: "1m"
+             frequency_sim: False
+             handle_bar_wait: False             
              accounts: 
                 stock: 100000
           extra: 
              log_level: "verbose"
+             report_save_path: &report_save_path "custom/data/trader/report"
+             stock_data_path: "/home/qdata/stock_data"
              context_vars:
                 strategy_class: 
                    class: MinuteStrategy
@@ -123,11 +127,11 @@ task:
              sys_analyser: 
                  enabled: True
                  plot: True
-                 report_save_path: "custom/data/trader/report"
+                 report_save_path: *report_save_path
              ext_ds_mod:
                  enabled: True
                  lib: "data_extract.rqalpha.ext_ds_mod"
-                 report_save_path: "custom/data/trader/report" 
+                 report_save_path: *report_save_path 
                  load_trade_df: False
             
         

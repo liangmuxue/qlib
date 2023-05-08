@@ -29,8 +29,9 @@ class WorkflowSubStatus(Enum):
     
 @unique
 class FrequencyType(Enum):
-    """任务频次类别，1 日 2 周 3 月 4 季度 5 年 6 半年"""
+    """任务频次类别，0 实时 1 日 2 周 3 月 4 季度 5 年 6 半年"""
     
+    REAL = 0 
     DAY = 1 
     WEEK = 2  
     MONTH = 3 

@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import pickle
 import yaml
 import sys, os
@@ -58,13 +59,23 @@ class ResultView(object):
         with open(pred_data_file, "rb") as fin:
             total_df = pickle.load(fin)           
             logger.info("df pred_date:{}".format(total_df.pred_date.unique()))         
+   
+    def view_trade_data(self):
+        file_path = "/home/qdata/workflow/wf_backtest_flow_2023/trader_data/05/trade_data.csv"
+        trade_data = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)  
+        print("trade_data:",trade_data)
+        tar_data = trade_data["trade_date"].dt.strftime('%Y%m%d')=="20230505"
+        order_id = 16832845180002
+        # trade_data[trade_data["order_id"]==order_id] = np.array([datetime.datetime(2023, 5, 5, 9, 31), '600533.XSHG', 1, 3.4, 4600, 15640.0])
+        from rqalpha.const import ORDER_STATUS
+        print("ORDER_STATUS.ACTIVE:{}".format(ORDER_STATUS.ACTIVE))
         
 if __name__ == "__main__":    
     # task = WorkflowTask(task_batch=2,workflow_id=1,resume=True)
     view = ResultView()
     csv_file = "/home/qdata/stock_data/ak/whole_data/day/600008_institution.csv"
-    csv_file = "/home/qdata/stock_data/ak/item/day/000510_institution.csv"
-    csv_file = "/home/qdata/stock_data/tdx/item/5m/600678.csv"
+    csv_file = "/home/qdata/stock_data/ak/item/day/002461_institution.csv"
+    # csv_file = "/home/qdata/stock_data/tdx/item/5m/600678.csv"
     view.view_csv_data(csv_file)
     data_file = "/home/qdata/stock_data/ak/all_day_institution.pickle"
     # data_file = "/home/qdata/stock_data/tdx/all_5m.pickle"
@@ -73,4 +84,7 @@ if __name__ == "__main__":
     pred_data_file = "/home/qdata/workflow/wf_backtest_flow/task/20/dump_data/pred_part/pred_df_total_20220201.pkl"
     pred_data_file = "/home/qdata/workflow/wf_test/task/73/dump_data/pred_part/pred_df_total_20220118.pkl"
     # view.view_pred_data(pred_data_file)   
+    # view.view_trade_data()
+    
+    
     

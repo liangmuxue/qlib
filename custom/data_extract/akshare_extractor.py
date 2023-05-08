@@ -232,5 +232,11 @@ class AkExtractor(HisDataExtractor):
         base_data["total_capital"] = stock_individual_info_em_df.values[6][1]
         base_data["tradable_shares"] = stock_individual_info_em_df.values[7][1]
         return base_data
+
+    def clear_redun_data(self,ori_data_item,date):
+        """清除重复部分的数据"""
         
+        data_item = ori_data_item[ori_data_item["datetime"]<date]
+        return data_item  
+            
             
