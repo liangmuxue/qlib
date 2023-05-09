@@ -30,9 +30,10 @@ class TdxExtractor(HisDataExtractor):
     def reconnect(self):
         try:
             self.api.disconnect()
+            self.api = TdxHq_API(auto_retry=True,raise_exception=True)
             self.connect()
         except Exception as e:
-            logger.error("reconnect fail:",e)
+            logger.error("reconnect fail:{}".format(e))
             
     def load_code_data(self):  
         """取得所有股票代码"""
@@ -53,7 +54,7 @@ class TdxExtractor(HisDataExtractor):
                                         is_complete=is_complete,contain_institution=contain_institution,fill_history=fill_history)
                 flag = True   
             except Exception as e:
-                logger.error("import_data fail:",e)    
+                logger.error("import_data fail:{}".format(e))    
                 self.reconnect()     
                 cnt += 1
                 logger.info("reconnect time:{}".format(cnt)) 

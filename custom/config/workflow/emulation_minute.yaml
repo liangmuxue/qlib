@@ -36,6 +36,7 @@ task:
             load_dataset_file: &load_dataset_file True
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data"
             pred_data_file: "pred_df_total.pkl"
+            dynamic_file: True
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -97,7 +98,8 @@ task:
              end_date: "2023-04-29"
              benchmark: "000001.XSHG"
              frequency: "1m"
-             frequency_sim: True
+             frequency_sim: False
+             handle_bar_wait: False
              accounts: 
                 stock: 100000
           extra: 
@@ -106,8 +108,8 @@ task:
              report_save_path: &report_save_path "custom/data/trader/report"
              context_vars:
                 strategy_class: 
-                   class: MinuteStrategy
-                   module_path: trader.emulator.emu_minute_strategy   
+                   class: SimBacktestStrategy
+                   module_path: trader.emulator.emu_backtest_strategy   
                    config_path: "custom/config/workflow/emulation_minute.yaml"
                    provider_uri: "/home/qdata/qlib_data/custom_cn_data"     
                 strategy:
@@ -136,11 +138,8 @@ task:
              ext_emulation_mod:
                  enabled: True
                  lib: "trader.rqalpha.mod_ext_simulation"
-                 emu_channel: "juejin"      
+                 emu_channel: "rqalpha"      
                  emu_args:
-                     token: "token"  
-                     end_point: "api.myquant.cn:9000"
-                     account_id: "06c52995-e00c-11ed-864a-00163e022aa6"  
                      account_alias: "lmx_acc"                     
                      
                      

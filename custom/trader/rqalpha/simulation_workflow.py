@@ -19,8 +19,7 @@ def init(context):
     strategy_class_config = context.strategy_class
     # 使用qlib模式，动态类定义，以及传参
     context.strategy_class = init_instance_by_config(strategy_class_config)
-    # 回测下取消工作任务模式
-    context.strategy_class.__build_with_context__(context,workflow_mode=False)
+    context.strategy_class.__build_with_context__(context,workflow_mode=True)
     
 def before_trading(context):
     """交易前准备"""

@@ -210,8 +210,8 @@ class TradeEntity():
         return target_df    
     
     def exp_trade_data(self,file_path):
-        pd.set_option('display.max_columns', 20) 
-        logger.debug("to csv,trade_data_df:{}".format(self.trade_data_df))
+        # pd.set_option('display.max_columns', 20) 
+        # logger.debug("to csv,trade_data_df:{}".format(self.trade_data_df))
         self.trade_data_df.to_csv(file_path,index=False)
         
     def imp_trade_data(self,file_path):

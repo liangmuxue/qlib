@@ -6,6 +6,7 @@ __pycache__/
 *.pyd
 *.so
 **/*.pickle
+**/*.pkl
 *.settings
 *.ipynb
 .ipynb_checkpoints

@@ -533,7 +533,8 @@ class WorkflowSubTask(object):
         
         # 修改状态为已失败
         self.main_task.task_store.update_workflow_subtask_status(self.task_entity["id"],WorkflowSubStatus.fail.value) 
-                   
+
+            
 if __name__ == "__main__":    
     
     # For Test
@@ -555,6 +556,5 @@ if __name__ == "__main__":
     # 回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow_2023",resume=False)
     task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)    
-    
     task.start_task()
         

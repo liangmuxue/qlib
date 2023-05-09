@@ -12,7 +12,7 @@ from cus_utils.data_filter import get_topN_dict
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-class Simtrategy(BaseStrategy):
+class SimStrategy(BaseStrategy):
     """仿真交易策略，分钟级别，继承回测基类"""
     
     def __init__(self,proxy_name="qidian"):
@@ -26,7 +26,7 @@ class Simtrategy(BaseStrategy):
         self.ds = env.data_proxy._data_source
         self.frequency_sim = env.config.base.frequency_sim
         self.handle_bar_wait = env.config.base.handle_bar_wait
-    
+        
     def init_env(self):
 
         # 初始化交易代理对象
@@ -127,10 +127,12 @@ class Simtrategy(BaseStrategy):
                 
         # 保存到上下文
         self.candidate_list_buy = candidate_list_buy
+        
         # 根据买单数量配置，设置买单列表
         position_max_number = self.strategy.position_max_number
         # 从买入股票候选列表中，根据配置取得待买入列表
         self.buy_list = get_topN_dict(candidate_list_buy,position_max_number)
+        self.new_buy_list = {}
         self.sell_list = sell_list
         # 撤单列表
         self.cancel_list = []
@@ -150,8 +152,12 @@ class Simtrategy(BaseStrategy):
         
         
         logger.info("handle_bar.now:{}".format(context.now))
+        
+        # 如果之前有新增候选买入，在此添加
+        for index,(k,v) in enumerate(self.new_buy_list.items()):
+            self.buy_list[k] = v        
         # 如果非实时模式，则需要在相应前等待几秒，以保证先处理外部通知事件
-        if not self.handle_bar_wait:
+        if self.handle_bar_wait:
             time.sleep(3)
         logger.debug("handle_bar process:{}".format(context.now))
         # 已提交卖单及买单检查
@@ -407,7 +413,8 @@ class Simtrategy(BaseStrategy):
         
         for index,(k,v) in enumerate(self.candidate_list_buy.items()):
             if k not in self.buy_list:
-                self.buy_list[k] = v
+                # 先放入待新增列表中，下一个时间窗进行新增
+                self.new_buy_list[k] = v
                 return v
     
     def get_postion_by_order_book_id(self,order_book_id,context=None):

@@ -1,6 +1,7 @@
 import pickle
 import numpy as np
 import pandas as pd
+import os
 
 from qlib.utils import init_instance_by_config
 from qlib.tests.config import CSI300_BENCH, CSI300_GBDT_TASK
@@ -44,6 +45,7 @@ class MlIntergrate():
         
         # 初始化
         self.pred_data_path = self.model_cfg["kwargs"]["pred_data_path"]
+        self.dynamic_file = self.model_cfg["kwargs"]["dynamic_file"]
         self.load_dataset_file = self.model_cfg["kwargs"]["load_dataset_file"]
         self.save_dataset_file = self.model_cfg["kwargs"]["save_dataset_file"]
         # 初始化model和dataset
@@ -71,12 +73,31 @@ class MlIntergrate():
 
     def prepare_data(self,pred_date):   
         # 加载预测文件
-        self.pred_df = self.load_pred_data()
-         
-    def load_pred_data(self):
-        pred_data_path = self.pred_data_path + "/pred_df_total.pkl"
+        
+        if self.dynamic_file:
+            # 如果动态加载模式，则从目录中找出最接近此预测日期的文件
+            pred_part_path = self.pred_data_path + "/pred_part"
+            files = os.listdir(pred_part_path)
+            match_file = None
+            for file in files:
+                file_data_part = int(file.split(".")[0].split("_")[-1])
+                if file_data_part>pred_date:
+                    continue
+                if match_file is None:
+                    match_file = file_data_part
+                    continue
+                if file_data_part>match_file:
+                    match_file = file_data_part
+            pred_data_path = "{}/pred_part/pred_df_total_{}.pkl".format(self.pred_data_path,match_file)
+        else:
+            pred_data_path = self.pred_data_path + "/pred_df_total.pkl"
+        
         with open(pred_data_path, "rb") as fin:
-            df_pred = pickle.load(fin)     
+            df_pred = pickle.load(fin)
+            self.pred_df = self.load_pred_data(df_pred) 
+      
+    def load_pred_data(self,df_pred):
+     
         df_pred["pred_date"] = df_pred["pred_date"].astype(int)
         df_pred["class1"] = df_pred["class1"].astype(int) 
         df_pred["class2"] = df_pred["class2"].astype(int) 
