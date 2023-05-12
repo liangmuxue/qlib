@@ -19,9 +19,9 @@ class SimBacktestStrategy(SimStrategy):
         
     
     def init_env(self):
-
         # 初始化交易代理对象
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
+        self.trade_entity.clear_his_data()
          
     def before_trading(self,context):
         """交易前准备"""
@@ -41,4 +41,17 @@ class SimBacktestStrategy(SimStrategy):
         
         super().handle_bar(context,bar_dict)
 
+
+    def get_candidate_list(self,pred_date,context=None):
+        return super().get_candidate_list(pred_date,context=context)
+        # candidate_list = [600521]
+        # return candidate_list
+ 
+    def get_last_price(self,order_book_id):
+        """重载，这里为取得最近分钟行情"""
+        
+        env = Environment.get_instance()
+        market_price = env.get_last_price(order_book_id)
+        return market_price 
+    
     

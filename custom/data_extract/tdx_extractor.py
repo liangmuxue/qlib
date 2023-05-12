@@ -29,38 +29,16 @@ class TdxExtractor(HisDataExtractor):
         
     def reconnect(self):
         try:
-            self.api.disconnect()
             self.api = TdxHq_API(auto_retry=True,raise_exception=True)
             self.connect()
+            return True
         except Exception as e:
             logger.error("reconnect fail:{}".format(e))
+            return False
             
     def load_code_data(self):  
         """取得所有股票代码"""
         pass     
-
-    def import_data_within_workflow(self,wf_task_id,start_date=19700101,end_date=20500101,period=None,
-                                    is_complete=False,contain_institution=True,fill_history=False):
-        
-        # 任务开始时初始化连接，后续保持使用此连接
-        self.connect() 
-        flag = False
-        cnt = 0
-        while True:
-            if flag:
-                break
-            try: 
-                super().import_data_within_workflow(wf_task_id,start_date=start_date,end_date=end_date,period=period,
-                                        is_complete=is_complete,contain_institution=contain_institution,fill_history=fill_history)
-                flag = True   
-            except Exception as e:
-                logger.error("import_data fail:{}".format(e))    
-                self.reconnect()     
-                cnt += 1
-                logger.info("reconnect time:{}".format(cnt)) 
-                continue  
-        # 任务结束时关闭连接
-        self.api.disconnect()
                     
     def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,
                     contain_institution=False,resume=False,no_total_file=False,auto_import=False):
@@ -184,7 +162,7 @@ class TdxExtractor(HisDataExtractor):
         api = self.api
         data = api.get_security_quotes([(market, instrument_code)])
         # 按照规范构造返回值，有几项没有数据
-        np_data = np.array([[data[0]["code"],data[0]["servertime"],float(data[0]["open"]),float(data[0]["last_close"]),float(data[0]["high"]),
+        np_data = np.array([[data[0]["code"],data[0]["servertime"],float(data[0]["open"]),float(data[0]["price"]),float(data[0]["high"]),
                              float(data[0]["low"]),float(data[0]["cur_vol"]),float(data[0]["amount"]),0,0,0,0]])
         df = pd.DataFrame(np_data,columns=self.busi_columns)
         df["open"] = pd.to_numeric(df["open"])
@@ -193,6 +171,8 @@ class TdxExtractor(HisDataExtractor):
         df["low"] = pd.to_numeric(df["low"])
         df["volume"] = pd.to_numeric(df["volume"])
         df["amount"] = pd.to_numeric(df["amount"])
+        # 添加last属性
+        df["last"] = pd.to_numeric(df["close"])
         return df
         
     def get_last_data_date(self,data_item,period):    

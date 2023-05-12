@@ -108,10 +108,12 @@ class TraderSpi(object):
                     return        
                 # 放入掘金订单信息
                 if need_append:
-                    order.juejin_order = juejin_order     
+                    logger.debug("need append with second:{}".format(juejin_order.cl_ord_id))
+                    order.juejin_order = juejin_order    
+                    # 订单中使用第二订单号来存储掘金订单编号
+                    order.set_secondary_order_id(juejin_order.cl_ord_id)
                 order.active()
                 logger.info('pubelish_event creation:{}'.format(order))
-                logger.info('pubelish_event creation,order status:{}'.format(order.status))
                 ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CREATION_PASS, account=account, order=order))     
             # 成交事件回调
             if juejin_order.status==OrderStatus_Filled:
@@ -120,7 +122,6 @@ class TraderSpi(object):
                 if order is None:
                     logger.error("not found order:{}".format(juejin_order))
                     return               
-                order._status = RQ_ORDER_STATUS.FILLED
                 # 此事件和on_execution_report事件先后顺序不固定，只有具备execrpt属性的时候才进行成单事件发布
                 if hasattr(order,"execrpt"):
                     # 成交信息已经在之前的事件里预存进来了
@@ -138,14 +139,14 @@ class TraderSpi(object):
                         # 当日可平仓位取0
                         close_today_amount=0
                     )
-                    logger.debug("trade add ok")
+                    order._status = RQ_ORDER_STATUS.FILLED
+                    logger.debug("trade add ok on_order_status")
                     order.fill(trade)       
-                    logger.debug("order fill") 
                     # 手续费
                     trade._commission = execrpt.commission
                     # 印花税
-                    logger.debug("get_trade_tax begin") 
-                    trade._tax = ctx.context.get_trade_tax(trade)                  
+                    trade._tax = ctx.context.get_trade_tax(trade)    
+                    logger.debug("publish event in on_order_status")               
                     ctx.context.event_bus.publish_event(Event(EVENT.TRADE, account=account, trade=trade, order=order))  
                 else:
                     # 如果没有execrpt属性，则不发送事件，同时做出标记
@@ -186,6 +187,8 @@ class TraderSpi(object):
             if need_append:
                 logger.debug("need_append execrpt")
                 order.juejin_order = execrpt   
+                # 订单中使用第二订单号来存储掘金订单编号
+                order.set_secondary_order_id(execrpt.cl_ord_id)                
             
             # 此事件和订单成单事件先后顺序不固定，如果此事件在前，则只设置execrpt属性，等待后续订单成单事件处理发布的事情
             if not hasattr(order,"has_fill"):
@@ -206,12 +209,13 @@ class TraderSpi(object):
                 # 当日可平仓位取0
                 close_today_amount=0
             )
-            logger.debug("trade add ok")
+            logger.debug("trade add ok on_execution_report")
             order.fill(trade)       
             # 手续费
             trade._commission = execrpt.commission
             # 印花税
-            trade._tax = ctx.context.get_trade_tax(trade)     
+            trade._tax = ctx.context.get_trade_tax(trade)    
+            logger.debug("publish event in on_execution_report")  
             ctx.context.event_bus.publish_event(Event(EVENT.TRADE, account=account, trade=trade, order=order))   
         except Exception as e:
             logger.exception("on_execution_report error")

@@ -11,7 +11,7 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 # 交易信息表字段，分别为交易日期，股票代码，成交价格，成交量,总价格，成交状态，订单编号,卖出原因
-TRADE_COLUMNS = ["trade_date","order_book_id","side","price","quantity","total_price","status","order_id","sell_reason"]
+TRADE_COLUMNS = ["trade_date","order_book_id","side","price","quantity","total_price","status","order_id","sell_reason","secondary_order_id"]
 
 class TradeEntity():
     """交易对象处理类"""
@@ -25,13 +25,18 @@ class TradeEntity():
             self.trade_data_df = self.imp_trade_data(save_path)
             if self.trade_data_df is None:
                 self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+                self.sys_orders = {} 
         else:
             self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
-        # self.trade_data_df.set_index("order_id",inplace=True)
-        # 映射系统订单
-        self.sys_orders = {}
+            # 映射系统订单
+            self.sys_orders = {}            
+
         self.save_path = save_path
-        
+    
+    def clear_his_data(self):
+        self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+        self.exp_trade_data(self.save_path)
+           
     def add_or_update_order(self,order,trade_day):
         """添加(或更新)订单信息"""
         
@@ -45,12 +50,16 @@ class TradeEntity():
         # 交易状态为进行中
         status = order.status
         order_id = order.order_id
+        # 存储对于实际仿真或实盘系统的交易订单号
+        secondary_order_id = order.secondary_order_id
+        if secondary_order_id is None:
+            secondary_order_id = 0
         
         if hasattr(order, "sell_reason"):
             sell_reason = order.sell_reason
         else:
             sell_reason = 0
-        row_data = [trade_date,order_book_id,side,price,quantity,0,status,order_id,sell_reason]
+        row_data = [trade_date,order_book_id,side,price,quantity,0,status,order_id,sell_reason,secondary_order_id]
         logger.debug("row_data is:{}".format(row_data))
         row_data = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
@@ -107,7 +116,11 @@ class TradeEntity():
         # 交易状态为已成交
         status = default_status
         order_id = trade.order_id
-        row_data = [trade_date,order_book_id,side,price,quantity,total_price,status,order_id,order.sell_reason]
+        # 存储对于实际仿真或实盘系统的交易订单号
+        secondary_order_id = order.secondary_order_id
+        if secondary_order_id is None:
+            secondary_order_id = 0        
+        row_data = [trade_date,order_book_id,side,price,quantity,total_price,status,order_id,order.sell_reason,secondary_order_id]
         # 使用订单号查询并更新记录
         self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
         # 变更后保存数据
@@ -118,7 +131,7 @@ class TradeEntity():
         """根据订单号查询订单"""
         
         trade_data_df = self.trade_data_df
-        logger.debug("trade_data_df in get order:{}".format(trade_data_df))
+        # logger.debug("trade_data_df in get order:{}".format(trade_data_df))
         target_df = trade_data_df[(trade_data_df["order_id"]==order_id)]
         return target_df
          
@@ -211,14 +224,18 @@ class TradeEntity():
     
     def exp_trade_data(self,file_path):
         # pd.set_option('display.max_columns', 20) 
-        # logger.debug("to csv,trade_data_df:{}".format(self.trade_data_df))
         self.trade_data_df.to_csv(file_path,index=False)
         
     def imp_trade_data(self,file_path):
+        """从文件加载交易订单信息"""
         
         if not os.path.exists(file_path):
             return None
         trade_data = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)  
+        self.sys_orders = {}    
+        # 追加到系统订单信息中
+        for index,row in trade_data.iterrows():   
+            self.sys_orders[row["order_book_id"]] = row
         return trade_data     
 
 

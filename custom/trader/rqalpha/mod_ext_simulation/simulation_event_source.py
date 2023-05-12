@@ -42,7 +42,7 @@ class SimulationEventSource(AbstractEventSource):
         am_end_dt = current_dt.replace(hour=11, minute=30)
         pm_start_dt = current_dt.replace(hour=13, minute=1)
         # 修改收盘时间用于仿真测试
-        pm_end_dt = current_dt.replace(hour=18, minute=0)
+        pm_end_dt = current_dt.replace(hour=20, minute=0)
 
         delta_minute = timedelta(minutes=1)
         while current_dt <= am_end_dt:
@@ -234,7 +234,7 @@ class SimulationEventSource(AbstractEventSource):
                             tm.sleep(3)
                             continue
                         # 交易时间小于当前时间，跳入下一交易时间
-                        if calendar_dt.hour>now_time.hour or (calendar_dt.hour==now_time.hour and calendar_dt.minute>now_time.minute):
+                        if calendar_dt.hour<now_time.hour or (calendar_dt.hour==now_time.hour and calendar_dt.minute<now_time.minute):
                             logger.debug("need next,calendar_dt.hour:{},calendar_dt.minute:{}".format(calendar_dt.hour,calendar_dt.minute))
                             break                      
                         # 交易时间等于当前时间，执行bar事件

@@ -59,7 +59,8 @@ class BaseStrategy():
         context.fired = False
         subscribe_event(EVENT.TRADE, self.on_trade_handler)
         subscribe_event(EVENT.ORDER_CREATION_PASS, self.on_order_handler)     
-        subscribe_event(EVENT.ORDER_CREATION_REJECT, self.on_order_handler)        
+        subscribe_event(EVENT.ORDER_CREATION_REJECT, self.on_order_handler)    
+        self.init_env()    
     
     def init_env(self):
         pass

@@ -28,7 +28,6 @@ class SimStrategy(BaseStrategy):
         self.handle_bar_wait = env.config.base.handle_bar_wait
         
     def init_env(self):
-
         # 初始化交易代理对象
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
          
@@ -44,23 +43,24 @@ class SimStrategy(BaseStrategy):
         # 根据当前日期，进行预测计算
         context.ml_context.prepare_data(pred_date)
         # 根据预测计算，筛选可以买入的股票
-        candidate_list = context.ml_context.filter_buy_candidate(pred_date)
+        # candidate_list = self.get_candidate_list(pred_date,context=context)
+        candidate_list = [600520]
         # candidate_list = []
         candidate_list_buy = {}
-        exceed_ins = []
-        # 使用额度占比
-        total_pos_value_rate = self.strategy.single_buy_mount_percent/100*self.strategy.position_max_number
-        # 持仓股票个数
-        position_number = len(self.get_positions())
-        # 通过计算使用额度占比，以及当前持仓数量和单只股票购买额度，动态计算购买数量
-        remain_number = self.strategy.position_max_number - position_number       
-        # 保持非0
-        if remain_number<=0:
-            remain_number = 1         
-        # 剩余额度为当前现金除以可以买入的股票个数额度，并乘以使用额度占比
-        portfolio = self.get_portfolio()
-        remain_quota = portfolio.cash/remain_number * total_pos_value_rate 
-      
+        sell_list = {}
+        
+        # 从文件中加载的未成单的订单记录，维护到上下文
+        buy_orders = self.trade_entity.get_buy_list_active(str(self.trade_day))
+        for index,row in buy_orders.iterrows():   
+            order = self.create_order(row["order_book_id"], row["quantity"], SIDE.BUY, row["price"])
+            candidate_list_buy[row["order_book_id"]] = order
+        sell_orders = self.trade_entity.get_sell_list_active(str(self.trade_day))
+        for index,row in sell_orders.iterrows():              
+            order = order = self.create_order(row["order_book_id"], row["quantity"], SIDE.SELL, row["price"])
+            order.set_frozen_cash(0)
+            order._status = row["status"]            
+            sell_list[row["order_book_id"]] = order
+                                
         for instrument in candidate_list:
             # 剔除没有价格数据的股票
             if instrument not in self.instruments_dict:
@@ -77,31 +77,23 @@ class SimStrategy(BaseStrategy):
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
             buy_price = h_bar[0,0]
-            amount = remain_quota / buy_price   
-            # 如果数量凑不够100股，或者现金不足，则取消
-            if amount<100:
-                logger.warning("volume exceed:{}".format(instrument))
-                exceed_ins.append(instrument)
-                continue    
-            # 取100的整数倍 
-            amount = int(amount/100) * 100            
+            if order_book_id in candidate_list_buy:
+                continue
             # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）
-            order = Order.__from_create__(
-                order_book_id=order_book_id,
-                quantity=amount,
-                side=SIDE.BUY,
-                style=None,
-                position_effect=None,
-                # 自定义属性
-                buy_price=buy_price,
-                try_cnt=0,
-            )
+            order = self.create_order(order_book_id, 0, SIDE.BUY, buy_price)
             candidate_list_buy[order_book_id] = order
-            position_number+=1
-            
+        # 保存到上下文
+        self.candidate_list_buy = candidate_list_buy         
+        # 根据买单数量配置，设置买单列表
+        position_max_number = self.strategy.position_max_number
+        # 从买入股票候选列表中，根据配置取得待买入列表
+        self.buy_list = get_topN_dict(candidate_list_buy,position_max_number)
+        self.new_buy_list = {}
+                   
         # 查看持仓，根据预测模型计算,逐一核对是否需要卖出
-        sell_list = {}
         for position in self.get_positions():
+            if position.order_book_id in sell_list:
+                continue            
             instrument = int(transfer_instrument(position.order_book_id))
             flag = context.ml_context.measure_pos(pred_date,instrument)
             if flag:
@@ -113,26 +105,9 @@ class SimStrategy(BaseStrategy):
                     continue
                 sell_price = h_bar[0,0]                
                 # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）
-                order = Order.__from_create__(
-                    order_book_id=position.order_book_id,
-                    quantity=amount,
-                    side=SIDE.SELL,
-                    style=None,
-                    position_effect=None,                    
-                    # 自定义属性
-                    sell_price=sell_price,
-                    sell_reason=SellReason.PRED.value
-                )                
+                order = self.create_order(position.order_book_id, amount, SIDE.SELL, sell_price,sell_reason=SellReason.PRED.value)             
                 sell_list[position.order_book_id] = order
-                
-        # 保存到上下文
-        self.candidate_list_buy = candidate_list_buy
-        
-        # 根据买单数量配置，设置买单列表
-        position_max_number = self.strategy.position_max_number
-        # 从买入股票候选列表中，根据配置取得待买入列表
-        self.buy_list = get_topN_dict(candidate_list_buy,position_max_number)
-        self.new_buy_list = {}
+        # 卖单保存到上下文    
         self.sell_list = sell_list
         # 撤单列表
         self.cancel_list = []
@@ -145,6 +120,11 @@ class SimStrategy(BaseStrategy):
         """集合竞价入口"""
         
         # 根据盘前的分析计算，在集合竞价阶段直接挂单
+        if self.frequency_sim:
+            # 如果当前时间已经超过集合竞价时间了，则跳过
+            now_time = datetime.datetime.now()
+            if now_time.hour>9 or (now_time==9 and now_time.minute>=28):
+                return
         self.order_process(context)
          
     def handle_bar(self,context, bar_dict):
@@ -186,7 +166,9 @@ class SimStrategy(BaseStrategy):
         # 如果持仓股票超过指定数量，则不操作
         position_number = len(self.get_positions())
         position_max_number = self.strategy.position_max_number
-        if position_number>=position_max_number:
+        active_buy_list = self.trade_entity.get_buy_list_active(self.trade_day)
+        # 进行中的订单加上已持仓订单数量，不能大于规定数量阈值 
+        if position_number+len(active_buy_list)>=position_max_number:
             logger.info("full pos")
             return
         
@@ -194,14 +176,19 @@ class SimStrategy(BaseStrategy):
         for buy_order_id in self.buy_list:
             buy_order = self.buy_list[buy_order_id]
             # 只对待买入状态进行挂单
-            logger.debug("buy order loop,status:{}".format(buy_order.status))
+            logger.debug("buy order loop,order_book_id:{},status:{}".format(buy_order.status,buy_order.order_book_id))
             if buy_order.status!=ORDER_STATUS.PENDING_NEW:
                 continue
-            # 以当日收盘价格挂单买入,买入量参考单次限定购买金额
+            # 以当日收盘价格挂单买入
             order_book_id = buy_order.order_book_id
             price = buy_order.kwargs["buy_price"]
-            quantity = buy_order.quantity
-            order = self.submit_order(order_book_id,quantity,SIDE.BUY,price=price)
+            # 买入数量需要根据当前现金动态计算
+            quantity = self.dynamic_compute_quantity(order_book_id,price)
+            # 资金不足时，不进行处理
+            if quantity==0:
+                logger.warning("volume exceed,order_book_id:{}".format(order_book_id))
+                continue
+            order = self.submit_order(quantity,order_in=buy_order)
             if order is None:
                 logger.warning("order submit fail,order_book_id:{}".format(order_book_id))
                 continue
@@ -234,7 +221,7 @@ class SimStrategy(BaseStrategy):
                 # 全部卖出
                 sell_amount = pos_info.quantity
                 # 挂单卖出
-                order = self.submit_order(order_book_id,sell_amount,SIDE.SELL,price=sell_order.kwargs["sell_price"])
+                order = self.submit_order(sell_amount,order_in=sell_order)
                 if order is None:
                     logger.warning("order submit fail,order_book_id:{}".format(order_book_id))
                     continue               
@@ -242,10 +229,28 @@ class SimStrategy(BaseStrategy):
                 # 添加到跟踪变量
                 self.trade_entity.add_or_update_order(order,str(self.trade_day))
     
-    def submit_order(self,id_or_ins, amount, side, price=None, position_effect=None):
-        """代理api的订单提交方法"""
+    def create_order(self,id_or_ins, amount, side, price, position_effect=None,sell_reason=None):
+        """代理api的订单创建方法"""
         
         order_book_id = assure_order_book_id(id_or_ins)
+        style = cal_style(price, None)
+        order = Order.__from_create__(
+            order_book_id=order_book_id,
+            quantity=amount,
+            side=side,
+            style=style,
+            position_effect=position_effect,
+            # 自定义属性
+            buy_price=price,
+            try_cnt=0, 
+            sell_reason=sell_reason           
+        )        
+        return order
+    
+    def submit_order(self,amount,order_in=None):
+        """代理api的订单提交方法"""
+        
+        order_book_id = order_in.order_book_id
         env = Environment.get_instance()
         
         if (
@@ -260,38 +265,20 @@ class SimStrategy(BaseStrategy):
                 raise RQInvalidArgument(
                     _(u"Index Future contracts[99] are not supported in paper trading.")
                 )
-        style = cal_style(price, None)
-        # 这里改为取得实时行情
-        snapshot = self.get_current_snapshot(order_book_id)
-        market_price = snapshot.open
-        if not is_valid_price(market_price):
-            print("market_price in valid:{},code:{}".format(market_price,order_book_id))
-            user_system_log.warn(
-                _(u"Order Creation Failed: [{order_book_id}] No market data").format(
-                    order_book_id=order_book_id
-                )
-            )
-            return
-    
-        amount = int(amount)
-    
-        order = Order.__from_create__(
-            order_book_id=order_book_id,
-            quantity=amount,
-            side=side,
-            style=style,
-            position_effect=position_effect,
-        )
-    
-        if order.type == ORDER_TYPE.MARKET:
-            order.set_frozen_price(market_price)
-        # 由于没有在整个环境里进行计算，这里就不进行判断了
-        if env.can_submit_order(order) or True:
-            env.broker.submit_order(order)
+
+        order_in._quantity = int(amount)
+
+        if env.can_submit_order(order_in) or True:
+            # order._price = 
+            env.broker.submit_order(order_in)
             # 订单编号转换为字符串
-            order._order_id = "rq_{}".format(order._order_id)
-            return order
+            order_in._order_id = "rq_{}".format(order_in._order_id)
+            return order_in
     
+    def cancel_order(self,order):
+        logger.debug("cancel_order in ,order:{}".format(order))
+        cancel_order(order)
+        
     def verify_order_selling(self,context):
         """核查卖出订单"""
         
@@ -315,7 +302,7 @@ class SimStrategy(BaseStrategy):
                     logger.info("stop_fall_sell pending,ignore,price_now:{},limit_price:{}".format(price_now,limit_price))
                     continue
                 # 先撤单
-                cancel_order(sys_order)
+                self.cancel_order(sell_order)
                 # 更新挂单列表，后续统一处理
                 sell_order.kwargs["sell_price"] = price_now
                 # 这里需要修改状态为待挂单
@@ -342,6 +329,7 @@ class SimStrategy(BaseStrategy):
         buy_list_active = self.trade_entity.get_buy_list_active(str(self.trade_day))
         # 已下单未成交的处理
         for index,buy_item in buy_list_active.iterrows():
+            logger.info("check active,buy_item.order_book_id:{}".format(buy_item.order_book_id))
             sys_order = self.trade_entity.get_sys_order(buy_item.order_book_id)
             buy_order = self.get_buy_order(buy_item.order_book_id,context=context)
             cur_snapshot = self.get_current_snapshot(buy_item.order_book_id)
@@ -356,16 +344,18 @@ class SimStrategy(BaseStrategy):
             try_cnt_limit = self.strategy.buy_opt.try_cnt_limit
             # 如果超出昨日收盘1个百分点，则换股票
             if (price_now - price_last_day)/price_last_day*100>pred_buy_exceed_rate:
+                logger.info("pred_buy_exceed ,now:{},price_last_day:{}".format(price_now,price_last_day))
                 # 先撤单
-                cancel_order(sys_order)
+                self.cancel_order(buy_order)
                 # 从待买入列表中去除,通过设置状态实现               
                 self.update_order_status(buy_item,ORDER_STATUS.CANCELLED,side=SIDE.BUY, context=context)
                 # 从候选列表中挑选新的股票，放入待买入列表中
                 self.pick_to_buy_list(context)
             # 如果超出重复挂单限制，则换股票
             elif self.buy_try_cnt>try_cnt_limit:
+                logger.info("try_cnt_limit exceed,{}".format(self.buy_try_cnt))
                 # 先撤单
-                cancel_order(sys_order)
+                self.cancel_order(buy_order)
                 # 从待买入列表中去除,通过设置状态为已取消               
                 self.update_order_status(buy_item,ORDER_STATUS.CANCELLED,side=SIDE.BUY, context=context)
                 # 从候选列表中挑选新的股票，放入待买入列表中
@@ -373,12 +363,14 @@ class SimStrategy(BaseStrategy):
             # 如果未超出，则按照当前价格重新挂单
             else:
                 # 如果当前价格和挂盘价格相差不大，则忽略
-                if (price_now - sys_order.price)/sys_order.price*100<pred_buy_ignore_rate:
+                if abs(price_now - sys_order.price)/sys_order.price*100<pred_buy_ignore_rate:
+                    logger.info("ignore range,price_now:{},sys_order.price:{}".format(price_now,sys_order.price))
                     # 累加尝试次数
                     buy_order.kwargs["try_cnt"]+=1
                     continue
+                logger.info("need cancel,price_now:{},sys_order.price:{}".format(price_now,sys_order.price))
                 # 先撤单
-                cancel_order(sys_order)
+                self.cancel_order(buy_order)
                 # 修改状态    
                 self.update_order_status(buy_item,ORDER_STATUS.PENDING_NEW,side=SIDE.BUY, context=context)      
                 # 更新报价     
@@ -389,15 +381,52 @@ class SimStrategy(BaseStrategy):
         buy_list_reject = self.trade_entity.get_buy_list_reject(str(self.trade_day))
         for index,buy_item in buy_list_reject.iterrows():
             try:
+                cur_snapshot = self.get_current_snapshot(buy_item.order_book_id)
                 price_now = cur_snapshot.last
             except Exception as e:
                 logger.error("cur_snapshot err:{}".format(e))
+                continue
             # 修改状态    
             self.update_order_status(buy_item,ORDER_STATUS.PENDING_NEW,side=SIDE.BUY, context=context)      
             # 更新报价     
             self.buy_list[buy_item.order_book_id].kwargs["buy_price"] = price_now    
                         
-    ###############################自有数据逻辑########################################                                    
+    ###############################自有数据逻辑########################################  
+    
+    def dynamic_compute_quantity(self,order_book_id,price):
+        """动态计算需要买入的数量"""
+        
+        # 使用额度占比
+        total_pos_value_rate = self.strategy.single_buy_mount_percent/100*self.strategy.position_max_number
+        # 持仓股票个数
+        position_number = len(self.get_positions())
+        # 通过计算使用额度占比，以及当前持仓数量和单只股票购买额度，动态计算购买数量
+        remain_number = self.strategy.position_max_number - position_number       
+        # 保持非0
+        if remain_number<=0:
+            remain_number = 1         
+        # 剩余额度为当前现金除以可以买入的股票个数额度，并乘以使用额度占比
+        portfolio = self.get_portfolio()
+        remain_quota = portfolio.cash/remain_number * total_pos_value_rate      
+        amount = remain_quota / price   
+        logger.info("total_pos_value_rate:{},position_number:{},remain_number:{},cash:{},remain_quota:{},price:{},amount:{}" \
+                    .format(total_pos_value_rate,position_number,remain_number,portfolio.cash,remain_quota,price,amount))
+        # 如果数量凑不够100股，则取消
+        if amount<100:
+            logger.warning("volume exceed:{}".format(order_book_id))
+            return 0    
+        # 取100的整数倍 
+        amount = int(amount/100) * 100
+        return amount
+    
+    def get_candidate_list(self,pred_date,context=None):
+        candidate_list = context.ml_context.filter_buy_candidate(pred_date)
+        return candidate_list
+
+    def get_last_price(self,order_book_id):
+        snapshot = self.get_current_snapshot(order_book_id)
+        return snapshot.last
+                                     
     def get_sell_order(self,order_book_id,context=None):
         if order_book_id in self.sell_list:
             return self.sell_list[order_book_id]
@@ -461,7 +490,8 @@ class SimStrategy(BaseStrategy):
         """取得指定股票当前快照"""
         
         env = Environment.get_instance()
-        return env.data_proxy.current_snapshot(order_book_id, env.config.base.frequency,env.calendar_dt)
+        snapshot = env.data_proxy.current_snapshot(order_book_id, env.config.base.frequency,env.calendar_dt)
+        return snapshot
         
     #####################################逻辑判断部分#################################################                                 
     def expire_day_logic(self,context,bar_dict=None):
@@ -482,17 +512,10 @@ class SimStrategy(BaseStrategy):
                 logger.warning("trade not found:{},{}".format(order_book_id,before_date))
                 continue
             # 检查是否超期，以决定是否卖出
-            if tradedays(trade_date,before_date)>keep_day_number:
-                order = Order.__from_create__(
-                    order_book_id=position.order_book_id,
-                    quantity=sell_amount,
-                    side=SIDE.SELL,
-                    style=None,
-                    position_effect=None,                       
-                    # 自定义属性
-                    sell_price=pos_info.last_price,
-                    sell_reason=SellReason.EXPIRE_DAY.value
-                )                
+            dur_days = tradedays(trade_date,before_date)
+            if dur_days>keep_day_number:
+                logger.info("expire,trade_date:{},and dur_day:{}".format(trade_date,dur_days))
+                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, pos_info.last_price,sell_reason=SellReason.EXPIRE_DAY.value)                
                 self.sell_list[position.order_book_id] = order    
                         
     def stop_fall_logic(self,context,bar_dict=None):
@@ -508,16 +531,7 @@ class SimStrategy(BaseStrategy):
             sell_amount = pos_info.quantity
             # 如果下跌幅度(与买入价格比较)超过阈值(百分点)，则以当前收盘价格卖出
             if (pos_info.last_price-pos_info.avg_price)/pos_info.avg_price*100<stop_threhold:
-                order = Order.__from_create__(
-                    order_book_id=position.order_book_id,
-                    quantity=sell_amount,
-                    side=SIDE.SELL,
-                    style=None,
-                    position_effect=None,                       
-                    # 自定义属性
-                    sell_price=pos_info.last_price,
-                    sell_reason=SellReason.STOP_FALL.value
-                )                
+                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, pos_info.last_price,sell_reason=SellReason.STOP_FALL.value)                
                 self.sell_list[position.order_book_id] = order                
         
     def stop_raise_logic(self,context,bar_dict=None):
@@ -545,20 +559,7 @@ class SimStrategy(BaseStrategy):
                     sell_reason=SellReason.STOP_RAISE.value
                 )                
                 self.sell_list[position.order_book_id] = order  
-     
-    def candidate_buy_logic(self,context,bar_dict=None):
-        """候选买入逻辑"""
-       
-        position_number = len(self.get_positions())
-        position_max_number = self.strategy.position_max_number
-        buy_list_number = self.today_buy_number(context)
-        # 如果持仓股票加上待买入股票数量超过指定数量，则不操作
-        if position_number+buy_list_number>=position_max_number:
-            logger.info("candidate_buy_logic full pos")
-            return
-        # 买入剩余的份数
-        for i in range(position_max_number-(position_number+buy_list_number)):
-            self.pick_to_buy_list(context)
+
             
     ############################事件注册部分######################################
     def on_trade_handler(self,context, event):
@@ -586,7 +587,6 @@ class SimStrategy(BaseStrategy):
     def on_order_handler(self,context, event):
         order = event.order
         logger.info("order handler,order:{}".format(order))
-        logger.info("order handler,order.status:{}".format(order.status))
         # 如果订单被拒绝，则忽略,仍然保持新单状态，后续会继续下单
         if order.status==ORDER_STATUS.REJECTED:
             logger.warning("order reject:{},trade_date:{}".format(order.order_book_id,self.trade_day))
@@ -605,11 +605,5 @@ class SimStrategy(BaseStrategy):
             # 这里需要修改状态为已挂单
             buy_order._status = order.status            
             
-  
-if __name__ == '__main__':
-                   
-    emu_strategy = MinuteStrategy()
-    portfolio = emu_strategy.trade_proxy.get_portfolio()
-    logger.debug("portfolio:{}".format(portfolio))
     
     

@@ -35,6 +35,7 @@ task:
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
             pred_data_path: "custom/data/darts/dump_data/test6"
+            dynamic_file: False
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'

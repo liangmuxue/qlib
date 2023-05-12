@@ -60,8 +60,14 @@ class TdxDataSource(BaseDataSource):
     def get_bar(self, instrument, dt, frequency,need_prev=True):
         if frequency != '1m' and frequency != '1d':
             return super(TdxDataSource, self).get_bar(instrument, dt, frequency)
-
-        bar_data = self.get_k_data(instrument, dt, dt,frequency=frequency,need_prev=need_prev)
+        
+        if dt.hour<=9 and dt.minute<35:
+            # 
+            dt = get_tradedays_dur(dt,-1)
+            frequency = "1d"
+            bar_data = self.get_k_data(instrument, dt, dt,frequency=frequency,need_prev=need_prev)
+        else:
+            bar_data = self.get_k_data(instrument, dt, dt,frequency=frequency,need_prev=need_prev)
 
         if bar_data is None or bar_data.empty:
             return None
@@ -101,18 +107,6 @@ class TdxDataSource(BaseDataSource):
         if frequency!="1m":
             return super(TdxDataSource, self).current_snapshot(instrument, frequency, dt)
         
-        def tick_fields_for(ins):
-            _STOCK_FIELD_NAMES = [
-                'datetime', 'open', 'high', 'low', 'last', 'volume', 'total_turnover', 'prev_close',
-                'limit_up', 'limit_down'
-            ]
-            _FUTURE_FIELD_NAMES = _STOCK_FIELD_NAMES + ['open_interest', 'prev_settlement']
-
-            if ins.type == 'Future':
-                return _STOCK_FIELD_NAMES
-            else:
-                return _FUTURE_FIELD_NAMES
-        
         if self.frequency_sim:   
             # 如果实时模式，则取得实时数据      
             market = judge_market(order_book_id)    
@@ -123,7 +117,8 @@ class TdxDataSource(BaseDataSource):
                 # 如果不是5分钟间隔，则返回空
                 return None            
             bar = self.get_bar(instrument,dt,frequency)
-        return TickObject(instrument, bar)
+        tick_obj = TickObject(instrument, bar)
+        return tick_obj
 
     def _get_prev_close(self, instrument, dt,frequency=None):
         """取得上一交易时段的收盘价"""

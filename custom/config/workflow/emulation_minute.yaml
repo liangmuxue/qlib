@@ -94,8 +94,8 @@ task:
        rqalpha:
           ignore_mode: False
           base: 
-             start_date: "2023-04-28"
-             end_date: "2023-04-29"
+             start_date: "2023-04-1"
+             end_date: "2023-04-30"
              benchmark: "000001.XSHG"
              frequency: "1m"
              frequency_sim: False
@@ -115,7 +115,7 @@ task:
                 strategy:
                    position_max_number: 6
                    single_buy_mount_percent: 15
-                   keep_day_number: 2        
+                   keep_day_number: 3        
                    sell_opt:
                       stop_fall_percent: -5
                       stop_raise_percent: 5

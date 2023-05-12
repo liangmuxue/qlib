@@ -1,37 +1,13 @@
-import asyncio
-from cus_utils.process import IFakeSyncCall
+from trader.utils.date_util import tradedays
+from datetime import datetime
+def test_days_dur():
+    trade_date = 20230508
+    before_date = 20230510
+    trade_date = datetime.strptime(str(trade_date),"%Y%m%d")
+    before_date = datetime.strptime(str(before_date),"%Y%m%d")
+    dur_days = tradedays(trade_date,before_date)
+    print(dur_days)
 
-import random
-  
-class Player(object):
-    def __init__(self, entityId):
-        super(Player, self).__init__()
-        self.entityId = entityId
-  
-    def onFubenEnd(self, mailBox):
-        score = random.randint(1, 10)
-        print("onFubenEnd player %d score %d"%(self.entityId, score))
-        mailBox.onFakeSyncCall('evalFubenScore', (self.entityId, score))
-  
-class FubenStub(IFakeSyncCall):
-    def __init__(self, players):
-        super(FubenStub, self).__init__()
-        self.players = players
-  
-    @IFakeSyncCall.FAKE_SYNCALL()
-    def evalFubenScore(self):
-        totalScore = 0
-        for player in self.players:
-            entityId, score = yield (player.onFubenEnd, (self,))
-            print ("onEvalFubenScore player %d score %d"%(entityId, score))
-            totalScore += score
-  
-        print('the totalScore is %d'%totalScore)
-  
-if __name__ == '__main__':
-    players = [Player(i) for i in range(3)]
-  
-    fs = FubenStub(players)
-    fs.evalFubenScore()
-    
-    
+        
+if __name__ == "__main__":
+    test_days_dur()
