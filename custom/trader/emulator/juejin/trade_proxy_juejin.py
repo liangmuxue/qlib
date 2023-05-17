@@ -1,4 +1,5 @@
 from enum import Enum, unique
+import copy
 
 from rqalpha.const import SIDE,ORDER_STATUS as RQ_ORDER_STATUS
 from rqalpha.portfolio.position import Position as RQPosition
@@ -11,12 +12,18 @@ from trader.emulator.juejin.storage import ctx
 
 from .trade import set_token,set_endpoint,account,login,get_positions,get_cash
 
-from gmtrade.api import PositionSide_Long,PositionSide_Short,order_volume,OrderSide_Buy,OrderSide_Sell,OrderType_Limit,PositionEffect_Open
+from gmtrade.api import Order,order_volume,get_unfinished_orders,order_cancel
 from gmtrade.csdk.c_sdk import c_status_fail,py_gmi_set_data_callback, py_gmi_start, py_gmi_stop
 from gmtrade.enum import *
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
+
+class JuejinOrder(object):
+    """仿照掘金的订单类"""
+    def __init__(self,cl_ord_id,account_id):
+        self.cl_ord_id = cl_ord_id  
+        self.account_id = account_id
 
 @unique
 class OrderMode(Enum):
@@ -165,11 +172,11 @@ class TraderSpi(object):
             # 订单已撤单事件回调
             if juejin_order.status==OrderStatus_Canceled:
                 logger.debug("OrderStatus_Canceled cl_ord_id find:{}".format(juejin_order.cl_ord_id))
-                order,_ = self.find_cache_order(order_id=juejin_order)
+                order,_ = self.find_cache_order(juejin_order)
                 if order is None:
                     logger.error("not found order:{}".format(juejin_order))
                     return               
-                order.status = RQ_ORDER_STATUS.CANCELLED 
+                order._status = RQ_ORDER_STATUS.CANCELLED 
                 ctx.context.event_bus.publish_event(Event(EVENT.ORDER_CANCELLATION_PASS, account=account, order=order))
         except Exception as e:
             logger.exception("on_order_status error")
@@ -185,7 +192,7 @@ class TraderSpi(object):
                 return     
             # 有可能先执行on_execution_report事件，则在此放入掘金订单信息
             if need_append:
-                logger.debug("need_append execrpt")
+                logger.debug("need_append execrpt with second:{}".format(execrpt.cl_ord_id))
                 order.juejin_order = execrpt   
                 # 订单中使用第二订单号来存储掘金订单编号
                 order.set_secondary_order_id(execrpt.cl_ord_id)                
@@ -233,8 +240,8 @@ class TraderSpi(object):
     def on_account_status(self,account_status):
         logger.debug(f'on_account_status status={account_status}')
         
-    def on_error(self,error):
-        logger.debug(f'on_error error={error}')
+    def on_error(self,code,error):
+        logger.debug(f'on_error code={code},error={error}')
 
     def on_shutdown(self):
         logger.debug('on_shutdown in')
@@ -352,19 +359,21 @@ class JuejinTrade(BaseTrade):
             position_effect = PositionEffect_Close       
          
         order_volume(symbol=symbol, volume=volume, side=target_side, order_type=OrderType_Limit, position_effect=position_effect, price=price)
-        # 加入匹配订单队列      
-        ctx.cached_orders.append(order)   
+        # 加入匹配订单队列    
+        order_inner = copy.copy(order)  
+        ctx.cached_orders.append(order_inner)   
         
     def cancel_order(self,order):
         """撤单"""
         
-        # 根据RQ订单号，查找到对应掘金订单号，并执行 
-        order = self.api.find_cache_order(order_id=order.order_id,mode=OrderMode.RQALPHA.value)
-        if order is None:
-            logger.error("not found order:{}".format(order.order_id))
-            return   
-        juejin_order = order["juejin_order"]
-        self.api.order_cancel([juejin_order])        
+        cl_ord_id = order.secondary_order_id
+        logger.debug("cancel_order,cl_ord_id:{}".format(cl_ord_id))
+        order_list = get_unfinished_orders(self.account_id)
+        for item in order_list:
+            logger.debug("cancel_order,order_list loop item.cl_ord_id:{}".format(item.cl_ord_id))
+            if item.cl_ord_id==cl_ord_id:
+                order_in = {"cl_ord_id":item.cl_ord_id,"accouint_id":self.account_id}
+                order_cancel(order_in)
         
         
         

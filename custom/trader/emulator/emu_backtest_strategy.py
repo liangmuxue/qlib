@@ -16,7 +16,6 @@ class SimBacktestStrategy(SimStrategy):
     
     def __init__(self,proxy_name="qidian"):
         super().__init__(proxy_name=proxy_name)
-        
     
     def init_env(self):
         # 初始化交易代理对象
@@ -39,13 +38,18 @@ class SimBacktestStrategy(SimStrategy):
     def handle_bar(self,context, bar_dict):
         """主要的算法逻辑入口"""
         
+        # 需要符合回测数据时间规范（5分钟数据）
+        if not self.ds.valid_bar_date(context.now):
+            return     
+        # 首先进行撮合，然后进行策略
+        env = Environment.get_instance()
+        env.broker.trade_proxy.handler_bar(context.now)
         super().handle_bar(context,bar_dict)
 
-
     def get_candidate_list(self,pred_date,context=None):
-        return super().get_candidate_list(pred_date,context=context)
+        candidate_list = super().get_candidate_list(pred_date,context=context)
         # candidate_list = [600521]
-        # return candidate_list
+        return candidate_list
  
     def get_last_price(self,order_book_id):
         """重载，这里为取得最近分钟行情"""

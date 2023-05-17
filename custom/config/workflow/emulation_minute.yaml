@@ -123,7 +123,7 @@ task:
                       pred_sell_continue_rate: 0.5    
                    buy_opt:
                       pred_buy_exceed_rate: 1        
-                      pred_buy_ignore_rate: 0.1
+                      pred_buy_ignore_rate: 1
                       try_cnt_limit: 5                   
           mod: 
              sys_analyser: 

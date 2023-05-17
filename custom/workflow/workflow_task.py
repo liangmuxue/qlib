@@ -552,9 +552,13 @@ if __name__ == "__main__":
     # auto导入
     # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_auto",resume=False)
     # task = WorkflowTask(task_batch=119,workflow_name="wf_data_import_auto",resume=True)
-            
+
+    # 回测工作流
+    # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
+    task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)  
+                
     # 回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow_2023",resume=False)
-    task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)    
+    # task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)    
     task.start_task()
         

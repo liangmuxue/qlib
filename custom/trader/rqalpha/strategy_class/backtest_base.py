@@ -53,13 +53,15 @@ class BaseStrategy():
         self.strategy = context.config.extra.context_vars.strategy
         # 交易对象上下文
         save_path = context.config.extra.report_save_path
-        save_path = save_path + "/trade_data.csv"
-        self.trade_entity = TradeEntity(save_path=save_path)
+        data_save_path = save_path + "/trade_data.csv"
+        log_save_path = save_path + "/trade_data_log.csv"
+        self.trade_entity = TradeEntity(save_path=data_save_path,log_save_path=log_save_path)
         # 注册订单事件
         context.fired = False
         subscribe_event(EVENT.TRADE, self.on_trade_handler)
         subscribe_event(EVENT.ORDER_CREATION_PASS, self.on_order_handler)     
         subscribe_event(EVENT.ORDER_CREATION_REJECT, self.on_order_handler)    
+        subscribe_event(EVENT.ORDER_CANCELLATION_PASS, self.on_order_handler) 
         self.init_env()    
     
     def init_env(self):

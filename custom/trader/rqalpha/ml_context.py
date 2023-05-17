@@ -162,8 +162,6 @@ class MlIntergrate():
         # 预测数据,前面补0
         pred_data = df_pred_item["pred_data"].values
         pad_len = df_item.shape[0]-pred_data.shape[0]
-        if pad_len<0:
-            print("ggg") 
         data_line = np.pad(pred_data,(pad_len,0),'constant',constant_values=(0,0))          
         df_item["pred_data"] = data_line
         # 走势分类信息处

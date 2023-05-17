@@ -42,7 +42,7 @@ class SimulationEventSource(AbstractEventSource):
         am_end_dt = current_dt.replace(hour=11, minute=30)
         pm_start_dt = current_dt.replace(hour=13, minute=1)
         # 修改收盘时间用于仿真测试
-        pm_end_dt = current_dt.replace(hour=20, minute=0)
+        pm_end_dt = current_dt.replace(hour=15, minute=0)
 
         delta_minute = timedelta(minutes=1)
         while current_dt <= am_end_dt:

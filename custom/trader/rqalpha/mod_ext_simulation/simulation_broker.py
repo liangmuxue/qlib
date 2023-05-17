@@ -71,7 +71,6 @@ class ExtSimulationBroker(SimulationBroker):
 
         order.mark_cancelled(_(u"{order_id} order has been cancelled by user.").format(order_id=order.order_id))
         self.trade_proxy.cancel_order(order)
-
         try:
             self._open_orders.remove((account, order))
         except ValueError:

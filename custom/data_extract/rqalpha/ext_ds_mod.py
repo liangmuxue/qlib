@@ -7,7 +7,7 @@ from rqalpha.interface import AbstractMod
 from rqalpha.const import ORDER_STATUS
 from rqalpha.const import SIDE
 
-from .tdx_ds import TdxDataSource
+from data_extract.rqalpha.tdx_ds import TdxDataSource
 from trader.rqalpha.trade_entity import TRADE_COLUMNS
 from trader.utils.date_util import tradedays
 from trader.data_viewer import DataViewer
@@ -68,20 +68,62 @@ class ExtDataMod(AbstractMod):
         
         save_path = self.report_save_path + "/plot"
         # 取得预测数据和回测数据，并进行图形化展示
-        # for index,row in stat_df.iterrows():
-        #     trade_date = row["trade_date"]
-        #     trade_date_str = trade_date.strftime('%Y%m%d')
-        #     instrument = int(transfer_instrument(row["order_book_id"]))
-        #     pred_df_item = pred_df[(pred_df["pred_date"]==int(trade_date_str))&(pred_df["instrument"]==instrument)]
-        #     complex_df = pred_recorder.combine_complex_df_data(trade_date_str,instrument,pred_df=pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
-        #     data_viewer.show_trades_data_visdom(row,complex_df)
-        #     buy_trade_date_str = row["buy_date"]
-        #     buy_pred_df_item = pred_df[(pred_df["pred_date"]==int(buy_trade_date_str))&(pred_df["instrument"]==instrument)]
-        #     buy_complex_df = pred_recorder.combine_complex_df_data(buy_trade_date_str,instrument,pred_df=buy_pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
-        #     data_viewer.show_single_complex_pred_data(buy_complex_df,correct=-1,save_path=save_path)
-        #     data_viewer.show_single_complex_pred_data_visdom(buy_complex_df)
-            # logger.debug("complex_df data:{}".format(complex_df))
-         
+        for index,row in stat_df.iterrows():
+            trade_date = row["trade_date"]
+            trade_date_str = trade_date.strftime('%Y%m%d')
+            instrument = int(transfer_instrument(row["order_book_id"]))
+            pred_df_item = pred_df[(pred_df["pred_date"]==int(trade_date_str))&(pred_df["instrument"]==instrument)]
+            complex_df = pred_recorder.combine_complex_df_data(trade_date_str,instrument,pred_df=pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
+            data_viewer.show_trades_data_visdom(row,complex_df)
+            buy_trade_date_str = row["buy_date"]
+            buy_pred_df_item = pred_df[(pred_df["pred_date"]==int(buy_trade_date_str))&(pred_df["instrument"]==instrument)]
+            buy_complex_df = pred_recorder.combine_complex_df_data(buy_trade_date_str,instrument,pred_df=buy_pred_df_item,df_ref=dataset.df_all,ext_length=ext_length)
+            data_viewer.show_single_complex_pred_data(buy_complex_df,correct=-1,save_path=save_path)
+            data_viewer.show_single_complex_pred_data_visdom(buy_complex_df)
+            logger.debug("complex_df data:{}".format(complex_df))
+    
+    def analysis_stat_offline(self,file_path,save_path):   
+        """离线分析存储的历史交易数据"""
+        
+        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)   
+        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+        # 只统计已完成订单
+        target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
+        # 以股票为维度聚合，进行分析
+        group_df = target_df.groupby("order_book_id")
+        new_columns = TRADE_COLUMNS + TRADE_EXT_COLUMNS
+        stat_data = []
+        for name,instrument_df in group_df:
+            instrument_df = instrument_df.sort_values(by=["trade_date"]).reset_index(drop=True)
+            for index,row in instrument_df.iterrows():
+                # 买卖分别配对，进行额度计算
+                if index%2==0 and row["side"]!=SIDE.BUY:
+                    # 需要符合先买后卖原则
+                    logger.warning("buy index not fit:{},{}".format(index,row))
+                    break
+                if index%2==1 and row["side"]!=SIDE.SELL:
+                    # 需要符合先买后卖原则
+                    logger.warning("sell index not fit:{},{}".format(index,row))    
+                    break    
+                if row["side"]==SIDE.SELL:
+                    # 取得买入时记录，并计算差价
+                    prev_buy_row = instrument_df.iloc[index-1]
+                    buy_price = prev_buy_row["price"]
+                    differ_range = (row["price"] - buy_price)/buy_price
+                    gain = (row["price"] - buy_price) * row["quantity"]
+                    buy_day = prev_buy_row["trade_date"].strftime('%Y%m%d')
+                    sell_day = row["trade_date"].strftime('%Y%m%d')
+                    duration = tradedays(buy_day,sell_day)
+                    new_row = row.values.tolist() + [buy_price,differ_range,gain,buy_day,duration]
+                    stat_data.append(new_row)
+        stat_df = pd.DataFrame(np.array(stat_data),columns = new_columns)
+        # 按照盈亏排序
+        stat_df = stat_df.sort_values(by=["differ_range"],ascending=False)
+        # 计算汇总数据
+        total_gain = stat_df["gain"].sum()
+        logger.info("total_gain:{}".format(total_gain))
+        stat_df.to_csv(save_path,index=False)
+        
     def build_stat_df(self,strategy_obj,load_trade_df=False,load_cache=False):
         """生成统计数据"""
         
@@ -135,3 +177,12 @@ class ExtDataMod(AbstractMod):
                     
 def load_mod():
     return ExtDataMod()   
+
+if __name__ == "__main__": 
+    ext_mod = ExtDataMod()
+    file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/03/trade_data.csv"
+    stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/03/stat_data.csv"
+    ext_mod.analysis_stat_offline(file_path,stat_path)
+    
+    
+    

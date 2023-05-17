@@ -12,6 +12,7 @@ logger = AppLogger()
 
 # 交易信息表字段，分别为交易日期，股票代码，成交价格，成交量,总价格，成交状态，订单编号,卖出原因
 TRADE_COLUMNS = ["trade_date","order_book_id","side","price","quantity","total_price","status","order_id","sell_reason","secondary_order_id"]
+TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
 
 class TradeEntity():
     """交易对象处理类"""
@@ -19,6 +20,7 @@ class TradeEntity():
     def __init__(
         self,
         save_path=None,
+        log_save_path=None,
         **kwargs,
     ):
         if save_path is not None:
@@ -32,7 +34,10 @@ class TradeEntity():
             self.sys_orders = {}            
 
         self.save_path = save_path
-    
+        # 初始化交易日志数据
+        self.trade_log_df = pd.DataFrame(columns=TRADE_LOG_COLUMNS)
+        self.log_save_path = log_save_path
+        
     def clear_his_data(self):
         self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
         self.exp_trade_data(self.save_path)
@@ -61,10 +66,10 @@ class TradeEntity():
             sell_reason = 0
         row_data = [trade_date,order_book_id,side,price,quantity,0,status,order_id,sell_reason,secondary_order_id]
         logger.debug("row_data is:{}".format(row_data))
-        row_data = np.expand_dims(np.array(row_data),axis=0)
+        row_data_np = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
         if self.trade_data_df.shape[0]==0:
-            self.trade_data_df = pd.DataFrame(row_data,columns=TRADE_COLUMNS)
+            self.trade_data_df = pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)
             logger.debug("after add,self.trade_data_df:{}".format(self.trade_data_df))
         else:
             item_df = self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
@@ -72,17 +77,20 @@ class TradeEntity():
             if item_df.shape[0]>0:
                 # 有可能是之前撤单后新发起的订单，这类订单需要更新
                 self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
-                    (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)] = pd.DataFrame(row_data,columns=TRADE_COLUMNS)
-                logger.debug("update trade,data:{}".format(row_data))
+                    (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)] = pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)
+                logger.debug("update trade,data:{}".format(row_data_np))
             else:
-                logger.debug("concat trade,data:{}".format(row_data))
-                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data,columns=TRADE_COLUMNS)], axis=0)
+                logger.debug("concat trade,data:{}".format(row_data_np))
+                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)], axis=0)
         # 映射系统订单
         self.sys_orders[order.order_book_id] = order
         # 变更后保存数据
         if self.save_path is not None:
             self.exp_trade_data(self.save_path)
-    
+            # 日志记录
+            self.add_log(row_data)
+        
+        
     def get_sys_order(self,order_book_id):   
         if order_book_id in self.sys_orders:
             return self.sys_orders[order_book_id]
@@ -126,14 +134,16 @@ class TradeEntity():
         # 变更后保存数据
         if self.save_path is not None:
             self.exp_trade_data(self.save_path)   
-            
+            # 日志记录
+            self.add_log(row_data)
+                    
     def get_order_by_id(self,order_id):
         """根据订单号查询订单"""
         
         trade_data_df = self.trade_data_df
         # logger.debug("trade_data_df in get order:{}".format(trade_data_df))
         target_df = trade_data_df[(trade_data_df["order_id"]==order_id)]
-        return target_df
+        return target_df.iloc[0]
          
     def get_trade_by_instrument(self,order_book_id,trade_side,before_date):  
         """查询某个股票的已成交交易
@@ -238,5 +248,12 @@ class TradeEntity():
             self.sys_orders[row["order_book_id"]] = row
         return trade_data     
 
-
+    def add_log(self,row_data):
+        now_time = datetime.datetime.now()
+        logger.debug("add log,row_data:{},now_time:{}".format(row_data,now_time))
+        log_row_data = row_data + [now_time]
+        log_row_data = np.expand_dims(np.array(log_row_data),axis=0)
+        self.trade_log_df = pd.concat([self.trade_log_df,pd.DataFrame(log_row_data,columns=TRADE_LOG_COLUMNS)], axis=0)
+        self.trade_log_df.to_csv(self.log_save_path,index=False)
+        
           

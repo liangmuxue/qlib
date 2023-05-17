@@ -39,6 +39,7 @@ class BacktestProcessor(BaseProcessor):
         # 相关文件路径
         parent_path = self.wf_task.get_trader_data_path()
         cur_period_path = parent_path + "/" + str(working_day)[4:6]
+        backtest_template["rqalpha"]["extra"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path
         # 映射数据文件路径
@@ -47,7 +48,7 @@ class BacktestProcessor(BaseProcessor):
         backtest_template["rqalpha"]["extra"]["dump_path"] = self.wf_task.get_dumpdata_part_path()
         # 根据当前序号，如果不够则不进行此次任务
         cur_sequence = self.wf_task.task_entity["sequence"]
-        if cur_sequence<=1:
+        if cur_sequence<1:
             # 设置忽略标志
             self.task_ignore = True        
         return real_template
@@ -65,9 +66,14 @@ class BacktestProcessor(BaseProcessor):
             start_date,end_date = get_first_and_last_day(year,month)    
         # 季度频率，取得本季度所有数据
         if self.wf_task.config["frequency"]==FrequencyType.QUARTER.value:
-            start_month = month - 2
-            start_date = datetime.date(year,start_month,day=1)
-            end_date = datetime.date(year,month,day=30)                
+            if month<3:
+                start_date = datetime.date(year,1,day=1)
+                end_date = datetime.date(year,1,day=1)
+            else:
+                start_month = month - 2
+                end_month = month
+                start_date = datetime.date(year,start_month,day=1)
+                end_date = datetime.date(year,end_month,day=30)                
         # 年度频率，取得本年所有数据
         if self.wf_task.config["frequency"]==FrequencyType.YEAR.value:
             start_date = datetime.date(year,1,day=1)
