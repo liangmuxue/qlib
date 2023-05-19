@@ -82,8 +82,9 @@ class MlWorkflowIntergrate(MlIntergrate):
                  
     def filter_buy_candidate(self,pred_date):
         """根据预测计算，筛选可以买入的股票"""
-
-        return self.filter_buy_candidate_data(pred_date,self.pred_df)   
+        
+        can_list = self.filter_buy_candidate_data(pred_date,self.pred_df) 
+        return can_list 
     
     def record_results(self,result_df):
         """保存回测结果"""

@@ -15,7 +15,7 @@ def test_base_info():
     print(stock_individual_info_em_df)
 
 def test_trade_date():
-    dt = datetime(2023,5,1) 
+    dt = datetime(2022,1,31) 
     prev_date = get_tradedays_dur(dt,-1) 
     print("prev_date:",prev_date)
        

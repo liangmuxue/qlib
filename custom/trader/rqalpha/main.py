@@ -8,7 +8,7 @@ import logbook
 import six
 from rqalpha import const
 from .executor import Executor
-from rqalpha.core.strategy import Strategy
+from trader.rqalpha.core.strategy import Strategy
 from rqalpha.core.strategy_context import StrategyContext
 from rqalpha.core.strategy_loader import FileStrategyLoader, SourceCodeStrategyLoader, UserFuncStrategyLoader
 from rqalpha.data.base_data_source import BaseDataSource

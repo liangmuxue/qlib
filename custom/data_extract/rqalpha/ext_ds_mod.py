@@ -118,7 +118,7 @@ class ExtDataMod(AbstractMod):
                     stat_data.append(new_row)
         stat_df = pd.DataFrame(np.array(stat_data),columns = new_columns)
         # 按照盈亏排序
-        stat_df = stat_df.sort_values(by=["differ_range"],ascending=False)
+        stat_df = stat_df.sort_values(by=["trade_date"],ascending=True)
         # 计算汇总数据
         total_gain = stat_df["gain"].sum()
         logger.info("total_gain:{}".format(total_gain))
@@ -180,8 +180,8 @@ def load_mod():
 
 if __name__ == "__main__": 
     ext_mod = ExtDataMod()
-    file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/03/trade_data.csv"
-    stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/03/stat_data.csv"
+    file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/trade_data.csv"
+    stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/stat_data.csv"
     ext_mod.analysis_stat_offline(file_path,stat_path)
     
     

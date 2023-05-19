@@ -5,7 +5,7 @@ import rqalpha
 from rqalpha.const import SIDE,ORDER_STATUS
 from trader.rqalpha.strategy_class.backtest_base import BaseStrategy,SellReason
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
-from trader.utils.date_util import tradedays
+from trader.utils.date_util import tradedays,get_tradedays_dur
 from trader.emulator.juejin.trade_proxy_juejin import JuejinTrade
 
 from cus_utils.data_filter import get_topN_dict
@@ -51,7 +51,7 @@ class SimStrategy(BaseStrategy):
         context.ml_context.prepare_data(pred_date)
         # 根据预测计算，筛选可以买入的股票
         candidate_list = self.get_candidate_list(pred_date,context=context)
-        # candidate_list = [600526]
+        # candidate_list = ["000156"]
         # candidate_list = []
         candidate_list_buy = {}
         sell_list = {}
@@ -327,25 +327,29 @@ class SimStrategy(BaseStrategy):
         if sell_list_active.shape[0]==0:
             return
         for index,sell_item in sell_list_active.iterrows():
-            sys_order = self.trade_entity.get_sys_order(sell_item.order_book_id)
             sell_order = self.get_sell_order(sell_item.order_book_id,context=context)
-            cur_snapshot = self.get_current_snapshot(sell_item.order_book_id)
-            price_now = cur_snapshot.last
+            price_now = self.get_last_price(sell_item.order_book_id)
+            # 止盈卖出未成交，以当前价格重新挂单
             if sell_order.kwargs["sell_reason"]==SellReason.STOP_RAISE.value:
-                # 止盈卖出未成交，不进行操作
-                logger.info("stop raise sell pending,ignore")
-            # 止损卖出未成交，如果当前价格与挂单价差在0.5个百分点(配置项)以内，以当前价格重新挂单   
-            if sell_order.kwargs["sell_reason"]==SellReason.STOP_FALL.value:
-                stop_fall_sell_continue_rate = self.strategy.sell_opt.stop_fall_sell_continue_rate
-                limit_price = sell_order.kwargs["sell_price"] * (1-stop_fall_sell_continue_rate/100)
-                if price_now < limit_price:
-                    # 超出价差则忽略
-                    logger.info("stop_fall_sell pending,ignore,price_now:{},limit_price:{}".format(price_now,limit_price))
-                    continue
-                # 先撤单
-                self.cancel_order(sell_order)
                 # 更新挂单列表，后续统一处理
-                sell_order.kwargs["sell_price"] = price_now
+                sell_order.kwargs["sell_price"] = price_now    
+                self.sell_list[sell_item.order_book_id].kwargs["need_resub"] = True                 
+                # 撤单
+                self.cancel_order(sell_order)
+            # 止损卖出未成交，以当前价格重新挂单 
+            if sell_order.kwargs["sell_reason"]==SellReason.STOP_FALL.value:
+                # 更新挂单列表，后续统一处理
+                sell_order.kwargs["sell_price"] = price_now    
+                self.sell_list[sell_item.order_book_id].kwargs["need_resub"] = True                 
+                # 撤单
+                self.cancel_order(sell_order)
+            # 超期未成交，以当前价格重新挂单 
+            if sell_order.kwargs["sell_reason"]==SellReason.EXPIRE_DAY.value:
+                # 更新挂单列表，后续统一处理
+                sell_order.kwargs["sell_price"] = price_now    
+                self.sell_list[sell_item.order_book_id].kwargs["need_resub"] = True                 
+                # 撤单
+                self.cancel_order(sell_order)
             # 预测卖单未成交，如果当前价格与挂单价差在0.5个百分点(配置项)以内，以当前价格重新挂单  
             if sell_order.kwargs["sell_reason"]==SellReason.PRED.value:
                 pred_sell_continue_rate = self.strategy.sell_opt.pred_sell_continue_rate
@@ -359,10 +363,12 @@ class SimStrategy(BaseStrategy):
                 # 更新挂单列表，后续统一处理
                 sell_order = self.get_sell_order(sell_item.order_book_id, context=context)
                 sell_order.kwargs["sell_price"] = limit_price
+                self.sell_list[sell_item.order_book_id].kwargs["need_resub"] = True
 
     def verify_order_buying(self,context):
         """核查买入订单"""
-        
+
+        env = Environment.get_instance()
         buy_list_active = self.trade_entity.get_buy_list_active(str(self.trade_day))
         # 已下单未成交的处理
         for index,buy_item in buy_list_active.iterrows():
@@ -374,15 +380,13 @@ class SimStrategy(BaseStrategy):
                 logger.warning("cur_snapshot None in verify_order_buying:{}".format(buy_item))
                 continue            
             price_now = cur_snapshot.last
-            try:
-                h_bar = history_bars(buy_item.order_book_id,1,"1d",fields="close",adjust_type="none")
-            except Exception as e:
-                logger.error("history_bars in verify_order_buying err:{}".format(e))
-                continue
+            dt = env.calendar_dt
+            prev_day = get_tradedays_dur(dt,-1)
+            h_bar = env.data_proxy.history_bars(buy_item.order_book_id,1,"1d","close",prev_day)
             price_last_day = h_bar[0,0]               
             pred_buy_exceed_rate = self.strategy.buy_opt.pred_buy_exceed_rate
             try_cnt_limit = self.strategy.buy_opt.try_cnt_limit
-            # 如果超出昨日收盘1个百分点，则换股票
+            # 如果超出昨日收盘5个百分点(配置项)，则换股票
             if (price_now - price_last_day)/price_last_day*100>pred_buy_exceed_rate:
                 logger.info("pred_buy_exceed ,now:{},price_last_day:{}".format(price_now,price_last_day))
                 # 先撤单
@@ -570,7 +574,8 @@ class SimStrategy(BaseStrategy):
             dur_days = tradedays(trade_date,before_date)
             if dur_days>keep_day_number:
                 logger.info("expire,trade_date:{},and dur_day:{}".format(trade_date,dur_days))
-                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, pos_info.last_price,sell_reason=SellReason.EXPIRE_DAY.value)                
+                sell_price = self.get_last_price(order_book_id)
+                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, sell_price,sell_reason=SellReason.EXPIRE_DAY.value)                
                 self.sell_list[position.order_book_id] = order    
                         
     def stop_fall_logic(self,context,bar_dict=None):
@@ -586,7 +591,8 @@ class SimStrategy(BaseStrategy):
             sell_amount = pos_info.quantity
             # 如果下跌幅度(与买入价格比较)超过阈值(百分点)，则以当前收盘价格卖出
             if (pos_info.last_price-pos_info.avg_price)/pos_info.avg_price*100<stop_threhold:
-                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, pos_info.last_price,sell_reason=SellReason.STOP_FALL.value)                
+                sell_price = self.get_last_price(order_book_id)
+                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, sell_price,sell_reason=SellReason.STOP_FALL.value)                
                 self.sell_list[position.order_book_id] = order                
         
     def stop_raise_logic(self,context,bar_dict=None):
@@ -604,9 +610,10 @@ class SimStrategy(BaseStrategy):
                 continue            
             pos_info = self.get_position(order_book_id)
             sell_amount = pos_info.quantity
-            # 如果下跌幅度(与买入价格比较)超过阈值(百分点)，则以当前收盘价格卖出
+            # 如果下跌幅度(与买入价格比较)超过阈值(百分点)，则以当前价格卖出
             if (pos_info.last_price-pos_info.avg_price)/pos_info.avg_price*100>stop_threhold:
-                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, pos_info.last_price,sell_reason=SellReason.STOP_RAISE.value)              
+                sell_price = self.get_last_price(order_book_id)
+                order = self.create_order(position.order_book_id, sell_amount, SIDE.SELL, sell_price,sell_reason=SellReason.STOP_RAISE.value)              
                 self.sell_list[position.order_book_id] = order  
 
             
@@ -639,7 +646,7 @@ class SimStrategy(BaseStrategy):
         # 已接单事件
         if order.status==ORDER_STATUS.ACTIVE:
             logger.info("order active:{},trade_date:{}".format(order.order_book_id,self.trade_day))
-            # 订单已接受，设置第二订单号
+            # 订单已接受，设置第二订单号          
             if order.side==SIDE.BUY:
                 self.buy_list[order.order_book_id].set_secondary_order_id(order.secondary_order_id) 
             else:
@@ -667,9 +674,16 @@ class SimStrategy(BaseStrategy):
                 price_now = cur_snapshot.last
                 # 创建新订单对象并重置原数据
                 order_resub = self.create_order(order.order_book_id, order.quantity, SIDE.BUY, price_now)
-                logger.debug("resub create end:{}".format(order.order_book_id))
                 self.buy_list[order.order_book_id] = order_resub
                 logger.debug("resub buylist set end:{}".format(order.order_book_id))
-            
+            if order.side==SIDE.SELL and self.sell_list[order.order_book_id].kwargs["need_resub"]:
+                logger.info("need resub order:{}".format(order))
+                # 如果具备重新报单标志，则以最新价格重新生成订单
+                cur_snapshot = self.get_current_snapshot(order.order_book_id)
+                price_now = cur_snapshot.last
+                # 创建新订单对象并重置原数据
+                order_resub = self.create_order(order.order_book_id, order.quantity, SIDE.SELL, price_now)
+                self.sell_list[order.order_book_id] = order_resub
+                logger.debug("resub sell_list set end:{}".format(order.order_book_id))           
     
     

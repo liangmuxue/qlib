@@ -7,7 +7,7 @@ from trader.rqalpha.strategy_class.backtest_base import BaseStrategy,SellReason
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
 from trader.utils.date_util import tradedays
 from trader.emulator.sim_strategy import SimStrategy
-
+from data_extract.his_data_extractor import PeriodType
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
@@ -47,9 +47,30 @@ class SimBacktestStrategy(SimStrategy):
         super().handle_bar(context,bar_dict)
 
     def get_candidate_list(self,pred_date,context=None):
+        """取得候选列表，重载父类方法"""
+        
         candidate_list = super().get_candidate_list(pred_date,context=context)
+        env = Environment.get_instance()
+        ds = env.data_proxy._data_source
+        
+        # 检查是否缺失历史数据
+        filter_list = []
+        for item in candidate_list:
+            symbol = str(item).zfill(6)
+            # 直接使用数据源
+            try:
+                item_df = ds.extractor.load_item_df(symbol,period=PeriodType.MIN5.value,institution=False)
+            except Exception as e:
+                logger.warning("no data file,code:{},date:{}".format(symbol,pred_date))
+                continue
+            item_df["datetime_dt"] = pd.to_datetime(item_df.datetime)
+            today_df = item_df[item_df["datetime_dt"].dt.strftime("%Y%m%d").astype(int)==pred_date]
+            if today_df.shape[0]==0:
+                logger.warning("no data,code:{},date:{}".format(symbol,pred_date))
+                continue            
+            filter_list.append(item)
         # candidate_list = [600521]
-        return candidate_list
+        return filter_list
  
     def get_last_price(self,order_book_id):
         """重载，这里为取得最近分钟行情"""

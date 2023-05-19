@@ -63,7 +63,7 @@ def get_tradedays_dur(start_date,duration):
             next_date = target_date + timedelta(days=1)
         else:
             next_date = target_date - timedelta(days=1)
-        if is_holiday(next_date):
+        if is_holiday(next_date) or next_date.weekday()==5 or next_date.weekday()==6:
             target_date = next_date
         else:
             if duration>0:

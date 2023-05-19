@@ -52,7 +52,8 @@ class ResultView(object):
             item_df = pd.read_csv(f)        
             logger.info("df date min:{} and max:{}".format(item_df.datetime.min(),item_df.datetime.max()))  
             item_df["datetime_dt"] = pd.to_datetime(item_df.datetime)
-            test_df = item_df[item_df["datetime_dt"].dt.strftime("%Y%m%d").astype(int)>=20230401]
+            test_df = item_df[item_df["datetime_dt"].dt.strftime("%Y%m%d").astype(int)==20220511]
+            logger.info("test_df:{}".format(test_df))
             # logger.info("test_df datetime:{}".format(test_df.datetime.unique()))   
     
     def view_pred_data(self,pred_data_file):
@@ -75,7 +76,7 @@ if __name__ == "__main__":
     view = ResultView()
     csv_file = "/home/qdata/stock_data/ak/whole_data/day/600008_institution.csv"
     csv_file = "/home/qdata/stock_data/ak/item/day/002461_institution.csv"
-    # csv_file = "/home/qdata/stock_data/tdx/item/5m/600678.csv"
+    csv_file = "/home/qdata/stock_data/tdx/item/5m/600083.csv"
     view.view_csv_data(csv_file)
     data_file = "/home/qdata/stock_data/ak/all_day_institution.pickle"
     # data_file = "/home/qdata/stock_data/tdx/all_5m.pickle"

@@ -43,6 +43,7 @@ class RqalphaTrade(BaseTrade):
     
     def handler_bar(self,context_now):
         """模拟撮合，通过bar事件触发"""
+        
         env = Environment.get_instance()
         q_list = self.get_order_queue()
         for order in q_list:
@@ -72,7 +73,7 @@ class RqalphaTrade(BaseTrade):
                         close_today_amount=0
                     )
                 except RuntimeError as e:
-                    logger.error("trade create err,order.order_book_id:{},price:{},amount:{},error:{}".format(order.order_book_id,cur_price,amount,e))
+                    logger.error("trade create err,order.order_book_id:{},price:{},amount:{},error:{}".format(order.order_book_id,cur_price,order.quantity,e))
                     continue
                 order.fill(trade)       
                 # 手续费
@@ -151,7 +152,7 @@ class RqalphaTrade(BaseTrade):
                     order_q._status = RQ_ORDER_STATUS.CANCELLED
                     # 发送取消成功的事件
                     account = env.get_account(order.order_book_id) 
-                    self.context._env.event_bus.publish_event(Event(EVENT.ORDER_CANCELLATION_PASS, account=account, order=order))  
+                    self.context._env.event_bus.publish_event(Event(EVENT.ORDER_CANCELLATION_PASS, account=account, order=order_q))  
                 else:
                     logger.warning("order can not cancel:{}".format(order_q))       
         
