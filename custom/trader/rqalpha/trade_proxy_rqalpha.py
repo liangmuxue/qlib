@@ -78,9 +78,9 @@ class RqalphaTrade(BaseTrade):
                 order.fill(trade)       
                 # 手续费
                 total_turnover = order.quantity * order.price
-                trade._commission = total_turnover * 0.35/100
+                trade._commission = total_turnover * 0.03/100
                 # 印花税
-                trade._tax = total_turnover * 0.35/100      
+                trade._tax = total_turnover * 0.01/100      
                 account = env.get_account(order.order_book_id)  
                 # 修改撮合系统的订单状态
                 self.update_order_status(order.order_book_id,RQ_ORDER_STATUS.FILLED)                       

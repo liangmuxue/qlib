@@ -127,9 +127,9 @@ class HisDataExtractor:
     def export_item_data(self,code,item_data,period=None,is_complete=False,savepath=None,institution=False):
         """生成单个文件，兼顾全量和增量"""
         
-        save_file_path = "{}/{}.csv".format(savepath,code)
+        save_file_path = "{}/origin/{}.csv".format(savepath,code)
         if institution:
-            save_file_path = "{}/{}_institution.csv".format(savepath,code)        
+            save_file_path = "{}/institution/{}.csv".format(savepath,code)        
         if is_complete:
             # 如果是全量，则覆盖
             item_data.to_csv(save_file_path, index=False)   
@@ -158,8 +158,8 @@ class HisDataExtractor:
     def get_whole_item_datapath(self,period,institution=False):
         period_name = get_period_name(period)
         if institution:
-            return "{}/whole_data/{}/institution".format(self.savepath,period_name)
-        return "{}/whole_data/{}".format(self.savepath,period_name)
+            return "{}/item/{}/institution".format(self.savepath,period_name)
+        return "{}/item/{}/origin".format(self.savepath,period_name)
     
     def export_to_qlib(self,qlib_dir,period,file_name="all.txt",institution=False):
         """csv格式的单独文件导入到qlib"""
@@ -437,9 +437,9 @@ class HisDataExtractor:
         period_name = get_period_name(period)
         item_savepath = self.item_savepath + "/{}".format(period_name)
         if institution:
-            f = "{}/{}_institution.csv".format(item_savepath,instrument)
+            f = "{}/institution/{}.csv".format(item_savepath,instrument)
         else:
-            f = "{}/{}.csv".format(item_savepath,instrument)
+            f = "{}/origin/{}.csv".format(item_savepath,instrument)
         item_df = pd.read_csv(f)  
         # 对时间字段进行检查及清洗
         if self.backend_channel=="tdx":

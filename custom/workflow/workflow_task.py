@@ -555,10 +555,14 @@ if __name__ == "__main__":
 
     # 回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
-    task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)  
+    # task = WorkflowTask(task_batch=75,workflow_name="wf_backtest_flow",resume=True)  
                 
-    # 回测工作流
+    # 实时工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow_2023",resume=False)
-    # task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)    
+    task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)  
+    
+    # 2023回测工作流
+    # task = WorkflowTask(task_batch=0,workflow_name="wf_review_flow_2023",resume=False)
+    # task = WorkflowTask(task_batch=141,workflow_name="wf_review_flow_2023",resume=True)       
     task.start_task()
         

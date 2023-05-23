@@ -1,4 +1,7 @@
 import tushare as ts
+from data_extract.rqalpha.tdx_ds import TdxDataSource
+from rqalpha.model.instrument import Instrument
+import datetime
 
 def test_efinance():
     import efinance as ef
@@ -29,9 +32,31 @@ def test_pytdx_code():
         data = api.get_security_list(1, 0)
         cnt = api.get_security_count(0)
         print("data size:{}".format(len(data)))
-           
+
+def test_tdx_ds():
+    tds = TdxDataSource("/home/liang/.rqalpha/bundle","/home/qdata/stock_data",frequency_sim=False)
+    order_book_id = "000702.XSHE"
+    instrument = Instrument({"order_book_id":order_book_id,"symbol":"000702","trading_code":"000702"})
+    dt = datetime.datetime(2022,6,14,9,45,0)
+    snapshot = tds.current_snapshot(instrument, "1m",dt)
+    print(snapshot.last)
+
+def batch_rename():
+    import os.path
+    rootdir = "/home/qdata/stock_data/ak/item/day/institution"
+    i=0;
+    for parent, dirnames, filenames in os.walk(rootdir):
+        for filename in filenames:
+            newName=filename.split("_")[0] + ".csv"
+            os.rename(os.path.join(parent, filename), os.path.join(parent, newName))
+            i=i+1    
+    
 if __name__ == "__main__":
     # test_tushare_day()
     # test_efinance()
-    test_pytdx()
+    # test_pytdx()
+    batch_rename()
+    # test_tdx_ds()
     # test_pytdx_code()
+    
+    

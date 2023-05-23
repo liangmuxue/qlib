@@ -117,9 +117,7 @@ class DataProcessor(BaseProcessor):
             t = init_instance_by_config(
                 config,
             )            
-            # 首先以股票为单位，导出多个csv
-            # t.export_whole_item_data(period=period,institution=institution)
-            # 然后使用qlib的dump功能从上一步生成的cvs文件中导入
+            # 使用qlib的dump功能从数据cvs文件中导入
             if target==LocalDataSourceType.qlib.name:
                 qlib_dir = config["kwargs"]["qlib_provider_uri"]
                 t.export_to_qlib(qlib_dir,period,file_name=config["kwargs"]["dump_file_name"],institution=institution)

@@ -159,7 +159,7 @@ class TradeEntity():
         return target_df
         
     def get_trade_date_by_instrument(self,order_book_id,trade_side,before_date):  
-        """查询某个股票的已成交交易日期
+        """查询某个股票的最近已成交交易日期
             Params:
                 order_book_id 股票编码
                 trade_side 买卖类别
@@ -172,7 +172,8 @@ class TradeEntity():
                                   (trade_data_df["trade_date"]<=pd.to_datetime(before_date))]
         if target_df.shape[0]==0:
             return None
-        return target_df["trade_date"].dt.to_pydatetime().tolist()[0].strftime('%Y%m%d') 
+        # 取得最后一个交易
+        return target_df["trade_date"].dt.to_pydatetime().tolist()[-1].strftime('%Y%m%d') 
     
     def get_order_list(self,trade_date=None):   
         """取得指定日期的订单"""

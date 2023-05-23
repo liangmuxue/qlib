@@ -110,7 +110,9 @@ class ExtDataMod(AbstractMod):
                     prev_buy_row = instrument_df.iloc[index-1]
                     buy_price = prev_buy_row["price"]
                     differ_range = (row["price"] - buy_price)/buy_price
-                    gain = (row["price"] - buy_price) * row["quantity"]
+                    # 计算手续费
+                    commission = (row["price"] + buy_price) * row["quantity"] * 0.03/100
+                    gain = (row["price"] - buy_price) * row["quantity"] - commission
                     buy_day = prev_buy_row["trade_date"].strftime('%Y%m%d')
                     sell_day = row["trade_date"].strftime('%Y%m%d')
                     duration = tradedays(buy_day,sell_day)

@@ -27,8 +27,9 @@ class BacktestProcessor(BaseProcessor):
         # 设置预测数据路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 计算开始结束日期
-        start_date,end_date = self.get_first_and_last_day(working_day)    
-        # 回测开始和结束日期为本月第一天和最后一天
+        start_date,end_date = self.get_first_and_last_day(working_day)  
+        # start_date = datetime.date(2022,6,day=1)  
+        # 回测开始和结束日期为本期（月、季、年）第一天和最后一天
         backtest_template["rqalpha"]["base"]["start_date"] = start_date
         backtest_template["rqalpha"]["base"]["end_date"] = end_date
         # 给回测进程植入任务号

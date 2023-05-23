@@ -59,6 +59,7 @@ class ExtSimulationBroker(SimulationBroker):
             return self._open_exercise_orders.append((account, order))
         if ExecutionContext.phase() == EXECUTION_PHASE.OPEN_AUCTION:
             self._open_auction_orders.append((account, order))
+            self._open_auction_orders.clear()
         else:
             self._open_orders.append((account, order))
         # 使用具体的仿真（实盘）环境进行下单
@@ -101,19 +102,6 @@ class ExtSimulationBroker(SimulationBroker):
         self._get_matcher(tick.order_book_id).update()
         self._match(tick.order_book_id)
 
-    def _match(self, order_book_id=None):
-        order_filter = None if order_book_id is None else lambda a_and_o: a_and_o[1].order_book_id == order_book_id
-        for account, order in filter(order_filter, self._open_orders):
-            self._get_matcher(order.order_book_id).match(account, order, open_auction=False)
-        for account, order in filter(order_filter, self._open_auction_orders):
-            self._get_matcher(order.order_book_id).match(account, order, open_auction=True)
-        final_orders = [(a, o) for a, o in chain(self._open_orders, self._open_auction_orders) if o.is_final()]
-        self._open_orders = [(a, o) for a, o in chain(self._open_orders, self._open_auction_orders) if not o.is_final()]
-        self._open_auction_orders.clear()
-
-        for account, order in final_orders:
-            if order.status == ORDER_STATUS.REJECTED or order.status == ORDER_STATUS.CANCELLED:
-                self._env.event_bus.publish_event(Event(EVENT.ORDER_UNSOLICITED_UPDATE, account=account, order=order))
 
     def _check_subscribe(self, order):
         if self._env.config.base.frequency == "tick" and order.order_book_id not in self._env.get_universe():

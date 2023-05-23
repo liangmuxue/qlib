@@ -46,32 +46,41 @@ class SimBacktestStrategy(SimStrategy):
         env.broker.trade_proxy.handler_bar(context.now)
         super().handle_bar(context,bar_dict)
 
+
+    ###############################自有数据逻辑########################################  
+    
     def get_candidate_list(self,pred_date,context=None):
         """取得候选列表，重载父类方法"""
         
-        candidate_list = super().get_candidate_list(pred_date,context=context)
-        env = Environment.get_instance()
-        ds = env.data_proxy._data_source
+        candidate_list = context.ml_context.filter_buy_candidate(pred_date)
+        # candidate_list = ["000702"]
         
-        # 检查是否缺失历史数据
+        # 检查是否缺失历史数据,如果缺失则剔除
         filter_list = []
         for item in candidate_list:
             symbol = str(item).zfill(6)
-            # 直接使用数据源
-            try:
-                item_df = ds.extractor.load_item_df(symbol,period=PeriodType.MIN5.value,institution=False)
-            except Exception as e:
-                logger.warning("no data file,code:{},date:{}".format(symbol,pred_date))
-                continue
-            item_df["datetime_dt"] = pd.to_datetime(item_df.datetime)
-            today_df = item_df[item_df["datetime_dt"].dt.strftime("%Y%m%d").astype(int)==pred_date]
-            if today_df.shape[0]==0:
-                logger.warning("no data,code:{},date:{}".format(symbol,pred_date))
-                continue            
-            filter_list.append(item)
-        # candidate_list = [600521]
+            # 只处理当日有开盘数据的
+            if self.has_current_data(pred_date,symbol):        
+                filter_list.append(item)
         return filter_list
- 
+    
+    def has_current_data(self,day,symbol):
+        """当日是否开盘交易"""
+
+        env = Environment.get_instance()
+        ds = env.data_proxy._data_source
+                
+        # 直接使用数据源
+        try:
+            item_df = ds.extractor.load_item_df(symbol,period=PeriodType.MIN5.value,institution=False)
+        except Exception as e:
+            return False
+        item_df["datetime_dt"] = pd.to_datetime(item_df.datetime)
+        today_df = item_df[item_df["datetime_dt"].dt.strftime("%Y%m%d").astype(int)==day]
+        if today_df.shape[0]==0:
+            return False          
+        return True
+    
     def get_last_price(self,order_book_id):
         """重载，这里为取得最近分钟行情"""
         
