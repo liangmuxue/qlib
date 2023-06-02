@@ -36,7 +36,7 @@ class SimulationProcessor(BaseProcessor):
         backtest_template["rqalpha"]["extra"]["context_vars"]["strategy_class"]["config_path"] = config_file_path
         # 相关文件路径
         parent_path = self.wf_task.get_trader_data_path()
-        cur_period_path = parent_path + "/" + str(working_day)[4:6]
+        cur_period_path = parent_path # + "/" + str(working_day)[4:6]
         backtest_template["rqalpha"]["extra"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path

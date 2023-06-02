@@ -26,12 +26,14 @@ class DataProcessor(BaseProcessor):
         real_template = copy.deepcopy(template)
         extend_config = self.wf_task.config["extend_config"]
         self.auto_import = False
-        # 附加配置中，查看是否有自动导入的选项
+        # 查看附加配置
         if extend_config is not None:
             cfg = json.loads(extend_config)
+            # 自动导入的选项
             self.auto_import = bool(cfg["auto_import"])
-        else:
-            self.auto_import = False
+            # 失败后是否重新进行
+            self.restart_after_fail = bool(cfg["restart_after_fail"])
+
         return real_template
                             
     def sub_run(self,working_day=None,results=None,resume=True):

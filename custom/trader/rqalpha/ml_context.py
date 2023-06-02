@@ -110,23 +110,13 @@ class MlIntergrate():
         date_pred_df = self.pred_df[(self.pred_df["pred_date"]==pred_date)]
         return self.filter_buy_candidate_data(pred_date,date_pred_df)
 
-    def filter_buy_candidate_data(self,pred_date,date_pred_df):
+    def filter_buy_candidate_data(self,pred_date,data_pred_df):
         """根据预测计算，筛选可以买入的股票"""
         
         ext_length = self.kwargs["ext_length"]
-        candidate_list = []
-        for instrument,group_data in date_pred_df.groupby("instrument"):
-            instrument = int(instrument)
-            # 生成对应日期的单个股票的综合数据
-            complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=date_pred_df,df_ref=self.dataset.df_all,ext_length=ext_length)   
-            if complex_df is None:
-                continue
-            # 根据预测数据综合判断，取得匹配标志
-            (match_flag,pred_class_real,vr_class) = self.pred_data_jud(complex_df, dataset=self.dataset,ext_length=ext_length)
-            pred_class_real = pred_class_real.tolist()
-            if not match_flag:
-                continue   
-            candidate_list.append(instrument)     
+        item_pred_df = data_pred_df[data_pred_df["pred_date"]==pred_date]
+        result_df = self.pred_recorder.filter_cancidate_result(item_pred_df,dataset=self.dataset,ext_length=ext_length)
+        candidate_list = result_df["instrument"].astype(int).values.tolist()  
         return candidate_list   
        
     def combine_complex_df_data(self,pred_date,instrument,pred_df=None,df_ref=None,ext_length=25,type="combine"):
@@ -152,6 +142,14 @@ class MlIntergrate():
         df_item = df_ref[(df_ref[group_column]==instrument)&
                             (df_ref[time_index_column]>=time_index_range[0])&
                             (df_ref[time_index_column]<time_index_range[1])]
+        
+        # 实时模式下，后边的数据不够，需要补0
+        if df_item[time_index_column].max()<time_index_range[1]:
+            pad_len = int(time_index_range[1] - df_item[time_index_column].max() - 1)
+            zero_datas = np.zeros((pad_len,df_item.values.shape[1]))
+            zero_datas[:,0] = np.array([(i+df_item[time_index_column].max()+1) for i in range(pad_len)])
+            fill_data = np.concatenate((df_item.values,zero_datas),axis=0)
+            df_item = pd.DataFrame(fill_data,columns=df_item.columns)                 
         # 如果全量数据里不包括当前股票，则返回空
         if  df_item.shape[0]==0:
             return None   
@@ -177,13 +175,13 @@ class MlIntergrate():
         return df_item                         
         
     def pred_data_jud(self,ins_data,dataset=None,ext_length=25):
-        """预测均线价值判断"""
+        """预测价值判断"""
         
         label_arr = ins_data["label"].values.tolist()
         # 计算均线涨跌幅度,取预测日期前n天的（n为预测长度））
         label_slope_arr = compute_price_range(label_arr[-2*dataset.pred_len:-dataset.pred_len])
                      
-        pred_arr = ins_data["label"].values[-dataset.pred_len:]
+        pred_arr = ins_data["pred_data"].values[-dataset.pred_len:]
         # 计算预测均线涨跌幅度
         slope_arr = compute_price_range(pred_arr)  
         

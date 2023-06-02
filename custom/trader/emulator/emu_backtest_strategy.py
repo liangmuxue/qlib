@@ -20,7 +20,9 @@ class SimBacktestStrategy(SimStrategy):
     def init_env(self):
         # 初始化交易代理对象
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
-        self.trade_entity.clear_his_data()
+        # 根据标志，决定是否清空目录下的历史交易记录
+        if emu_args["clear_data"]:
+            self.trade_entity.clear_his_data()
          
     def before_trading(self,context):
         """交易前准备"""

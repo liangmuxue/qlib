@@ -11,7 +11,7 @@ from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus,FrequencyTy
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-class BacktestProcessor(BaseProcessor):
+class ReplayProcessor(BaseProcessor):
     
     def __init__(self, workflow_subtask):
         super().__init__(workflow_subtask)
@@ -28,7 +28,7 @@ class BacktestProcessor(BaseProcessor):
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 计算开始结束日期
         start_date,end_date = self.get_first_and_last_day(working_day)  
-        start_date = datetime.date(2023,1,day=1)  
+        # start_date = datetime.date(2023,1,day=1)  
         # 回测开始和结束日期为本期（月、季、年）第一天和最后一天
         backtest_template["rqalpha"]["base"]["start_date"] = start_date
         backtest_template["rqalpha"]["base"]["end_date"] = end_date
@@ -39,7 +39,7 @@ class BacktestProcessor(BaseProcessor):
         backtest_template["rqalpha"]["extra"]["context_vars"]["strategy_class"]["config_path"] = config_file_path
         # 相关文件路径
         parent_path = self.wf_task.get_trader_data_path()
-        cur_period_path = parent_path + "/" + str(working_day)[4:6]
+        cur_period_path = parent_path + "/replay"
         backtest_template["rqalpha"]["extra"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path

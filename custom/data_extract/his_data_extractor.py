@@ -91,6 +91,7 @@ class HisDataExtractor:
         self.common_dict = CommonDict()
         
         self.busi_columns = ["code","datetime","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
+        self.col_data_types = {"code":str}
            
     def create_code_data(self):
         """生成所有股票代码"""
@@ -258,29 +259,30 @@ class HisDataExtractor:
                     try:
                         ori_data_item_institution = self.load_item_df(code, period=period,institution=True)   
                     except Exception as e:
-                        logger.warning("load_item_df fail:{}".format(e)) 
+                        logger.warning("load_item_df institution fail:{}".format(e)) 
                         ori_data_item_institution = None                    
             # 单个股票数据抽取         
             item_data = self.data_part_auto_process(code,end_date=end_date,period=period,market=market,savepath=savepath,
                                                      institution=False,ori_data_item=ori_data_item)
             if item_data is None:
                 continue
-            logger.debug("item data ok:{}".format(code))
-            self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=%s where task_batch=%s", (code,task_batch))
-            # 合并所有的股票数据
-            if total_data is None:
-                total_data = item_data
-            else:
-                total_data = pd.concat([total_data,item_data])
+            if not no_total_file:
+                # 合并所有的股票数据
+                if total_data is None:
+                    total_data = item_data
+                else:
+                    total_data = pd.concat([total_data,item_data])
             if contain_institution:
                 item_data_institution = self.data_part_auto_process(code,end_date=end_date,period=period,market=market,savepath=savepath,
                                                     institution=True,ori_data_item=ori_data_item_institution)
-                if total_data_institution is None:
-                    total_data_institution = item_data_institution
-                else:
-                    total_data_institution = pd.concat([total_data_institution,item_data_institution])     
-        # 保存全量文件    
-        if not no_total_file: 
+                if not no_total_file:
+                    if total_data_institution is None:
+                        total_data_institution = item_data_institution
+                    else:
+                        total_data_institution = pd.concat([total_data_institution,item_data_institution]) 
+            self.dbaccessor.do_inserto_withparams("update data_task set last_item_code=%s where task_batch=%s", (code,task_batch))    
+        if not no_total_file:
+            # 保存全量文件    
             self.save_total_df(total_data,period=period)    
             if contain_institution:
                 self.save_total_df(total_data_institution,period=period,institution=True)      
@@ -318,6 +320,7 @@ class HisDataExtractor:
         """取得存储数据中的最近日期"""
         
         cur_date = data_item["datetime"].max()
+        cur_date = str(cur_date.date())
         tar_date = get_tradedays_dur(date_string_transfer(cur_date,direction=2),1)
         tar_date = tar_date.strftime("%Y%m%d")
         return tar_date     
@@ -440,7 +443,7 @@ class HisDataExtractor:
             f = "{}/institution/{}.csv".format(item_savepath,instrument)
         else:
             f = "{}/origin/{}.csv".format(item_savepath,instrument)
-        item_df = pd.read_csv(f)  
+        item_df = pd.read_csv(f,dtype=self.col_data_types)  
         # 对时间字段进行检查及清洗
         if self.backend_channel=="tdx":
             item_df["volume"] = item_df["vol"]            
@@ -496,8 +499,9 @@ if __name__ == "__main__":
     # extractor.create_code_data()
     # extractor.import_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
     # 导入分钟数据
-    extractor = TdxExtractor(savepath="./custom/data/stock_data")
-    extractor.import_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
+    extractor = TdxExtractor(savepath="/home/qdata/stock_data")
+    extractor.connect()
+    extractor.import_data_auto(task_batch=0,period=PeriodType.MIN5.value,end_date=20230526,no_total_file=True)
     # 导入日K数据
     # extractor = AkExtractor(savepath="./custom/data/stock_data")
     # extractor.import_data(task_batch=0,period=PeriodType.DAY.value,start_date=20220101,end_date=20221231)    

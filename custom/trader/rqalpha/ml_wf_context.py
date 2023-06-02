@@ -19,6 +19,7 @@ from darts_pro.data_extension.custom_model import TFTExtModel
 from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from trader.busi_compute import slope_status
+from trader.data_viewer import DataViewer
 from persistence.wf_task_store import WfTaskStore
 from cus_utils.db_accessor import DbAccessor
 
@@ -40,7 +41,11 @@ class MlWorkflowIntergrate(MlIntergrate):
         self.model_cfg =  config["task"]["model"]
         self.dataset_cfg = config["task"]["dataset"]
         self.backtest_cfg = config["task"]["backtest"]
-        
+        # 调试的股票列表
+        if "verbose_list" in self.backtest_cfg:
+            self.verbose_list = self.backtest_cfg["verbose_list"]
+        else:
+            self.verbose_list = None
         # 初始化
         self.pred_data_path = self.model_cfg["kwargs"]["pred_data_path"]
         self.load_dataset_file = self.model_cfg["kwargs"]["load_dataset_file"]
@@ -83,7 +88,22 @@ class MlWorkflowIntergrate(MlIntergrate):
     def filter_buy_candidate(self,pred_date):
         """根据预测计算，筛选可以买入的股票"""
         
-        can_list = self.filter_buy_candidate_data(pred_date,self.pred_df) 
+        date_pred_df = self.pred_df[(self.pred_df["pred_date"]==pred_date)]
+        can_list = []
+        can_list = self.filter_buy_candidate_data(pred_date,self.pred_df)            
+        # 如果设置了调试内容，则在此处理
+        if self.verbose_list is not None:
+            data_viewer_correct = DataViewer(env_name="replay_pred_classify_correct")
+            ext_length = 25
+            for code in self.verbose_list:
+                instrument = int(code)
+                complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=date_pred_df,df_ref=self.dataset.df_all,ext_length=ext_length)   
+                if complex_df is None:
+                    continue
+                # 根据预测数据综合判断，取得匹配标志
+                (match_flag,pred_class_real,vr_class) = self.pred_data_jud(complex_df, dataset=self.dataset,ext_length=ext_length)     
+                data_viewer_correct.show_single_complex_pred_data_visdom(complex_df,correct=0,dataset=self.dataset)       
+                data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=self.dataset,save_path=self.pred_data_path+"/plot")
         return can_list 
     
     def record_results(self,result_df):

@@ -5,6 +5,7 @@ from qlib.workflow import R
 from qlib.utils import flatten_dict, get_callable_kwargs, init_instance_by_config
 from qlib.model.trainer import fill_placeholder
 
+
 import time
 import sys, os
 from pathlib import Path
@@ -24,6 +25,7 @@ class BaseProcessor(object):
         self.wf_task = workflow_subtask
         self.db_accessor = DbAccessor({})
         self.task_ignore = False
+        self.restart_after_fail = False
         
     def build_real_template(self,config=None,working_day=None):
         """生成实际配置文件，子类实现"""
@@ -41,9 +43,9 @@ class BaseProcessor(object):
         # 读取配置文件
         with open(yaml_file) as fp:
             config = yaml.safe_load(fp)    
-            self.config = config            
+            self.config = config     
         # 多进程异步方式执行
-        self.process_worker = self.start_worker(self.run_worker_task,args=(self.wf_task,config,working_day,resume))
+        self.process_worker = self.start_worker(self.run_worker_task,args=(self.wf_task,config,working_day,resume))    
         while True:
             # 一直轮询当前状态，如果发生改变则退出主进程
             status = self.wf_task.get_task_status()

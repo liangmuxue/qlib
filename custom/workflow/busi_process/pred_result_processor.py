@@ -25,9 +25,9 @@ class PredResultProcessor(BaseProcessor):
         
         start_date = str(config["start_date"])
         start_date = date_string_transfer(start_date)
-        # 结束时间取当前日期
-        end_date = str(working_day)
-        end_date = date_string_transfer(end_date) 
+        # 结束时间取当前日期延后n天（n为预测长度）
+        pred_len = dataset_template["kwargs"]["pred_len"]
+        end_date = get_tradedays_dur(str(working_day),pred_len)
         # 总数据集定义的开始结束时间
         real_template["data_handler_config"]["start_date"] = start_date
         real_template["data_handler_config"]["end_date"] = end_date
@@ -35,12 +35,11 @@ class PredResultProcessor(BaseProcessor):
         # dataset数据集定义的开始结束时间
         dataset_template["kwargs"]["segments"]["train_total"] = [start_date,end_date]
         # 验证集结束日期前推3个月
-        valid_start_date = get_tradedays_dur(date_string_transfer(end_date,direction=2),-30*3)
+        valid_start_date = get_tradedays_dur(end_date,-30*3)
         # 验证集结束日期前推1个月
-        valid_end_date = get_tradedays_dur(date_string_transfer(end_date,direction=2),-30*1)
+        valid_end_date = get_tradedays_dur(end_date,-30*1)
         dataset_template["kwargs"]["segments"]["valid"] = [valid_start_date,valid_end_date]
         # 预测开始和结束日期，为当前指定日期（workding day）的下一周(间隔5天)
-        pred_len = model_template["kwargs"]["optargs"]["forecast_horizon"]
         working_day_list = self.wf_task.get_calendar_by_seq(self.wf_task.task_entity["sequence"])
         if len(working_day_list)>0:
             pred_begin_date = str(working_day_list[0])

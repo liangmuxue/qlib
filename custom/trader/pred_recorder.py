@@ -33,13 +33,13 @@ from .tft_recorder import TftRecorder
 
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from darts_pro.tft_series_dataset import TFTSeriesDataset
-from .data_viewer import DataViewer
 from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from trader.utils.date_util import get_tradedays
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.log_util import AppLogger
 from trader.busi_compute import slope_status
+from trader.data_viewer import DataViewer
 logger = AppLogger()
 
 class PortAnaRecord(TftRecorder):
@@ -118,7 +118,8 @@ class PortAnaRecord(TftRecorder):
             if data_total is None:
                 data_total = data_pred
             else:
-                data_total = np.concatenate((data_total,data_pred),axis=0)  
+                data_total = np.concatenate((data_total,data_pred),axis=0) 
+                 
             logger.debug("build df_pred,data:{}".format(cur_date))   
              
         # 一并生成DataFrame
@@ -138,7 +139,7 @@ class PortAnaRecord(TftRecorder):
         data_pred = None
         for index,series in enumerate(pred_series_list):
             group_rank = series.static_covariates[group_column].values[0]
-            group_item = self.dataset.get_group_code_by_rank(group_rank)            
+            group_item = self.dataset.get_group_code_by_rank(group_rank)  
             time_index = series.time_index.values
             # 根据概率数据取得唯一性数据
             pred_center_data = get_pred_center_value(series).data
@@ -201,6 +202,9 @@ class PortAnaRecord(TftRecorder):
         vr_class_total = [item[2] for item in pred_combine] 
         # 归一化反置，恢复到原值
         pred_series_list = self.dataset.reverse_transform_preds(pred_series_list)
+        for series in pred_series_list:
+            group_rank = series.static_covariates["instrument_rank"].values[0]
+            code = self.dataset.get_group_code_by_rank(group_rank)
         return pred_series_list,pred_class_total,vr_class_total
 
     def combine_complex_df_data(self,pred_date,instrument,pred_df=None,df_ref=None,ext_length=25,type="combine"):
@@ -281,95 +285,95 @@ class ClassifyRecord(PortAnaRecord):
     def stat_complex_pred_data(self,dataset=None,ext_length=25,load_cache=False):
         """统计预测信息准确度，可用性"""
         
-        cache_file = self.pred_data_path + "/pred_stat_2202.pickel"
-        if not load_cache:
-            # 加载预测结果数据
-            pred_data_file = self.pred_data_file
-            pred_df = self.load_pred_data(pred_data_file=pred_data_file)
-            # 根据配置取得对应日期的预测结果
-            pred_df = pred_df[(pred_df["pred_date"]>=int(self.classify_range[0].strftime('%Y%m%d')))&
-                              (pred_df["pred_date"]<=int(self.classify_range[1].strftime('%Y%m%d')))]
-            date_list = pred_df["pred_date"].unique()
-            match_columns = ["date","instrument","correct","pred_class","vr_class","price_raise_range","price_down_range"]
-            match_list = []
-            match_cnt = 0
-            logger.debug("date_list len:{}".format(len(date_list)))
-            if len(date_list)==0:
-                logger.error("date_list size 0,classify_range:{},pred_data_file:{}".format(self.classify_range,pred_data_file))
-            for pred_date in date_list:   
-                pred_date = int(pred_date)  
-                match_cnt = 0
-                date_pred_df = pred_df[(pred_df["pred_date"]==pred_date)]
-                for instrument,group_data in date_pred_df.groupby("instrument"):
-                    # 生成对应日期的单个股票的综合数据
-                    complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=pred_df,df_ref=dataset.df_all,ext_length=ext_length)   
-                    if complex_df is None:
-                        continue
-                    # 使用收盘价格进行衡量         
-                    price_values = complex_df["label_ori"].values
-                    # 根据预测数据综合判断，取得匹配标志
-                    (match_flag,pred_class_real,vr_class) = self.pred_data_jud(complex_df, dataset=dataset,ext_length=ext_length)
-                    pred_class_real = pred_class_real.tolist()
-                    if not match_flag:
-                        continue
-                    
-                    # 取得实际价格信息，进行准确率判断
-                    price_list = price_values[-(dataset.pred_len):]
-                    # 以昨日收盘价为基准
-                    cur_price = price_values[-(dataset.pred_len+1)]
-                    price_raise_range = (price_list.max() - cur_price)/cur_price
-                    price_down_range = (price_list.min() - cur_price)/cur_price
-                    if price_raise_range > 0.05:
-                        correct = 2
-                    elif price_raise_range > 0.03:
-                        correct = 1
-                    elif price_raise_range > 0.01:
-                        correct = 0         
-                    elif price_down_range > -0.01:
-                        correct = 0        
-                    elif price_down_range > -0.03:
-                        correct = -1
-                    else:
-                        correct = -2                                                     
-                    match_item = [pred_date,instrument,correct,pred_class_real,vr_class,price_raise_range,price_down_range]
-                    match_list.append(match_item)
-                    # if correct!=2:
-                    #     self.data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.pred_data_path+"/plot")
-                    #     self.data_viewer_correct.show_single_complex_pred_data_visdom(complex_df,dataset=dataset)
-                    match_cnt += 1
-                logger.debug("date:{} and match_cnt:{}".format(pred_date,match_cnt))
-            
-            df = pd.DataFrame(np.array(match_list),columns=match_columns)   
-            with open(cache_file, "wb") as fout:
-                pickle.dump(df, fout)               
-        else:
-            with open(cache_file, "rb") as fin:
-                df = pickle.load(fin)             
+        # 加载预测结果数据
+        pred_df = self.load_pred_data(pred_data_file=self.pred_data_file)
+        # 根据配置取得对应日期的预测结果
+        pred_df = pred_df[(pred_df["pred_date"]>=int(self.classify_range[0].strftime('%Y%m%d')))&
+                          (pred_df["pred_date"]<=int(self.classify_range[1].strftime('%Y%m%d')))]        
+        df = self.filter_cancidate_result(pred_df, dataset, ext_length)        
         corr_2_rate = df[df["correct"]==2].shape[0]/df.shape[0]
         corr_1_rate = df[df["correct"]==1].shape[0]/df.shape[0]
         corr_0_rate = df[df["correct"]==0].shape[0]/df.shape[0]
-        print("corr_rate:{},corr_1:{},corr_0:{}".format(corr_2_rate,corr_1_rate,corr_0_rate))    
+        print("corr_rate:{},corr_1:{},corr_0:{}".format(corr_2_rate,corr_1_rate,corr_0_rate))   
+        # self.show_correct_pred(df,dataset=dataset) 
         return df
     
-    def show_correct_pred(self,dataset=None,show_num=5):
+    def filter_cancidate_result(self,pred_df,dataset=None,ext_length=25):
+        """筛选出合适的品种"""
+
+        # 统一筛选，筛选出分类上涨类股票
+        pred_df = pred_df[(pred_df["vr_class"]==2)]
+        date_list = pred_df["pred_date"].unique()        
+        match_list = []
+        match_cnt = 0        
+        match_columns = ["date","instrument","correct","pred_class","vr_class","price_raise_range","price_down_range"]
         
-        cache_file = self.pred_data_path + "/pred_stat.pickel"
-        with open(cache_file, "rb") as fin:
-            stat_df = pickle.load(fin)  
-        complex_df = self.load_pred_data()
+        for pred_date in date_list:   
+            pred_date = int(pred_date)  
+            match_cnt = 0
+            date_pred_df = pred_df[(pred_df["pred_date"]==pred_date)]
+            # 走势符合前平后起，或先起后平
+            date_pred_df = date_pred_df.groupby('instrument').filter(
+                lambda x: (x.iloc[0]["class1"]==2 and x.iloc[0]["class2"]==0) or (x.iloc[0]["class1"]==0 and x.iloc[0]["class2"]==2)
+            )             
+            for instrument,group_data in date_pred_df.groupby("instrument"):
+                # 生成对应日期的单个股票的综合数据
+                complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=group_data,df_ref=dataset.df_all,ext_length=ext_length)   
+                if complex_df is None:
+                    continue
+                # 使用收盘价格进行衡量         
+                price_values = complex_df["label_ori"].values
+                # 根据预测数据综合判断，取得匹配标志
+                (match_flag,pred_class_real,vr_class) = self.pred_data_jud(complex_df, dataset=dataset,ext_length=ext_length)
+                pred_class_real = pred_class_real.tolist()
+                if not match_flag:
+                    continue
+                
+                # 取得实际价格信息，进行准确率判断
+                price_list = price_values[-(dataset.pred_len):]
+                # 以昨日收盘价为基准
+                cur_price = price_values[-(dataset.pred_len+1)]
+                price_raise_range = (price_list.max() - cur_price)/cur_price
+                price_down_range = (price_list.min() - cur_price)/cur_price
+                if price_raise_range > 0.05:
+                    correct = 2
+                elif price_raise_range > 0.03:
+                    correct = 1
+                elif price_raise_range > 0.01:
+                    correct = 0         
+                elif price_down_range > -0.01:
+                    correct = 0        
+                elif price_down_range > -0.03:
+                    correct = -1
+                else:
+                    correct = -2                                                     
+                match_item = [pred_date,instrument,correct,pred_class_real,vr_class,price_raise_range,price_down_range]
+                match_list.append(match_item)
+                # if correct!=2:
+                #     self.data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.pred_data_path+"/plot")
+                # data_viewer_correct.show_single_complex_pred_data_visdom(complex_df,dataset=dataset)
+                match_cnt += 1
+            logger.debug("date:{} and match_cnt:{}".format(pred_date,match_cnt))
+        df = pd.DataFrame(np.array(match_list),columns=match_columns)     
+        return df
+        
+    def show_correct_pred(self,stat_df,dataset=None,show_num=10):
+        
+        complex_df = self.load_pred_data(pred_data_file=self.pred_data_file)
         incorrect_df = stat_df[stat_df["correct"]<0].iloc[:show_num]
         correct_df = stat_df[stat_df["correct"]==2].iloc[:show_num]
         show_df = pd.concat([incorrect_df,correct_df])
-        
+        data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
+        data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
         for index,group_data in show_df.groupby(["instrument","date"]):
             instrument = int(group_data["instrument"].values[0])
             date = int(group_data["date"].values[0])
             correct = group_data["correct"].values[0]
             complex_item_df = self.combine_complex_df_data(date,instrument,pred_df=complex_df,df_ref=dataset.df_all) 
             if correct==2:
-                self.data_viewer_correct.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
+                data_viewer_correct.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
             else:
-                self.data_viewer_incorrect.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
+                data_viewer_incorrect.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
             # self.data_viewer_correct.show_single_complex_pred_data(complex_item_df,correct=correct,dataset=dataset,save_path=self.pred_data_path+"/plot")
             logger.debug("correct:{}".format(correct))
         
@@ -422,7 +426,7 @@ class ClassifyRecord(PortAnaRecord):
         # 计算均线涨跌幅度,取预测日期前n天的（n为预测长度））
         label_slope_arr = compute_price_range(label_arr[-2*dataset.pred_len:-dataset.pred_len])
                      
-        pred_arr = ins_data["label"].values[-dataset.pred_len:]
+        pred_arr = ins_data["pred_data"].values[-dataset.pred_len:]
         # 计算预测均线涨跌幅度
         slope_arr = compute_price_range(pred_arr)  
         
@@ -434,38 +438,39 @@ class ClassifyRecord(PortAnaRecord):
         rtn_obj = [match_flag,pred_class,vr_class]
         
         # RSI指标需要在50以上
-        rsi = ins_data["RSI20"].values[-2*dataset.pred_len:-dataset.pred_len]
-        if np.any(rsi<50):
-            return rtn_obj
-        # MACD指标需要在0以上
-        macd = ins_data["MACD"].values[-2*dataset.pred_len:-dataset.pred_len]
-        if np.any(macd<0):
-            return rtn_obj
-                
+        # rsi = ins_data["RSI20"].values[-2*dataset.pred_len:-dataset.pred_len]
+        # if np.any(rsi<50):
+        #     return rtn_obj
+        # # MACD指标需要在0以上
+        # macd = ins_data["MACD"].values[-2*dataset.pred_len:-dataset.pred_len]
+        # if np.any(macd<0):
+        #     return rtn_obj
+        
         # 检查之前的实际均线形态，要求是比较平
         status = slope_status(label_slope_arr)
         if status != SLOPE_SHAPE_SMOOTH:
             return rtn_obj
         
         # 预测最后一个时间段数据需要上涨
-        if slope_arr[-1]< 0:
-            return rtn_obj
+        # if slope_arr[-1]< 0:
+        #     return rtn_obj
         # 整体需要上涨
-        if pred_arr[-1] - pred_arr[0] < 0:
-            return rtn_obj         
+        # if pred_arr[-1] - pred_arr[0] < 0:
+        #     return rtn_obj         
 
         # 需要符合涨跌幅类别
-        if vr_class<2:
-            return rtn_obj
+        # if vr_class<2:
+        #     return rtn_obj
         # 一直起，符合
-        if pred_class[0]==0 and pred_class[1]==0:
-            rtn_obj[0] = True           
-        # 前平后起，符合
-        if pred_class[0]==2 and pred_class[1]==0:
-            rtn_obj[0] = True
+        # if pred_class[0]==0 and pred_class[1]==0:
+        #     rtn_obj[0] = True           
+        # # 前平后起，符合
+        # if pred_class[0]==2 and pred_class[1]==0:
+        #     rtn_obj[0] = True
         # 前起后平，符合
         # if pred_class_real[0]==0 and pred_class_real[1]==2:
         #     match_flag = True   
+        rtn_obj[0] = True  
         return rtn_obj
 
 

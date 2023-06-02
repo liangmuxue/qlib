@@ -27,6 +27,7 @@ from workflow.busi_process.offer_processor import OfferProcessor
 from workflow.busi_process.data_processor import DataProcessor
 from workflow.busi_process.classify_processor import ClassifyProcessor
 from workflow.busi_process.simulation_processor import SimulationProcessor
+from workflow.busi_process.replay_processor import ReplayProcessor
 from trader.utils.date_util import get_tradedays_dur,get_tradedays,is_working_day
 from cus_utils.data_filter import list_split
 
@@ -151,7 +152,26 @@ class WorkflowTask(object):
             # 如果超出结束日期，则退出
             if next_working_day>self.config["end_date"]:
                 break
-    
+
+    def start_single_task(self,detail_task_name):
+        """单独任务执行"""
+        
+        # 取得所有子任务，并依次执行
+        detail_configs = self.task_store.get_workflow_details_config(self.workflow_id)
+        detail_config = None
+        for config in detail_configs:
+            if config["name"] == detail_task_name:
+                detail_config = config
+                break
+        
+        # 以当前日期为基准，循环执行任务
+        start_date = detail_config["start_date"]
+        end_date = detail_config["end_date"]
+        working_day = int(start_date)
+        sub_task = WorkflowSubTask(self,config=detail_config)
+        self.prepare_subtask_env(sub_task,detail_config,working_day)
+        flag = sub_task.processor.run(sub_task.get_task_config_file(),working_day=working_day,resume=False)
+                
     def status_judge(self,status):
         if status==WorkflowSubStatus.success.value or status==WorkflowSubStatus.freq_ignore.value or status==WorkflowSubStatus.busi_ignore.value:
             return True
@@ -429,7 +449,9 @@ class WorkflowSubTask(object):
         if dict_code=="offer":
             processor = OfferProcessor(self)
         if dict_code=="simulation":
-            processor = SimulationProcessor(self)        
+            processor = SimulationProcessor(self)     
+        if dict_code=="replay":
+            processor = ReplayProcessor(self)               
         self.processor = processor          
     
     def start_task(self,working_day,resume=True):
@@ -559,10 +581,10 @@ if __name__ == "__main__":
                 
     # 实时工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow_2023",resume=False)
-    task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)  
+    # task = WorkflowTask(task_batch=118,workflow_name="wf_backtest_flow_2023",resume=True)  
     
     # 2023回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_review_flow_2023",resume=False)
-    # task = WorkflowTask(task_batch=141,workflow_name="wf_review_flow_2023",resume=True)       
+    task = WorkflowTask(task_batch=141,workflow_name="wf_review_flow_2023",resume=True)       
     task.start_task()
         

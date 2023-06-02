@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import datetime
 
-from trader.utils.date_util import tradedays
+from trader.utils.date_util import tradedays,get_trade_min_dur
 from trader.utils.date_util import get_tradedays_dur,date_string_transfer
 
 from cus_utils.log_util import AppLogger
@@ -52,7 +52,7 @@ class TdxExtractor(HisDataExtractor):
         """
         
         # 任务开始时初始化连接，后续保持使用此连接
-        self.api.connect(self.host,self.port)     
+        self.connect()    
         results = None  
         flag = False
         cnt = 0
@@ -67,6 +67,8 @@ class TdxExtractor(HisDataExtractor):
                 logger.exception("tdx import_data fail:")      
                 self.reconnect()     
                 cnt += 1
+                if cnt>3:
+                    return None
                 logger.info("reconnect time:{}".format(cnt)) 
                 continue                        
         # 任务结束时关闭连接
@@ -107,8 +109,13 @@ class TdxExtractor(HisDataExtractor):
         item_data = None
         while(True):
             # 滚动查询，每次减少前推间隔.
-            # category：0--为5分钟K线 market：0深圳 1上海
-            data = api.get_security_bars(category,market, instrument_code, before_number, loop_call_number)
+            try:
+                # category：0--为5分钟K线 market：0深圳 1上海
+                data = api.get_security_bars(category,market, instrument_code, before_number, loop_call_number)
+            except Exception as e:
+                logger.warning("get_security_bars fail:{}".format(e))
+                self.reconnect()
+                continue
             if data is None or len(data)==0:
                 logger.warning("data none,instrument_code:{},inner_batch:{}".format(instrument_code,inner_batch))
                 break
@@ -144,15 +151,20 @@ class TdxExtractor(HisDataExtractor):
             min_number = 15    
         
         # 根据不同分钟级别，计算一天需要多少K线
-        day_item_number = 4 * 60 / min_number
+        day_item_number = int(4 * 60 / min_number)
         # 计算需要向前退多少天，根据当前日期以及开始日期进行计算
-        today = datetime.date.today().strftime('%Y%m%d')
+        now_time = datetime.datetime.now()
+        today = now_time.strftime('%Y%m%d')
         days_to_begin = tradedays(start_date,today)
         # 前推数量为天数乘以每天K线数
         start_number = int(day_item_number * days_to_begin)
         # 根据结束日期，计算需要查询的K线数量
         days_to_end = tradedays(end_date,today)
         end_number = int(day_item_number * days_to_end)
+        # 计算当日时间差值，并补齐
+        dur_time = get_trade_min_dur(now_time,min_number)
+        end_number = end_number + dur_time - day_item_number
+        start_number = start_number + dur_time
         # exceed_number = before_number - item_number
         return start_number,end_number
 

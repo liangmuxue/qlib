@@ -75,12 +75,12 @@ if __name__ == "__main__":
     # task = WorkflowTask(task_batch=2,workflow_id=1,resume=True)
     view = ResultView()
     csv_file = "/home/qdata/stock_data/ak/whole_data/day/600008_institution.csv"
-    csv_file = "/home/qdata/stock_data/ak/item/day/002461_institution.csv"
-    csv_file = "/home/qdata/stock_data/tdx/item/5m/600083.csv"
-    # view.view_csv_data(csv_file)
-    data_file = "/home/qdata/stock_data/ak/all_day_institution.pickle"
+    csv_file = "/home/qdata/stock_data/ak/item/day/institution/000605.csv"
+    csv_file = "/home/qdata/stock_data/tdx/item/5m/origin/000630.csv"
+    view.view_csv_data(csv_file)
+    # data_file = "/home/qdata/stock_data/ak/all_day_institution.pickle"
     # data_file = "/home/qdata/stock_data/tdx/all_5m.pickle"
-    view.view_whole_data(data_file)
+    # view.view_whole_data(data_file)
     # view.view_qlib_data("custom/config/stat/dataset.yaml")    
     pred_data_file = "/home/qdata/workflow/wf_backtest_flow/task/20/dump_data/pred_part/pred_df_total_20220201.pkl"
     pred_data_file = "/home/qdata/workflow/wf_test/task/73/dump_data/pred_part/pred_df_total_20220118.pkl"

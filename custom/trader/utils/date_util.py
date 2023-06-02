@@ -122,3 +122,28 @@ def get_tradedays(start,end):
         counts += 1
         start += timedelta(days=1)
     return cal_list
+
+def get_trade_min_dur(trade_time,period_number=5):
+    """按照A股交易规则，计算两个时间的交易间隔数"""
+    
+    trade_day = trade_time.strftime('%Y%m%d')
+    # 生成当天上午及下午开盘时间
+    m_begin = datetime(trade_time.year,trade_time.month,trade_time.day,9,30)
+    m_end = datetime(trade_time.year,trade_time.month,trade_time.day,11,30)
+    a_begin = datetime(trade_time.year,trade_time.month,trade_time.day,13,0)
+    a_end = datetime(trade_time.year,trade_time.month,trade_time.day,15,0)
+    dur_time = None
+    if trade_time<m_begin:
+        return 0
+    if trade_time<m_end:
+        dur_time = trade_time - m_begin
+    if trade_time>m_end and trade_time<a_begin:
+        dur_time = m_end - m_begin
+    if trade_time>a_begin and trade_time<a_end:
+        dur_time = (m_end - m_begin) + (trade_time - a_begin)      
+    if trade_time>a_end:
+        dur_time = (m_end - m_begin) + (a_end - a_begin)   
+    dur_number = dur_time.seconds//(60*period_number) + 1
+    # day_item_number = 4 * 60 / period_number
+    # dur_number = day_item_number - dur_number
+    return int(dur_number)
