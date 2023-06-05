@@ -45,7 +45,7 @@ from darts.utils.data import (
     TrainingDataset,
     InferenceDataset
 )
-from darts_pro.data_extension.custom_dataset import CustomNumpyDataset,CustomSequentialDataset,CustomInferenceDataset
+from darts_pro.data_extension.custom_dataset import CustomSequentialDataset,CustomInferenceDataset
 
 logger = get_logger(__name__)
 

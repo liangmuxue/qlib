@@ -95,8 +95,7 @@ class PortAnaRecord(TftRecorder):
     def load_pred_data(self,pred_data_file=None):
         if pred_data_file is None:
             pred_data_file = "pred_df_total.pkl"
-        pred_data_path = self.pred_data_path + "/" + pred_data_file
-        with open(pred_data_path, "rb") as fin:
+        with open(pred_data_file, "rb") as fin:
             df_pred = pickle.load(fin)     
         df_pred["class1"] = df_pred["class1"].astype(int) 
         df_pred["class2"] = df_pred["class2"].astype(int) 
@@ -274,7 +273,6 @@ class ClassifyRecord(PortAnaRecord):
             return self
         
         df = self.stat_complex_pred_data(self.dataset)
-        # self.show_correct_pred(self.dataset)
         return df
 
     def classify_analysis(self, dataset: TFTSeriesDataset):
@@ -285,36 +283,48 @@ class ClassifyRecord(PortAnaRecord):
     def stat_complex_pred_data(self,dataset=None,ext_length=25,load_cache=False):
         """统计预测信息准确度，可用性"""
         
-        # 加载预测结果数据
-        pred_df = self.load_pred_data(pred_data_file=self.pred_data_file)
-        # 根据配置取得对应日期的预测结果
-        pred_df = pred_df[(pred_df["pred_date"]>=int(self.classify_range[0].strftime('%Y%m%d')))&
-                          (pred_df["pred_date"]<=int(self.classify_range[1].strftime('%Y%m%d')))]        
-        df = self.filter_cancidate_result(pred_df, dataset, ext_length)        
+        pred_data_path = self.model.kwargs["pred_data_path"]
+        pred_file = self.model.kwargs["pred_data_file"]
+        if len(pred_file)==0:
+            pred_file = None
+        else:
+            pred_file = "{}/{}".format(pred_data_path,pred_file)
+        df,pred_df_total = self.filter_cancidate_result(dataset, pred_file=pred_file,ext_length=ext_length)        
         corr_2_rate = df[df["correct"]==2].shape[0]/df.shape[0]
         corr_1_rate = df[df["correct"]==1].shape[0]/df.shape[0]
         corr_0_rate = df[df["correct"]==0].shape[0]/df.shape[0]
         print("corr_rate:{},corr_1:{},corr_0:{}".format(corr_2_rate,corr_1_rate,corr_0_rate))   
-        # self.show_correct_pred(df,dataset=dataset) 
+        self.show_correct_pred(df,pred_df_total,dataset=dataset) 
         return df
     
-    def filter_cancidate_result(self,pred_df,dataset=None,ext_length=25):
+    def filter_cancidate_result(self,dataset=None,ext_length=25,pred_file=None):
         """筛选出合适的品种"""
 
-        # 统一筛选，筛选出分类上涨类股票
-        pred_df = pred_df[(pred_df["vr_class"]==2)]
-        date_list = pred_df["pred_date"].unique()        
+        date_list = get_tradedays(self.classify_range[0],self.classify_range[1])
         match_list = []
         match_cnt = 0        
         match_columns = ["date","instrument","correct","pred_class","vr_class","price_raise_range","price_down_range"]
-        
+        data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
+        pred_df_total = None
         for pred_date in date_list:   
+            # 每日动态加载预测结果数据
+            if pred_file is None:
+                pred_data_file = self.get_pred_data_file(pred_date)
+            else:
+                pred_data_file = pred_file
+            date_pred_df_ori = self.load_pred_data(pred_data_file=pred_data_file)
+            if pred_df_total is None:
+                pred_df_total = date_pred_df_ori
+            else:
+                pred_df_total = pd.concat([pred_df_total,date_pred_df_ori])
+            # 筛选出分类上涨类股票
+            date_pred_df = date_pred_df_ori[(date_pred_df_ori["vr_class"]==2)]            
             pred_date = int(pred_date)  
-            match_cnt = 0
-            date_pred_df = pred_df[(pred_df["pred_date"]==pred_date)]
             # 走势符合前平后起，或先起后平
             date_pred_df = date_pred_df.groupby('instrument').filter(
-                lambda x: (x.iloc[0]["class1"]==2 and x.iloc[0]["class2"]==0) or (x.iloc[0]["class1"]==0 and x.iloc[0]["class2"]==2)
+                lambda x: (x.iloc[0]["class1"]==SLOPE_SHAPE_SMOOTH and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE) or 
+                (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_SMOOTH) or  
+                (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE)
             )             
             for instrument,group_data in date_pred_df.groupby("instrument"):
                 # 生成对应日期的单个股票的综合数据
@@ -355,21 +365,25 @@ class ClassifyRecord(PortAnaRecord):
                 match_cnt += 1
             logger.debug("date:{} and match_cnt:{}".format(pred_date,match_cnt))
         df = pd.DataFrame(np.array(match_list),columns=match_columns)     
-        return df
+        return df,pred_df_total
+    
+    def get_pred_data_file(self,pred_date):
+        file_path = "{}/pred_part/pred_df_total_{}.pkl".format(self.pred_data_path,pred_date)
+        return file_path
+           
+    def show_correct_pred(self,stat_df,pred_df_total,dataset=None,show_num=10):
         
-    def show_correct_pred(self,stat_df,dataset=None,show_num=10):
-        
-        complex_df = self.load_pred_data(pred_data_file=self.pred_data_file)
         incorrect_df = stat_df[stat_df["correct"]<0].iloc[:show_num]
         correct_df = stat_df[stat_df["correct"]==2].iloc[:show_num]
         show_df = pd.concat([incorrect_df,correct_df])
+        show_df = stat_df[stat_df["instrument"]==66]
         data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
         data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
         for index,group_data in show_df.groupby(["instrument","date"]):
             instrument = int(group_data["instrument"].values[0])
             date = int(group_data["date"].values[0])
             correct = group_data["correct"].values[0]
-            complex_item_df = self.combine_complex_df_data(date,instrument,pred_df=complex_df,df_ref=dataset.df_all) 
+            complex_item_df = self.combine_complex_df_data(date,instrument,pred_df=pred_df_total,df_ref=dataset.df_all) 
             if correct==2:
                 data_viewer_correct.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
             else:
@@ -447,9 +461,9 @@ class ClassifyRecord(PortAnaRecord):
         #     return rtn_obj
         
         # 检查之前的实际均线形态，要求是比较平
-        status = slope_status(label_slope_arr)
-        if status != SLOPE_SHAPE_SMOOTH:
-            return rtn_obj
+        # status = slope_status(label_slope_arr)
+        # if status != SLOPE_SHAPE_SMOOTH:
+        #     return rtn_obj
         
         # 预测最后一个时间段数据需要上涨
         # if slope_arr[-1]< 0:

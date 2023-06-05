@@ -1,12 +1,13 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market all
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
-    start_time: 2008-01-01
-    end_time: 2023-05-15
-    fit_start_time: 2008-01-01
+    init_data: True
+    start_time: 2022-01-01
+    end_time: 2023-12-31
+    fit_start_time: 2022-01-01
     fit_end_time: 2023-12-31
     instruments: *market
     infer_processors:
@@ -33,14 +34,14 @@ task:
             type: 'classify_train'
             n_epochs : 300
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
-            pred_data_path: &pred_data_path "/home/qdata/workflow/wf_review_flow_2023/task/141/dump_data"
-            pred_data_file: &pred_data_file "pred_part/pred_df_total_20230103.pkl"
+            load_dataset_file: &load_dataset_file False
+            pred_data_path: &pred_data_path "custom/data/darts/dump_data"
+            pred_data_file: &pred_data_file "pred_df_total.pkl"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_all_step5'
+               model_name: 'test9_tft_all_step5'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -53,10 +54,10 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2008-01-01, 2023-05-15]
-                valid: [2022-12-30, 2023-03-30]
-                test: [2021-01-01, 2021-03-01]         
-                classify_range: [2023-01-03, 2023-01-16]
+                train_total: [2022-01-01, 2023-05-31]
+                valid: [2022-09-01, 2022-12-05]
+                test: [2022-02-01, 2022-03-01]         
+                classify_range: [2023-02-01, 2023-02-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
@@ -79,19 +80,15 @@ task:
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
                 static_covariate_col: ['industry','tradable_shares']   
-    record: 
-        - class: SignalRecord
-          module_path: trader.tft_recorder
-          kwargs: 
-            model: <MODEL>
-            dataset: <DATASET>    
+    record:    
         - class: ClassifyRecord
           module_path: trader.pred_recorder
           kwargs: 
             config: None
+            pred_data_path: *pred_data_path
+            pred_data_file: *pred_data_file
             model: <MODEL>
             dataset: <DATASET>  
-            pred_data_path: *pred_data_path
-            pred_data_file: *pred_data_file               
+            
         
             

@@ -1,13 +1,14 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market all
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
+    init_data: True
     start_time: 2008-01-01
-    end_time: 2022-12-31
+    end_time: 2023-12-31
     fit_start_time: 2008-01-01
-    fit_end_time: 2022-12-31
+    fit_end_time: 2023-12-31
     instruments: *market
     infer_processors:
         - class: FilterCol
@@ -53,12 +54,12 @@ task:
             n_jobs: 20
             log_every_n_steps: 50
             type: 'train_dataframe'
-            n_epochs : 1
+            n_epochs : 100
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
+            load_dataset_file: &load_dataset_file False
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
-               gamma: 0.3     
+               gamma: 0.8     
                step_size: 1    
             optimizer_kwargs:
                lr: 0.01
@@ -67,8 +68,8 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_all_step5'
-               load_weight: False
+               model_name: 'test9_tft_all_step5'
+               load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5
@@ -81,8 +82,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2022-12-31]
-                valid: [2021-11-01, 2021-12-31]
+                train_total: [2010-01-01, 2023-05-31]
+                valid: [2022-09-01, 2023-02-07]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

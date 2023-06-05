@@ -17,7 +17,6 @@ import torch.nn.functional as F
 
 from datetime import datetime
 from data_extract.data_baseinfo_extractor import StockDataExtractor
-from darts_pro.data_extension.custom_dataset import CustomNumpyDataset
 from darts_pro.tft_dataset import TFTDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
@@ -266,9 +265,6 @@ class TFTSeriesDataset(TFTDataset):
             ts_transformed = target_scaler.fit_transform(ts)
             vs_transformed = target_scaler.transform(val_series[index])
             total_transformed = target_scaler.transform(total_series[index])
-            # 添加label原值，用于后续使用。--cancal
-            # ts_transformed = ts_transformed.concatenate(ts,axis=1)
-            # vs_transformed = vs_transformed.concatenate(val_series[index],axis=1)
             train_series_transformed.append(ts_transformed)
             val_series_transformed.append(vs_transformed)
             total_series_transformed.append(total_transformed)
@@ -304,6 +300,8 @@ class TFTSeriesDataset(TFTDataset):
 
         # 生成过去协变量，并归一化
         logger.info("begin build_covariates")
+        # 在过去协变量的数据中加入目标值原值，借用此协变量带入后续dataset中，用于原值分类计算
+        past_columns = [target_column] + past_columns
         past_convariates = build_covariates(past_columns)      
         # 生成未来协变量，并归一化
         future_convariates = build_covariates(future_columns)    
@@ -702,4 +700,16 @@ class TFTSeriesDataset(TFTDataset):
         data_columns = data_columns + pred_columns + label_columns + price_columns      
         return data_columns 
         
+    def get_datetime_with_index(self,instrument,begin_time_index,end_time_index):
+        """取得指定股票对应时间索引的具体日期范围"""
         
+        df_target = self.df_all[(self.df_all["instrument"]==instrument)&(self.df_all["time_idx"]>=begin_time_index)&(self.df_all["time_idx"]<=end_time_index)]
+        return df_target["datetime"].dt.strftime("%Y%m%d").astype(int).values.tolist()        
+    
+    def get_series_value_by_range(self,series,range):
+        target_series = series.drop_before(range[0]).drop_after(range[1])
+        return target_series
+        
+        
+    
+    

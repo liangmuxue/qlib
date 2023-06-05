@@ -68,8 +68,8 @@ class ClassifyProcessor(BaseProcessor):
             classify_begin_date = str(working_day_list[0])
             classify_begin_date = datetime.strptime(classify_begin_date,"%Y%m%d")
             # 数据集定义预测分类评估的结束时间，为当前指定日期（workding day）的上一个交易日，即上一个日历批次的最后一天
-            next_working_day_list = self.wf_task.get_calendar_by_seq(pred_sequence+1)
-            classify_end_date = str(next_working_day_list[-1])        
+            # next_working_day_list = self.wf_task.get_calendar_by_seq(pred_sequence+1)
+            classify_end_date = str(working_day_list[-1])        
             classify_end_date = datetime.strptime(classify_end_date,"%Y%m%d")
             dataset_template["kwargs"]["segments"]["classify_range"] = [classify_begin_date,classify_end_date]
         return real_template

@@ -1,5 +1,6 @@
 from qlib.data.dataset import DatasetH
 from qlib.data.dataset.handler import DataHandler, DataHandlerLP
+from qlib.utils import init_instance_by_config
 from qlib.log import get_module_logger
 from typing import Union, List, Tuple, Dict, Text, Optional
 from inspect import getfullargspec
@@ -41,6 +42,7 @@ class TFTDataset(DatasetH):
         if self.load_dataset_file:
             self.segments = kwargs["segments"].copy()
             self.fetch_kwargs = {}
+            self.handler: DataHandler = init_instance_by_config(kwargs["handler"], accept_types=DataHandler)
             # self.cus_setup_data(**kwargs)
             return        
         super().__init__(**kwargs)

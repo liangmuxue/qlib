@@ -44,6 +44,7 @@ class TftDataHandler(DataHandlerLP):
             infer_processors=infer_processors,
             learn_processors=learn_processors,
             process_type=process_type,
+            init_data=kwargs["init_data"]
         )
 
     def get_feature_config(self):

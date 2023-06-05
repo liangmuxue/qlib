@@ -102,7 +102,8 @@ class TftDataframeModel():
         if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
-            return      
+            self.predict(dataset)
+            return           
         if self.type.startswith("build_pred_result"):
             self.build_pred_result(dataset)
             return            
@@ -268,7 +269,11 @@ class TftDataframeModel():
             return        
         if self.type!="predict":
             return 
- 
+
+        path = "{}/result_view".format(self.optargs["work_dir"])
+        if not os.path.exists(path):
+            os.mkdir(path)
+            
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]
@@ -472,6 +477,8 @@ class TftDataframeModel():
         figsize = (9, 6)
         group_rank_column = dataset.get_group_rank_column()
         group_column = dataset.get_group_column()
+        # pred_series_list = dataset.reverse_transform_preds(pred_series_list)
+        # series_total = dataset.reverse_transform_preds(series_total)
         # 创建比较序列，后面保持所有，或者自己指定长度
         actual_series_list = []
         for index,ser_val in enumerate(val_series_list):          
@@ -486,8 +493,10 @@ class TftDataframeModel():
         diff_all = 0
         cross_all = 0
         vr_acc_all = 0
-        vr_acc_imp_all = 0
-        vr_acc_imp_recall = 0
+        vr_imp_all = 0
+        vr_imp_recall = 0
+        vr_imp_pred_all = 0
+        vr_imp_pred_acc = 0
         # r = 5
         # view_list = random_int_list(1,len(val_series_list)-1,r)
         
@@ -506,6 +515,7 @@ class TftDataframeModel():
             total_series = series_total[i]
             actual_series = actual_series_list[i]
             group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
+            group_code = dataset.get_group_code_by_rank(group_rank_code)
             # 与实际的数据集进行比较，比较的是两个数据集的交集
             mape_item = mape(total_series, pred_series)
             mape_all = mape_all + mape_item
@@ -520,8 +530,12 @@ class TftDataframeModel():
             vr_acc_all = vr_acc_all + vr_acc_item[0]  
             # 重点关注上涨类别的召回率
             if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
-                vr_acc_imp_all += 1
-                vr_acc_imp_recall = vr_acc_imp_recall + vr_acc_item[0]          
+                vr_imp_all += 1
+                vr_imp_recall = vr_imp_recall + vr_acc_item[0]  
+            if vr_acc_item[0]>0:
+                vr_imp_pred_all += 1
+                if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
+                    vr_imp_pred_acc += 1
             # 开始结束差的距离衡量
             diff_item = diff_dis(total_series, pred_series) 
             diff_all = diff_all + diff_item      
@@ -529,7 +543,9 @@ class TftDataframeModel():
             df_item = df_pick[df_pick[group_rank_column]==group_rank_code]
             result.append({"instrument":group_rank_code,"corr_item":corr_item,"cross_item":cross_item,
                            "vr_acc_item":vr_acc_item,"mape_item":mape_item})
+            kwargs = dict(figsize=(10, 5))
             if df_item.shape[0]>0:
+                group_code = df_item[group_column].values[0].astype(int)
                 # 分位数范围显示
                 pred_series.plot(
                     low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
@@ -539,9 +555,14 @@ class TftDataframeModel():
                 # 实际数据集的结尾与预测序列对齐
                 pred_series.plot(label="forecast")            
                 instrument_code = df_item[group_column].values[0]
-                actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1].plot(label="actual")   
+                act_series = actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1]
+                act_series.plot(label="actual")   
+                # fig, ax = plt.subplots(**kwargs)    
+                date_range = dataset.get_datetime_with_index(group_code,pred_series.start_time(),pred_series.end_time())
+                range_show = "[{}-{}]".format(date_range[0],date_range[-1])
+                # ax.set_xticks(date_range)                                
                 pred_class_str = "{}-{}/{}".format(pred_class[0],pred_class[1],vr_class)
-                plt.title("ser_{},MAPE: {:.2f}%,corr:{},class:{}".format(instrument_code,mape_item,corr_item,pred_class_str))
+                plt.title("{},ser_{},MAPE: {:.2f}%,corr:{},class:{}".format(range_show,instrument_code,mape_item,corr_item,pred_class_str))
                 plt.legend()
                 plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
                 plt.clf()   
@@ -550,9 +571,11 @@ class TftDataframeModel():
         diff_mean = diff_all/len(val_series_list)
         cross_mean = cross_all/len(val_series_list)
         vr_acc_mean = vr_acc_all/len(val_series_list)   
-        vr_acc_imp_mean = vr_acc_imp_recall/vr_acc_imp_all    
-        print("mape_mean:{},corr mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_acc_imp_mean:{}".
-              format(mape_mean,corr_mean,diff_mean,cross_mean,vr_acc_mean,vr_acc_imp_mean))     
+        vr_recall_imp_mean = vr_imp_recall/vr_imp_all    
+        vr_acc_imp_mean = vr_imp_pred_acc/vr_imp_pred_all  
+        print("mape_mean:{},corr mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{},vr_imp_acc_mean:{} with {}/{}".
+              format(mape_mean,corr_mean,diff_mean,cross_mean,vr_acc_mean,vr_recall_imp_mean,
+                     vr_imp_recall,vr_imp_all,vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all))     
         return result
         
     def save_pred_result(self,result,dataset=None,update=False):

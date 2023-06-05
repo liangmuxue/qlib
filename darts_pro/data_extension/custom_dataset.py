@@ -13,94 +13,126 @@ from darts.utils.data.sequential_dataset import MixedCovariatesSequentialDataset
 from darts.utils.data.inference_dataset import InferenceDataset,PastCovariatesInferenceDataset,DualCovariatesInferenceDataset
 from darts.utils.data.shifted_dataset import GenericShiftedDataset,MixedCovariatesTrainingDataset
 from darts.utils.data.utils import CovariateType
+from darts.logging import raise_if_not
 from darts import TimeSeries
 from cus_utils.common_compute import target_scale,slope_classify_compute
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class
 
-class CustomNumpyDataset(SplitCovariatesTrainingDataset):
+class CusGenericShiftedDataset(GenericShiftedDataset):
     def __init__(
         self,
-        numpy_data=None,
-        input_chunk_length: int = 25,
-        output_chunk_length: int = 5,
-        future_covariate_index: List = [],
-        past_covariate_index: List = [],
-        static_covariate_index: List = [],
-        target_index: str = None,
-        model_type = "tft",
+        target_series: Union[TimeSeries, Sequence[TimeSeries]],
+        covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        input_chunk_length: int = 12,
+        output_chunk_length: int = 1,
+        shift: int = 1,
+        shift_covariates: bool = False,
+        max_samples_per_ts: Optional[int] = None,
+        covariate_type: CovariateType = CovariateType.NONE,
+        use_static_covariates: bool = True,
     ):
         """
-        自定义数据集，直接使用numpy数据进行取值
+        自定义数据集，用于重载父类getitem方法
         """
-        super().__init__()
-        
-        self.model_type = model_type
-        self.numpy_data = numpy_data
-        self.input_chunk_length = input_chunk_length
-        self.output_chunk_length = output_chunk_length
-        self.future_covariate_index = future_covariate_index
-        self.past_covariate_index = past_covariate_index
-        self.static_covariate_index = static_covariate_index
-        self.target_index = target_index
-
-    def __len__(self):
-        return self.numpy_data.shape[0]
+        super().__init__(target_series,covariates,input_chunk_length,output_chunk_length,shift,shift_covariates,
+                         max_samples_per_ts,covariate_type,use_static_covariates)
 
     def __getitem__(
         self, idx
     ) -> Tuple[
-        np.ndarray,
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        np.ndarray,
+        np.ndarray, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
     ]:
-        row = self.numpy_data[idx]
-        past_target = row[:self.input_chunk_length,self.target_index:self.target_index+1]
-        past_covariate = row[:self.input_chunk_length,self.past_covariate_index]
-        future_covariate = row[self.input_chunk_length:,self.future_covariate_index]
-        historic_future_covariate = row[:self.input_chunk_length,self.future_covariate_index]
-        future_target = row[self.input_chunk_length:,self.target_index:self.target_index+1]
-        static_covariate = np.expand_dims(row[0,self.static_covariate_index],axis=0)
+        """重载父类方法，用于植入更多数据"""
         
-        if self.model_type=="tft":
-            return (
-                past_target,
-                past_covariate,
-                historic_future_covariate,
-                future_covariate,
-                static_covariate,
-                future_target,
+        # determine the index of the time series.
+        target_idx = idx // self.max_samples_per_ts
+        target_series = self.target_series[target_idx]
+        target_vals = target_series.random_component_values(copy=False)
+
+        # determine the actual number of possible samples in this time series
+        n_samples_in_ts = len(target_vals) - self.size_of_both_chunks + 1
+        
+        raise_if_not(
+            n_samples_in_ts >= 1,
+            "The dataset contains some time series that are too short to contain "
+            "`max(self.input_chunk_length, self.shift + self.output_chunk_length)` "
+            "({}-th series)".format(target_idx),
+        )
+
+        # determine the index at the end of the output chunk
+        # it is originally in [0, self.max_samples_per_ts), so we use a modulo to have it in [0, n_samples_in_ts)
+        end_of_output_idx = (
+            len(target_series)
+            - (idx - (target_idx * self.max_samples_per_ts)) % n_samples_in_ts
+        )
+
+        # optionally, load covariates
+        covariate_series = (
+            self.covariates[target_idx] if self.covariates is not None else None
+        )
+
+        main_covariate_type = CovariateType.NONE
+        if self.covariates is not None:
+            main_covariate_type = (
+                CovariateType.FUTURE if self.shift_covariates else CovariateType.PAST
             )
+
+        # get all indices for the current sample
+        (
+            past_start,
+            past_end,
+            future_start,
+            future_end,
+            covariate_start,
+            covariate_end,
+        ) = self._memory_indexer(
+            target_idx=target_idx,
+            target_series=target_series,
+            shift=self.shift,
+            input_chunk_length=self.input_chunk_length,
+            output_chunk_length=self.output_chunk_length,
+            end_of_output_idx=end_of_output_idx,
+            covariate_series=covariate_series,
+            covariate_type=main_covariate_type,
+        )
+
+        # extract sample target
+        future_target = target_vals[future_start:future_end]
+        past_target = target_vals[past_start:past_end]
+        # 多生成一个目标协变量，用于传递原值
+        covariate_target = target_vals[future_start:future_end]
+
+        # optionally, extract sample covariates
+        covariate = None
+        if self.covariates is not None:
+            raise_if_not(
+                covariate_end <= len(covariate_series),
+                f"The dataset contains {main_covariate_type.value} covariates "
+                f"that don't extend far enough into the future. ({idx}-th sample)",
+            )
+
+            covariate = covariate_series.random_component_values(copy=False)[
+                covariate_start:covariate_end
+            ]
+
+            raise_if_not(
+                len(covariate)
+                == (
+                    self.output_chunk_length
+                    if self.shift_covariates
+                    else self.input_chunk_length
+                ),
+                f"The dataset contains {main_covariate_type.value} covariates "
+                f"whose time axis doesn't allow to obtain the input (or output) chunk relative to the "
+                f"target series.",
+            )
+
+        if self.use_static_covariates:
+            static_covariate = target_series.static_covariates_values(copy=False)
+        else:
+            static_covariate = None
+        return past_target, covariate, static_covariate, future_target,covariate_target
         
-        if self.model_type=="lstm":
-            past_target = row[:self.input_chunk_length,self.target_index:self.target_index+1]
-            past_covariate = row[:self.input_chunk_length,self.past_covariate_index]
-            if len(self.future_covariate_index)==0:
-                future_covariate = None
-                historic_future_covariate = None
-            else:
-                future_covariate = row[self.output_chunk_length:,self.future_covariate_index]
-                historic_future_covariate = row[self.output_chunk_length:,self.future_covariate_index]
-            # lstm模式下，shift一直为1，因此使用滚动数据
-            future_target = row[self.output_chunk_length:,self.target_index:self.target_index+1]
-            static_covariate = np.expand_dims(row[0,self.static_covariate_index],axis=0)           
-            return (
-                past_target,
-                past_covariate,
-                future_covariate,
-                None,
-                future_target
-            )            
-            
-        if self.model_type=="tcn":
-            return (
-                past_target,
-                past_covariate,
-                None,
-                future_target.transpose(1,0)
-            )             
-            
 class CustomSequentialDataset(MixedCovariatesTrainingDataset):
     """重载MixedCovariatesSequentialDataset，用于定制加工数据"""
     
@@ -113,14 +145,14 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         output_chunk_length: int = 1,
         max_samples_per_ts: Optional[int] = None,
         use_static_covariates: bool = True,
-        mode="train"
+        mode="train",
     ):
         """初始化，分为过去数据集和未来数据集"""
 
         super().__init__()
         self.mode = mode
         # This dataset is in charge of serving past covariates
-        self.ds_past = GenericShiftedDataset(
+        self.ds_past = CusGenericShiftedDataset(
             target_series=target_series,
             covariates=past_covariates,
             input_chunk_length=input_chunk_length,
@@ -161,18 +193,19 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         np.ndarray,
     ]:
 
-        past_target, past_covariate, static_covariate, future_target = self.ds_past[idx]
+        past_target, past_covariate, static_covariate, future_target,covariate_target = self.ds_past[idx]
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
+        # 第一个数值为目标原值，不需要
+        # past_target = past_target[1:]
         
         # 添加总体走势分类输出
-        max_value = np.max(future_target)
-        min_value = np.min(future_target)
-        
-        # 比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        if max_value - future_target[0,0] > future_target[0,0] - min_value:
-            raise_range = (max_value - future_target[0,0])/future_target[0,0]*100
+        # 从协变量第一列取得目标原值，使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
+        max_value = np.max(covariate_target)
+        min_value = np.min(covariate_target)
+        if max_value - covariate_target[0,0] > covariate_target[0,0] - min_value:
+            raise_range = (max_value - covariate_target[0,0])/covariate_target[0,0]*100
         else:
-            raise_range = (min_value - future_target[0,0])/future_target[0,0]*100
+            raise_range = (min_value - covariate_target[0,0])/covariate_target[0,0]*100
         p_taraget_class = get_simple_class(raise_range)
         p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)
                 
@@ -258,7 +291,8 @@ class CustomInferenceDataset(InferenceDataset):
             ts_target,
         ) = self.ds_past[idx]
         _, historic_future_covariate, future_covariate, _, _ = self.ds_future[idx]
-        
+        # 忽略第一列
+        # past_target = past_target[1:]
         # 针对价格数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
         past_target = scaler.fit_transform(past_target)   
