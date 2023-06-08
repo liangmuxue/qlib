@@ -99,8 +99,11 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         # extract sample target
         future_target = target_vals[future_start:future_end]
         past_target = target_vals[past_start:past_end]
-        # 多生成一个目标协变量，用于传递原值
-        covariate_target = target_vals[future_start:future_end]
+        # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
+        code = int(target_series.static_covariates["instrument_rank"].values[0])
+        target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
+                       "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"future_end":future_end,
+                       "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates
         covariate = None
@@ -131,7 +134,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
             static_covariate = target_series.static_covariates_values(copy=False)
         else:
             static_covariate = None
-        return past_target, covariate, static_covariate, future_target,covariate_target
+        return past_target, covariate, static_covariate, future_target,target_info
         
 class CustomSequentialDataset(MixedCovariatesTrainingDataset):
     """重载MixedCovariatesSequentialDataset，用于定制加工数据"""
@@ -193,27 +196,27 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         np.ndarray,
     ]:
 
-        past_target, past_covariate, static_covariate, future_target,covariate_target = self.ds_past[idx]
+        past_target, past_covariate, static_covariate, future_target,target_info = self.ds_past[idx]
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
-        # 第一个数值为目标原值，不需要
-        # past_target = past_target[1:]
         
-        # 添加总体走势分类输出
-        # 从协变量第一列取得目标原值，使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        max_value = np.max(covariate_target)
-        min_value = np.min(covariate_target)
-        if max_value - covariate_target[0,0] > covariate_target[0,0] - min_value:
-            raise_range = (max_value - covariate_target[0,0])/covariate_target[0,0]*100
+        # if target_info["item_rank_code"]==7 and target_info["end"]>=target_info["total_end"]-1:
+        #     print("lll")
+
+        # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
+        max_value = np.max(future_target)
+        min_value = np.min(future_target)
+        if max_value - future_target[0,0] > future_target[0,0] - min_value:
+            raise_range = (max_value - future_target[0,0])/future_target[0,0]*100
         else:
-            raise_range = (min_value - covariate_target[0,0])/covariate_target[0,0]*100
+            raise_range = (min_value - future_target[0,0])/future_target[0,0]*100
         p_taraget_class = get_simple_class(raise_range)
-        p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)
-                
-        # 针对价格数据，进行单独归一化，扩展数据波动范围
+        p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)    
+        # 针对目标数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
-        scaler.fit(past_target)
+        scaler.fit(past_target)          
+        # 计算涨跌幅度分类后，再进行归一化
         past_target = scaler.transform(past_target)   
-        future_target = scaler.transform(future_target)    
+        future_target = scaler.transform(future_target)           
         # 添加分段走势分类目标输出
         target_class, target_scaler = slope_classify_compute(future_target,self.class1_len)
         target_class = np.expand_dims(target_class,axis=-1)
@@ -228,6 +231,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             scaler,
             target_class,
             future_target,
+            target_info
         )
         
 class CustomInferenceDataset(InferenceDataset):
@@ -291,8 +295,7 @@ class CustomInferenceDataset(InferenceDataset):
             ts_target,
         ) = self.ds_past[idx]
         _, historic_future_covariate, future_covariate, _, _ = self.ds_future[idx]
-        # 忽略第一列
-        # past_target = past_target[1:]
+        
         # 针对价格数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
         past_target = scaler.fit_transform(past_target)   

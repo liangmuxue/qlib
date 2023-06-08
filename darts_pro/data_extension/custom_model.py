@@ -27,7 +27,7 @@ from joblib import Parallel, delayed
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import target_scale
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
-from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
+from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC
 
 import torchmetrics
 from torchmetrics import MeanSquaredError
@@ -202,11 +202,9 @@ class _TFTCusModule(_TFTModule):
         """performs the training step"""
         
         # 包括数值数据，以及分类输出
-        (output,out_class,vr_class) = self._produce_train_output(train_batch[:-3])
+        (output,out_class,vr_class) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
-        _,target_class,target = train_batch[
-            -3:
-        ]
+        _,target_class,target,target_info = train_batch[5:]
         target_class = target_class[:,:,0]
         target_trend_class = target_class[:,:2]
         target_vr_class = target_class[:,2]
@@ -238,8 +236,8 @@ class _TFTCusModule(_TFTModule):
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """performs the validation step"""
         
-        (output,out_class,vr_class) = self._produce_train_output(val_batch[:-3])
-        scaler,target_class,target = val_batch[-3:]  
+        (output,out_class,vr_class) = self._produce_train_output(val_batch[:5])
+        scaler,target_class,target,target_info = val_batch[5:]  
         target_class = target_class[:,:,0]
         target_trend_class = target_class[:,:2]
         target_vr_class = target_class[:,2]
@@ -260,12 +258,22 @@ class _TFTCusModule(_TFTModule):
         value_diff_loss = self.compute_value_diff_metrics(output, target)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        vr_class_certainlys = self.build_vr_class_cer(vr_class[:,0,:])
+        last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
-        vr_acc,import_vr_acc = self.compute_vr_class_acc(vr_class[:,0,:], target_vr_class)  
+        vr_acc,import_vr_acc,import_acc_count,import_recall,import_sec_acc,import_sec_acc_count,import_sec_recall \
+             = self.compute_vr_class_acc(vr_class_certainlys, target_vr_class,target_info=target_info,last_batch_index=last_batch_index)  
         self.log("vr_acc", vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
+        self.log("import_acc_count", import_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
+        self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)         
+        self.log("import_sec_acc", import_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
+        self.log("import_sec_acc_count", import_sec_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
+        self.log("import_sec_recall", import_sec_recall, batch_size=val_batch[0].shape[0], prog_bar=True)  
         past_target = val_batch[0]
-        self.val_metric_show(output,target,out_class,target_class,vr_class[:,0,:],target_vr_class,past_target=past_target,val_batch=val_batch,scaler=scaler)
+        self.val_metric_show(output,target,out_class,target_class,vr_class_certainlys,
+                                 target_vr_class,past_target=past_target,val_batch=val_batch,scaler=scaler,target_info=target_info,
+                                 last_batch_index=last_batch_index,item_codes=item_codes)
         self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
         record_results = {"val_loss":round(loss.item(),5),"val_corr_loss":round(corr_loss.item(),5),
@@ -275,6 +283,11 @@ class _TFTCusModule(_TFTModule):
         self.process_val_results(record_results,self.current_epoch)
         return loss
     
+    def build_vr_class_cer(self,vr_class):
+        vr_class_cer = F.softmax(vr_class,dim=-1)
+        vr_class_cer = torch.max(vr_class_cer,dim=-1)[1]    
+        return vr_class_cer  
+        
     def process_val_results(self,results,epoch):
         """按照批次，累加训练结果"""
         
@@ -290,22 +303,47 @@ class _TFTCusModule(_TFTModule):
             self.val_results[epoch]["import_vr_acc"] += results["import_vr_acc"]
             self.val_results[epoch]["time"] += 1         
     
-    def compute_vr_class_acc(self,vr_class_eva,vr_target):
+    def compute_vr_class_acc(self,vr_class,vr_target,target_info=None,last_batch_index=None):
         """计算涨跌幅分类准确度"""
-        
-        # 根据实际数据取得涨跌幅类别
-        vr_class = F.softmax(vr_class_eva,dim=-1)
-        vr_class = torch.max(vr_class,dim=-1)[1]  
+
         # 总体准确率
         total_acc = torch.sum(vr_class==vr_target)/vr_target.shape[0]
         # 重点类别的准确率
         import_index = torch.nonzero(vr_class==CLASS_SIMPLE_VALUE_MAX)[:,0]
+        import_sec_index = torch.nonzero(vr_class==CLASS_SIMPLE_VALUE_SEC)[:,0]
         import_acc_count = torch.sum(vr_target[import_index]==CLASS_SIMPLE_VALUE_MAX)
+        import_sec_acc_count = torch.sum(vr_target[import_sec_index]==CLASS_SIMPLE_VALUE_SEC)
         if import_index.shape[0]==0:
             import_acc = torch.tensor(0.0)
         else:
             import_acc = import_acc_count/import_index.shape[0]
-        return total_acc,import_acc
+        if import_sec_index.shape[0]==0:
+            import_sec_acc = torch.tensor(0.0)
+        else:
+            import_sec_acc = import_sec_acc_count/import_sec_index.shape[0]            
+        # 重点类别的召回率    
+        total_imp_cnt = torch.sum(vr_target==CLASS_SIMPLE_VALUE_MAX)
+        total_imp_sec_cnt = torch.sum(vr_target==CLASS_SIMPLE_VALUE_SEC)
+        if total_imp_cnt!=0:
+            import_recall = import_acc_count/total_imp_cnt
+        else:
+            import_recall = 0
+        if total_imp_sec_cnt!=0:
+            import_sec_recall = import_sec_acc_count/total_imp_sec_cnt
+        else:
+            import_sec_recall = 0            
+        # 最后一个批次的准确率统计
+        # last_vr_target =  vr_target[last_batch_index]
+        # last_vr_class = vr_class[last_batch_index]
+        # last_import_index = torch.nonzero(last_vr_class==CLASS_SIMPLE_VALUE_MAX)[:,0]
+        # last_import_acc_count = torch.sum(last_vr_target[last_import_index]==CLASS_SIMPLE_VALUE_MAX)
+        # if last_import_index.shape[0]==0:
+        #     last_import_acc = torch.tensor(0.0)
+        # else:
+        #     last_import_acc = last_import_acc_count/last_import_index.shape[0]
+        # print("last_import_acc:{},last_import_index cnt:{}".format(last_import_acc,last_import_index.shape[0]))   
+                 
+        return total_acc,import_acc, import_acc_count,import_recall,import_sec_acc,import_sec_acc_count,import_sec_recall
         
        
     def compute_corr_metrics(self,output,target):
@@ -639,11 +677,40 @@ class _TFTCusModule(_TFTModule):
             for batch_prediction in batch_predictions:
                 pred = batch_prediction[batch_idx]
     
-    def val_metric_show(self,output,target,out_class,target_class,vr_class,target_vr_class,past_target=None,val_batch=None,scaler=None):
-        size = 9 if target.shape[0]>9 else target.shape[0]
-        view_range = np.random.randint(target.shape[0],size=size)
+    def build_last_batch_index(self,vr_class,target_vr_class,target_info=None):
+        size = target_vr_class.shape[0]
+        last_batch_index = []
+        last_batch_imp_index = []
+        last_batch_imp_correct_index = []
+        item_codes = []
+        # 取得最后一个批次索引
+        for s_index in range(size):
+            ts = target_info[s_index]
+            # 只针对最后一个时间批次进行显示
+            if ts["end"]==ts["total_end"]:
+                item_codes.append(ts["item_rank_code"])
+                last_batch_index.append(s_index) 
+                if vr_class[s_index]==CLASS_SIMPLE_VALUE_MAX:
+                    last_batch_imp_index.append(s_index)
+                    if target_vr_class[s_index]==CLASS_SIMPLE_VALUE_MAX:
+                        last_batch_imp_correct_index.append(s_index)
+                        
+        return last_batch_index,last_batch_imp_index,item_codes
+                                
+    def val_metric_show(self,output,target,out_class,target_class,vr_class,target_vr_class,past_target=None,val_batch=None,
+                        scaler=None,target_info=None,last_batch_index=None,item_codes=None):
+        size = target.shape[0] if target.shape[0]<9 else 9
         names = ["output","target"]
-        for i,s_index in enumerate(view_range):
+        vr_class_certainlys = vr_class.cpu().numpy()
+        
+        # print("item_codes:",item_codes)
+        loop_range = range(size)      
+        loop_range = last_batch_index
+        
+        for s_index in loop_range:
+            ts = target_info[s_index]
+            # if ts["item_rank_code"]>9:
+            #     continue
             scaler_sample = scaler[s_index]
             target_sample = target[s_index,:,:].cpu().numpy()
             target_sample = target_sample[:,0]
@@ -651,22 +718,22 @@ class _TFTCusModule(_TFTModule):
             output_sample = output[s_index,:,0,:].cpu().numpy()
             target_class_sample = target_class[s_index].cpu().numpy()
             target_vr_class_sample = target_vr_class[s_index].cpu().numpy()
-            vr_class_sample = vr_class[s_index].cpu().numpy()
-            vr_class_certainly = np.argmax(vr_class_sample)
+            vr_class_certainly = vr_class_certainlys[s_index]
+            if vr_class_certainly!=CLASS_SIMPLE_VALUE_MAX:
+                continue           
             output_class_sample = out_class[s_index].cpu().numpy()
             output_class_index = np.argmax(output_class_sample, axis=-1)
             pred_center_data_ori = get_np_center_value(output_sample)
             # 数值部分图形
-            target_title = "tar class:{}_{},out class:{}_{},tar_vr class:{}&{}".format(target_class_sample[0],
+            target_title = "rank:{},tar class:{}_{},out class:{}_{},tar_vr class:{}&{}".format(ts["item_rank_code"],target_class_sample[0],
                             target_class_sample[1],output_class_index[0],output_class_index[1],target_vr_class_sample,vr_class_certainly)
             # 补充画出前面的label数据
             target_combine_sample = np.concatenate((past_target_sample,target_sample),axis=-1)
             pad_data = np.array([0 for i in range(past_target_sample.shape[0])])
             pred_center_data = np.concatenate((pad_data,pred_center_data_ori),axis=-1)
             view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
-            win = "win_{}".format(i)
+            win = "win_{}".format(ts["item_rank_code"])
             viz_input.viz_matrix_var(view_data,win=win,title=target_title,names=names)     
-            
             # 针对分类部分，画出相应的缩放折线      
             pred_center_data = scaler_sample.inverse_transform(np.expand_dims(pred_center_data_ori,axis=0))
             pred_center_data = np.concatenate((pad_data,pred_center_data[0]),axis=-1)
@@ -675,10 +742,18 @@ class _TFTCusModule(_TFTModule):
             past_target_sample = scaler_sample.inverse_transform(np.expand_dims(past_target_sample,axis=0))
             target_combine_sample = np.concatenate((past_target_sample,target_sample),axis=-1)
             view_data = np.concatenate((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
-            target_title = "tar class:{}_{},out class:{}_{},tar_vr class:{}&{}".format(target_class_sample[0],
-                            target_class_sample[1],output_class_index[0],output_class_index[1],target_vr_class_sample,vr_class_certainly)
-            win = "win_scaler_{}".format(i)
-            viz_input_2.viz_matrix_var(view_data,win=win,title=target_title,names=names)   
+            x_range = np.array([i for i in range(ts["start"],ts["end"])])
+            if self.monitor is not None:
+                instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
+                datetime_range = self.monitor.get_datetime_with_index(instrument,ts["start"],ts["end"])
+            else:
+                instrument = ts["item_rank_code"]
+                datetime_range = x_range
+            target_title = "time range:{}/{} code:{},tar class:{}_{},out class:{}_{},tar_vr class:{}&{}".format(
+                datetime_range[0],datetime_range[-1],instrument,target_class_sample[0],target_class_sample[1],output_class_index[0],
+                output_class_index[1],target_vr_class_sample,vr_class_certainly)
+            win = "win_scaler_{}".format(ts["item_rank_code"])
+            viz_input_2.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=x_range)   
                
     def build_scaler_map(self,scalers, batch_input_series,group_column="instrument_rank"):
         scaler_map = {}
@@ -710,10 +785,12 @@ class TFTExtModel(MixedCovariatesTorchModel):
         use_weighted_loss_func:bool = False,
         loss_number=3,
         monitor=None,
+        mode="train",
         **kwargs,
     ):
         """重载darts相关类"""
         
+        self.mode = mode
         model_kwargs = {key: val for key, val in self.model_params.items()}
         if "devices" in model_kwargs["pl_trainer_kwargs"]:
             self.device = "cuda:" + str(model_kwargs["pl_trainer_kwargs"]["devices"][0])
@@ -758,6 +835,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.norm_type = norm_type
         self.monitor = monitor
         
+        
     def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
         """重载创建模型方法，使用自定义模型"""
         (
@@ -769,6 +847,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             target_scaler,
             future_target_class,
             future_target,
+            target_info,
         ) = train_sample
 
         # add a covariate placeholder so that relative index will be included
@@ -915,7 +994,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         )
 
         self.categorical_embedding_sizes = categorical_embedding_sizes
-            
+        
         return _TFTCusModule(
             output_dim=self.output_dim,
             variables_meta=variables_meta,
@@ -1101,8 +1180,6 @@ class TFTExtModel(MixedCovariatesTorchModel):
             logger,
         )
         flag = val_dataset is not None and (not val_length_ok or len(val_dataset) == 0)
-        if flag:
-            print("ggg")
         raise_if(
             flag,
             "The provided validation time series dataset is too short for obtaining even one training point.",
@@ -1111,9 +1188,10 @@ class TFTExtModel(MixedCovariatesTorchModel):
 
         train_sample = train_dataset[0]
         if self.model is None:
-            # Build model, based on the dimensions of the first series in the train set.
-            self.train_sample, self.output_dim = train_sample, train_sample[-1].shape[1]
+            # 使用future_target部分(倒数第二列)，进行输出维度判断
+            self.train_sample, self.output_dim = train_sample, train_sample[-2].shape[1]
             self._init_model(trainer)
+            self.model.monitor = self.monitor
         else:
             # Check existing model has input/output dims matching what's provided in the training set.
             raise_if_not(
@@ -1229,8 +1307,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         """重载方法以规避类型检查"""
         _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
 
-    @staticmethod
-    def _batch_collate_fn(ori_batch: List[Tuple]) -> Tuple:
+    def _batch_collate_fn(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
         """
@@ -1239,7 +1316,10 @@ class TFTExtModel(MixedCovariatesTorchModel):
         # 过滤不符合条件的记录
         for b in ori_batch:
             # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
-            future_target = b[-1]
+            if self.mode=="train":
+                future_target = b[-2]
+            else:
+                future_target = b[-1]
             if not np.all(future_target == future_target[0]):
                 batch.append(b)
             
@@ -1254,6 +1334,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 )
             elif isinstance(elem, MinMaxScaler):
                 aggregated.append([sample[i] for sample in batch])
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
             elif elem is None:
                 aggregated.append(None)                
             elif isinstance(elem, TimeSeries):

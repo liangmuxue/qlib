@@ -200,7 +200,7 @@ class PortAnaRecord(TftRecorder):
         pred_class_total = [item[1] for item in pred_combine]
         vr_class_total = [item[2] for item in pred_combine] 
         # 归一化反置，恢复到原值
-        pred_series_list = self.dataset.reverse_transform_preds(pred_series_list)
+        # pred_series_list = self.dataset.reverse_transform_preds(pred_series_list)
         for series in pred_series_list:
             group_rank = series.static_covariates["instrument_rank"].values[0]
             code = self.dataset.get_group_code_by_rank(group_rank)

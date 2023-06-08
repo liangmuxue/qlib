@@ -46,7 +46,7 @@ from cus_utils.data_filter import DataFilter
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.data_aug import random_int_list
 from cus_utils.metrics import corr_dis,series_target_scale,diff_dis,cel_acc_compute,vr_acc_compute
-from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
+from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 
@@ -140,16 +140,23 @@ class TftDataframeModel():
         # 使用股票代码数量作为embbding长度
         emb_size = dataset.get_emb_size()
         load_weight = self.optargs["load_weight"]
+        if "monitor" in self.optargs:
+            monitor = dataset
+        else:
+            monitor = None
         if load_weight:
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
             self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
             self.model.batch_size = self.batch_size     
+            self.model.mode = "train"
+            self.model.model.monitor = monitor
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
+            self.model.monitor = monitor
         
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 trainer=None,epochs=self.n_epochs,verbose=True)
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True)
         
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         """生成模型"""
@@ -305,19 +312,20 @@ class TftDataframeModel():
         my_model.fit(series_total,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
                      val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
         logger.info("begin predict")   
+        my_model.mode = "predict"
         # 对验证集进行预测，得到预测结果   
         pred_combine = my_model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
         pred_series_list = [item[0] for item in pred_combine]
         pred_class_total = [item[1] for item in pred_combine]       
         vr_class_total = [item[2] for item in pred_combine]   
-        logger.info("do predict_show")  
+        logger.info("do predict mesure")  
         pred_class_total = torch.stack(pred_class_total)
         pred_class = dataset.combine_pred_class(pred_class_total)
         vr_class_total = torch.stack(vr_class_total)[:,0,:]
-        var_class = self.combine_vr_class(vr_class_total)
+        vr_class = self.combine_vr_class(vr_class_total)
         # 可视化
-        result = self.predict_show(val_series_transformed,pred_series_list,pred_class[1],var_class[1],
+        result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],
                           series_total=series_total,dataset=dataset,do_scale=False,scaler_map=None)
         # 保存结果到数据库
         # self.save_pred_result(result,dataset=dataset,update=False)           
@@ -453,7 +461,10 @@ class TftDataframeModel():
             else:
                 df_total = pd.concat([df_total,df_item])
         # 标签数据分布图
-        viz_input.viz_data_hist(df_total.values,numbins=10,win=title,title=title) 
+        label_datas = df_total[target_column].values
+        label_range_rate = (label_datas[1:]  - label_datas[:-1])/label_datas[:-1]
+        label_range_rate = label_range_rate[(label_range_rate>-0.1)&(label_range_rate<0.1)]
+        viz_input.viz_data_hist(label_range_rate,numbins=10,win=title,title=title) 
         data_view_len = self.optargs["wave_period"]
         if past_convariates is None:
             return
@@ -468,17 +479,13 @@ class TftDataframeModel():
             view_data_past = past_df[past_columns].values[:data_view_len,:]
             viz_input.viz_matrix_var(view_data_past,win=sub_title,title=sub_title,names=past_columns)        
                
-    def predict_show(self,val_series_list,pred_series_list,pred_class_list,vr_class_list,series_total=None,dataset=None,do_scale=False,scaler_map=None):       
-        lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
-        label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
-        label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"       
-        forecast_horizon = self.optargs["forecast_horizon"]    
-        # 整个序列比较多，只比较某几个序列
-        figsize = (9, 6)
+    def predict_mesure(self,val_series_list,pred_series_list,pred_class_list,vr_class_list,series_total=None,dataset=None,do_scale=False,scaler_map=None):       
+
         group_rank_column = dataset.get_group_rank_column()
-        group_column = dataset.get_group_column()
         # pred_series_list = dataset.reverse_transform_preds(pred_series_list)
         # series_total = dataset.reverse_transform_preds(series_total)
+        forecast_horizon = self.optargs["forecast_horizon"] 
+        
         # 创建比较序列，后面保持所有，或者自己指定长度
         actual_series_list = []
         for index,ser_val in enumerate(val_series_list):          
@@ -494,9 +501,15 @@ class TftDataframeModel():
         cross_all = 0
         vr_acc_all = 0
         vr_imp_all = 0
+        vr_imp_sec_all = 0
         vr_imp_recall = 0
+        vr_imp_sec_recall = 0
         vr_imp_pred_all = 0
         vr_imp_pred_acc = 0
+        vr_imp_sec_pred_all = 0
+        vr_imp_sec_pred_acc = 0
+        vr_imp_pred_acc_list = []
+        vr_imp_sec_pred_acc_list = []
         # r = 5
         # view_list = random_int_list(1,len(val_series_list)-1,r)
         
@@ -511,7 +524,6 @@ class TftDataframeModel():
             pred_series = pred_series_list[i]
             pred_class = pred_class_list[i]
             vr_class = vr_class_list[i]
-            val_series = val_series_list[i]
             total_series = series_total[i]
             actual_series = actual_series_list[i]
             group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
@@ -528,14 +540,28 @@ class TftDataframeModel():
             # 涨跌幅度类别的准确率
             vr_acc_item = vr_acc_compute(total_series, pred_series,vr_class)  
             vr_acc_all = vr_acc_all + vr_acc_item[0]  
-            # 重点关注上涨类别的召回率
+            # 重点关注上涨类别的召回率和准确率
             if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
                 vr_imp_all += 1
                 vr_imp_recall = vr_imp_recall + vr_acc_item[0]  
-            if vr_acc_item[0]>0:
+            if vr_class==CLASS_SIMPLE_VALUE_MAX:
                 vr_imp_pred_all += 1
+                item_result = {group_code:0}
                 if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
                     vr_imp_pred_acc += 1
+                    item_result[group_code] = 1
+                vr_imp_pred_acc_list.append(item_result)
+            # 次级上涨类别的召回率和准确率
+            if vr_acc_item[1]==CLASS_SIMPLE_VALUE_SEC:
+                vr_imp_sec_all += 1
+                vr_imp_sec_recall = vr_imp_sec_recall + vr_acc_item[0]  
+            if vr_class==CLASS_SIMPLE_VALUE_SEC:
+                vr_imp_sec_pred_all += 1
+                item_result = {group_code:0}
+                if vr_acc_item[1]==CLASS_SIMPLE_VALUE_SEC:
+                    vr_imp_sec_pred_acc += 1
+                    item_result[group_code] = 1
+                vr_imp_sec_pred_acc_list.append(item_result)                
             # 开始结束差的距离衡量
             diff_item = diff_dis(total_series, pred_series) 
             diff_all = diff_all + diff_item      
@@ -545,39 +571,59 @@ class TftDataframeModel():
                            "vr_acc_item":vr_acc_item,"mape_item":mape_item})
             kwargs = dict(figsize=(10, 5))
             if df_item.shape[0]>0:
-                group_code = df_item[group_column].values[0].astype(int)
-                # 分位数范围显示
-                pred_series.plot(
-                    low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
-                )
-                pred_series.plot(low_quantile=low_q, high_quantile=high_q, label=label_q_inner)                
-                plt.figure(figsize=figsize)
-                # 实际数据集的结尾与预测序列对齐
-                pred_series.plot(label="forecast")            
-                instrument_code = df_item[group_column].values[0]
-                act_series = actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1]
-                act_series.plot(label="actual")   
-                # fig, ax = plt.subplots(**kwargs)    
-                date_range = dataset.get_datetime_with_index(group_code,pred_series.start_time(),pred_series.end_time())
-                range_show = "[{}-{}]".format(date_range[0],date_range[-1])
-                # ax.set_xticks(date_range)                                
-                pred_class_str = "{}-{}/{}".format(pred_class[0],pred_class[1],vr_class)
-                plt.title("{},ser_{},MAPE: {:.2f}%,corr:{},class:{}".format(range_show,instrument_code,mape_item,corr_item,pred_class_str))
-                plt.legend()
-                plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
-                plt.clf()   
+                # 显示重点上涨类别判断情况
+                if vr_class==CLASS_SIMPLE_VALUE_MAX:
+                    self.show_pred_result(df_item, pred_series, actual_series, pred_class=pred_class,
+                                          vr_class=vr_class,mape_item=mape_item,corr_item=corr_item,dataset=dataset)
         mape_mean = mape_all/len(val_series_list)
         corr_mean = corr_all/len(val_series_list)
         diff_mean = diff_all/len(val_series_list)
         cross_mean = cross_all/len(val_series_list)
         vr_acc_mean = vr_acc_all/len(val_series_list)   
         vr_recall_imp_mean = vr_imp_recall/vr_imp_all    
-        vr_acc_imp_mean = vr_imp_pred_acc/vr_imp_pred_all  
-        print("mape_mean:{},corr mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{},vr_imp_acc_mean:{} with {}/{}".
-              format(mape_mean,corr_mean,diff_mean,cross_mean,vr_acc_mean,vr_recall_imp_mean,
-                     vr_imp_recall,vr_imp_all,vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all))     
+        if vr_imp_pred_all>0:
+            vr_acc_imp_mean = vr_imp_pred_acc/vr_imp_pred_all  
+        else:
+            vr_acc_imp_mean = 0
+        # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
+        print("mape_mean:{},corr mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{},vr_imp_acc_mean:{} with {}/{}" \
+              " vr_recall_imp_sec_mean: {}/{},vr_imp_sec_acc_mean:{}/{}"
+              .format(mape_mean,corr_mean,diff_mean,cross_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all,
+                      vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all,vr_imp_sec_recall,vr_imp_sec_all,vr_imp_sec_pred_acc,vr_imp_sec_pred_all))     
+        print("vr_imp_pred_acc_list:",vr_imp_pred_acc_list)
         return result
-        
+    
+    def show_pred_result(self,df_item,pred_series,actual_series,pred_class=None,vr_class=None,mape_item=None,corr_item=None,dataset=None):
+        lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
+        label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
+        label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"       
+           
+        # 整个序列比较多，只比较某几个序列
+        figsize = (9, 6)
+                
+        group_column = dataset.get_group_column()
+        group_code = df_item[group_column].values[0].astype(int)
+        # 分位数范围显示
+        pred_series.plot(
+            low_quantile=lowest_q, high_quantile=highest_q, label=label_q_outer
+        )
+        pred_series.plot(low_quantile=low_q, high_quantile=high_q, label=label_q_inner)                
+        plt.figure(figsize=figsize)
+        # 实际数据集的结尾与预测序列对齐
+        pred_series.plot(label="forecast")            
+        instrument_code = df_item[group_column].values[0]
+        act_series = actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1]
+        act_series.plot(label="actual")   
+        # fig, ax = plt.subplots(**kwargs)    
+        date_range = dataset.get_datetime_with_index(group_code,pred_series.start_time(),pred_series.end_time())
+        range_show = "[{}-{}]".format(date_range[0],date_range[-1])
+        # ax.set_xticks(date_range)                                
+        pred_class_str = "{}-{}/{}".format(pred_class[0],pred_class[1],vr_class)
+        plt.title("{},ser_{},MAPE: {:.2f}%,corr:{},class:{}".format(range_show,instrument_code,mape_item,corr_item,pred_class_str))
+        plt.legend()
+        plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
+        plt.clf()          
+           
     def save_pred_result(self,result,dataset=None,update=False):
         """保存预测记录"""
         

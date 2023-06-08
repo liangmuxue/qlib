@@ -3,9 +3,10 @@ CLASS_VALUES={1:[-1000,-10],2:[-10,-9],3:[-9,-8],4:[-8,-7],5:[-7,-6],6:[-6,-5],7
               ,12:[0,1],13:[1,2],14:[2,3],15:[3,4],16:[4,5],17:[5,6],18:[6,7],19:[7,8],20:[8,9],21:[9,10],22:[10,1000]}
 
 # 涨跌幅分类区间,包括区间以及损失权重
-# CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.2],1:[[-5,5],0.2],2:[[5,8],0.3],3:[[8,1000],0.3]}
-CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.3],1:[[-5,5],0.3],2:[[5,1000],0.4]}
+CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.1],1:[[-5,0],0.2],2:[[0,3],0.3],3:[[3,1000],0.4]}
+# CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.1],1:[[-5,0],0.1],2:[[0,5],0.3],3:[[5,1000],0.5]}
 CLASS_SIMPLE_VALUE_MAX = list(CLASS_SIMPLE_VALUES)[-1]
+CLASS_SIMPLE_VALUE_SEC = list(CLASS_SIMPLE_VALUES)[-2]
 
 def get_simple_class_weight():
     return [v[1] for k, v in CLASS_SIMPLE_VALUES.items()]
@@ -23,7 +24,7 @@ def get_simple_class(target_value):
         if target_value<0:
             result = 0
         else:
-            result = 2
+            result = CLASS_SIMPLE_VALUE_MAX
     return result
        
 VALUE_BINS = [-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0, 1, 2, 3,4, 5, 6, 7,8, 9, 10]

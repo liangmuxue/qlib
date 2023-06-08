@@ -72,7 +72,9 @@ class TensorViz(object):
         length = data.shape[1]
         ts = data.shape[0]
         if x_range is None:
-            x_range = np.arange(ts)        
+            x_range = np.arange(ts)    
+        if desc is not None:    
+            self.viz.text(desc)
         for i in range(length):
             if names is not None:
                 line_name = "{}".format(names[i])

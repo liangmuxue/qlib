@@ -255,23 +255,24 @@ class TFTSeriesDataset(TFTDataset):
                                                  freq='D',
                                                  fill_missing_dates=True,
                                                  static_cols=static_columns,
-                                                 value_cols=target_column)               
-        train_series_transformed = []
-        val_series_transformed = []
-        total_series_transformed = []
-        # 生成归一化的目标序列
-        for index,ts in enumerate(train_series):
-            target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
-            ts_transformed = target_scaler.fit_transform(ts)
-            vs_transformed = target_scaler.transform(val_series[index])
-            total_transformed = target_scaler.transform(total_series[index])
-            train_series_transformed.append(ts_transformed)
-            val_series_transformed.append(vs_transformed)
-            total_series_transformed.append(total_transformed)
+                                                 value_cols=target_column)    
+        # 生成归一化的目标序列--取消，改为dataset内部进行           
+        # train_series_transformed = []
+        # val_series_transformed = []
+        # total_series_transformed = []
+        #
+        # for index,ts in enumerate(train_series):
+        #     target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
+        #     ts_transformed = target_scaler.fit_transform(ts)
+        #     vs_transformed = target_scaler.transform(val_series[index])
+        #     total_transformed = target_scaler.transform(total_series[index])
+        #     train_series_transformed.append(ts_transformed)
+        #     val_series_transformed.append(vs_transformed)
+        #     total_series_transformed.append(total_transformed)
             
         def build_covariates(column_names,no_transform_columns=None):
             covariates_array = []
-            for index,series in enumerate(train_series_transformed):
+            for index,series in enumerate(train_series):
                 group_col_val = series.static_covariates[group_column].values[0]
                 scaler = Scaler()
                 # 遍历并筛选出不同分组字段(股票)的单个dataframe
@@ -300,8 +301,8 @@ class TFTSeriesDataset(TFTDataset):
 
         # 生成过去协变量，并归一化
         logger.info("begin build_covariates")
-        # 在过去协变量的数据中加入目标值原值，借用此协变量带入后续dataset中，用于原值分类计算
-        past_columns = [target_column] + past_columns
+        # 在过去协变量的数据中加入目标值原值，借用此协变量带入后续dataset中，用于原值分类计算--cancel
+        # past_columns = [target_column] + past_columns
         past_convariates = build_covariates(past_columns)      
         # 生成未来协变量，并归一化
         future_convariates = build_covariates(future_columns)    
@@ -312,7 +313,7 @@ class TFTSeriesDataset(TFTDataset):
         if fill_future:           
             future_convariates = self.fill_future_data(future_convariates,future_columns,self.pred_len)
         # 分别返回用于训练预测的序列series_transformed，以及完整序列series
-        return train_series_transformed,val_series_transformed,total_series_transformed,past_convariates,future_convariates
+        return train_series,val_series,total_series,past_convariates,future_convariates
             
 
     def fill_future_data(self,future_convariates,column_names,fill_length):
@@ -703,13 +704,17 @@ class TFTSeriesDataset(TFTDataset):
     def get_datetime_with_index(self,instrument,begin_time_index,end_time_index):
         """取得指定股票对应时间索引的具体日期范围"""
         
-        df_target = self.df_all[(self.df_all["instrument"]==instrument)&(self.df_all["time_idx"]>=begin_time_index)&(self.df_all["time_idx"]<=end_time_index)]
+        df_target = self.query_data(instrument, [begin_time_index,end_time_index])
         return df_target["datetime"].dt.strftime("%Y%m%d").astype(int).values.tolist()        
     
     def get_series_value_by_range(self,series,range):
         target_series = series.drop_before(range[0]).drop_after(range[1])
         return target_series
         
-        
+    def query_data(self,instrument,time_range):
+        df_target = self.df_all[(self.df_all["instrument"]==instrument)&(self.df_all["time_idx"]>=time_range[0])&(self.df_all["time_idx"]<time_range[1])]
+        return df_target   
+    
+    
     
     
