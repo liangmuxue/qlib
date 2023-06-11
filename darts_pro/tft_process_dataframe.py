@@ -50,6 +50,7 @@ from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAK
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 
+import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
@@ -95,6 +96,8 @@ class TftDataframeModel():
         self.type = type
         self.kwargs = kwargs
         
+        global_var._init()
+        
     def fit(
         self,
         dataset: TFTSeriesDataset,
@@ -133,7 +136,9 @@ class TftDataframeModel():
                 df_data_path = self.pred_data_path + "/df_all.pkl"
                 with open(df_data_path, "wb") as fout:
                     pickle.dump(dataset.df_all, fout)    
-                           
+        
+        global_var.set_value("dataset", dataset)
+                       
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
         
@@ -248,7 +253,7 @@ class TftDataframeModel():
             likelihood=None,
             # loss_fn=torch.nn.MSELoss(),
             use_weighted_loss_func=True,
-            loss_number=4,
+            # loss_number=4,
             # torch_metrics=metric_collection,
             random_state=42,
             model_name=model_name,

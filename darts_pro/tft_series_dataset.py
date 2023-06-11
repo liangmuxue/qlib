@@ -85,7 +85,7 @@ class TFTSeriesDataset(TFTDataset):
         df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)        
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
-        # df["label"] = df["label"].astype("float64")
+        df["label"] = df["label"].astype("float64")
         # 使用前几天的移动平均值作为目标数值
         df["label_ori"] = df["label"]
         df["label"] = df.groupby(group_column)[self.get_target_column()].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)

@@ -18,6 +18,8 @@ from darts import TimeSeries
 from cus_utils.common_compute import target_scale,slope_classify_compute
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class
 
+import cus_utils.global_var as global_var
+
 class CusGenericShiftedDataset(GenericShiftedDataset):
     def __init__(
         self,
@@ -102,7 +104,8 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
         target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
-                       "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"future_end":future_end,
+                       "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
+                       "future_start":future_start,"future_end":future_end,
                        "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates
@@ -199,9 +202,11 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         past_target, past_covariate, static_covariate, future_target,target_info = self.ds_past[idx]
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
-        # if target_info["item_rank_code"]==7 and target_info["end"]>=target_info["total_end"]-1:
-        #     print("lll")
-
+        # 使用原价格作为涨跌幅分类参照
+        # df_all = global_var.get_value("dataset").df_all
+        # price_items = df_all[(df_all["time_idx"]>=target_info["future_start"])&(df_all["time_idx"]<target_info["future_end"])&
+        #                         (df_all["instrument_rank"]==target_info["item_rank_code"])]["label_ori"].values
+        # price_items = np.expand_dims(price_items,axis=-1)
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
         max_value = np.max(future_target)
         min_value = np.min(future_target)

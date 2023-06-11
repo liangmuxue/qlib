@@ -62,15 +62,19 @@ class ClassifyProcessor(BaseProcessor):
             # 关联到预测处理器，并取得对应的文件名
             pred_result_file = self.db_accessor.do_query(sql, ())[0][0]
             model_template["kwargs"]["pred_data_file"] = self.wf_task.get_pred_data_part_path(pred_result_file,working_day)
-            record_template["kwargs"]["pred_data_file"] = model_template["kwargs"]["pred_data_file"]
+            # pred_data_file 保持为空，后续动态生成文件名
+            model_template["kwargs"]["pred_data_file"] = ""
+            record_template["kwargs"]["pred_data_file"] = ""
             # 数据集定义预测分类评估的开始时间，为当前指定日期（workding day）的两周前,即上2个日历批次的第一天
             working_day_list = self.wf_task.get_calendar_by_seq(pred_sequence)
-            classify_begin_date = str(working_day_list[0])
-            classify_begin_date = datetime.strptime(classify_begin_date,"%Y%m%d")
+            # 改为取3周前到2周前的日期范围
+            classify_begin_date = get_tradedays_dur(str(working_day),-5*3+2)
+            # classify_begin_date = datetime.strptime(classify_begin_date,"%Y%m%d")
             # 数据集定义预测分类评估的结束时间，为当前指定日期（workding day）的上一个交易日，即上一个日历批次的最后一天
             # next_working_day_list = self.wf_task.get_calendar_by_seq(pred_sequence+1)
-            classify_end_date = str(working_day_list[-1])        
-            classify_end_date = datetime.strptime(classify_end_date,"%Y%m%d")
+            # classify_end_date = str(working_day_list[-1])       
+            # classify_end_date = datetime.strptime(classify_end_date,"%Y%m%d") 
+            classify_end_date = get_tradedays_dur(str(working_day),-5*2+2)
             dataset_template["kwargs"]["segments"]["classify_range"] = [classify_begin_date,classify_end_date]
         return real_template
     

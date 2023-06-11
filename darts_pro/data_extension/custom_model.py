@@ -27,6 +27,7 @@ from joblib import Parallel, delayed
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import target_scale
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
+import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC
 
 import torchmetrics
@@ -221,14 +222,14 @@ class _TFTCusModule(_TFTModule):
         # 相关系数损失
         corr_loss = self.compute_corr_metrics(output, target)
         # 走势分类交叉熵损失
-        cross_loss = compute_cross_metrics(out_class, target_trend_class)
+        # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # 总体涨跌幅度分类损失
         value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class) 
         # mse损失
         mse_loss = self.compute_mse_metrics(output, target)   
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_cross_loss", cross_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_cross_loss", cross_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
         return loss
@@ -248,12 +249,12 @@ class _TFTCusModule(_TFTModule):
         # 距离损失MSE
         mse_loss = self.compute_mse_metrics(output, target)
         # 分类交叉熵损失
-        cross_loss = compute_cross_metrics(out_class, target_trend_class)
+        # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # 总体涨跌幅度分类损失
         value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class)         
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         value_diff_loss = self.compute_value_diff_metrics(output, target)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -276,8 +277,10 @@ class _TFTCusModule(_TFTModule):
                                  last_batch_index=last_batch_index,item_codes=item_codes)
         self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
+        # cr_loss = round(cross_loss.item(),5)
+        cr_loss = 0
         record_results = {"val_loss":round(loss.item(),5),"val_corr_loss":round(corr_loss.item(),5),
-                              "ce_loss":round(cross_loss.item(),5),"value_diff_loss":round(value_diff_loss.item(),5),
+                              "ce_loss":cr_loss,"value_diff_loss":round(value_diff_loss.item(),5),
                               "value_range_loss":round(value_range_loss.item(),5),"vr_acc":round(vr_acc.item(),5),
                               "import_vr_acc":round(import_vr_acc.item(),5)}
         self.process_val_results(record_results,self.current_epoch)
@@ -700,14 +703,15 @@ class _TFTCusModule(_TFTModule):
     def val_metric_show(self,output,target,out_class,target_class,vr_class,target_vr_class,past_target=None,val_batch=None,
                         scaler=None,target_info=None,last_batch_index=None,item_codes=None):
         size = target.shape[0] if target.shape[0]<9 else 9
-        names = ["output","target"]
+        names = ["output","target","price"]
         vr_class_certainlys = vr_class.cpu().numpy()
         
         # print("item_codes:",item_codes)
         loop_range = range(size)      
-        loop_range = last_batch_index
+        # loop_range = last_batch_index
+        df_all = global_var.get_value("dataset").df_all
         
-        for s_index in loop_range:
+        for idx,s_index in enumerate(loop_range):
             ts = target_info[s_index]
             # if ts["item_rank_code"]>9:
             #     continue
@@ -719,8 +723,8 @@ class _TFTCusModule(_TFTModule):
             target_class_sample = target_class[s_index].cpu().numpy()
             target_vr_class_sample = target_vr_class[s_index].cpu().numpy()
             vr_class_certainly = vr_class_certainlys[s_index]
-            if vr_class_certainly!=CLASS_SIMPLE_VALUE_MAX:
-                continue           
+            # if vr_class_certainly!=CLASS_SIMPLE_VALUE_MAX:
+            #     continue           
             output_class_sample = out_class[s_index].cpu().numpy()
             output_class_index = np.argmax(output_class_sample, axis=-1)
             pred_center_data_ori = get_np_center_value(output_sample)
@@ -732,7 +736,7 @@ class _TFTCusModule(_TFTModule):
             pad_data = np.array([0 for i in range(past_target_sample.shape[0])])
             pred_center_data = np.concatenate((pad_data,pred_center_data_ori),axis=-1)
             view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
-            win = "win_{}".format(ts["item_rank_code"])
+            win = "win_{}".format(idx)
             viz_input.viz_matrix_var(view_data,win=win,title=target_title,names=names)     
             # 针对分类部分，画出相应的缩放折线      
             pred_center_data = scaler_sample.inverse_transform(np.expand_dims(pred_center_data_ori,axis=0))
@@ -741,7 +745,11 @@ class _TFTCusModule(_TFTModule):
             target_sample = scaler_sample.inverse_transform(np.expand_dims(target_sample,axis=0))
             past_target_sample = scaler_sample.inverse_transform(np.expand_dims(past_target_sample,axis=0))
             target_combine_sample = np.concatenate((past_target_sample,target_sample),axis=-1)
-            view_data = np.concatenate((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
+            # 可以从全局变量中，通过索引获得实际价格
+            price_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
+                                    (df_all["instrument_rank"]==ts["item_rank_code"])]["label_ori"].values    
+            price_target = np.expand_dims(price_target,axis=0)        
+            view_data = np.concatenate((pred_center_data,target_combine_sample,price_target),axis=0).transpose(1,0)
             x_range = np.array([i for i in range(ts["start"],ts["end"])])
             if self.monitor is not None:
                 instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
@@ -752,7 +760,6 @@ class _TFTCusModule(_TFTModule):
             target_title = "time range:{}/{} code:{},tar class:{}_{},out class:{}_{},tar_vr class:{}&{}".format(
                 datetime_range[0],datetime_range[-1],instrument,target_class_sample[0],target_class_sample[1],output_class_index[0],
                 output_class_index[1],target_vr_class_sample,vr_class_certainly)
-            win = "win_scaler_{}".format(ts["item_rank_code"])
             viz_input_2.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=x_range)   
                
     def build_scaler_map(self,scalers, batch_input_series,group_column="instrument_rank"):

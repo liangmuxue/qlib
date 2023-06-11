@@ -188,6 +188,8 @@ class PortAnaRecord(TftRecorder):
             outer_df_filter = outer_df     
         # 从执行器模型中取得已经生成好的模型变量
         my_model = self.model.model
+        my_model.model.monitor = None
+        my_model.mode = "predict"
         # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
         train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
             self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df_filter)
@@ -292,8 +294,8 @@ class ClassifyRecord(PortAnaRecord):
         df,pred_df_total = self.filter_cancidate_result(dataset, pred_file=pred_file,ext_length=ext_length)        
         corr_2_rate = df[df["correct"]==2].shape[0]/df.shape[0]
         corr_1_rate = df[df["correct"]==1].shape[0]/df.shape[0]
-        corr_0_rate = df[df["correct"]==0].shape[0]/df.shape[0]
-        print("corr_rate:{},corr_1:{},corr_0:{}".format(corr_2_rate,corr_1_rate,corr_0_rate))   
+        corr_danger_rate = df[df["correct"]==-2].shape[0]/df.shape[0]
+        print("corr_rate:{},corr_1:{},corr_danger:{}".format(corr_2_rate,corr_1_rate,corr_danger_rate))   
         self.show_correct_pred(df,pred_df_total,dataset=dataset) 
         return df
     
@@ -318,19 +320,23 @@ class ClassifyRecord(PortAnaRecord):
             else:
                 pred_df_total = pd.concat([pred_df_total,date_pred_df_ori])
             # 筛选出分类上涨类股票
-            date_pred_df = date_pred_df_ori[(date_pred_df_ori["vr_class"]==2)]            
+            date_pred_df = date_pred_df_ori[(date_pred_df_ori["vr_class"]==CLASS_SIMPLE_VALUE_MAX)]            
             pred_date = int(pred_date)  
             # 走势符合前平后起，或先起后平
             date_pred_df = date_pred_df.groupby('instrument').filter(
-                lambda x: (x.iloc[0]["class1"]==SLOPE_SHAPE_SMOOTH and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE) or 
-                (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_SMOOTH) or  
-                (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE)
+                lambda x: (x.iloc[0]["class1"]==SLOPE_SHAPE_SMOOTH and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE)  
+                or (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_SMOOTH)   
+                or (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE)
             )             
             for instrument,group_data in date_pred_df.groupby("instrument"):
                 # 生成对应日期的单个股票的综合数据
                 complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=group_data,df_ref=dataset.df_all,ext_length=ext_length)   
                 if complex_df is None:
+                    logger.warning("data None,code:{}".format(instrument))
                     continue
+                if complex_df.shape[0]<dataset.step_len:
+                    logger.warning("not enough len,code:{},len:{}".format(instrument,complex_df.shape[0]))
+                    continue                
                 # 使用收盘价格进行衡量         
                 price_values = complex_df["label_ori"].values
                 # 根据预测数据综合判断，取得匹配标志
@@ -376,7 +382,7 @@ class ClassifyRecord(PortAnaRecord):
         incorrect_df = stat_df[stat_df["correct"]<0].iloc[:show_num]
         correct_df = stat_df[stat_df["correct"]==2].iloc[:show_num]
         show_df = pd.concat([incorrect_df,correct_df])
-        show_df = stat_df[stat_df["instrument"]==66]
+        # show_df = stat_df[stat_df["instrument"]==66]
         data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
         data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
         for index,group_data in show_df.groupby(["instrument","date"]):

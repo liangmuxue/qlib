@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market test_100
+market: &market all
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -15,33 +15,53 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]  
-              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10','CLOSE','OPEN','HIGH', 'LOW','VOLUME_CLOSE','RSI20','MACD']                 
+              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10','CLOSE','OPEN','HIGH', 'LOW','VOLUME_CLOSE','RSI20','MACD']                  
     learn_processors:
         - class: DropnaLabel
     # label: ["Ref($close, -1)"] 
     label: ["$close"] 
     # label: ["$volume/100"]
 
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy
+        kwargs:
+            signal:
+                - <MODEL> 
+                - <DATASET>
+            topk: 50
+            n_drop: 5
+    backtest:
+        start_time: 2020-11-16
+        end_time: 2021-01-31
+        account: 100000000
+        benchmark: *benchmark
+        exchange_kwargs:
+            limit_threshold: 0.095
+            deal_price: close
+            open_cost: 0.0005
+            close_cost: 0.0015
+            min_cost: 5
 task:
     model:
         class: TftDataframeModel
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 128
+            batch_size: 1024
             seed: 0
             n_jobs: 20
-            type: 'classify_train'
+            type: 'predict'
             n_epochs : 300
-            save_dataset_file: False
-            load_dataset_file: &load_dataset_file False
-            pred_data_path: &pred_data_path "custom/data/darts/dump_data"
-            pred_data_file: &pred_data_file "pred_df_total.pkl"
+            save_dataset_file: False  
+            load_dataset_file: &load_dataset_file False     
+            pred_data_path: "custom/data/darts/dump_data"     
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
-               work_dir: 'custom/data/darts'
-               model_name: 'test9_tft_all_step5'
+               work_dir: '/home/qdata/workflow/wf_review_flow_2023/task/141/model'
+               model_name: 'train_202303'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -54,15 +74,15 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2022-01-01, 2023-05-31]
-                valid: [2022-09-01, 2022-12-05]
-                test: [2022-02-01, 2022-03-01]         
-                classify_range: [2023-02-08, 2023-02-08]
+                train_total: [2022-01-01, 2023-03-31]
+                valid: [2022-01-01, 2023-03-08]
+                test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
-            instrument_pick: [603986,603980,603987]
+            # instrument_pick: [428,429,504]
+            instrument_pick: []
             scaler_type: 'norm'
             model_type: 'tft'
             step_len: *wave_period
@@ -72,23 +92,23 @@ task:
             high_threhold: 5   
             col_def:
                 col_list: *col_list
-                datetime_index_column: 'datetime_number'
                 group_column: 'instrument'
+                datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 target_column: 'label'
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
-                static_covariate_col: ['industry','tradable_shares']   
-    record:    
-        - class: ClassifyRecord
-          module_path: trader.pred_recorder
+                static_covariate_col: ['industry','tradable_shares']  
+                
+    record: 
+        - class: SignalRecord
+          module_path: trader.tft_recorder
           kwargs: 
-            config: None
-            pred_data_path: *pred_data_path
-            pred_data_file: *pred_data_file
             model: <MODEL>
-            dataset: <DATASET>  
-            
-        
-            
+            dataset: <DATASET>    
+        - class: SigAnaRecord
+          module_path: trader.tft_recorder
+          kwargs: 
+            ana_long_short: False
+            ann_scaler: 252
