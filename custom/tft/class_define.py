@@ -4,7 +4,7 @@ CLASS_VALUES={1:[-1000,-10],2:[-10,-9],3:[-9,-8],4:[-8,-7],5:[-7,-6],6:[-6,-5],7
 
 # 涨跌幅分类区间,包括区间以及损失权重
 # CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.3],1:[[-5,0],0.1],2:[[0,3],0.2],3:[[3,1000],0.4]}
-CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.3],1:[[-5,0],0.1],2:[[0,5],0.2],3:[[5,1000],0.4]}
+CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.3],1:[[-5,0],0.2],2:[[0,5],0.2],3:[[5,1000],0.3]}
 CLASS_SIMPLE_VALUE_MAX = list(CLASS_SIMPLE_VALUES)[-1]
 CLASS_SIMPLE_VALUE_SEC = list(CLASS_SIMPLE_VALUES)[-2]
 
@@ -41,3 +41,13 @@ SLOPE_SHAPE_RAISE = 0
 SLOPE_SHAPE_FALL = 1
 SLOPE_SHAPE_SMOOTH = 2
 SLOPE_SHAPE_SHAKE = 3
+
+def get_slope_text(slope_value):
+    if slope_value==SLOPE_SHAPE_RAISE:
+        return "raise"
+    if slope_value==SLOPE_SHAPE_FALL:
+        return "fall"
+    if slope_value==SLOPE_SHAPE_SMOOTH:
+        return "smooth"        
+    return "shake"        
+        

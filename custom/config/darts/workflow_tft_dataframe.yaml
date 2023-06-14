@@ -59,7 +59,7 @@ task:
             load_dataset_file: &load_dataset_file False
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
-               gamma: 0.8     
+               gamma: 0.5     
                step_size: 1    
             optimizer_kwargs:
                lr: 0.01
@@ -68,7 +68,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft_100_step5'
+               model_name: 'test9_tft_100_step5'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5

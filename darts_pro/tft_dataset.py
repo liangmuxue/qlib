@@ -61,7 +61,7 @@ class TFTDataset(DatasetH):
         cal = self.handler.fetch(col_set=self.handler.CS_RAW).index.get_level_values("datetime").unique()
         ###### 用于静态连续变量的数据字典 ######
         # 商品价格指数
-        self.qyspjg_data = self.data_extractor.load_data("qyspjg")
+        # self.qyspjg_data = self.data_extractor.load_data("qyspjg")
         self.cal = sorted(cal)        
         
     @staticmethod
@@ -144,7 +144,7 @@ class TFTDataset(DatasetH):
         # 重新编号,解决节假日以及相关日期不连续问题
         data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
         # 补充商品指数数据,按照月份合并
-        data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
+        # data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek    

@@ -121,6 +121,7 @@ class _TFTCusModule(_TFTModule):
         self.class2_len = pred_len -1 - self.class1_len        
         self.classify_layer_1 = self._construct_classify_layer(self.class1_len,mss_num).to(device)
         self.classify_layer_2 = self._construct_classify_layer(self.class2_len+1,mss_num).to(device)
+        self.last_classify_layer = self._construct_classify_layer(2,vr_range_num).to(device)  
         # 涨跌幅度分类
         self.classify_vr_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
         # mse损失计算                
@@ -143,22 +144,10 @@ class _TFTCusModule(_TFTModule):
         # 从分位数取得中间数值
         output_sample = torch.mean(out[:,:,0,:],dim=-1)
         
-        # 走势状态分为2个部分，分别分类
-        split_arr = [output_sample[:,:self.class1_len],output_sample[:,self.class1_len:]]
-        out_classify = None
-        for i in range(2):
-            if i==0:
-                classify_layer = self.classify_layer_1
-            else:
-                classify_layer = self.classify_layer_2
-            # classify_layer = self.classify_layer[i]
-            c_data = classify_layer(split_arr[i])
-            c_data = torch.unsqueeze(c_data,1)
-            if out_classify is None:
-                out_classify = c_data
-            else:
-                out_classify = torch.cat([out_classify,c_data],1)
-                
+        o1 = output_sample[:,-2] - output_sample[:,-3]
+        o2 = output_sample[:,-1] -output_sample[:,-2]
+        target_slope = torch.stack([o1,o2]).transpose(1,0)
+        out_classify = self.last_classify_layer(target_slope)
         # 涨跌幅度分类
         vr_class = self.classify_vr_layer(output_sample)
         vr_class = torch.unsqueeze(vr_class,1)
@@ -208,7 +197,7 @@ class _TFTCusModule(_TFTModule):
         _,target_class,target,target_info = train_batch[5:]
         target_class = target_class[:,:,0]
         target_trend_class = target_class[:,:2]
-        target_vr_class = target_class[:,2]
+        target_vr_class = target_class[:,1]
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained
@@ -240,25 +229,25 @@ class _TFTCusModule(_TFTModule):
         (output,out_class,vr_class) = self._produce_train_output(val_batch[:5])
         scaler,target_class,target,target_info = val_batch[5:]  
         target_class = target_class[:,:,0]
-        target_trend_class = target_class[:,:2]
-        target_vr_class = target_class[:,2]
+        target_trend_class = target_class[:,0]
+        target_vr_class = target_class[:,1]
         # 全部损失
         loss = self._compute_loss((output,out_class,vr_class), (target,target_class))
         # 相关系数损失
         corr_loss = self.compute_corr_metrics(output, target)
         # 距离损失MSE
-        mse_loss = self.compute_mse_metrics(output, target)
-        # 分类交叉熵损失
-        # cross_loss = compute_cross_metrics(out_class, target_trend_class)
+        # mse_loss = self.compute_mse_metrics(output, target)
+        # 走势分类交叉熵损失
+        cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # 总体涨跌幅度分类损失
         value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class)         
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         value_diff_loss = self.compute_value_diff_metrics(output, target)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         vr_class_certainlys = self.build_vr_class_cer(vr_class[:,0,:])
         last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
@@ -266,13 +255,13 @@ class _TFTCusModule(_TFTModule):
              = self.compute_vr_class_acc(vr_class_certainlys, target_vr_class,target_info=target_info,last_batch_index=last_batch_index)  
         self.log("vr_acc", vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
-        self.log("import_acc_count", import_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
+        # self.log("import_acc_count", import_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)         
         self.log("import_sec_acc", import_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
-        self.log("import_sec_acc_count", import_sec_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
+        # self.log("import_sec_acc_count", import_sec_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_sec_recall", import_sec_recall, batch_size=val_batch[0].shape[0], prog_bar=True)  
         past_target = val_batch[0]
-        self.val_metric_show(output,target,out_class,target_class,vr_class_certainlys,
+        self.val_metric_show(output,target,out_class,target_trend_class,vr_class_certainlys,
                                  target_vr_class,past_target=past_target,val_batch=val_batch,scaler=scaler,target_info=target_info,
                                  last_batch_index=last_batch_index,item_codes=item_codes)
         self._calculate_metrics(output, target, self.val_metrics)
@@ -416,13 +405,17 @@ class _TFTCusModule(_TFTModule):
 
         # 对于最后的全连接层，使用高倍数lr
         optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
-        ignored_params = list(map(id, self.classify_layer_1.parameters())) + list(map(id, self.classify_layer_2.parameters())) + list(map(id, self.classify_vr_layer.parameters()))
+        ignored_params = list(map(id, self.classify_layer_1.parameters())) + \
+            list(map(id, self.classify_layer_2.parameters())) + \
+            list(map(id, self.last_classify_layer.parameters())) + \
+            list(map(id, self.classify_vr_layer.parameters()))
         base_params = filter(lambda p: id(p) not in ignored_params, self.parameters())       
         base_lr = self.optimizer_kwargs["lr"] 
         optimizer_kws["params"] = [
                     {'params': base_params},
                     {'params': self.classify_layer_1.parameters(), 'lr': base_lr*10},
                     {'params': self.classify_layer_2.parameters(), 'lr': base_lr*10},
+                    {'params': self.last_classify_layer.parameters(), 'lr': base_lr*10},
                     {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}]
 
         optimizer = _create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
@@ -710,11 +703,15 @@ class _TFTCusModule(_TFTModule):
         loop_range = range(size)      
         # loop_range = last_batch_index
         df_all = global_var.get_value("dataset").df_all
-        
-        for idx,s_index in enumerate(loop_range):
-            ts = target_info[s_index]
-            # if ts["item_rank_code"]>9:
-            #     continue
+        code_dict = {}
+        idx = 0
+        for s_index,ts in enumerate(target_info):
+            if len(code_dict)>size:
+                break
+            if ts["item_rank_code"] in code_dict:
+                continue
+
+            idx += 1
             scaler_sample = scaler[s_index]
             target_sample = target[s_index,:,:].cpu().numpy()
             target_sample = target_sample[:,0]
@@ -723,14 +720,15 @@ class _TFTCusModule(_TFTModule):
             target_class_sample = target_class[s_index].cpu().numpy()
             target_vr_class_sample = target_vr_class[s_index].cpu().numpy()
             vr_class_certainly = vr_class_certainlys[s_index]
-            # if vr_class_certainly!=CLASS_SIMPLE_VALUE_MAX:
-            #     continue           
+            if vr_class_certainly!=CLASS_SIMPLE_VALUE_MAX:
+                continue           
+            code_dict[ts["item_rank_code"]] = 1
             output_class_sample = out_class[s_index].cpu().numpy()
             output_class_index = np.argmax(output_class_sample, axis=-1)
             pred_center_data_ori = get_np_center_value(output_sample)
             # 数值部分图形
-            target_title = "rank:{},tar class:{}_{},out class:{}_{},tar_vr class:{}&{}".format(ts["item_rank_code"],target_class_sample[0],
-                            target_class_sample[1],output_class_index[0],output_class_index[1],target_vr_class_sample,vr_class_certainly)
+            target_title = "rank:{},tar class:{},out class:{},tar_vr class:{}&{}".format(
+                ts["item_rank_code"],target_class_sample,output_class_index,target_vr_class_sample,vr_class_certainly)
             # 补充画出前面的label数据
             target_combine_sample = np.concatenate((past_target_sample,target_sample),axis=-1)
             pad_data = np.array([0 for i in range(past_target_sample.shape[0])])
@@ -757,9 +755,8 @@ class _TFTCusModule(_TFTModule):
             else:
                 instrument = ts["item_rank_code"]
                 datetime_range = x_range
-            target_title = "time range:{}/{} code:{},tar class:{}_{},out class:{}_{},tar_vr class:{}&{}".format(
-                datetime_range[0],datetime_range[-1],instrument,target_class_sample[0],target_class_sample[1],output_class_index[0],
-                output_class_index[1],target_vr_class_sample,vr_class_certainly)
+            target_title = "time range:{}/{} code:{},tar class:{},out class:{},tar_vr class:{}&{}".format(
+                datetime_range[0],datetime_range[-1],instrument,target_class_sample,output_class_index,target_vr_class_sample,vr_class_certainly)
             viz_input_2.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=x_range)   
                
     def build_scaler_map(self,scalers, batch_input_series,group_column="instrument_rank"):

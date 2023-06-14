@@ -102,6 +102,8 @@ class TftDataframeModel():
         self,
         dataset: TFTSeriesDataset,
     ):
+        global_var.set_value("dataset", dataset)
+        
         if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
@@ -137,8 +139,6 @@ class TftDataframeModel():
                 with open(df_data_path, "wb") as fout:
                     pickle.dump(dataset.df_all, fout)    
         
-        global_var.set_value("dataset", dataset)
-                       
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
         
@@ -253,7 +253,7 @@ class TftDataframeModel():
             likelihood=None,
             # loss_fn=torch.nn.MSELoss(),
             use_weighted_loss_func=True,
-            # loss_number=4,
+            loss_number=4,
             # torch_metrics=metric_collection,
             random_state=42,
             model_name=model_name,
@@ -530,6 +530,7 @@ class TftDataframeModel():
             pred_class = pred_class_list[i]
             vr_class = vr_class_list[i]
             total_series = series_total[i]
+            time_range = [total_series.time_index.start,total_series.time_index.stop]
             actual_series = actual_series_list[i]
             group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
             group_code = dataset.get_group_code_by_rank(group_rank_code)

@@ -65,6 +65,6 @@ class StockDataExtractor:
         
 if __name__ == "__main__":    
     extractor = StockDataExtractor()       
-    # extractor.download_data(file_type="qyspjg")
-    extractor.download_data(file_type="instrument",instrument_code="600520",start_date="20080101", end_date='20141231')
+    extractor.download_data(file_type="qyspjg")
+    # extractor.download_data(file_type="instrument",instrument_code="600520",start_date="20080101", end_date='20141231')
         

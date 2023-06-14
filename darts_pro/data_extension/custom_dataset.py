@@ -15,8 +15,8 @@ from darts.utils.data.shifted_dataset import GenericShiftedDataset,MixedCovariat
 from darts.utils.data.utils import CovariateType
 from darts.logging import raise_if_not
 from darts import TimeSeries
-from cus_utils.common_compute import target_scale,slope_classify_compute
-from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class
+from cus_utils.common_compute import target_scale,slope_classify_compute,slope_last_classify_compute
+from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 
 import cus_utils.global_var as global_var
 
@@ -38,7 +38,15 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         """
         super().__init__(target_series,covariates,input_chunk_length,output_chunk_length,shift,shift_covariates,
                          max_samples_per_ts,covariate_type,use_static_covariates)
-
+        
+        df_all = global_var.get_value("dataset").df_all
+        self.ass_data = {}
+        for series in self.target_series:
+            code = int(series.static_covariates["instrument_rank"].values[0])
+            price_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["label_ori"].values
+            self.ass_data[code] = price_array
+            
     def __getitem__(
         self, idx
     ) -> Tuple[
@@ -103,9 +111,10 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         past_target = target_vals[past_start:past_end]
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
+        price_array = self.ass_data[code][future_start:future_end]
         target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
-                       "future_start":future_start,"future_end":future_end,
+                       "future_start":future_start,"future_end":future_end,"price_array":price_array,
                        "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates
@@ -206,25 +215,37 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         # df_all = global_var.get_value("dataset").df_all
         # price_items = df_all[(df_all["time_idx"]>=target_info["future_start"])&(df_all["time_idx"]<target_info["future_end"])&
         #                         (df_all["instrument_rank"]==target_info["item_rank_code"])]["label_ori"].values
-        # price_items = np.expand_dims(price_items,axis=-1)
+        price_items = target_info["price_array"]
+        price_items = np.expand_dims(price_items,axis=-1)
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        max_value = np.max(future_target)
-        min_value = np.min(future_target)
-        if max_value - future_target[0,0] > future_target[0,0] - min_value:
-            raise_range = (max_value - future_target[0,0])/future_target[0,0]*100
+        price_tar = future_target
+        # price_tar = price_items
+        max_value = np.max(price_tar)
+        min_value = np.min(price_tar)
+        if max_value - price_tar[0,0] > price_tar[0,0] - min_value:
+            raise_range = (max_value - price_tar[0,0])/price_tar[0,0]*100
         else:
-            raise_range = (min_value - future_target[0,0])/future_target[0,0]*100
+            raise_range = (min_value - price_tar[0,0])/price_tar[0,0]*100
         p_taraget_class = get_simple_class(raise_range)
-        p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)    
+          
         # 针对目标数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
         scaler.fit(past_target)          
         # 计算涨跌幅度分类后，再进行归一化
         past_target = scaler.transform(past_target)   
         future_target = scaler.transform(future_target)           
-        # 添加分段走势分类目标输出
-        target_class, target_scaler = slope_classify_compute(future_target,self.class1_len)
-        target_class = np.expand_dims(target_class,axis=-1)
+        # 添加末段走势分类目标输出
+        target_class = slope_last_classify_compute(future_target)
+        
+        # # 进一步筛选重点涨幅数据
+        # if p_taraget_class==CLASS_SIMPLE_VALUE_MAX:
+        #     # 如果后阶段趋势保持上升或平稳，则认为还是大幅度上涨类型，否则任务是大幅度下降类型
+        #     if target_class==SLOPE_SHAPE_RAISE or target_class==SLOPE_SHAPE_SMOOTH:
+        #         p_taraget_class = CLASS_SIMPLE_VALUE_MAX
+        #     else:
+        #         p_taraget_class = list(CLASS_SIMPLE_VALUES)[0]
+        target_class = np.expand_dims([target_class],axis=-1)
+        p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)  
         target_class = np.concatenate((target_class,p_taraget_class),axis=0)
         
         return (

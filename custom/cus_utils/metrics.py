@@ -101,12 +101,8 @@ def cel_acc_compute(actual_series, pred_series, pred_class,intersect: bool = Tru
     return acc_score    
     
 def compute_cross_metrics(output_class,target_class):
-    loss_func = [nn.CrossEntropyLoss(),nn.CrossEntropyLoss()]
-    classify_arr = [output_class[:,0,:],output_class[:,1,:]]
-    cross_loss = 0
-    for i in range(2):
-        cross_loss += loss_func[i](classify_arr[i],target_class[:,i])
-    return cross_loss   
+    cross_loss = nn.CrossEntropyLoss()(output_class,target_class)
+    return cross_loss 
 
 def compute_vr_metrics(output_class,target_class):
     value_range_loss = nn.CrossEntropyLoss()(output_class,target_class)  

@@ -13,7 +13,7 @@ import pandas as pd
 
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH
 
-def slope_classify_compute(target_ori,class1_len,threhold=0.05):
+def slope_classify_compute(target_ori,class1_len,threhold=0.1):
     """生成基于斜率的目标分类"""
     
     # 再次归一化，只衡量目标数据部分--取消
@@ -24,6 +24,7 @@ def slope_classify_compute(target_ori,class1_len,threhold=0.05):
     # 分为2个部分，分别分类
     split_arr = [target_slope[:class1_len],target_slope[class1_len:]]    
     result = [0,0]
+    # 重点关注最后一段
     for index,item in enumerate(split_arr):
         # 每一段斜率都比较小，则类型为平稳
         if np.sum(np.abs(item)<threhold)==item.shape[0]:
@@ -39,7 +40,26 @@ def slope_classify_compute(target_ori,class1_len,threhold=0.05):
             continue 
         # 以上情况都不是，则为震荡
         result[index] = SLOPE_SHAPE_SHAKE
-    return np.array(result),target
+    return result
+
+
+def slope_last_classify_compute(target,threhold=0.05):
+    """生成基于斜率的目标分类"""
+    
+    # 给每段计算斜率,由于刻度一致，因此就是相邻元素的差,重点关注最后一段
+    target_slope = np.array([target[-2,0]  - target[-3,0],target[-1,0]  - target[-2,0]])
+    if np.sum(np.abs(target_slope)<threhold)==2:
+        return SLOPE_SHAPE_SMOOTH
+    if np.sum(target_slope>0)==2:
+        return SLOPE_SHAPE_RAISE    
+    if np.sum(target_slope<0)==2:
+        return SLOPE_SHAPE_FALL
+    if (target_slope[0]+target_slope[1])>0 and target_slope[1]>0:
+        return SLOPE_SHAPE_RAISE 
+    if (target_slope[0]+target_slope[1])>0 and target_slope[0]>0 \
+            and target_slope[0]>2*abs(target_slope[1]):
+        return SLOPE_SHAPE_RAISE     
+    return SLOPE_SHAPE_SHAKE
 
 def mae_comp(input,target):
     loss_fn = torch.nn.L1Loss(reduce=False, size_average=False)
