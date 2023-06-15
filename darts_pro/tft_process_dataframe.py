@@ -330,7 +330,7 @@ class TftDataframeModel():
         vr_class_total = torch.stack(vr_class_total)[:,0,:]
         vr_class = self.combine_vr_class(vr_class_total)
         # 可视化
-        result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],
+        result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],vr_class[0],
                           series_total=series_total,dataset=dataset,do_scale=False,scaler_map=None)
         # 保存结果到数据库
         # self.save_pred_result(result,dataset=dataset,update=False)           
@@ -484,7 +484,8 @@ class TftDataframeModel():
             view_data_past = past_df[past_columns].values[:data_view_len,:]
             viz_input.viz_matrix_var(view_data_past,win=sub_title,title=sub_title,names=past_columns)        
                
-    def predict_mesure(self,val_series_list,pred_series_list,pred_class_list,vr_class_list,series_total=None,dataset=None,do_scale=False,scaler_map=None):       
+    def predict_mesure(self,val_series_list,pred_series_list,pred_class_list,vr_class_list,vr_class_confi_list,
+                       series_total=None,dataset=None,do_scale=False,scaler_map=None):       
 
         group_rank_column = dataset.get_group_rank_column()
         # pred_series_list = dataset.reverse_transform_preds(pred_series_list)
@@ -503,18 +504,17 @@ class TftDataframeModel():
         mape_all = 0
         corr_all = 0
         diff_all = 0
-        cross_all = 0
         vr_acc_all = 0
         vr_imp_all = 0
-        vr_imp_sec_all = 0
         vr_imp_recall = 0
-        vr_imp_sec_recall = 0
         vr_imp_pred_all = 0
         vr_imp_pred_acc = 0
-        vr_imp_sec_pred_all = 0
-        vr_imp_sec_pred_acc = 0
+        vr_imp_pred_price_acc = 0
+        vr_imp_pred_price_nag = 0
+        vr_imp_filter_all = 0
+        vr_imp_filter_acc = 0
         vr_imp_pred_acc_list = []
-        vr_imp_sec_pred_acc_list = []
+        vr_imp_pred_fliter_acc_list = []
         # r = 5
         # view_list = random_int_list(1,len(val_series_list)-1,r)
         
@@ -526,11 +526,12 @@ class TftDataframeModel():
             df_pick = dataset.get_data_by_group_code(instrument_pick)
         result = []
         for i in range(len(pred_series_list)):
+            filter_flag = False
             pred_series = pred_series_list[i]
             pred_class = pred_class_list[i]
             vr_class = vr_class_list[i]
+            vr_class_confi = vr_class_confi_list[i]
             total_series = series_total[i]
-            time_range = [total_series.time_index.start,total_series.time_index.stop]
             actual_series = actual_series_list[i]
             group_rank_code = pred_series.static_covariates[group_rank_column].values[0]
             group_code = dataset.get_group_code_by_rank(group_rank_code)
@@ -540,51 +541,72 @@ class TftDataframeModel():
             # 计算相关度
             corr_item = corr_dis(total_series, pred_series)  
             corr_all = corr_all + corr_item   
-            # 分类数值偏差
-            cross_item = cel_acc_compute(total_series, pred_series,pred_class)   
-            cross_all = cross_all + cross_item        
             # 涨跌幅度类别的准确率
             vr_acc_item = vr_acc_compute(total_series, pred_series,vr_class)  
             vr_acc_all = vr_acc_all + vr_acc_item[0]  
+            # 取得指定股票，如果不存在则不进行可视化
+            df_item = df_pick[df_pick[group_rank_column]==group_rank_code]            
             # 重点关注上涨类别的召回率和准确率
             if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
                 vr_imp_all += 1
                 vr_imp_recall = vr_imp_recall + vr_acc_item[0]  
             if vr_class==CLASS_SIMPLE_VALUE_MAX:
                 vr_imp_pred_all += 1
-                item_result = {group_code:0}
+                item_result = {group_code:{"filter":0,"correct":0}}
+                vr_imp_pred_acc_list.append(item_result)
+                if group_code==785:
+                    print("ggg")
+                # 进一步筛选后，统计准确率
+                filter_flag = self.filter_judge(pred_series, total_series,actual_series,dataset=dataset)
+                if filter_flag:
+                    vr_imp_filter_all += 1
+                    item_result[group_code]["filter"] = 1
+                    vr_imp_pred_fliter_acc_list.append(item_result)
+                    # 进一步通过价格判断是否准确
+                    start = pred_series.time_index.start
+                    end = pred_series.time_index.stop
+                    price_data = df_item[(df_item["time_idx"]>=start-1)&(df_item["time_idx"]<end)]["label_ori"].values
+                    cur_price = price_data[0]
+                    price_list = price_data[1:]
+                    price_raise_range = (price_list.max() - cur_price)/cur_price
+                    price_down_range = (price_list.min() - cur_price)/cur_price
+                    if price_raise_range > 0.05:
+                        correct = 2
+                    elif price_raise_range > 0.03:
+                        correct = 1
+                    elif price_raise_range > 0.01:
+                        correct = 0         
+                    elif price_down_range > -0.01:
+                        correct = 0        
+                    elif price_down_range > -0.03:
+                        correct = -1
+                    else:
+                        correct = -2                          
+                    if correct==2:
+                        vr_imp_pred_price_acc += 1
+                    if correct<0:
+                        vr_imp_pred_price_nag += 1   
+                    item_result[group_code]["correct"] = correct                      
                 if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
                     vr_imp_pred_acc += 1
-                    item_result[group_code] = 1
-                vr_imp_pred_acc_list.append(item_result)
-            # 次级上涨类别的召回率和准确率
-            if vr_acc_item[1]==CLASS_SIMPLE_VALUE_SEC:
-                vr_imp_sec_all += 1
-                vr_imp_sec_recall = vr_imp_sec_recall + vr_acc_item[0]  
-            if vr_class==CLASS_SIMPLE_VALUE_SEC:
-                vr_imp_sec_pred_all += 1
-                item_result = {group_code:0}
-                if vr_acc_item[1]==CLASS_SIMPLE_VALUE_SEC:
-                    vr_imp_sec_pred_acc += 1
-                    item_result[group_code] = 1
-                vr_imp_sec_pred_acc_list.append(item_result)                
+                    if filter_flag:
+                        vr_imp_filter_acc += 1
             # 开始结束差的距离衡量
             diff_item = diff_dis(total_series, pred_series) 
             diff_all = diff_all + diff_item      
-            # 取得指定股票，如果不存在则不进行可视化
-            df_item = df_pick[df_pick[group_rank_column]==group_rank_code]
-            result.append({"instrument":group_rank_code,"corr_item":corr_item,"cross_item":cross_item,
+            result.append({"instrument":group_rank_code,"corr_item":corr_item,
                            "vr_acc_item":vr_acc_item,"mape_item":mape_item})
             kwargs = dict(figsize=(10, 5))
             if df_item.shape[0]>0:
                 # 显示重点上涨类别判断情况
-                if vr_class==CLASS_SIMPLE_VALUE_MAX:
-                    self.show_pred_result(df_item, pred_series, actual_series, pred_class=pred_class,
-                                          vr_class=vr_class,mape_item=mape_item,corr_item=corr_item,dataset=dataset)
+                if vr_class==CLASS_SIMPLE_VALUE_MAX and filter_flag:
+                    self.show_pred_result(df_item, pred_series, actual_series, 
+                                          vr_class=vr_class,tar_class=vr_acc_item[1],
+                                          mape_item=mape_item,corr_item=corr_item,dataset=dataset)
         mape_mean = mape_all/len(val_series_list)
         corr_mean = corr_all/len(val_series_list)
         diff_mean = diff_all/len(val_series_list)
-        cross_mean = cross_all/len(val_series_list)
+        # cross_mean = cross_all/len(val_series_list)
         vr_acc_mean = vr_acc_all/len(val_series_list)   
         vr_recall_imp_mean = vr_imp_recall/vr_imp_all    
         if vr_imp_pred_all>0:
@@ -592,14 +614,33 @@ class TftDataframeModel():
         else:
             vr_acc_imp_mean = 0
         # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
-        print("mape_mean:{},corr mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{},vr_imp_acc_mean:{} with {}/{}" \
-              " vr_recall_imp_sec_mean: {}/{},vr_imp_sec_acc_mean:{}/{}"
-              .format(mape_mean,corr_mean,diff_mean,cross_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all,
-                      vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all,vr_imp_sec_recall,vr_imp_sec_all,vr_imp_sec_pred_acc,vr_imp_sec_pred_all))     
-        print("vr_imp_pred_acc_list:",vr_imp_pred_acc_list)
+        print("mape_mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{},vr_imp_acc_mean:{} with {}/{}" \
+              " vr_imp_filter_acc:{}/{},vr_imp_price_acc:{}/{}/{}"
+              .format(mape_mean,corr_mean,diff_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all,
+                      vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all,vr_imp_filter_acc,vr_imp_filter_all,
+                      vr_imp_pred_price_acc,vr_imp_pred_price_nag,vr_imp_filter_all))     
+        # print("vr_imp_pred_acc_list:",vr_imp_pred_acc_list)
+        print("vr_imp_pred_fliter_acc_list:",vr_imp_pred_fliter_acc_list)
         return result
     
-    def show_pred_result(self,df_item,pred_series,actual_series,pred_class=None,vr_class=None,mape_item=None,corr_item=None,dataset=None):
+    def filter_judge(self,pred_series,total_series,actual_series,raise_range=3,head_range=3,dataset=None):
+        recent_length = dataset.step_len - dataset.pred_len
+        time_range = [pred_series.time_index.start,pred_series.time_index.stop]
+        recent_begin_index = time_range[0] - recent_length
+        recent_data = actual_series.all_values()[:,0,0][recent_begin_index:time_range[0]]
+        
+        pred_data = pred_series.all_values()[:,0,:]
+        pred_data = np.mean(pred_data,axis=1)
+        # 整体需要一定涨幅
+        if (pred_data[-1] - pred_data[0])/pred_data[0]<(raise_range/100):
+            return False
+        # 与近期高点比较，不能差太多
+        recent_max= recent_data.max()
+        if pred_data[0]<recent_max and (recent_max-pred_data[0])/recent_max>head_range/100:
+            return False
+        return True
+    
+    def show_pred_result(self,df_item,pred_series,actual_series,tar_class=None,vr_class=None,mape_item=None,corr_item=None,dataset=None):
         lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
         label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
         label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"       
@@ -618,14 +659,25 @@ class TftDataframeModel():
         # 实际数据集的结尾与预测序列对齐
         pred_series.plot(label="forecast")            
         instrument_code = df_item[group_column].values[0]
-        act_series = actual_series[pred_series.end_time()- 25 : pred_series.end_time()+1]
+        begin_index = pred_series.end_time()- 25
+        end_index = pred_series.end_time()+1
+        act_series = actual_series[begin_index:end_index]
         act_series.plot(label="actual")   
+        # 构造价格序列用于对比
+        
+        df_price = df_item[(df_item["time_idx"]>=begin_index)&(df_item["time_idx"]<end_index)]
+        price_series = TimeSeries.from_dataframe(df_price,
+                                                time_col="time_idx",
+                                                 freq='D',
+                                                 fill_missing_dates=True,
+                                                 value_cols="label_ori")       
+        price_series.plot(label="price")
         # fig, ax = plt.subplots(**kwargs)    
         date_range = dataset.get_datetime_with_index(group_code,pred_series.start_time(),pred_series.end_time())
         range_show = "[{}-{}]".format(date_range[0],date_range[-1])
         # ax.set_xticks(date_range)                                
-        pred_class_str = "{}-{}/{}".format(pred_class[0],pred_class[1],vr_class)
-        plt.title("{},ser_{},MAPE: {:.2f}%,corr:{},class:{}".format(range_show,instrument_code,mape_item,corr_item,pred_class_str))
+        pred_class_str = "{}/{}".format(vr_class,tar_class)
+        plt.title("{},ser_{},MAPE: {:.2f}%,corr:{},class(pred/real):{}".format(range_show,instrument_code,mape_item,corr_item,pred_class_str))
         plt.legend()
         plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
         plt.clf()          

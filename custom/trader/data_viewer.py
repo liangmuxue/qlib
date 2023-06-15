@@ -58,11 +58,9 @@ class DataViewer():
         
         instrument = int(single_data["instrument"].values[0])
         date = single_data["pred_date"].values[0]
-        class1 = single_data["class1"].values[0]
-        class2 = single_data["class2"].values[0]
         vr_class = single_data["vr_class"].values[0]
         names = ["pred_data","label","label_ori"]        
-        target_title = "{}_{}_{}-{}/{},correct:{}".format(date,instrument, class1,class2,vr_class,correct)
+        target_title = "{}_{}/{},correct:{}".format(date,instrument,vr_class,correct)
         pred_line = single_data["pred_data"].values
         label_line = single_data["label"].values
         price_line = single_data["label_ori"].values

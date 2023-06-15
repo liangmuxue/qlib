@@ -48,18 +48,11 @@ def slope_last_classify_compute(target,threhold=0.05):
     
     # 给每段计算斜率,由于刻度一致，因此就是相邻元素的差,重点关注最后一段
     target_slope = np.array([target[-2,0]  - target[-3,0],target[-1,0]  - target[-2,0]])
-    if np.sum(np.abs(target_slope)<threhold)==2:
-        return SLOPE_SHAPE_SMOOTH
     if np.sum(target_slope>0)==2:
         return SLOPE_SHAPE_RAISE    
     if np.sum(target_slope<0)==2:
         return SLOPE_SHAPE_FALL
-    if (target_slope[0]+target_slope[1])>0 and target_slope[1]>0:
-        return SLOPE_SHAPE_RAISE 
-    if (target_slope[0]+target_slope[1])>0 and target_slope[0]>0 \
-            and target_slope[0]>2*abs(target_slope[1]):
-        return SLOPE_SHAPE_RAISE     
-    return SLOPE_SHAPE_SHAKE
+    return SLOPE_SHAPE_SMOOTH
 
 def mae_comp(input,target):
     loss_fn = torch.nn.L1Loss(reduce=False, size_average=False)

@@ -69,7 +69,7 @@ class PortAnaRecord(TftRecorder):
         self.pred_data_file = pred_data_file
         
         self.df_ref = dataset.df_all     
-        self.pred_result_columns = ['pred_date','time_idx','instrument','class1','class2','vr_class','pred_data'] 
+        self.pred_result_columns = ['pred_date','time_idx','instrument','trend_class','vr_class','pred_data'] 
         # self.data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
         # self.data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
         
@@ -97,8 +97,7 @@ class PortAnaRecord(TftRecorder):
             pred_data_file = "pred_df_total.pkl"
         with open(pred_data_file, "rb") as fin:
             df_pred = pickle.load(fin)     
-        df_pred["class1"] = df_pred["class1"].astype(int) 
-        df_pred["class2"] = df_pred["class2"].astype(int) 
+        df_pred["trend_class"] = df_pred["trend_class"].astype(int) 
         df_pred["vr_class"] = df_pred["vr_class"].astype(int) 
         return df_pred
                     
@@ -145,14 +144,13 @@ class PortAnaRecord(TftRecorder):
             # 取得分类值
             pred_class = pred_class_total[index]
             pred_class_max = self.dataset.combine_pred_class(pred_class)   
-            pred_class_real = pred_class_max[1].numpy()
+            pred_class_real = pred_class_max[1].item()
             vr_class_data = vr_class_total[index]
             vr_class,vr_class_confidence = comp_max_and_rate(np.array(vr_class_data))
             data_item = np.array([[int(pred_date) for i in range(time_index.shape[0])],
                                   time_index.tolist(),
                                  [group_item for i in range(time_index.shape[0])],
-                                 [pred_class_real[0] for i in range(time_index.shape[0])],
-                                 [pred_class_real[1] for i in range(time_index.shape[0])],
+                                 [pred_class_real for i in range(time_index.shape[0])],
                                  [vr_class for i in range(time_index.shape[0])]])
             data_item = np.concatenate((data_item,np.expand_dims(pred_center_data,0)),axis=0).transpose(1,0)
             # 图像验证
@@ -233,7 +231,7 @@ class PortAnaRecord(TftRecorder):
         if  df_item.shape[0]==0:
             return None   
         # 新增补充的列值
-        new_columns = df_item.columns.tolist() + ["pred_date","pred_data","class1","class2","vr_class"]
+        new_columns = df_item.columns.tolist() + ["pred_date","pred_data","trend_class","vr_class"]
         df_item = df_item.reindex(columns=new_columns)
         df_item["pred_date"] = [pred_date for i in range(df_item.shape[0])] 
         # 预测数据,前面补0
@@ -242,11 +240,9 @@ class PortAnaRecord(TftRecorder):
         data_line = np.pad(pred_data,(pad_len,0),'constant',constant_values=(0,0))          
         df_item["pred_data"] = data_line
         # 走势分类信息处
-        class1 = df_pred_item["class1"].values[0]
-        class2 = df_pred_item["class2"].values[0]
+        trend_class = df_pred_item["trend_class"].values[0]
         # 为了方便，在每一行中都放入同样的分类信息
-        df_item["class1"] = [class1 for i in range(df_item.shape[0])]
-        df_item["class2"] = [class2 for i in range(df_item.shape[0])]
+        df_item["trend_class"] = [trend_class for i in range(df_item.shape[0])]
         # 涨跌幅分类信息
         vr_class = df_pred_item["vr_class"].values[0]
         df_item["vr_class"] = [vr_class for i in range(df_item.shape[0])]
@@ -299,13 +295,13 @@ class ClassifyRecord(PortAnaRecord):
         self.show_correct_pred(df,pred_df_total,dataset=dataset) 
         return df
     
-    def filter_cancidate_result(self,dataset=None,ext_length=25,pred_file=None):
+    def filter_cancidate_result(self,dataset=None,ext_length=25,pred_file=None,raise_range=3):
         """筛选出合适的品种"""
 
         date_list = get_tradedays(self.classify_range[0],self.classify_range[1])
         match_list = []
         match_cnt = 0        
-        match_columns = ["date","instrument","correct","pred_class","vr_class","price_raise_range","price_down_range"]
+        match_columns = ["date","instrument","correct","vr_class","price_raise_range","price_down_range"]
         data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
         pred_df_total = None
         for pred_date in date_list:   
@@ -322,12 +318,11 @@ class ClassifyRecord(PortAnaRecord):
             # 筛选出分类上涨类股票
             date_pred_df = date_pred_df_ori[(date_pred_df_ori["vr_class"]==CLASS_SIMPLE_VALUE_MAX)]            
             pred_date = int(pred_date)  
-            # 走势符合前平后起，或先起后平
+            # 整体需要一定涨幅
             date_pred_df = date_pred_df.groupby('instrument').filter(
-                lambda x: (x.iloc[0]["class1"]==SLOPE_SHAPE_SMOOTH and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE)  
-                or (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_SMOOTH)   
-                or (x.iloc[0]["class1"]==SLOPE_SHAPE_RAISE and x.iloc[0]["class2"]==SLOPE_SHAPE_RAISE)
-            )             
+                lambda x: (x["pred_data"].values[-1] - x["pred_data"].values[0])/x["pred_data"].values[0]>(raise_range/100)  
+            )    
+
             for instrument,group_data in date_pred_df.groupby("instrument"):
                 # 生成对应日期的单个股票的综合数据
                 complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=group_data,df_ref=dataset.df_all,ext_length=ext_length)   
@@ -340,8 +335,7 @@ class ClassifyRecord(PortAnaRecord):
                 # 使用收盘价格进行衡量         
                 price_values = complex_df["label_ori"].values
                 # 根据预测数据综合判断，取得匹配标志
-                (match_flag,pred_class_real,vr_class) = self.pred_data_jud(complex_df, dataset=dataset,ext_length=ext_length)
-                pred_class_real = pred_class_real.tolist()
+                [match_flag,vr_class] = self.pred_data_jud(complex_df, dataset=dataset,ext_length=ext_length)
                 if not match_flag:
                     continue
                 
@@ -363,7 +357,7 @@ class ClassifyRecord(PortAnaRecord):
                     correct = -1
                 else:
                     correct = -2                                                     
-                match_item = [pred_date,instrument,correct,pred_class_real,vr_class,price_raise_range,price_down_range]
+                match_item = [pred_date,instrument,correct,vr_class,price_raise_range,price_down_range]
                 match_list.append(match_item)
                 # if correct!=2:
                 #     self.data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.pred_data_path+"/plot")
@@ -439,7 +433,7 @@ class ClassifyRecord(PortAnaRecord):
    
         return match_flag        
     
-    def pred_data_jud(self,ins_data,dataset=None,ext_length=25):
+    def pred_data_jud(self,ins_data,dataset=None,ext_length=25,head_range=3):
         """预测均线价值判断"""
         
         label_arr = ins_data["label"].values.tolist()
@@ -447,49 +441,27 @@ class ClassifyRecord(PortAnaRecord):
         label_slope_arr = compute_price_range(label_arr[-2*dataset.pred_len:-dataset.pred_len])
                      
         pred_arr = ins_data["pred_data"].values[-dataset.pred_len:]
-        # 计算预测均线涨跌幅度
-        slope_arr = compute_price_range(pred_arr)  
         
         # 分类信息判断
-        pred_class = np.array([ins_data["class1"].values[0],ins_data["class2"].values[0]])
         vr_class = ins_data["vr_class"].values[0]
                 
         match_flag = False
-        rtn_obj = [match_flag,pred_class,vr_class]
+        rtn_obj = [match_flag,vr_class]
         
         # RSI指标需要在50以上
-        # rsi = ins_data["RSI20"].values[-2*dataset.pred_len:-dataset.pred_len]
-        # if np.any(rsi<50):
-        #     return rtn_obj
-        # # MACD指标需要在0以上
-        # macd = ins_data["MACD"].values[-2*dataset.pred_len:-dataset.pred_len]
-        # if np.any(macd<0):
-        #     return rtn_obj
+        rsi = ins_data["RSI20"].values[-2*dataset.pred_len:-dataset.pred_len]
+        if np.any(rsi<50):
+            return rtn_obj
+        # MACD指标需要在0以上
+        macd = ins_data["MACD"].values[-2*dataset.pred_len:-dataset.pred_len]
+        if np.any(macd<0):
+            return rtn_obj
         
-        # 检查之前的实际均线形态，要求是比较平
-        # status = slope_status(label_slope_arr)
-        # if status != SLOPE_SHAPE_SMOOTH:
-        #     return rtn_obj
         
-        # 预测最后一个时间段数据需要上涨
-        # if slope_arr[-1]< 0:
-        #     return rtn_obj
-        # 整体需要上涨
-        # if pred_arr[-1] - pred_arr[0] < 0:
-        #     return rtn_obj         
-
-        # 需要符合涨跌幅类别
-        # if vr_class<2:
-        #     return rtn_obj
-        # 一直起，符合
-        # if pred_class[0]==0 and pred_class[1]==0:
-        #     rtn_obj[0] = True           
-        # # 前平后起，符合
-        # if pred_class[0]==2 and pred_class[1]==0:
-        #     rtn_obj[0] = True
-        # 前起后平，符合
-        # if pred_class_real[0]==0 and pred_class_real[1]==2:
-        #     match_flag = True   
+        # 与近期高点比较，不能差太多
+        recent_max= ins_data["label"].values[:ext_length].max()
+        if pred_arr[0]<recent_max and (recent_max-pred_arr[0])/recent_max>head_range/100:
+            return rtn_obj          
         rtn_obj[0] = True  
         return rtn_obj
 

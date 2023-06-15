@@ -121,7 +121,7 @@ class _TFTCusModule(_TFTModule):
         self.class2_len = pred_len -1 - self.class1_len        
         self.classify_layer_1 = self._construct_classify_layer(self.class1_len,mss_num).to(device)
         self.classify_layer_2 = self._construct_classify_layer(self.class2_len+1,mss_num).to(device)
-        self.last_classify_layer = self._construct_classify_layer(2,vr_range_num).to(device)  
+        self.last_classify_layer = self._construct_classify_layer(3,3).to(device)  
         # 涨跌幅度分类
         self.classify_vr_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
         # mse损失计算                
@@ -144,10 +144,7 @@ class _TFTCusModule(_TFTModule):
         # 从分位数取得中间数值
         output_sample = torch.mean(out[:,:,0,:],dim=-1)
         
-        o1 = output_sample[:,-2] - output_sample[:,-3]
-        o2 = output_sample[:,-1] -output_sample[:,-2]
-        target_slope = torch.stack([o1,o2]).transpose(1,0)
-        out_classify = self.last_classify_layer(target_slope)
+        out_classify = self.last_classify_layer(output_sample[:,2:])
         # 涨跌幅度分类
         vr_class = self.classify_vr_layer(output_sample)
         vr_class = torch.unsqueeze(vr_class,1)
@@ -238,12 +235,12 @@ class _TFTCusModule(_TFTModule):
         # 距离损失MSE
         # mse_loss = self.compute_mse_metrics(output, target)
         # 走势分类交叉熵损失
-        cross_loss = compute_cross_metrics(out_class, target_trend_class)
+        # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # 总体涨跌幅度分类损失
         value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class)         
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         value_diff_loss = self.compute_value_diff_metrics(output, target)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -255,11 +252,10 @@ class _TFTCusModule(_TFTModule):
              = self.compute_vr_class_acc(vr_class_certainlys, target_vr_class,target_info=target_info,last_batch_index=last_batch_index)  
         self.log("vr_acc", vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
-        # self.log("import_acc_count", import_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)         
-        self.log("import_sec_acc", import_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
-        # self.log("import_sec_acc_count", import_sec_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
-        self.log("import_sec_recall", import_sec_recall, batch_size=val_batch[0].shape[0], prog_bar=True)  
+        # self.log("import_sec_acc", import_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
+        # # self.log("import_sec_acc_count", import_sec_acc_count, batch_size=val_batch[0].shape[0], prog_bar=True)     
+        # self.log("import_sec_recall", import_sec_recall, batch_size=val_batch[0].shape[0], prog_bar=True)  
         past_target = val_batch[0]
         self.val_metric_show(output,target,out_class,target_trend_class,vr_class_certainlys,
                                  target_vr_class,past_target=past_target,val_batch=val_batch,scaler=scaler,target_info=target_info,
@@ -416,7 +412,7 @@ class _TFTCusModule(_TFTModule):
                     {'params': self.classify_layer_1.parameters(), 'lr': base_lr*10},
                     {'params': self.classify_layer_2.parameters(), 'lr': base_lr*10},
                     {'params': self.last_classify_layer.parameters(), 'lr': base_lr*10},
-                    {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}]
+                    {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*3}]
 
         optimizer = _create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
         
@@ -527,7 +523,7 @@ class _TFTCusModule(_TFTModule):
             delayed(_build_forecast_series)(
                 [batch_prediction[batch_idx] for batch_prediction in batch_predictions_unscale],
                 input_series,
-                batch_pred_class[:,batch_idx,:,:],
+                batch_pred_class[:,batch_idx,:],
                 batch_vr_class[:,batch_idx,:,:]
             )
             for batch_idx, input_series in enumerate(batch_input_series)
@@ -695,23 +691,21 @@ class _TFTCusModule(_TFTModule):
                                 
     def val_metric_show(self,output,target,out_class,target_class,vr_class,target_vr_class,past_target=None,val_batch=None,
                         scaler=None,target_info=None,last_batch_index=None,item_codes=None):
-        size = target.shape[0] if target.shape[0]<9 else 9
+        
         names = ["output","target","price"]
         vr_class_certainlys = vr_class.cpu().numpy()
-        
+        vr_class_certainlys_imp_index = np.argwhere(vr_class_certainlys==CLASS_SIMPLE_VALUE_MAX)
+        size = len(vr_class_certainlys_imp_index) if len(vr_class_certainlys_imp_index)<9 else 9
         # print("item_codes:",item_codes)
         loop_range = range(size)      
         # loop_range = last_batch_index
         df_all = global_var.get_value("dataset").df_all
         code_dict = {}
         idx = 0
-        for s_index,ts in enumerate(target_info):
-            if len(code_dict)>size:
-                break
-            if ts["item_rank_code"] in code_dict:
-                continue
-
-            idx += 1
+        range_index = np.random.random_integers(0, vr_class_certainlys_imp_index.shape[0],size)
+        for idx,r_index in enumerate(range_index):
+            s_index = vr_class_certainlys_imp_index[r_index,0]
+            ts = target_info[s_index]
             scaler_sample = scaler[s_index]
             target_sample = target[s_index,:,:].cpu().numpy()
             target_sample = target_sample[:,0]
@@ -722,7 +716,6 @@ class _TFTCusModule(_TFTModule):
             vr_class_certainly = vr_class_certainlys[s_index]
             if vr_class_certainly!=CLASS_SIMPLE_VALUE_MAX:
                 continue           
-            code_dict[ts["item_rank_code"]] = 1
             output_class_sample = out_class[s_index].cpu().numpy()
             output_class_index = np.argmax(output_class_sample, axis=-1)
             pred_center_data_ori = get_np_center_value(output_sample)

@@ -41,6 +41,7 @@ class UncertaintyLoss(nn.Module):
         vr_loss_weight = get_simple_class_weight()
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
         self.classify_loss = [nn.CrossEntropyLoss(),nn.CrossEntropyLoss()]
+        self.last_classify_loss = nn.CrossEntropyLoss()
         self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
 
     def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
@@ -59,7 +60,7 @@ class UncertaintyLoss(nn.Module):
         # 相关系数损失
         corr_loss = self.corr_loss_comp(input, target)   
         # 针对均线最后一个部分，计算交叉熵损失
-        ce_loss = self.classify_loss[1](input_classify,target_classify[:,0])
+        ce_loss = self.last_classify_loss(input_classify,target_classify[:,0])
         # 第3个部分为幅度范围分类，计算交叉熵损失 
         value_range_loss = self.vr_loss(vr_class[:,0,:],target_classify[:,1])              
         # 整体MSE损失
@@ -69,11 +70,11 @@ class UncertaintyLoss(nn.Module):
         
         loss_sum = 0
         # 使用不确定性损失模式进行累加
-        loss_sum += 1/4 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
-        loss_sum += 1/4 / (self.sigma[1] ** 2) * ce_loss + torch.log(1 + self.sigma[1] ** 2)
-        loss_sum += 1/4 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        loss_sum += 1/4 / (self.sigma[3] ** 2) * value_diff_loss + torch.log(1 + self.sigma[3] ** 2)
-        return ce_loss
+        loss_sum += 1/3 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
+        # loss_sum += 1/4 / (self.sigma[1] ** 2) * ce_loss + torch.log(1 + self.sigma[1] ** 2)
+        loss_sum += 1/3 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
+        loss_sum += 1/3 / (self.sigma[3] ** 2) * value_diff_loss + torch.log(1 + self.sigma[3] ** 2)
+        return loss_sum
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):
         
