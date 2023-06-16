@@ -85,7 +85,25 @@ class UncertaintyLoss(nn.Module):
         corr_loss = pearson(input_corr, target_corr)   
         corr_loss = 1 - corr_loss
         return torch.mean(corr_loss)
+ 
+    def ccc_loss_comp(self, input: Tensor, target: Tensor):
+        """一致性相关系数计算"""
         
+        y_pred = torch.squeeze(input).cpu().numpy()
+        y_true = torch.squeeze(target).cpu().numpy()
+        cor = np.corrcoef(y_true,y_pred)[0][1]
+        mean_true = np.mean(y_true)
+        mean_pred = np.mean(y_pred)
+        var_true = np.var(y_true)
+        var_pred = np.var(y_pred)
+        sd_true = np.std(y_true)
+        sd_pred = np.std(y_pred)
+        numerator = 2*cor*sd_true*sd_pred
+        denominator = var_true+var_pred+(mean_true-mean_pred)**2
+        ccc = numerator/denominator
+        ccc_loss = 1 - ccc
+        return ccc_loss
+           
 # if __name__ == '__main__':
 #     weighted_loss_func = UncertaintyLoss(2)
 #     weighted_loss_func.to(device)

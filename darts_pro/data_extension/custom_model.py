@@ -412,7 +412,7 @@ class _TFTCusModule(_TFTModule):
                     {'params': self.classify_layer_1.parameters(), 'lr': base_lr*10},
                     {'params': self.classify_layer_2.parameters(), 'lr': base_lr*10},
                     {'params': self.last_classify_layer.parameters(), 'lr': base_lr*10},
-                    {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*3}]
+                    {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}]
 
         optimizer = _create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
         

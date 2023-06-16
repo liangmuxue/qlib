@@ -376,10 +376,12 @@ def test_corr_tensor():
         [0.1232, 0.1220, 0.1231, 0.1224, 0.1234],
         [0.0429, 0.0427, 0.0443, 0.0467, 0.0480],
         [0.0213, 0.0192, 0.0168, 0.0155, 0.0133]])
+    target = torch.tensor([[-1.8430, -1.9625, -2.1838, -1.8075, -1.8022]])
     preds = torch.tensor([[ 0.9404,  0.9669,  0.8062,  0.8755,  0.7477],
         [ 0.2350, -1.0773, -0.7159, -0.6425, -0.7188],
         [-1.1237, -1.2764, -1.3003, -1.1781, -1.6030],
         [-1.0591, -1.4384, -1.2628, -2.0782, -1.6555]])
+    preds = torch.tensor([[0.2252, 0.2269, 0.2403, 0.2496, 0.2595]])
     pearson = PearsonCorrCoef(num_outputs=5)
     ret = pearson(preds, target)
     print(ret)
@@ -391,14 +393,44 @@ def test_slope():
     slope, intercept = np.polyfit(x,y,1)
     print(slope)
 
-        
+def concordance_correlation_coefficient(y_true, y_pred,
+                       sample_weight=None,
+                       multioutput='uniform_average'):
+    
+    cor=np.corrcoef(y_true,y_pred)[0][1]
+    
+    mean_true=np.mean(y_true)
+    mean_pred=np.mean(y_pred)
+    
+    var_true=np.var(y_true)
+    var_pred=np.var(y_pred)
+    
+    sd_true=np.std(y_true)
+    sd_pred=np.std(y_pred)
+    
+    numerator=2*cor*sd_true*sd_pred
+    
+    denominator=var_true+var_pred+(mean_true-mean_pred)**2
+
+    return numerator/denominator
+
+def test_ccc():
+    n_samples=1000
+    y_true = np.arange(n_samples)
+    y_pred = y_true + 1
+    y_true = np.array([-1.8430, -1.9625, -2.1838, -1.8075, -1.8022])
+    y_pred = np.array([0.2252, 0.2269, 0.2403, 0.2496, 0.2595])    
+    y_pred = np.array([-1.8, -0.9625, -2.1838, -1.8075, -1.8022])   
+    c = concordance_correlation_coefficient(y_true,y_pred)    
+    print("c is",c)
+           
 if __name__ == "__main__":
     # test_argwhere()
     # test_condition3()
     # test_condi_remove()
     # test_group()
     # test_corr()
-    # test_corr_tensor()
+    test_corr_tensor()
     # test_slope()
     # test_each()
     # test_split_compute()
@@ -421,6 +453,8 @@ if __name__ == "__main__":
     # test_pd_df()
     # test_pd_trans()
     # test_pd_index()
-    test_norm()
+    # test_norm()
+    # test_ccc()
+    
     
     
