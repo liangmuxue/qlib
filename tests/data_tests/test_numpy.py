@@ -190,10 +190,11 @@ def test_split_compute():
 
                 
 def test_temp():
-    arr = [[(130, 37, 0.9547701, 0)], [(106, 41, 0.960853, 1), (130, 43, 0.9493217, 2)], [(110, 41, 0.9765356, 3), (124, 43, 0.87878436, 4)], [(114, 48, 0.9471407, 5), (121, 51, 1.0362356, 6)], [(110, 49, 0.21988666, 7), (120, 59, 0.9178307, 8)], [(101, 40, 0.9474892, 9), (135, 44, 0.9179209, 10)], [(98, 47, 0.7709754, 11), (138, 52, 0.8963235, 12)], [(97, 49, 0.23131275, 13), (139, 60, 0.822693, 14), (152, 0, 0.118390195, 15)], [(109, 55, 0.9592643, 16), (125, 61, 0.92577446, 17)], [(109, 66, 0.92471373, 18), (124, 73, 0.98474723, 19), (159, 79, 0.12637408, 20)], [(108, 77, 0.92193204, 21), (125, 82, 0.8574085, 22), (182, 120, 0.10133813, 23), (192, 121, 0.10296779, 24)], [(102, 55, 0.8907591, 25), (132, 61, 0.8883806, 26)], [(103, 65, 0.83924854, 27), (131, 73, 0.9766074, 28), (158, 80, 0.19179878, 29)], [(105, 73, 0.7987924, 30), (131, 84, 0.9129152, 31), (158, 96, 0.12822857, 32), (159, 87, 0.11083252, 33), (192, 123, 0.11102441, 34)], [(129, 36, 0.9734128, 35)], [(132, 36, 0.94683576, 36)], [(109, 35, 0.9049975, 37), (127, 37, 0.88041323, 38)], [(105, 35, 0.7279416, 39), (133, 37, 0.68659896, 40)]]               
-    for index,item in enumerate(arr):
-        if len(item)>2:
-            print("index:{},data:{}".format(index,item))
+    # arr = [[(130, 37, 0.9547701, 0)], [(106, 41, 0.960853, 1), (130, 43, 0.9493217, 2)], [(110, 41, 0.9765356, 3), (124, 43, 0.87878436, 4)], [(114, 48, 0.9471407, 5), (121, 51, 1.0362356, 6)], [(110, 49, 0.21988666, 7), (120, 59, 0.9178307, 8)], [(101, 40, 0.9474892, 9), (135, 44, 0.9179209, 10)], [(98, 47, 0.7709754, 11), (138, 52, 0.8963235, 12)], [(97, 49, 0.23131275, 13), (139, 60, 0.822693, 14), (152, 0, 0.118390195, 15)], [(109, 55, 0.9592643, 16), (125, 61, 0.92577446, 17)], [(109, 66, 0.92471373, 18), (124, 73, 0.98474723, 19), (159, 79, 0.12637408, 20)], [(108, 77, 0.92193204, 21), (125, 82, 0.8574085, 22), (182, 120, 0.10133813, 23), (192, 121, 0.10296779, 24)], [(102, 55, 0.8907591, 25), (132, 61, 0.8883806, 26)], [(103, 65, 0.83924854, 27), (131, 73, 0.9766074, 28), (158, 80, 0.19179878, 29)], [(105, 73, 0.7987924, 30), (131, 84, 0.9129152, 31), (158, 96, 0.12822857, 32), (159, 87, 0.11083252, 33), (192, 123, 0.11102441, 34)], [(129, 36, 0.9734128, 35)], [(132, 36, 0.94683576, 36)], [(109, 35, 0.9049975, 37), (127, 37, 0.88041323, 38)], [(105, 35, 0.7279416, 39), (133, 37, 0.68659896, 40)]]               
+    # for index,item in enumerate(arr):
+    #     if len(item)>2:
+    #         print("index:{},data:{}".format(index,item))
+    print(np.random.randint(0,2))
         
         
 def test_pd_ser():
@@ -414,15 +415,38 @@ def concordance_correlation_coefficient(y_true, y_pred,
 
     return numerator/denominator
 
+def concordance_correlation_coefficient_torch(y_true, y_pred,
+                       sample_weight=None,
+                       multioutput='uniform_average'):
+    
+    corr_tensor = torch.stack((y_pred,y_true),dim=0)
+    cor = torch.corrcoef(corr_tensor)[0][1]
+    
+    mean_true = torch.mean(y_true)
+    mean_pred = torch.mean(y_pred)
+    
+    var_true = torch.var(y_true)
+    var_pred = torch.var(y_pred)
+    
+    sd_true = torch.std(y_true)
+    sd_pred = torch.std(y_pred)
+    
+    numerator = 2*cor*sd_true*sd_pred
+    
+    denominator=var_true+var_pred+(mean_true-mean_pred)**2
+
+    return numerator/denominator
+
 def test_ccc():
     n_samples=1000
     y_true = np.arange(n_samples)
     y_pred = y_true + 1
-    y_true = np.array([-1.8430, -1.9625, -2.1838, -1.8075, -1.8022])
+    y_true = np.array([-1.8430, -2.9625, -2.1838, -1.8075, -1.8022])
     y_pred = np.array([0.2252, 0.2269, 0.2403, 0.2496, 0.2595])    
-    y_pred = np.array([-1.8, -0.9625, -2.1838, -1.8075, -1.8022])   
-    c = concordance_correlation_coefficient(y_true,y_pred)    
-    print("c is",c)
+    y_pred = np.array([-1.8, -1.9625, -2.1838, -1.8075, -1.8022])   
+    c = concordance_correlation_coefficient(y_true,y_pred)  
+    c_torch = concordance_correlation_coefficient_torch(torch.tensor(y_true),torch.tensor(y_pred))    
+    print("c is:{},and c_torch:{}".format(c,c_torch))
            
 if __name__ == "__main__":
     # test_argwhere()
@@ -430,13 +454,13 @@ if __name__ == "__main__":
     # test_condi_remove()
     # test_group()
     # test_corr()
-    test_corr_tensor()
+    # test_corr_tensor()
     # test_slope()
     # test_each()
     # test_split_compute()
     # test_variable()
     # test_index()
-    # test_temp()
+    test_temp()
     # test_pd_ser()
     # test_torch_vision()
     # torch_comp()

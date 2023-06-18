@@ -511,6 +511,7 @@ class TftDataframeModel():
         vr_imp_pred_acc = 0
         vr_imp_pred_price_acc = 0
         vr_imp_pred_price_nag = 0
+        vr_imp_filter_pred_price_nag = 0
         vr_imp_filter_all = 0
         vr_imp_filter_acc = 0
         vr_imp_pred_acc_list = []
@@ -554,43 +555,44 @@ class TftDataframeModel():
                 vr_imp_pred_all += 1
                 item_result = {group_code:{"filter":0,"correct":0}}
                 vr_imp_pred_acc_list.append(item_result)
-                if group_code==785:
-                    print("ggg")
+                # 通过价格判断是否准确
+                start = pred_series.time_index.start
+                end = pred_series.time_index.stop
+                price_data = df_item[(df_item["time_idx"]>=start-1)&(df_item["time_idx"]<end)]["label_ori"].values
+                cur_price = price_data[0]
+                price_list = price_data[1:]
+                price_raise_range = (price_list.max() - cur_price)/cur_price
+                price_down_range = (price_list.min() - cur_price)/cur_price
+                if price_raise_range > 0.05:
+                    correct = 2
+                elif price_raise_range > 0.03:
+                    correct = 1
+                elif price_raise_range > 0.01:
+                    correct = 0         
+                elif price_down_range > -0.01:
+                    correct = 0        
+                elif price_down_range > -0.03:
+                    correct = -1
+                else:
+                    correct = -2                          
+                item_result[group_code]["correct"] = correct                      
                 # 进一步筛选后，统计准确率
                 filter_flag = self.filter_judge(pred_series, total_series,actual_series,dataset=dataset)
                 if filter_flag:
                     vr_imp_filter_all += 1
                     item_result[group_code]["filter"] = 1
-                    vr_imp_pred_fliter_acc_list.append(item_result)
-                    # 进一步通过价格判断是否准确
-                    start = pred_series.time_index.start
-                    end = pred_series.time_index.stop
-                    price_data = df_item[(df_item["time_idx"]>=start-1)&(df_item["time_idx"]<end)]["label_ori"].values
-                    cur_price = price_data[0]
-                    price_list = price_data[1:]
-                    price_raise_range = (price_list.max() - cur_price)/cur_price
-                    price_down_range = (price_list.min() - cur_price)/cur_price
-                    if price_raise_range > 0.05:
-                        correct = 2
-                    elif price_raise_range > 0.03:
-                        correct = 1
-                    elif price_raise_range > 0.01:
-                        correct = 0         
-                    elif price_down_range > -0.01:
-                        correct = 0        
-                    elif price_down_range > -0.03:
-                        correct = -1
-                    else:
-                        correct = -2                          
-                    if correct==2:
-                        vr_imp_pred_price_acc += 1
-                    if correct<0:
-                        vr_imp_pred_price_nag += 1   
-                    item_result[group_code]["correct"] = correct                      
                 if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
                     vr_imp_pred_acc += 1
                     if filter_flag:
-                        vr_imp_filter_acc += 1
+                        vr_imp_filter_acc += 1    
+                        if correct==2:
+                            vr_imp_pred_price_acc += 1
+                        vr_imp_pred_fliter_acc_list.append(item_result)     
+                else:
+                    if correct<0:
+                        vr_imp_pred_price_nag += 1       
+                        if filter_flag:
+                            vr_imp_filter_pred_price_nag += 1 
             # 开始结束差的距离衡量
             diff_item = diff_dis(total_series, pred_series) 
             diff_all = diff_all + diff_item      
@@ -615,15 +617,16 @@ class TftDataframeModel():
             vr_acc_imp_mean = 0
         # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
         print("mape_mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{},vr_imp_acc_mean:{} with {}/{}" \
-              " vr_imp_filter_acc:{}/{},vr_imp_price_acc:{}/{}/{}"
+              " vr_imp_filter_acc:{}/{}/{},vr_imp_price_acc:{}/{}/{}"
               .format(mape_mean,corr_mean,diff_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all,
-                      vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all,vr_imp_filter_acc,vr_imp_filter_all,
-                      vr_imp_pred_price_acc,vr_imp_pred_price_nag,vr_imp_filter_all))     
+                      vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all,vr_imp_filter_acc,vr_imp_pred_price_nag,vr_imp_filter_all,
+                      vr_imp_pred_price_acc,vr_imp_filter_pred_price_nag,vr_imp_filter_all))     
         # print("vr_imp_pred_acc_list:",vr_imp_pred_acc_list)
         print("vr_imp_pred_fliter_acc_list:",vr_imp_pred_fliter_acc_list)
         return result
     
     def filter_judge(self,pred_series,total_series,actual_series,raise_range=3,head_range=3,dataset=None):
+        return True
         recent_length = dataset.step_len - dataset.pred_len
         time_range = [pred_series.time_index.start,pred_series.time_index.stop]
         recent_begin_index = time_range[0] - recent_length

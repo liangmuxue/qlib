@@ -42,7 +42,8 @@ class UncertaintyLoss(nn.Module):
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
         self.classify_loss = [nn.CrossEntropyLoss(),nn.CrossEntropyLoss()]
         self.last_classify_loss = nn.CrossEntropyLoss()
-        self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
+        # self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
+        self.vr_loss = nn.CrossEntropyLoss()
 
     def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
@@ -58,22 +59,22 @@ class UncertaintyLoss(nn.Module):
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.corr_loss_comp(input, target)   
+        corr_loss = self.ccc_loss_comp(input, target)   
         # 针对均线最后一个部分，计算交叉熵损失
-        ce_loss = self.last_classify_loss(input_classify,target_classify[:,0])
+        # ce_loss = self.last_classify_loss(input_classify,target_classify[:,0])
         # 第3个部分为幅度范围分类，计算交叉熵损失 
         value_range_loss = self.vr_loss(vr_class[:,0,:],target_classify[:,1])              
         # 整体MSE损失
         mse_loss = F.mse_loss(input, target[:,:,0], reduction=self.mse_reduction)     
         # 只衡量第一个和最后一个数值
-        value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
+        # value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
         
         loss_sum = 0
         # 使用不确定性损失模式进行累加
-        loss_sum += 1/3 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
+        loss_sum += 1/2 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
         # loss_sum += 1/4 / (self.sigma[1] ** 2) * ce_loss + torch.log(1 + self.sigma[1] ** 2)
-        loss_sum += 1/3 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        loss_sum += 1/3 / (self.sigma[3] ** 2) * value_diff_loss + torch.log(1 + self.sigma[3] ** 2)
+        loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
+        # loss_sum += 1/3 / (self.sigma[3] ** 2) * value_diff_loss + torch.log(1 + self.sigma[3] ** 2)
         return loss_sum
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):
@@ -86,18 +87,19 @@ class UncertaintyLoss(nn.Module):
         corr_loss = 1 - corr_loss
         return torch.mean(corr_loss)
  
-    def ccc_loss_comp(self, input: Tensor, target: Tensor):
+    def ccc_loss_comp(self, input_ori: Tensor, target_ori: Tensor):
         """一致性相关系数计算"""
         
-        y_pred = torch.squeeze(input).cpu().numpy()
-        y_true = torch.squeeze(target).cpu().numpy()
-        cor = np.corrcoef(y_true,y_pred)[0][1]
-        mean_true = np.mean(y_true)
-        mean_pred = np.mean(y_pred)
-        var_true = np.var(y_true)
-        var_pred = np.var(y_pred)
-        sd_true = np.std(y_true)
-        sd_pred = np.std(y_pred)
+        input = input_ori.flatten()
+        target = target_ori.flatten()
+        corr_tensor = torch.stack([input,target],dim=0)
+        cor = torch.corrcoef(corr_tensor)[0][1]
+        mean_true = torch.mean(target)
+        mean_pred = torch.mean(input)
+        var_true = torch.var(target)
+        var_pred = torch.var(input)
+        sd_true = torch.std(target)
+        sd_pred = torch.std(input)
         numerator = 2*cor*sd_true*sd_pred
         denominator = var_true+var_pred+(mean_true-mean_pred)**2
         ccc = numerator/denominator

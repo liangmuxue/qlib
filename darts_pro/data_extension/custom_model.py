@@ -206,14 +206,14 @@ class _TFTCusModule(_TFTModule):
         # self.custom_histogram_adder(batch_idx)
         self._calculate_metrics(output, target, self.train_metrics)
         # 相关系数损失
-        corr_loss = self.compute_corr_metrics(output, target)
+        corr_loss = self.compute_ccc_metrics(output, target)
         # 走势分类交叉熵损失
         # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # 总体涨跌幅度分类损失
         value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class) 
         # mse损失
         mse_loss = self.compute_mse_metrics(output, target)   
-        self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_cross_loss", cross_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -341,7 +341,10 @@ class _TFTCusModule(_TFTModule):
         corr_loss = self.pearson(output_sample.transpose(1,0),target.squeeze(-1).transpose(1,0))  
         corr_loss = torch.mean(1 - corr_loss)
         return corr_loss      
-    
+ 
+    def compute_ccc_metrics(self,output,target):
+        return self.criterion.ccc_loss_comp(output,target)
+       
     def compute_mse_metrics(self,output,target):
         output_sample = torch.mean(output[:,:,0,:],dim=-1)
         mse_loss = self.mean_squared_error(output_sample, target[:,:,0])
@@ -702,7 +705,7 @@ class _TFTCusModule(_TFTModule):
         df_all = global_var.get_value("dataset").df_all
         code_dict = {}
         idx = 0
-        range_index = np.random.random_integers(0, vr_class_certainlys_imp_index.shape[0],size)
+        range_index = np.random.random_integers(0, vr_class_certainlys_imp_index.shape[0]-1,size)
         for idx,r_index in enumerate(range_index):
             s_index = vr_class_certainlys_imp_index[r_index,0]
             ts = target_info[s_index]
@@ -1303,23 +1306,48 @@ class TFTExtModel(MixedCovariatesTorchModel):
     def _verify_inference_dataset_type(self, inference_dataset: InferenceDataset):
         """重载方法以规避类型检查"""
         _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
-
+    
+    def dynamic_build_training_data(self,item,dynaimc_range=3):
+        d = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
+        past_covariate = item[1]
+        future_target = item[-2]
+        rtn_item = (item[0],past_covariate,item[2],item[3],item[4],item[5],item[6],future_target,item[8])
+        return rtn_item
+    
     def _batch_collate_fn(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
         """
         
         batch = []
+        max_cnt = 0
+        adj_max_cnt = 0
         # 过滤不符合条件的记录
         for b in ori_batch:
-            # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
             if self.mode=="train":
                 future_target = b[-2]
+                target_class = b[-3]
             else:
                 future_target = b[-1]
+            # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
             if not np.all(future_target == future_target[0]):
-                batch.append(b)
-            
+                if self.mode!="train":
+                    batch.append(b)
+                else:
+                    # 增加不平衡类别的数量，随机小幅度调整数据
+                    if target_class[1,0]==CLASS_SIMPLE_VALUE_MAX or target_class[1,0]==0:
+                        max_cnt += 1
+                        for i in range(1):
+                            adj_max_cnt += 2
+                            b_rebuild = self.dynamic_build_training_data(b)
+                            batch.append(b_rebuild)
+                    else:
+                        # 随机减少大类数量
+                        if np.random.randint(0,2)==1:
+                            batch.append(b)
+        ori_rate = max_cnt/len(ori_batch)
+        after_rate = adj_max_cnt/len(batch)
+        # print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
         aggregated = []
         first_sample = batch[0]
         for i in range(len(first_sample)):
