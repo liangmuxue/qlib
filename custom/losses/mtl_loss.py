@@ -67,14 +67,14 @@ class UncertaintyLoss(nn.Module):
         # 整体MSE损失
         mse_loss = F.mse_loss(input, target[:,:,0], reduction=self.mse_reduction)     
         # 只衡量第一个和最后一个数值
-        # value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
+        value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
         
         loss_sum = 0
         # 使用不确定性损失模式进行累加
         loss_sum += 1/2 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
         # loss_sum += 1/4 / (self.sigma[1] ** 2) * ce_loss + torch.log(1 + self.sigma[1] ** 2)
-        loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        # loss_sum += 1/3 / (self.sigma[3] ** 2) * value_diff_loss + torch.log(1 + self.sigma[3] ** 2)
+        # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
+        loss_sum += 1/2 / (self.sigma[3] ** 2) * value_diff_loss + torch.log(1 + self.sigma[3] ** 2)
         return loss_sum
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):

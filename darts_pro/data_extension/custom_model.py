@@ -199,9 +199,9 @@ class _TFTCusModule(_TFTModule):
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained
         loss = self._compute_loss((output,out_class,vr_class),(target,target_class))
-        self.log("base_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
-        self.log("class1_lr",self.trainer.optimizers[0].param_groups[1]["lr"])
-        self.log("class2_lr",self.trainer.optimizers[0].param_groups[2]["lr"])
+        # self.log("base_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
+        # self.log("class1_lr",self.trainer.optimizers[0].param_groups[1]["lr"])
+        # self.log("class2_lr",self.trainer.optimizers[0].param_groups[2]["lr"])
         self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.custom_histogram_adder(batch_idx)
         self._calculate_metrics(output, target, self.train_metrics)
@@ -239,11 +239,12 @@ class _TFTCusModule(_TFTModule):
         # 总体涨跌幅度分类损失
         value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class)         
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         value_diff_loss = self.compute_value_diff_metrics(output, target)
-        # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        mse_loss = self.compute_mse_metrics(output, target)   
+        self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         vr_class_certainlys = self.build_vr_class_cer(vr_class[:,0,:])
         last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
@@ -264,11 +265,11 @@ class _TFTCusModule(_TFTModule):
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
         cr_loss = 0
-        record_results = {"val_loss":round(loss.item(),5),"val_corr_loss":round(corr_loss.item(),5),
-                              "ce_loss":cr_loss,"value_diff_loss":round(value_diff_loss.item(),5),
-                              "value_range_loss":round(value_range_loss.item(),5),"vr_acc":round(vr_acc.item(),5),
-                              "import_vr_acc":round(import_vr_acc.item(),5)}
-        self.process_val_results(record_results,self.current_epoch)
+        # record_results = {"val_loss":round(loss.item(),5),"val_corr_loss":round(corr_loss.item(),5),
+        #                       "ce_loss":cr_loss,"value_diff_loss":round(value_diff_loss.item(),5),
+        #                       "value_range_loss":round(value_range_loss.item(),5),"vr_acc":round(vr_acc.item(),5),
+        #                       "import_vr_acc":round(import_vr_acc.item(),5)}
+        # self.process_val_results(record_results,self.current_epoch)
         return loss
     
     def build_vr_class_cer(self,vr_class):

@@ -589,7 +589,7 @@ class TftDataframeModel():
                             vr_imp_pred_price_acc += 1
                         vr_imp_pred_fliter_acc_list.append(item_result)     
                 else:
-                    if correct<0:
+                    if correct==-2:
                         vr_imp_pred_price_nag += 1       
                         if filter_flag:
                             vr_imp_filter_pred_price_nag += 1 
@@ -626,7 +626,7 @@ class TftDataframeModel():
         return result
     
     def filter_judge(self,pred_series,total_series,actual_series,raise_range=3,head_range=3,dataset=None):
-        return True
+        # return True
         recent_length = dataset.step_len - dataset.pred_len
         time_range = [pred_series.time_index.start,pred_series.time_index.stop]
         recent_begin_index = time_range[0] - recent_length
