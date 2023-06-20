@@ -33,7 +33,7 @@ from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SI
 import torchmetrics
 from torchmetrics import MeanSquaredError
 from sklearn.preprocessing import MinMaxScaler
-
+import tsaug
 from losses.mtl_loss import CorrLoss,UncertaintyLoss
 
 MixedCovariatesTrainTensorType = Tuple[
@@ -206,7 +206,7 @@ class _TFTCusModule(_TFTModule):
         # self.custom_histogram_adder(batch_idx)
         self._calculate_metrics(output, target, self.train_metrics)
         # 相关系数损失
-        corr_loss = self.compute_ccc_metrics(output, target)
+        # corr_loss = self.compute_ccc_metrics(output, target)
         # 走势分类交叉熵损失
         # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # 总体涨跌幅度分类损失
@@ -214,7 +214,7 @@ class _TFTCusModule(_TFTModule):
         # mse损失
         mse_loss = self.compute_mse_metrics(output, target)   
         # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_cross_loss", cross_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
@@ -244,8 +244,8 @@ class _TFTCusModule(_TFTModule):
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         value_diff_loss = self.compute_value_diff_metrics(output, target)
         mse_loss = self.compute_mse_metrics(output, target)   
-        self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         vr_class_certainlys = self.build_vr_class_cer(vr_class[:,0,:])
         last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
@@ -1309,10 +1309,28 @@ class TFTExtModel(MixedCovariatesTorchModel):
         _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
     
     def dynamic_build_training_data(self,item,dynaimc_range=3):
-        d = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
+        """使用数据增强，调整训练数据"""
+        
+        # dc = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
+        # dt = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
         past_covariate = item[1]
+        future_past_covariate = item[5][1]
+        past_target = item[0]
         future_target = item[-2]
-        rtn_item = (item[0],past_covariate,item[2],item[3],item[4],item[5],item[6],future_target,item[8])
+        # 把past和future重新组合，统一增强
+        target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
+        if np.random.randint(0,2)==1:
+            # 量化方式调整
+            X_aug, Y_aug = tsaug.Quantize(n_levels=10).augment(covariate, target)
+        else:
+            # 量化方式调整
+            X_aug, Y_aug = tsaug.Pool(size=2).augment(covariate, target)
+        past_covariate = X_aug[:self.input_chunk_length] 
+        future_target = X_aug[self.input_chunk_length:]
+        past_target = Y_aug[:self.input_chunk_length] 
+        future_target = Y_aug[self.input_chunk_length:] 
+        rtn_item = (past_target,past_covariate,item[2],item[3],item[4],item[5][0],item[6],future_target,item[8])
         return rtn_item
     
     def _batch_collate_fn(self,ori_batch: List[Tuple]) -> Tuple:
@@ -1332,20 +1350,28 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 future_target = b[-1]
             # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
             if not np.all(future_target == future_target[0]):
+                # 非训练部分，不需要数据增强，直接转换返回
                 if self.mode!="train":
-                    batch.append(b)
+                    if self.mode=="predict":
+                        batch.append(b)
+                    else:
+                        rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                        
+                        batch.append(rtn_item)
                 else:
+                    # 训练部分数据增强
+                    rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                    
                     # 增加不平衡类别的数量，随机小幅度调整数据
                     if target_class[1,0]==CLASS_SIMPLE_VALUE_MAX or target_class[1,0]==0:
                         max_cnt += 1
                         for i in range(1):
                             adj_max_cnt += 2
                             b_rebuild = self.dynamic_build_training_data(b)
+                            b_rebuild = rtn_item
                             batch.append(b_rebuild)
                     else:
                         # 随机减少大类数量
                         if np.random.randint(0,2)==1:
-                            batch.append(b)
+                            batch.append(rtn_item)
         ori_rate = max_cnt/len(ori_batch)
         after_rate = adj_max_cnt/len(batch)
         # print("img data rate:{},after rate:{}".format(ori_rate,after_rate))

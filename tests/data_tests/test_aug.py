@@ -28,10 +28,20 @@ def build_air_numpy_data():
     wave_data = data_filter.filter_wave_data(df, target_column="#Passengers", group_column=None,forecast_horizon=1,wave_period=16,
                                                  wave_threhold_type="more",wave_threhold=0,over_time=1) 
     np.save("custom/data/aug/tests/air.npy",wave_data)   
-        
+
+def test_tsaug():
+    import tsaug
+    from tsaug.visualization import plot
+    X = np.array([[[1,2],[2,3],[3,4]]])
+    Y = np.array([[1,2,3]])
+    X_aug, Y_aug = tsaug.AddNoise(scale=0.01).augment(X, Y)
+    X_aug, Y_aug = tsaug.Quantize(n_levels=20).augment(X, Y)
+    plot(X_aug, Y_aug);    
+   
 if __name__ == "__main__":
     # test_scaler()
-    build_air_numpy_data()
+    test_tsaug()
+    # build_air_numpy_data()
 
     
     

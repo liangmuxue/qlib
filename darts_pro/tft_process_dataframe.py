@@ -52,6 +52,7 @@ from darts_pro.tft_series_dataset import TFTSeriesDataset
 
 import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
+from trader.utils.date_util import get_tradedays
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -285,12 +286,13 @@ class TftDataframeModel():
         path = "{}/result_view".format(self.optargs["work_dir"])
         if not os.path.exists(path):
             os.mkdir(path)
-            
+        
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]
         model_name = self.optargs["model_name"]
         forecast_horizon = self.optargs["forecast_horizon"]
+        pred_range = dataset.kwargs["segments"]["test"] 
         
         # 缓存全量数据
         if self.load_dataset_file:
@@ -313,29 +315,46 @@ class TftDataframeModel():
         else:
             my_model = self._build_model(dataset,emb_size=1000,use_model_name=True)       
         logger.info("begin fit")     
-        # 需要进行fit设置
-        my_model.fit(series_total,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
-                     val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
+        # # 需要进行fit设置
+        # my_model.fit(series_total,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
+        #              val_past_covariates=past_convariates, val_future_covariates=future_convariates,verbose=True,epochs=-1)            
         logger.info("begin predict")   
         my_model.mode = "predict"
-        # 对验证集进行预测，得到预测结果   
-        pred_combine = my_model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,
-                                            past_covariates=past_convariates,future_covariates=future_convariates)
-        pred_series_list = [item[0] for item in pred_combine]
-        pred_class_total = [item[1] for item in pred_combine]       
-        vr_class_total = [item[2] for item in pred_combine]   
-        logger.info("do predict mesure")  
-        pred_class_total = torch.stack(pred_class_total)
-        pred_class = dataset.combine_pred_class(pred_class_total)
-        vr_class_total = torch.stack(vr_class_total)[:,0,:]
-        vr_class = self.combine_vr_class(vr_class_total)
-        # 可视化
-        result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],vr_class[0],
-                          series_total=series_total,dataset=dataset,do_scale=False,scaler_map=None)
-        # 保存结果到数据库
-        # self.save_pred_result(result,dataset=dataset,update=False)           
-        self.model = my_model
-        return pred_series_list,val_series_transformed
+        
+        # 根据日期范围逐日进行预测，得到预测结果   
+        start_time = pred_range[0]
+        end_time = pred_range[1]
+        date_range = get_tradedays(start_time,end_time)
+        for cur_date in date_range:        
+            # 根据时间点，取得对应的输入时间序列范围
+            total_range,val_range,missing_instruments = dataset.get_part_time_range(cur_date,ref_df=dataset.df_all)
+            # 如果不满足预测要求，则返回空
+            if total_range is None:
+                self.log("pred series none")
+                return None
+            # 如果包含不符合的数据，再次进行过滤
+            if len(missing_instruments)>0:
+                outer_df_filter = dataset.df_all[~dataset.df_all[self.dataset.get_group_column()].isin(missing_instruments)]
+            else:
+                outer_df_filter = dataset.df_all     
+            # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+                self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df_filter)
+            pred_combine = my_model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,
+                                                past_covariates=past_convariates,future_covariates=future_convariates)
+            pred_series_list = [item[0] for item in pred_combine]
+            pred_class_total = [item[1] for item in pred_combine]       
+            vr_class_total = [item[2] for item in pred_combine]   
+            logger.info("do predict mesure")  
+            pred_class_total = torch.stack(pred_class_total)
+            pred_class = dataset.combine_pred_class(pred_class_total)
+            vr_class_total = torch.stack(vr_class_total)[:,0,:]
+            vr_class = self.combine_vr_class(vr_class_total)
+            # 可视化
+            result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],vr_class[0],
+                              series_total=series_total,dataset=dataset,do_scale=False,scaler_map=None)
+        
+        
     
     def combine_vr_class(self,vr_class_total):
         vr_class = F.softmax(vr_class_total,dim=-1)
@@ -514,8 +533,7 @@ class TftDataframeModel():
         vr_imp_filter_pred_price_nag = 0
         vr_imp_filter_all = 0
         vr_imp_filter_acc = 0
-        vr_imp_pred_acc_list = []
-        vr_imp_pred_fliter_acc_list = []
+        vr_imp_pred_result = []
         # r = 5
         # view_list = random_int_list(1,len(val_series_list)-1,r)
         
@@ -553,8 +571,11 @@ class TftDataframeModel():
                 vr_imp_recall = vr_imp_recall + vr_acc_item[0]  
             if vr_class==CLASS_SIMPLE_VALUE_MAX:
                 vr_imp_pred_all += 1
-                item_result = {group_code:{"filter":0,"correct":0}}
-                vr_imp_pred_acc_list.append(item_result)
+                item_result = {"group_code":group_code,"filter":0,"match":0,"correct":0}
+                result.append(item_result)                
+                vr_imp_pred_result.append(item_result)
+                if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
+                    item_result["match"] = 1                 
                 # 通过价格判断是否准确
                 start = pred_series.time_index.start
                 end = pred_series.time_index.stop
@@ -575,54 +596,45 @@ class TftDataframeModel():
                     correct = -1
                 else:
                     correct = -2                          
-                item_result[group_code]["correct"] = correct                      
+                item_result["correct"] = correct                      
                 # 进一步筛选后，统计准确率
                 filter_flag = self.filter_judge(pred_series, total_series,actual_series,dataset=dataset)
                 if filter_flag:
                     vr_imp_filter_all += 1
-                    item_result[group_code]["filter"] = 1
-                if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
-                    vr_imp_pred_acc += 1
-                    if filter_flag:
-                        vr_imp_filter_acc += 1    
-                        if correct==2:
-                            vr_imp_pred_price_acc += 1
-                        vr_imp_pred_fliter_acc_list.append(item_result)     
-                else:
-                    if correct==-2:
-                        vr_imp_pred_price_nag += 1       
-                        if filter_flag:
-                            vr_imp_filter_pred_price_nag += 1 
+                    item_result["filter"] = 1
             # 开始结束差的距离衡量
             diff_item = diff_dis(total_series, pred_series) 
             diff_all = diff_all + diff_item      
-            result.append({"instrument":group_rank_code,"corr_item":corr_item,
-                           "vr_acc_item":vr_acc_item,"mape_item":mape_item})
-            kwargs = dict(figsize=(10, 5))
+            # 作图
             if df_item.shape[0]>0:
                 # 显示重点上涨类别判断情况
                 if vr_class==CLASS_SIMPLE_VALUE_MAX and filter_flag:
                     self.show_pred_result(df_item, pred_series, actual_series, 
                                           vr_class=vr_class,tar_class=vr_acc_item[1],
                                           mape_item=mape_item,corr_item=corr_item,dataset=dataset)
+        # 总体统计
         mape_mean = mape_all/len(val_series_list)
         corr_mean = corr_all/len(val_series_list)
         diff_mean = diff_all/len(val_series_list)
         # cross_mean = cross_all/len(val_series_list)
         vr_acc_mean = vr_acc_all/len(val_series_list)   
         vr_recall_imp_mean = vr_imp_recall/vr_imp_all    
-        if vr_imp_pred_all>0:
-            vr_acc_imp_mean = vr_imp_pred_acc/vr_imp_pred_all  
-        else:
-            vr_acc_imp_mean = 0
+        print("mape_mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{}".
+              format(mape_mean,corr_mean,diff_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all)) 
+        # 统计重点计算准确度
+        for item in result:
+            if not item["filter"]==1:
+                continue
+            vr_imp_filter_all += 1
+            if item["match"]==1:
+                vr_imp_filter_acc += 1
+            if item["correct"]==2:
+                vr_imp_pred_price_acc += 1
+            if item["correct"]==-2:
+                vr_imp_pred_price_nag += 1                
         # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
-        print("mape_mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{},vr_imp_acc_mean:{} with {}/{}" \
-              " vr_imp_filter_acc:{}/{}/{},vr_imp_price_acc:{}/{}/{}"
-              .format(mape_mean,corr_mean,diff_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all,
-                      vr_acc_imp_mean,vr_imp_pred_acc,vr_imp_pred_all,vr_imp_filter_acc,vr_imp_pred_price_nag,vr_imp_filter_all,
-                      vr_imp_pred_price_acc,vr_imp_filter_pred_price_nag,vr_imp_filter_all))     
-        # print("vr_imp_pred_acc_list:",vr_imp_pred_acc_list)
-        print("vr_imp_pred_fliter_acc_list:",vr_imp_pred_fliter_acc_list)
+        print("vr_imp_filter_acc:{}/{},vr_imp_price_acc:{}/{}/{}".
+              format(vr_imp_filter_acc,vr_imp_filter_all,vr_imp_pred_price_acc,vr_imp_pred_price_nag,vr_imp_filter_all))     
         return result
     
     def filter_judge(self,pred_series,total_series,actual_series,raise_range=3,head_range=3,dataset=None):

@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market all
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -59,7 +59,7 @@ task:
             load_dataset_file: &load_dataset_file False
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
-               gamma: 0.3     
+               gamma: 0.8     
                step_size: 1    
             optimizer_kwargs:
                lr: 0.01
@@ -68,8 +68,8 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_5_step5'
-               load_weight: True
+               model_name: 'test9_tft_all_aug'
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

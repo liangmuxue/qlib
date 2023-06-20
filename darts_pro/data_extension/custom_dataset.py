@@ -126,10 +126,11 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                 f"that don't extend far enough into the future. ({idx}-th sample)",
             )
 
-            covariate = covariate_series.random_component_values(copy=False)[
-                covariate_start:covariate_end
+            covariate_total = covariate_series.random_component_values(copy=False)[
+                covariate_start:covariate_end + self.output_chunk_length
             ]
-
+            covariate = covariate_total[:self.input_chunk_length]
+            future_covariate = covariate_total[self.input_chunk_length:]
             raise_if_not(
                 len(covariate)
                 == (
@@ -146,7 +147,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
             static_covariate = target_series.static_covariates_values(copy=False)
         else:
             static_covariate = None
-        return past_target, covariate, static_covariate, future_target,target_info
+        return past_target, covariate, static_covariate, future_target,target_info,future_covariate
         
 class CustomSequentialDataset(MixedCovariatesTrainingDataset):
     """重载MixedCovariatesSequentialDataset，用于定制加工数据"""
@@ -208,7 +209,8 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         np.ndarray,
     ]:
 
-        past_target, past_covariate, static_covariate, future_target,target_info = self.ds_past[idx]
+        past_target, past_covariate, static_covariate, future_target,target_info,future_past_covariate = self.ds_past[idx]
+        
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
         # 使用原价格作为涨跌幅分类参照
@@ -254,7 +256,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             historic_future_covariate,
             future_covariate,
             static_covariate,
-            scaler,
+            (scaler,future_past_covariate),
             target_class,
             future_target,
             target_info
