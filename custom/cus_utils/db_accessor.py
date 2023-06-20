@@ -17,7 +17,12 @@ class DbAccessor():
         self.password = "lmx"
         self.database = "qlib"
 
-
+        # self.host="47.105.170.76"
+        # self.port = 3306
+        # self.user = "root"
+        # self.password = "zkrh2019"
+        # self.database = "qlib"
+        
     def get_connection(self):
         return pymysql.connect(host=self.host,
                                port=self.port,

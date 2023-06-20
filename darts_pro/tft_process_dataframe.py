@@ -52,7 +52,7 @@ from darts_pro.tft_series_dataset import TFTSeriesDataset
 
 import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
-from trader.utils.date_util import get_tradedays
+from trader.utils.date_util import get_tradedays,date_string_transfer
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -334,12 +334,12 @@ class TftDataframeModel():
                 return None
             # 如果包含不符合的数据，再次进行过滤
             if len(missing_instruments)>0:
-                outer_df_filter = dataset.df_all[~dataset.df_all[self.dataset.get_group_column()].isin(missing_instruments)]
+                outer_df_filter = dataset.df_all[~dataset.df_all[dataset.get_group_column()].isin(missing_instruments)]
             else:
                 outer_df_filter = dataset.df_all     
             # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
             train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
-                self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df_filter)
+                dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df_filter)
             pred_combine = my_model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,
                                                 past_covariates=past_convariates,future_covariates=future_convariates)
             pred_series_list = [item[0] for item in pred_combine]
@@ -353,7 +353,25 @@ class TftDataframeModel():
             # 可视化
             result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],vr_class[0],
                               series_total=series_total,dataset=dataset,do_scale=False,scaler_map=None)
-        
+            
+            vr_imp_pred_price_acc = 0
+            vr_imp_pred_price_nag = 0
+            vr_imp_filter_acc = 0
+            vr_imp_filter_all = 0            
+            # 统计重点计算准确度
+            for item in result:
+                if not item["filter"]==1:
+                    continue
+                vr_imp_filter_all += 1
+                if item["match"]==1:
+                    vr_imp_filter_acc += 1
+                if item["correct"]==2:
+                    vr_imp_pred_price_acc += 1
+                if item["correct"]==-2:
+                    vr_imp_pred_price_nag += 1                
+            # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
+            print("vr_imp_filter_acc:{}/{},vr_imp_price_acc:{}/{}/{}".
+                  format(vr_imp_filter_acc,vr_imp_filter_all,vr_imp_pred_price_acc,vr_imp_pred_price_nag,vr_imp_filter_all))          
         
     
     def combine_vr_class(self,vr_class_total):
@@ -527,12 +545,8 @@ class TftDataframeModel():
         vr_imp_all = 0
         vr_imp_recall = 0
         vr_imp_pred_all = 0
-        vr_imp_pred_acc = 0
-        vr_imp_pred_price_acc = 0
-        vr_imp_pred_price_nag = 0
-        vr_imp_filter_pred_price_nag = 0
-        vr_imp_filter_all = 0
-        vr_imp_filter_acc = 0
+
+        
         vr_imp_pred_result = []
         # r = 5
         # view_list = random_int_list(1,len(val_series_list)-1,r)
@@ -600,7 +614,6 @@ class TftDataframeModel():
                 # 进一步筛选后，统计准确率
                 filter_flag = self.filter_judge(pred_series, total_series,actual_series,dataset=dataset)
                 if filter_flag:
-                    vr_imp_filter_all += 1
                     item_result["filter"] = 1
             # 开始结束差的距离衡量
             diff_item = diff_dis(total_series, pred_series) 
@@ -621,24 +634,10 @@ class TftDataframeModel():
         vr_recall_imp_mean = vr_imp_recall/vr_imp_all    
         print("mape_mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{}".
               format(mape_mean,corr_mean,diff_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all)) 
-        # 统计重点计算准确度
-        for item in result:
-            if not item["filter"]==1:
-                continue
-            vr_imp_filter_all += 1
-            if item["match"]==1:
-                vr_imp_filter_acc += 1
-            if item["correct"]==2:
-                vr_imp_pred_price_acc += 1
-            if item["correct"]==-2:
-                vr_imp_pred_price_nag += 1                
-        # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
-        print("vr_imp_filter_acc:{}/{},vr_imp_price_acc:{}/{}/{}".
-              format(vr_imp_filter_acc,vr_imp_filter_all,vr_imp_pred_price_acc,vr_imp_pred_price_nag,vr_imp_filter_all))     
         return result
     
     def filter_judge(self,pred_series,total_series,actual_series,raise_range=3,head_range=3,dataset=None):
-        # return True
+        return True
         recent_length = dataset.step_len - dataset.pred_len
         time_range = [pred_series.time_index.start,pred_series.time_index.stop]
         recent_begin_index = time_range[0] - recent_length
