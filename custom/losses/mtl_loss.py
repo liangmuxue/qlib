@@ -9,23 +9,27 @@ import numpy as np
 from darts.utils import likelihood_models
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class_weight
 
-class CorrLoss(_Loss):
+class MseLoss(_Loss):
+    """自定义mse损失，用于设置类别权重"""
+    
     __constants__ = ['reduction']
 
-    def __init__(self, num_outputs=5, size_average=None, reduce=None, reduction: str = 'mean',device=None) -> None:
-        super(CorrLoss, self).__init__(size_average, reduce, reduction)
+    def __init__(self, weight=2, size_average=None, reduce=None, reduction: str = 'mean',device=None) -> None:
+        super(MseLoss, self).__init__(size_average, reduce, reduction)
         self.device = device
-        # self.pearson = torchmetrics.PearsonCorrCoef(num_outputs=num_outputs)
+        self.weight = weight
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        mse_loss = F.mse_loss(input, target, reduction=self.reduction)
-        num_outputs = input.shape[0]
-        pearson = torchmetrics.PearsonCorrCoef(num_outputs=num_outputs).to(self.device)
-        input_corr = torch.squeeze(input).transpose(1,0)
-        target_corr = torch.squeeze(target).transpose(1,0)
-        corr_loss = pearson(input_corr, target_corr)
-        return corr_loss  
-    
+        loss_arr_ori = (input - target) ** 2
+        loss_arr_pun = loss_arr_ori * self.weight
+        # 对于预测值大于实际值的情况，增加惩罚项
+        loss_arr = torch.where((input-target)<0,loss_arr_ori,loss_arr_pun)
+        if self.reduction=="mean":
+            mse_loss = torch.mean(loss_arr)
+        else:
+            mse_loss = torch.sum(loss_arr)
+        return mse_loss  
+        
 class UncertaintyLoss(nn.Module):
     """不确定损失,包括mse，corr以及分类交叉熵损失等"""
 
@@ -44,6 +48,7 @@ class UncertaintyLoss(nn.Module):
         self.last_classify_loss = nn.CrossEntropyLoss()
         # self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
         self.vr_loss = nn.CrossEntropyLoss()
+        self.mse_loss = MseLoss(reduction=mse_reduction)
 
     def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
@@ -59,13 +64,13 @@ class UncertaintyLoss(nn.Module):
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.ccc_loss_comp(input, target)   
+        # corr_loss = self.ccc_loss_comp(input, target)   
         # 针对均线最后一个部分，计算交叉熵损失
         # ce_loss = self.last_classify_loss(input_classify,target_classify[:,0])
         # 第3个部分为幅度范围分类，计算交叉熵损失 
         value_range_loss = self.vr_loss(vr_class[:,0,:],target_classify[:,1])              
         # 整体MSE损失
-        mse_loss = F.mse_loss(input, target[:,:,0], reduction=self.mse_reduction)     
+        mse_loss = self.mse_loss(input, target[:,:,0])     
         # 只衡量第一个和最后一个数值
         # value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
         
