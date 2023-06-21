@@ -86,7 +86,18 @@ def _build_forecast_series(
         static_covariates=input_series.static_covariates,
         hierarchy=input_series.hierarchy,
     ),pred_mean_class,vr_mean_class)
-     
+ 
+def compute_price_class(target_info):   
+    price_tar = target_info["price_array"]
+    max_value = np.max(price_tar)
+    min_value = np.min(price_tar)
+    if max_value - price_tar[0] > price_tar[0] - min_value:
+        raise_range = (max_value - price_tar[0])/price_tar[0]*100
+    else:
+        raise_range = (min_value - price_tar[0])/price_tar[0]*100            
+    p_taraget_class = get_simple_class(raise_range)     
+    return p_taraget_class
+    
 class _TFTCusModule(_TFTModule):
     def __init__(
         self,
@@ -316,14 +327,7 @@ class _TFTCusModule(_TFTModule):
         # 重点类别的价格准确率
         price_class = []
         for item in target_info:
-            price_tar = item["price_array"]
-            max_value = np.max(price_tar)
-            min_value = np.min(price_tar)
-            if max_value - price_tar[0] > price_tar[0] - min_value:
-                raise_range = (max_value - price_tar[0])/price_tar[0]*100
-            else:
-                raise_range = (min_value - price_tar[0])/price_tar[0]*100            
-            p_taraget_class = get_simple_class(raise_range)
+            p_taraget_class = compute_price_class(item)
             price_class.append(p_taraget_class)
         price_class = torch.Tensor(np.array(price_class)).int()
         import_index = torch.nonzero(vr_class==CLASS_SIMPLE_VALUE_MAX)[:,0]
@@ -337,8 +341,7 @@ class _TFTCusModule(_TFTModule):
             import_price_nag = import_price_nag_count/import_index.shape[0]
                      
         return total_acc,import_acc, import_recall,import_price_acc,import_price_nag,price_class
-        
-       
+    
     def compute_corr_metrics(self,output,target):
         num_outputs = output.shape[0]
         self.pearson = torchmetrics.PearsonCorrCoef(num_outputs=num_outputs).to(self.device)
@@ -1320,6 +1323,13 @@ class TFTExtModel(MixedCovariatesTorchModel):
         future_past_covariate = item[5][1]
         past_target = item[0]
         future_target = item[-2]
+        target_info = item[-1]
+        
+        # 重点关注价格指数,只对价格涨幅达标的数据进行增强
+        p_taraget_class = compute_price_class(target_info)
+        if p_taraget_class!=CLASS_SIMPLE_VALUE_MAX:
+            return None
+        
         # 把past和future重新组合，统一增强
         target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
         covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
@@ -1329,10 +1339,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
         else:
             # 量化方式调整
             X_aug, Y_aug = tsaug.Pool(size=2).augment(covariate, target)
-        past_covariate = X_aug[:self.input_chunk_length] 
-        future_target = X_aug[self.input_chunk_length:]
-        past_target = Y_aug[:self.input_chunk_length] 
-        future_target = Y_aug[self.input_chunk_length:] 
+        past_covariate = X_aug[0,:self.input_chunk_length,:] 
+        future_target = Y_aug[0,self.input_chunk_length:,:]
         rtn_item = (past_target,past_covariate,item[2],item[3],item[4],item[5][0],item[6],future_target,item[8])
         return rtn_item
     
@@ -1364,12 +1372,16 @@ class TFTExtModel(MixedCovariatesTorchModel):
                     # 训练部分数据增强
                     rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                    
                     # 增加不平衡类别的数量，随机小幅度调整数据
-                    if target_class[1,0]==CLASS_SIMPLE_VALUE_MAX or target_class[1,0]==0:
+                    if target_class[1,0]==CLASS_SIMPLE_VALUE_MAX:
                         max_cnt += 1
+                        batch.append(rtn_item)
                         for i in range(1):
-                            adj_max_cnt += 2
                             b_rebuild = self.dynamic_build_training_data(b)
-                            b_rebuild = rtn_item
+                            # 不符合要求则不增强
+                            if b_rebuild is None:
+                                continue
+                            # b_rebuild = rtn_item
+                            adj_max_cnt += 2
                             batch.append(b_rebuild)
                     else:
                         # 随机减少大类数量

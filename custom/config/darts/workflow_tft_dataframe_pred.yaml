@@ -76,7 +76,7 @@ task:
             segments:
                 train_total: [2022-01-01, 2023-05-31]
                 valid: [2023-01-01, 2023-03-31]
-                test: [2023-04-07, 2023-04-07]
+                test: [2023-03-07, 2023-03-07]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
