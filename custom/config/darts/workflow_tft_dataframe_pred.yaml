@@ -61,7 +61,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test6_tft_100_aug'
+               model_name: 'test8_tft_100_aug'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -76,7 +76,7 @@ task:
             segments:
                 train_total: [2022-01-01, 2023-05-31]
                 valid: [2023-01-01, 2023-03-31]
-                test: [2023-03-07, 2023-03-07]
+                test: [2023-04-07, 2023-04-07]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'

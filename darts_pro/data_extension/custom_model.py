@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader
 from joblib import Parallel, delayed
 
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import target_scale
+from cus_utils.common_compute import compute_price_class
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_simple_class
@@ -87,16 +87,6 @@ def _build_forecast_series(
         hierarchy=input_series.hierarchy,
     ),pred_mean_class,vr_mean_class)
  
-def compute_price_class(target_info):   
-    price_tar = target_info["price_array"]
-    max_value = np.max(price_tar)
-    min_value = np.min(price_tar)
-    if max_value - price_tar[0] > price_tar[0] - min_value:
-        raise_range = (max_value - price_tar[0])/price_tar[0]*100
-    else:
-        raise_range = (min_value - price_tar[0])/price_tar[0]*100            
-    p_taraget_class = get_simple_class(raise_range)     
-    return p_taraget_class
     
 class _TFTCusModule(_TFTModule):
     def __init__(
@@ -327,7 +317,7 @@ class _TFTCusModule(_TFTModule):
         # 重点类别的价格准确率
         price_class = []
         for item in target_info:
-            p_taraget_class = compute_price_class(item)
+            p_taraget_class = compute_price_class(item["price_array"])
             price_class.append(p_taraget_class)
         price_class = torch.Tensor(np.array(price_class)).int()
         import_index = torch.nonzero(vr_class==CLASS_SIMPLE_VALUE_MAX)[:,0]
@@ -1326,7 +1316,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         target_info = item[-1]
         
         # 重点关注价格指数,只对价格涨幅达标的数据进行增强
-        p_taraget_class = compute_price_class(target_info)
+        p_taraget_class = compute_price_class(target_info["price_array"])
         if p_taraget_class!=CLASS_SIMPLE_VALUE_MAX:
             return None
         

@@ -111,7 +111,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         past_target = target_vals[past_start:past_end]
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
-        price_array = self.ass_data[code][future_start:future_end]
+        price_array = self.ass_data[code][future_start-1:future_end]
         target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
                        "future_start":future_start,"future_end":future_end,"price_array":price_array,

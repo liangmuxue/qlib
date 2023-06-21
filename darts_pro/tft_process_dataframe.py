@@ -50,6 +50,7 @@ from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAK
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 
+from cus_utils.common_compute import compute_price_class
 import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
 from trader.utils.date_util import get_tradedays,date_string_transfer
@@ -365,9 +366,9 @@ class TftDataframeModel():
                 vr_imp_filter_all += 1
                 if item["match"]==1:
                     vr_imp_filter_acc += 1
-                if item["correct"]==2:
+                if item["correct"]==CLASS_SIMPLE_VALUE_MAX:
                     vr_imp_pred_price_acc += 1
-                if item["correct"]==-2:
+                if item["correct"]==0:
                     vr_imp_pred_price_nag += 1                
             # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
             print("vr_imp_filter_acc:{}/{},vr_imp_price_acc:{}/{}/{}".
@@ -594,22 +595,7 @@ class TftDataframeModel():
                 start = pred_series.time_index.start
                 end = pred_series.time_index.stop
                 price_data = df_item[(df_item["time_idx"]>=start-1)&(df_item["time_idx"]<end)]["label_ori"].values
-                cur_price = price_data[0]
-                price_list = price_data[1:]
-                price_raise_range = (price_list.max() - cur_price)/cur_price
-                price_down_range = (price_list.min() - cur_price)/cur_price
-                if price_raise_range > 0.05:
-                    correct = 2
-                elif price_raise_range > 0.03:
-                    correct = 1
-                elif price_raise_range > 0.01:
-                    correct = 0         
-                elif price_down_range > -0.01:
-                    correct = 0        
-                elif price_down_range > -0.03:
-                    correct = -1
-                else:
-                    correct = -2                          
+                correct = compute_price_class(price_data)             
                 item_result["correct"] = correct                      
                 # 进一步筛选后，统计准确率
                 filter_flag = self.filter_judge(pred_series, total_series,actual_series,dataset=dataset)
