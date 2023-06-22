@@ -250,23 +250,10 @@ def test_pd_index():
 
                   
 def test_norm():
-    # from torch import nn
-    # from torchvision import transforms
-    # bn = nn.BatchNorm1d(num_features=3, eps=0, affine=False, track_running_stats=False)
-    # x = torch.rand(10, 3, 5)*10000
-    # official_bn = bn(x)    
-    # print(official_bn)
-    # vmax = official_bn.max()
-    # print("vmax:",vmax)
-    # official_bn = official_bn/vmax
-    # print(official_bn)
-    a = np.array([0.1,0.4,0.3])
-    ratio = 2/(np.max(a)-np.min(a)) 
-    #as you want your data to be between -1 and 1, everything should be scaled to 2, 
-    #if your desired min and max are other values, replace 2 with your_max - your_min
-    shift = (np.max(a)+np.min(a))/2 
-    #now you need to shift the center to the middle, this is not the average of the values.
-    rtn = (a - shift)*ratio
+ 
+    a = np.array([[0.1,0.4,0.3],[0.2,0.5,0.6]]).transpose(1,0)
+    rtn = (a-np.min(a,axis=0))/(np.max(a,axis=0)-np.min(a,axis=0)) 
+    rtn = rtn + 0.001
     print(rtn)
    
 def test_torch_vision():
@@ -460,7 +447,7 @@ if __name__ == "__main__":
     # test_split_compute()
     # test_variable()
     # test_index()
-    test_temp()
+    # test_temp()
     # test_pd_ser()
     # test_torch_vision()
     # torch_comp()
@@ -477,7 +464,7 @@ if __name__ == "__main__":
     # test_pd_df()
     # test_pd_trans()
     # test_pd_index()
-    # test_norm()
+    test_norm()
     # test_ccc()
     
     

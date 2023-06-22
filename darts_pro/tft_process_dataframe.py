@@ -349,7 +349,7 @@ class TftDataframeModel():
             logger.info("do predict mesure")  
             pred_class_total = torch.stack(pred_class_total)
             pred_class = dataset.combine_pred_class(pred_class_total)
-            vr_class_total = torch.stack(vr_class_total)[:,0,:]
+            vr_class_total = torch.stack(vr_class_total)
             vr_class = self.combine_vr_class(vr_class_total)
             # 可视化
             result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],vr_class[0],
@@ -562,7 +562,6 @@ class TftDataframeModel():
         for i in range(len(pred_series_list)):
             filter_flag = False
             pred_series = pred_series_list[i]
-            pred_class = pred_class_list[i]
             vr_class = vr_class_list[i]
             vr_class_confi = vr_class_confi_list[i]
             total_series = series_total[i]
@@ -579,7 +578,9 @@ class TftDataframeModel():
             vr_acc_item = vr_acc_compute(total_series, pred_series,vr_class)  
             vr_acc_all = vr_acc_all + vr_acc_item[0]  
             # 取得指定股票，如果不存在则不进行可视化
-            df_item = df_pick[df_pick[group_rank_column]==group_rank_code]            
+            df_item = df_pick[df_pick[group_rank_column]==group_rank_code]    
+            if df_item.shape[0]==0:
+                continue        
             # 重点关注上涨类别的召回率和准确率
             if vr_acc_item[1]==CLASS_SIMPLE_VALUE_MAX:
                 vr_imp_all += 1
@@ -673,7 +674,7 @@ class TftDataframeModel():
                                                  value_cols="label_ori")       
         price_series.plot(label="price")
         # fig, ax = plt.subplots(**kwargs)    
-        date_range = dataset.get_datetime_with_index(group_code,pred_series.start_time(),pred_series.end_time())
+        date_range = dataset.get_datetime_with_index(group_code,pred_series.start_time(),pred_series.end_time()+1)
         range_show = "[{}-{}]".format(date_range[0],date_range[-1])
         # ax.set_xticks(date_range)                                
         pred_class_str = "{}/{}".format(vr_class,tar_class)

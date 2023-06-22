@@ -274,29 +274,30 @@ class TFTSeriesDataset(TFTDataset):
             covariates_array = []
             for index,series in enumerate(train_series):
                 group_col_val = series.static_covariates[group_column].values[0]
-                scaler = Scaler()
+                # scaler = Scaler()
                 # 遍历并筛选出不同分组字段(股票)的单个dataframe
                 df_item = df_all[df_all[group_column]==group_col_val]
-                df_item_train = df_train[df_train[group_column]==group_col_val] 
+                # df_item_train = df_train[df_train[group_column]==group_col_val] 
                 covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
                                                          freq='D',
                                                          fill_missing_dates=True,
                                                          value_cols=column_names)  
-                train_covariates = TimeSeries.from_dataframe(df_item_train,time_col=time_column,
-                                                         freq='D',
-                                                         fill_missing_dates=True,
-                                                         value_cols=column_names)       
+                # train_covariates = TimeSeries.from_dataframe(df_item_train,time_col=time_column,
+                #                                          freq='D',
+                #                                          fill_missing_dates=True,
+                #                                          value_cols=column_names)       
                 # 使用训练数据fit，并transform到整个序列    
-                scaler.fit(train_covariates)
-                covariates_transformed = scaler.transform(covariates)    
-                # 对于补充类字段，不需要transform，在此进行拼接
-                if no_transform_columns is not None:
-                    att_covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
-                                                         freq='D',
-                                                         fill_missing_dates=True,
-                                                         value_cols=no_transform_columns)  
-                    covariates_transformed = covariates_transformed.concatenate(att_covariates,axis=1)
-                covariates_array.append(covariates_transformed)
+                # scaler.fit(train_covariates)
+                # covariates_transformed = scaler.transform(covariates)    
+                # # 对于补充类字段，不需要transform，在此进行拼接
+                # if no_transform_columns is not None:
+                #     att_covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
+                #                                          freq='D',
+                #                                          fill_missing_dates=True,
+                #                                          value_cols=no_transform_columns)  
+                #     covariates_transformed = covariates_transformed.concatenate(att_covariates,axis=1)
+                # covariates_array.append(covariates_transformed)
+                covariates_array.append(covariates)
             return covariates_array            
 
         # 生成过去协变量，并归一化

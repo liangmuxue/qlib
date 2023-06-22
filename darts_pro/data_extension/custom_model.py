@@ -221,13 +221,14 @@ class _TFTCusModule(_TFTModule):
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
         return loss
     
-    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
+    def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """performs the validation step"""
         
+        # val_batch = self.filter_batch_by_spec_date(val_batch_ori)
+        val_batch = val_batch_ori
         (output,out_class,vr_class) = self._produce_train_output(val_batch[:5])
         scaler,target_class,target,target_info = val_batch[5:]  
         target_class = target_class[:,:,0]
-        target_trend_class = target_class[:,0]
         target_vr_class = target_class[:,1]
         # 全部损失
         loss = self._compute_loss((output,out_class,vr_class), (target,target_class))
@@ -247,10 +248,10 @@ class _TFTCusModule(_TFTModule):
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         vr_class_certainlys = self.build_vr_class_cer(vr_class[:,0,:])
-        last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
+        # last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
         vr_acc,import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class = self.compute_vr_class_acc(
-            vr_class_certainlys, target_vr_class,target_info=target_info,last_batch_index=last_batch_index)  
+            vr_class_certainlys, target_vr_class,target_info=target_info,last_batch_index=None)  
         self.log("vr_acc", vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
@@ -261,8 +262,7 @@ class _TFTCusModule(_TFTModule):
         # self.log("import_sec_recall", import_sec_recall, batch_size=val_batch[0].shape[0], prog_bar=True)  
         past_target = val_batch[0]
         self.val_metric_show(output,target,price_class,vr_class_certainlys,
-                                 target_vr_class,past_target=past_target,val_batch=val_batch,scaler=scaler,target_info=target_info,
-                                 last_batch_index=last_batch_index,item_codes=item_codes)
+                                 target_vr_class,past_target=past_target,val_batch=val_batch,scaler=scaler,target_info=target_info)
         self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
@@ -273,6 +273,26 @@ class _TFTCusModule(_TFTModule):
         #                       "import_vr_acc":round(import_vr_acc.item(),5)}
         # self.process_val_results(record_results,self.current_epoch)
         return loss
+    
+    def filter_batch_by_spec_date(self,val_batch,date_spec="20230307"):
+        df_all = global_var.get_value("dataset").df_all
+        df_part = df_all[df_all["datetime"].dt.strftime('%Y%m%d')==date_spec]
+        rtn_index = []
+        target_info_list = val_batch[-1]
+        spec_codes = []
+        for i in range(len(target_info_list)):
+            target_info = target_info_list[i]
+            df_match = df_part[df_part["instrument_rank"]==target_info["item_rank_code"]]
+            if df_match["time_idx"].values[0]==(target_info["total_start"]+target_info["future_start"]):
+                if target_info["item_rank_code"] not in spec_codes:
+                    spec_codes.append(target_info["item_rank_code"])
+                    rtn_index.append(i)
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch
+        val_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
+                            future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
+                            np.array(scaler)[rtn_index].tolist(),target_class[rtn_index,:,:],
+                            target[rtn_index,:,:],np.array(target_info)[rtn_index].tolist()]
+        return val_batch_filter
     
     def build_vr_class_cer(self,vr_class):
         vr_class_cer = F.softmax(vr_class,dim=-1)
@@ -442,91 +462,25 @@ class _TFTCusModule(_TFTModule):
         """重载原方法，服务于自定义模式"""
         
         input_data_tuple,scalers, batch_input_series = batch[:-2], batch[-2], batch[-1]
-        # scaler_map = self.build_scaler_map(scalers, batch_input_series)
-        # number of individual series to be predicted in current batch
-        num_series = input_data_tuple[0].shape[0]
-
-        # number of times the input tensor should be tiled to produce predictions for multiple samples
-        # this variable is larger than 1 only if the batch_size is at least twice as large as the number
-        # of individual time series being predicted in current batch (`num_series`)
-        batch_sample_size = min(
-            max(self.pred_batch_size // num_series, 1), self.pred_num_samples
-        )
-
-        # counts number of produced prediction samples for every series to be predicted in current batch
-        sample_count = 0
-
-        # repeat prediction procedure for every needed sample
-        batch_predictions = []
-        while sample_count < self.pred_num_samples:
-
-            # make sure we don't produce too many samples
-            if sample_count + batch_sample_size > self.pred_num_samples:
-                batch_sample_size = self.pred_num_samples - sample_count
-
-            # stack multiple copies of the tensors to produce probabilistic forecasts
-            input_data_tuple_samples = self._sample_tiling(
-                input_data_tuple, batch_sample_size
-            )
-
-            # get predictions for 1 whole batch (can include predictions of multiple series
-            # and for multiple samples if a probabilistic forecast is produced)
-            batch_prediction,batch_pred_class,batch_vr_class = self._get_batch_prediction(
-                self.pred_n, input_data_tuple_samples, self.pred_roll_size
-            )
-
-            # reshape from 3d tensor (num_series x batch_sample_size, ...)
-            # into 4d tensor (batch_sample_size, num_series, ...), where dim 0 represents the samples
-            out_shape = batch_prediction.shape
-            batch_prediction = batch_prediction.reshape(
-                (
-                    batch_sample_size,
-                    num_series,
-                )
-                + out_shape[1:]
-            )
-            # 还需要处理分类数据的shape
-            out_class_shape = batch_pred_class.shape
-            batch_pred_class = batch_pred_class.reshape(
-                (
-                    batch_sample_size,
-                    num_series,
-                )
-                + out_class_shape[1:]
-            )
-            vr_class_shape = batch_vr_class.shape
-            batch_vr_class = batch_vr_class.reshape(
-                (
-                    batch_sample_size,
-                    num_series,
-                )
-                + vr_class_shape[1:]
-            )            
-            # save all predictions and update the `sample_count` variable
-            batch_predictions.append(batch_prediction)
-            sample_count += batch_sample_size
-
-        # concatenate the batch of samples, to form self.pred_num_samples samples
-        batch_predictions = torch.cat(batch_predictions, dim=0)
-        batch_predictions = batch_predictions.cpu().detach().numpy()
-        # self.predict_data_eval(batch_predictions,batch_input_series)
-        
-        batch_predictions_unscale = np.zeros([batch_predictions.shape[0],
-                    batch_predictions.shape[1],batch_predictions.shape[2],batch_predictions.shape[3]])
+        input_data_tuple = [input_data_tuple[0],input_data_tuple[1],input_data_tuple[2],input_data_tuple[3],input_data_tuple[5]]
+        input_past, input_future, input_static = self._process_input_batch(input_data_tuple)
+        out_combine = self._produce_predict_output(x=(input_past, input_future, input_static))   
+        (output,pred_class,vr_class) = out_combine
+        output = output.cpu().numpy()
         # 分别遍历每个系列，进行反向归一化
-        for i in range(batch_predictions.shape[1]):
+        batch_predictions_unscale = []
+        for i in range(output.shape[0]):
             scaler = scalers[i]
-            for j in range(batch_predictions.shape[0]):
-                batch_prediction = batch_predictions[j,i,:,:]
-                batch_prediction_unscale = scaler.inverse_transform(batch_prediction)
-                batch_predictions_unscale[j,i,:,:] = batch_prediction_unscale
+            batch_prediction = output[i]
+            batch_prediction_unscale = scaler.inverse_transform(batch_prediction)
+            batch_predictions_unscale.append(batch_prediction_unscale)
             
         ts_forecasts = Parallel(n_jobs=self.pred_n_jobs)(
             delayed(_build_forecast_series)(
-                [batch_prediction[batch_idx] for batch_prediction in batch_predictions_unscale],
+                [batch_predictions_unscale[batch_idx]],
                 input_series,
-                batch_pred_class[:,batch_idx,:],
-                batch_vr_class[:,batch_idx,:,:]
+                pred_class[batch_idx,:],
+                vr_class[batch_idx,:,:]
             )
             for batch_idx, input_series in enumerate(batch_input_series)
         )
@@ -692,20 +646,21 @@ class _TFTCusModule(_TFTModule):
         return last_batch_index,last_batch_imp_index,item_codes
                                 
     def val_metric_show(self,output,target,price_class,vr_class,target_vr_class,past_target=None,val_batch=None,
-                        scaler=None,target_info=None,last_batch_index=None,item_codes=None):
+                        scaler=None,target_info=None):
         
         names = ["output","target","price"]
         vr_class_certainlys = vr_class.cpu().numpy()
         vr_class_certainlys_imp_index = np.argwhere(vr_class_certainlys==CLASS_SIMPLE_VALUE_MAX)
-        size = len(vr_class_certainlys_imp_index) if len(vr_class_certainlys_imp_index)<9 else 9
+        size = len(vr_class_certainlys_imp_index) if len(vr_class_certainlys_imp_index)<27 else 27
         # print("item_codes:",item_codes)
         loop_range = range(size)      
         # loop_range = last_batch_index
         df_all = global_var.get_value("dataset").df_all
         code_dict = {}
         idx = 0
-        range_index = np.random.random_integers(0, vr_class_certainlys_imp_index.shape[0]-1,size)
-        for idx,r_index in enumerate(range_index):
+        date_str = "20230313"
+        result = []
+        for r_index in range(vr_class_certainlys_imp_index.shape[0]-1):
             s_index = vr_class_certainlys_imp_index[r_index,0]
             ts = target_info[s_index]
             scaler_sample = scaler[s_index]
@@ -715,8 +670,12 @@ class _TFTCusModule(_TFTModule):
             output_sample = output[s_index,:,0,:].cpu().numpy()
             target_vr_class_sample = target_vr_class[s_index].cpu().numpy()
             vr_class_certainly = vr_class_certainlys[s_index]
-            if vr_class_certainly!=CLASS_SIMPLE_VALUE_MAX:
-                continue           
+            # 检查指定日期的数据
+            if df_all[(df_all["time_idx"]==ts["end"]-1)&(df_all["instrument_rank"]==ts["item_rank_code"])]["datetime"].dt.strftime('%Y%m%d').values[0]!=date_str:
+                continue         
+            idx += 1
+            if idx>size:
+                break
             pred_center_data_ori = get_np_center_value(output_sample)
             price_class_item = price_class[s_index]
             # 数值部分图形
@@ -737,8 +696,9 @@ class _TFTCusModule(_TFTModule):
             past_target_sample = scaler_sample.inverse_transform(np.expand_dims(past_target_sample,axis=0))
             target_combine_sample = np.concatenate((past_target_sample,target_sample),axis=-1)
             # 可以从全局变量中，通过索引获得实际价格
-            price_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
-                                    (df_all["instrument_rank"]==ts["item_rank_code"])]["label_ori"].values    
+            df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
+                                    (df_all["instrument_rank"]==ts["item_rank_code"])]
+            price_target = df_target["label_ori"].values    
             price_target = np.expand_dims(price_target,axis=0)        
             view_data = np.concatenate((pred_center_data,target_combine_sample,price_target),axis=0).transpose(1,0)
             x_range = np.array([i for i in range(ts["start"],ts["end"])])
@@ -746,12 +706,15 @@ class _TFTCusModule(_TFTModule):
                 instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
                 datetime_range = self.monitor.get_datetime_with_index(instrument,ts["start"],ts["end"])
             else:
-                instrument = ts["item_rank_code"]
+                instrument = df_target["instrument"].values[0]
                 datetime_range = x_range
+            result.append({"instrument":instrument,"datetime":df_target["datetime"].dt.strftime('%Y%m%d').values[0]})
             target_title = "time range:{}/{} code:{},price class:{},tar_vr class:{}&{}".format(
-                datetime_range[0],datetime_range[-1],instrument,price_class_item,target_vr_class_sample,vr_class_certainly)
+                df_target["datetime"].dt.strftime('%Y%m%d').values[self.input_chunk_length],df_target["datetime"].dt.strftime('%Y%m%d').values[-1],
+                instrument,price_class_item,target_vr_class_sample,vr_class_certainly)
             viz_input_2.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=x_range)   
-               
+        print("pred result:{}".format(result))
+             
     def build_scaler_map(self,scalers, batch_input_series,group_column="instrument_rank"):
         scaler_map = {}
         for i in range(len(scalers)):

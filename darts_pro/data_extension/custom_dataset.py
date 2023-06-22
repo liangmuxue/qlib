@@ -15,7 +15,7 @@ from darts.utils.data.shifted_dataset import GenericShiftedDataset,MixedCovariat
 from darts.utils.data.utils import CovariateType
 from darts.logging import raise_if_not
 from darts import TimeSeries
-from cus_utils.common_compute import target_scale,slope_classify_compute,slope_last_classify_compute
+from cus_utils.common_compute import normalization,slope_last_classify_compute
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 
 import cus_utils.global_var as global_var
@@ -228,24 +228,22 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             raise_range = (max_value - price_tar[0,0])/price_tar[0,0]*100
         else:
             raise_range = (min_value - price_tar[0,0])/price_tar[0,0]*100
+            
+        # 先计算涨跌幅度分类，再进行归一化
         p_taraget_class = get_simple_class(raise_range)
           
         # 针对目标数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
-        scaler.fit(past_target)          
-        # 计算涨跌幅度分类后，再进行归一化
+        scaler.fit(past_target)             
         past_target = scaler.transform(past_target)   
-        future_target = scaler.transform(future_target)           
+        future_target = scaler.transform(future_target)   
+                
+        # 对于协变量，也进行单独的归一化    
+        past_covariate = normalization(past_covariate)
+        future_covariate = normalization(future_covariate)
+               
         # 添加末段走势分类目标输出
         target_class = slope_last_classify_compute(future_target)
-        
-        # # 进一步筛选重点涨幅数据
-        # if p_taraget_class==CLASS_SIMPLE_VALUE_MAX:
-        #     # 如果后阶段趋势保持上升或平稳，则认为还是大幅度上涨类型，否则任务是大幅度下降类型
-        #     if target_class==SLOPE_SHAPE_RAISE or target_class==SLOPE_SHAPE_SMOOTH:
-        #         p_taraget_class = CLASS_SIMPLE_VALUE_MAX
-        #     else:
-        #         p_taraget_class = list(CLASS_SIMPLE_VALUES)[0]
         target_class = np.expand_dims([target_class],axis=-1)
         p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)  
         target_class = np.concatenate((target_class,p_taraget_class),axis=0)
@@ -327,6 +325,11 @@ class CustomInferenceDataset(InferenceDataset):
         # 针对价格数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
         past_target = scaler.fit_transform(past_target)   
+        
+        # 对于协变量，也进行单独的归一化    
+        past_covariate = normalization(past_covariate)
+        future_covariate = normalization(future_covariate)  
+            
         # 需要返回scaler，用于后续恢复原数据
         return (
             past_target,
