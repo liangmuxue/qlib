@@ -25,10 +25,10 @@ from torch.utils.data import DataLoader
 from joblib import Parallel, delayed
 
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import compute_price_class
+from cus_utils.common_compute import compute_price_class,slope_classify_compute
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
-from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_simple_class
+from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH
 
 import torchmetrics
 from torchmetrics import MeanSquaredError
@@ -52,6 +52,7 @@ logger = get_logger(__name__)
 
 viz_input = TensorViz(env="data_train")
 viz_input_2 = TensorViz(env="data_train_unscale")
+viz_input_aug = TensorViz(env="data_train_aug")
 
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
@@ -1279,24 +1280,44 @@ class TFTExtModel(MixedCovariatesTorchModel):
         past_target = item[0]
         future_target = item[-2]
         target_info = item[-1]
+        scaler = item[5][0]
         
         # 重点关注价格指数,只对价格涨幅达标的数据进行增强
         p_taraget_class = compute_price_class(target_info["price_array"])
         if p_taraget_class!=CLASS_SIMPLE_VALUE_MAX:
             return None
         
-        # 把past和future重新组合，统一增强
         target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        target_unscale = scaler.inverse_transform(target[0])
+        # 重点关注前期走势比较平的
+        focus_target = target_unscale[self.input_chunk_length-5:self.input_chunk_length]
+        slope = slope_classify_compute(focus_target,threhold=2)
+        if slope!=SLOPE_SHAPE_SMOOTH:
+            return None
+        
+        # 把past和future重新组合，统一增强
         covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
         if np.random.randint(0,2)==1:
             # 量化方式调整
             X_aug, Y_aug = tsaug.Quantize(n_levels=10).augment(covariate, target)
         else:
-            # 量化方式调整
+            # 降低时间分辨率的方式调整
             X_aug, Y_aug = tsaug.Pool(size=2).augment(covariate, target)
         past_covariate = X_aug[0,:self.input_chunk_length,:] 
         future_target = Y_aug[0,self.input_chunk_length:,:]
+        past_target = Y_aug[0,:self.input_chunk_length,:]
         rtn_item = (past_target,past_covariate,item[2],item[3],item[4],item[5][0],item[6],future_target,item[8])
+        
+        # if np.random.randint(0,90)==1:
+        #     # 可视化增强的数据
+        #     index = np.random.randint(0,12)
+        #     win = "win_{}".format(index)
+        #     target_title = "code_{}".format(target_info["item_rank_code"])
+        #     names = ["label","price"]
+        #     price_array = np.concatenate((np.array([0] * (self.input_chunk_length-1)),target_info["price_array"]))
+        #     price_array = np.expand_dims(price_array,axis=-1)
+        #     view_data = np.concatenate((target_unscale,price_array),axis=-1)
+        #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
         return rtn_item
     
     def _batch_collate_fn(self,ori_batch: List[Tuple]) -> Tuple:
@@ -1330,17 +1351,17 @@ class TFTExtModel(MixedCovariatesTorchModel):
                     if target_class[1,0]==CLASS_SIMPLE_VALUE_MAX:
                         max_cnt += 1
                         batch.append(rtn_item)
-                        for i in range(1):
+                        adj_max_cnt += 1
+                        for i in range(2):
                             b_rebuild = self.dynamic_build_training_data(b)
                             # 不符合要求则不增强
                             if b_rebuild is None:
                                 continue
                             # b_rebuild = rtn_item
-                            adj_max_cnt += 2
+                            adj_max_cnt += 1
                             batch.append(b_rebuild)
                     elif target_class[1,0]==0:
                         batch.append(rtn_item)
-                        batch.append(rtn_item)                       
                     else:
                         # 随机减少大类数量
                         if np.random.randint(0,2)==1:

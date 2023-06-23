@@ -48,7 +48,7 @@ class UncertaintyLoss(nn.Module):
         self.last_classify_loss = nn.CrossEntropyLoss()
         # self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
         self.vr_loss = nn.CrossEntropyLoss()
-        self.mse_loss = MseLoss(reduction=mse_reduction,weight=3)
+        self.mse_loss = MseLoss(reduction=mse_reduction,weight=2)
 
     def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""

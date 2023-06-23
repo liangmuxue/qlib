@@ -13,34 +13,14 @@ import pandas as pd
 
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 
-def slope_classify_compute(target_ori,class1_len,threhold=0.1):
+def slope_classify_compute(target_ori,threhold=2):
     """生成基于斜率的目标分类"""
     
-    # 再次归一化，只衡量目标数据部分--取消
-    # target = target_scale(target_ori)
     target = target_ori
-    # 给每段计算斜率,由于刻度一致，因此就是相邻元素的差
-    target_slope = target[1:,0]  - target[:-1,0]
-    # 分为2个部分，分别分类
-    split_arr = [target_slope[:class1_len],target_slope[class1_len:]]    
-    result = [0,0]
-    # 重点关注最后一段
-    for index,item in enumerate(split_arr):
-        # 每一段斜率都比较小，则类型为平稳
-        if np.sum(np.abs(item)<threhold)==item.shape[0]:
-            result[index] = SLOPE_SHAPE_SMOOTH
-            continue
-        # 持续上升
-        if np.sum(item>0)==item.shape[0]:
-            result[index] = SLOPE_SHAPE_RAISE
-            continue        
-        # 持续下降
-        if np.sum(item<0)==item.shape[0]:
-            result[index] = SLOPE_SHAPE_FALL
-            continue 
-        # 以上情况都不是，则为震荡
-        result[index] = SLOPE_SHAPE_SHAKE
-    return result
+    target_slope = abs((target[1:,0]  - target[:-1,0])/target[:-1,0])
+    if np.sum(target_slope<(threhold/100))==target_slope.shape[0]:
+        return SLOPE_SHAPE_SMOOTH
+    return SLOPE_SHAPE_SHAKE
 
 
 def slope_last_classify_compute(target,threhold=0.05):
