@@ -610,7 +610,7 @@ class TftDataframeModel():
                 # 显示重点上涨类别判断情况
                 if vr_class==CLASS_SIMPLE_VALUE_MAX and filter_flag:
                     self.show_pred_result(df_item, pred_series, actual_series, 
-                                          vr_class=vr_class,tar_class=vr_acc_item[1],
+                                          vr_class=vr_class,tar_class=vr_acc_item[1],correct=correct,
                                           mape_item=mape_item,corr_item=corr_item,dataset=dataset)
         # 总体统计
         mape_mean = mape_all/len(val_series_list)
@@ -624,7 +624,7 @@ class TftDataframeModel():
         return result
     
     def filter_judge(self,pred_series,total_series,actual_series,raise_range=3,head_range=3,dataset=None):
-        return True
+        # return True
         recent_length = dataset.step_len - dataset.pred_len
         time_range = [pred_series.time_index.start,pred_series.time_index.stop]
         recent_begin_index = time_range[0] - recent_length
@@ -641,7 +641,7 @@ class TftDataframeModel():
             return False
         return True
     
-    def show_pred_result(self,df_item,pred_series,actual_series,tar_class=None,vr_class=None,mape_item=None,corr_item=None,dataset=None):
+    def show_pred_result(self,df_item,pred_series,actual_series,tar_class=None,vr_class=None,correct=0,mape_item=None,corr_item=None,dataset=None):
         lowest_q, low_q, high_q, highest_q = 0.01, 0.1, 0.9, 0.99 
         label_q_outer = f"{int(lowest_q * 100)}-{int(highest_q * 100)}th percentiles"
         label_q_inner = f"{int(low_q * 100)}-{int(high_q * 100)}th percentiles"       
@@ -678,7 +678,7 @@ class TftDataframeModel():
         range_show = "[{}-{}]".format(date_range[0],date_range[-1])
         # ax.set_xticks(date_range)                                
         pred_class_str = "{}/{}".format(vr_class,tar_class)
-        plt.title("{},ser_{},MAPE: {:.2f}%,corr:{},class(pred/real):{}".format(range_show,instrument_code,mape_item,corr_item,pred_class_str))
+        plt.title("{},ser_{},MAPE: {:.2f}%,correct:{},class(pred/real):{}".format(range_show,instrument_code,mape_item,correct,pred_class_str))
         plt.legend()
         plt.savefig('{}/result_view/eval_{}.jpg'.format(self.optargs["work_dir"],instrument_code))
         plt.clf()          

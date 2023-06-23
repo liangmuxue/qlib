@@ -1338,6 +1338,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
                             # b_rebuild = rtn_item
                             adj_max_cnt += 2
                             batch.append(b_rebuild)
+                    elif target_class[1,0]==0:
+                        batch.append(rtn_item)
+                        batch.append(rtn_item)                       
                     else:
                         # 随机减少大类数量
                         if np.random.randint(0,2)==1:
