@@ -283,6 +283,8 @@ class _TFTCusModule(_TFTModule):
         for i in range(len(target_info_list)):
             target_info = target_info_list[i]
             df_match = df_part[df_part["instrument_rank"]==target_info["item_rank_code"]]
+            if df_match.shape[0]==0:
+                logger.warning("no data for:{}".format(target_info["item_rank_code"]))
             if df_match["time_idx"].values[0]==(target_info["total_start"]+target_info["future_start"]):
                 if target_info["item_rank_code"] not in spec_codes:
                     spec_codes.append(target_info["item_rank_code"])
@@ -1315,7 +1317,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
             if not np.all(future_target == future_target[0]):
                 # 非训练部分，不需要数据增强，直接转换返回
-                if self.mode!="train":
+                if not self.model.training:
                     if self.mode=="predict":
                         batch.append(b)
                     else:
