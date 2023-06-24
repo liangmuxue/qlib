@@ -34,14 +34,14 @@ task:
             type: 'classify_train'
             n_epochs : 300
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file False
+            load_dataset_file: &load_dataset_file True
             pred_data_path: &pred_data_path "custom/data/darts/dump_data"
             pred_data_file: &pred_data_file "pred_df_total.pkl"
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test9_tft_all_step5'
+               model_name: 'test8_tft_all_aug'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -57,7 +57,7 @@ task:
                 train_total: [2022-01-01, 2023-05-31]
                 valid: [2022-09-01, 2022-12-05]
                 test: [2022-02-01, 2022-03-01]         
-                classify_range: [2023-03-31, 2023-03-31]
+                classify_range: [2023-04-01, 2023-04-15]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'

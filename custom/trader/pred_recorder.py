@@ -33,12 +33,10 @@ from .tft_recorder import TftRecorder
 
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from darts_pro.tft_series_dataset import TFTSeriesDataset
-from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
-from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
+from cus_utils.common_compute import normalization,compute_series_slope,slope_classify_compute,compute_price_class,comp_max_and_rate
+from tft.class_define import SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_SEC,CLASS_SIMPLE_VALUE_MAX
 from trader.utils.date_util import get_tradedays
-from cus_utils.tensor_viz import TensorViz
 from cus_utils.log_util import AppLogger
-from trader.busi_compute import slope_status
 from trader.data_viewer import DataViewer
 logger = AppLogger()
 
@@ -288,41 +286,41 @@ class ClassifyRecord(PortAnaRecord):
         else:
             pred_file = "{}/{}".format(pred_data_path,pred_file)
         df,pred_df_total = self.filter_cancidate_result(dataset, pred_file=pred_file,ext_length=ext_length)        
-        corr_2_rate = df[df["correct"]==2].shape[0]/df.shape[0]
-        corr_1_rate = df[df["correct"]==1].shape[0]/df.shape[0]
-        corr_danger_rate = df[df["correct"]==-2].shape[0]/df.shape[0]
-        print("corr_rate:{},corr_1:{},corr_danger:{}".format(corr_2_rate,corr_1_rate,corr_danger_rate))   
+        corr_2_rate = df[df["correct"]==CLASS_SIMPLE_VALUE_MAX].shape[0]/df.shape[0]
+        corr_1_rate = df[df["correct"]==CLASS_SIMPLE_VALUE_SEC].shape[0]/df.shape[0]
+        corr_danger_rate = df[df["correct"]==0].shape[0]/df.shape[0]
+        print("corr_rate:{},corr_sec:{},corr_danger:{}".format(corr_2_rate,corr_1_rate,corr_danger_rate))   
         self.show_correct_pred(df,pred_df_total,dataset=dataset) 
         return df
     
-    def filter_cancidate_result(self,dataset=None,ext_length=25,pred_file=None,raise_range=3):
+    def filter_cancidate_result(self,dataset=None,ext_length=25,pred_file=None):
         """筛选出合适的品种"""
 
         date_list = get_tradedays(self.classify_range[0],self.classify_range[1])
         match_list = []
-        match_cnt = 0        
-        match_columns = ["date","instrument","correct","vr_class","price_raise_range","price_down_range"]
+        match_columns = ["date","instrument","correct","vr_class"]
         data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
-        pred_df_total = None
         for pred_date in date_list:   
             # 每日动态加载预测结果数据
             if pred_file is None:
                 pred_data_file = self.get_pred_data_file(pred_date)
             else:
                 pred_data_file = pred_file
-            date_pred_df_ori = self.load_pred_data(pred_data_file=pred_data_file)
-            if pred_df_total is None:
-                pred_df_total = date_pred_df_ori
-            else:
-                pred_df_total = pd.concat([pred_df_total,date_pred_df_ori])
-            # 筛选出分类上涨类股票
-            date_pred_df = date_pred_df_ori[(date_pred_df_ori["vr_class"]==CLASS_SIMPLE_VALUE_MAX)]            
+            pred_df_total = self.load_pred_data(pred_data_file=pred_data_file)
             pred_date = int(pred_date)  
+            # 筛选出分类上涨类股票
+            date_pred_df = pred_df_total[(pred_df_total["vr_class"]==CLASS_SIMPLE_VALUE_MAX)&(pred_df_total["pred_date"]==pred_date)]            
             # 整体需要一定涨幅
             date_pred_df = date_pred_df.groupby('instrument').filter(
-                lambda x: (x["pred_data"].values[-1] - x["pred_data"].values[0])/x["pred_data"].values[0]>(raise_range/100)  
+                lambda x: ((x["pred_data"].values[-1] - x["pred_data"].values[0])/x["pred_data"].values[0]>(1/100)  
+                           # and (x["pred_data"].values[-1] - x["pred_data"].values[0])/x["pred_data"].values[0]<(5/100)
+                        )
             )    
-
+            # 最后一段需要上涨
+            date_pred_df = date_pred_df.groupby('instrument').filter(
+                lambda x: (x["pred_data"].values[-1] - x["pred_data"].values[-2])>0
+            )          
+            match_cnt = 0                     
             for instrument,group_data in date_pred_df.groupby("instrument"):
                 # 生成对应日期的单个股票的综合数据
                 complex_df = self.combine_complex_df_data(pred_date,instrument,pred_df=group_data,df_ref=dataset.df_all,ext_length=ext_length)   
@@ -332,32 +330,21 @@ class ClassifyRecord(PortAnaRecord):
                 if complex_df.shape[0]<dataset.step_len:
                     logger.warning("not enough len,code:{},len:{}".format(instrument,complex_df.shape[0]))
                     continue                
-                # 使用收盘价格进行衡量         
-                price_values = complex_df["label_ori"].values
+
                 # 根据预测数据综合判断，取得匹配标志
                 [match_flag,vr_class] = self.pred_data_jud(complex_df, dataset=dataset,ext_length=ext_length)
                 if not match_flag:
                     continue
                 
+                # 使用收盘价格进行衡量         
+                price_values = complex_df["label_ori"].values                
                 # 取得实际价格信息，进行准确率判断
                 price_list = price_values[-(dataset.pred_len):]
                 # 以昨日收盘价为基准
                 cur_price = price_values[-(dataset.pred_len+1)]
-                price_raise_range = (price_list.max() - cur_price)/cur_price
-                price_down_range = (price_list.min() - cur_price)/cur_price
-                if price_raise_range > 0.05:
-                    correct = 2
-                elif price_raise_range > 0.03:
-                    correct = 1
-                elif price_raise_range > 0.01:
-                    correct = 0         
-                elif price_down_range > -0.01:
-                    correct = 0        
-                elif price_down_range > -0.03:
-                    correct = -1
-                else:
-                    correct = -2                                                     
-                match_item = [pred_date,instrument,correct,vr_class,price_raise_range,price_down_range]
+                price_data = np.array([cur_price] + price_list.tolist())
+                correct = compute_price_class(price_data)                                                   
+                match_item = [pred_date,instrument,correct,vr_class]
                 match_list.append(match_item)
                 # if correct!=2:
                 #     self.data_viewer_correct.show_single_complex_pred_data(complex_df,dataset=dataset,save_path=self.pred_data_path+"/plot")
@@ -373,8 +360,8 @@ class ClassifyRecord(PortAnaRecord):
            
     def show_correct_pred(self,stat_df,pred_df_total,dataset=None,show_num=10):
         
-        incorrect_df = stat_df[stat_df["correct"]<0].iloc[:show_num]
-        correct_df = stat_df[stat_df["correct"]==2].iloc[:show_num]
+        incorrect_df = stat_df[stat_df["correct"]==0].iloc[:show_num]
+        correct_df = stat_df[stat_df["correct"]==CLASS_SIMPLE_VALUE_MAX].iloc[:show_num]
         show_df = pd.concat([incorrect_df,correct_df])
         # show_df = stat_df[stat_df["instrument"]==66]
         data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
@@ -384,12 +371,12 @@ class ClassifyRecord(PortAnaRecord):
             date = int(group_data["date"].values[0])
             correct = group_data["correct"].values[0]
             complex_item_df = self.combine_complex_df_data(date,instrument,pred_df=pred_df_total,df_ref=dataset.df_all) 
-            if correct==2:
+            if correct==CLASS_SIMPLE_VALUE_MAX:
                 data_viewer_correct.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
             else:
                 data_viewer_incorrect.show_single_complex_pred_data_visdom(complex_item_df,correct=correct,dataset=dataset)
             # self.data_viewer_correct.show_single_complex_pred_data(complex_item_df,correct=correct,dataset=dataset,save_path=self.pred_data_path+"/plot")
-            logger.debug("correct:{}".format(correct))
+            # logger.debug("correct:{}".format(correct))
         
     def label_data_jud(self,row,dataset=None):
         """均线价值判断"""
@@ -433,31 +420,36 @@ class ClassifyRecord(PortAnaRecord):
    
         return match_flag        
     
-    def pred_data_jud(self,ins_data,dataset=None,ext_length=25,head_range=3):
+    def pred_data_jud(self,ins_data,dataset=None,ext_length=25,head_range=1):
         """预测均线价值判断"""
         
         label_arr = ins_data["label"].values.tolist()
-        # 计算均线涨跌幅度,取预测日期前n天的（n为预测长度））
-        label_slope_arr = compute_price_range(label_arr[-2*dataset.pred_len:-dataset.pred_len])
-                     
+        ref_price_arr = ins_data["label_ori"].values[:-dataset.pred_len]
+        price_arr = ins_data["label_ori"].values[-2*dataset.pred_len:-dataset.pred_len]
         pred_arr = ins_data["pred_data"].values[-dataset.pred_len:]
         
         # 分类信息判断
         vr_class = ins_data["vr_class"].values[0]
-                
         match_flag = False
         rtn_obj = [match_flag,vr_class]
-        
-        # RSI指标需要在50以上
-        rsi = ins_data["RSI20"].values[-2*dataset.pred_len:-dataset.pred_len]
-        if np.any(rsi<50):
+
+        # 前期走势需要比价平稳
+        label_target = np.array([label_arr[-2*dataset.pred_len:-dataset.pred_len]]).transpose(1,0)
+        label_slope_class = slope_classify_compute(label_target,threhold=2)
+        if label_slope_class!=SLOPE_SHAPE_SMOOTH: 
             return rtn_obj
-        # MACD指标需要在0以上
-        macd = ins_data["MACD"].values[-2*dataset.pred_len:-dataset.pred_len]
-        if np.any(macd<0):
+ 
+        # 之前的价格涨幅筛选判断
+        price_arr_slope = (price_arr[1:] - price_arr[:-1])/price_arr[:-1]
+        # 最近价格连续上涨不可信
+        if price_arr_slope[-1]>0 and price_arr_slope[-2]>0:
             return rtn_obj
-        
-        
+        # 最近一天上涨幅度过高
+        if (price_arr_slope[-1]*100)>6:
+            return rtn_obj   
+        # 最后一天需要创出近期新高 
+        if ((ref_price_arr.max()-price_arr[-1])/price_arr[-1])>0.0001:
+            return rtn_obj              
         # 与近期高点比较，不能差太多
         recent_max= ins_data["label"].values[:ext_length].max()
         if pred_arr[0]<recent_max and (recent_max-pred_arr[0])/recent_max>head_range/100:

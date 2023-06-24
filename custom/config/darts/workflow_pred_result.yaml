@@ -32,8 +32,8 @@ port_analysis_config: &port_analysis_config
             topk: 3
     backtest:
         work_dir: "custom/data/rl"
-        pred_start_time: 2023-03-31
-        pred_end_time: 2023-03-31
+        pred_start_time: 2023-04-01
+        pred_end_time: 2023-04-15
         build_data: True 
         account: 100000000
         benchmark: *benchmark
@@ -54,7 +54,7 @@ task:
             n_jobs: 20
             type: 'build_pred_result'
             n_epochs : 300
-            save_dataset_file: False
+            save_dataset_file: True
             load_dataset_file: &load_dataset_file False
             pred_data_path: &pred_data_path "custom/data/darts/dump_data"
             pred_data_file: &pred_data_file "pred_df_total.pkl"
@@ -62,7 +62,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test9_tft_all_step5'
+               model_name: 'test8_tft_all_aug'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5

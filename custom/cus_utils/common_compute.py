@@ -17,9 +17,11 @@ def slope_classify_compute(target_ori,threhold=2):
     """生成基于斜率的目标分类"""
     
     target = target_ori
-    target_slope = abs((target[1:,0]  - target[:-1,0])/target[:-1,0])
-    if np.sum(target_slope<(threhold/100))==target_slope.shape[0]:
+    target_slope = (target[1:,0]  - target[:-1,0])/target[:-1,0]
+    if np.sum(abs(target_slope)<(threhold/100))==target_slope.shape[0]:
         return SLOPE_SHAPE_SMOOTH
+    if np.sum(target_slope[:-1]<(threhold/100))==target_slope.shape[0]-1 and target_slope[-1]>(threhold/100):
+        return SLOPE_SHAPE_SMOOTH    
     return SLOPE_SHAPE_SHAKE
 
 
@@ -37,11 +39,10 @@ def slope_last_classify_compute(target,threhold=0.05):
 def mae_comp(input,target):
     loss_fn = torch.nn.L1Loss(reduce=False, size_average=False)
     loss = loss_fn(input.float(), target.float())
-    print(loss)
     return loss
 
 def np_qcut(arr, q):
-    """ 实现类似pandas的qcut功能"""
+    """实现类似pandas的qcut功能"""
 
     res = np.zeros(arr.size)
     na_mask = np.isnan(arr)
