@@ -32,8 +32,8 @@ port_analysis_config: &port_analysis_config
             topk: 3
     backtest:
         work_dir: "custom/data/rl"
-        pred_start_time: 2023-04-01
-        pred_end_time: 2023-04-15
+        pred_start_time: 2023-04-16
+        pred_end_time: 2023-04-30
         build_data: True 
         account: 100000000
         benchmark: *benchmark
@@ -76,7 +76,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2022-01-01, 2023-05-31]
-                valid: [2022-11-15, 2023-03-30]
+                valid: [2023-01-15, 2023-04-15]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

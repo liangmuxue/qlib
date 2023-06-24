@@ -1270,7 +1270,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         """重载方法以规避类型检查"""
         _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
     
-    def dynamic_build_training_data(self,item,dynaimc_range=3):
+    def dynamic_build_training_data(self,item,head_range=2):
         """使用数据增强，调整训练数据"""
         
         # dc = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
@@ -1295,6 +1295,24 @@ class TFTExtModel(MixedCovariatesTorchModel):
         if slope!=SLOPE_SHAPE_SMOOTH:
             return None
         
+        # 与近期高点比较，不能差太多
+        # recent_max= target_unscale.values[:self.input_chunk_length].max()
+        # if target_unscale[-1]<recent_max and (recent_max-target_unscale[-1])/recent_max>head_range/100:
+        #     return None   
+        #
+        # # 之前的价格涨幅筛选判断
+        # price_arr = target_info["total_price_array"][self.input_chunk_length-self.output_chunk_length:self.input_chunk_length]
+        # price_arr_slope = (price_arr[1:] - price_arr[:-1])/price_arr[:-1]
+        # # 最近价格连续上涨不可信
+        # if price_arr_slope[-1]>0 and price_arr_slope[-2]>0:
+        #     return None
+        # # 最近一天上涨幅度过高
+        # if (price_arr_slope[-1]*100)>6:
+        #     return None   
+        # # 最后一天需要创出近期新高 
+        # if ((target_info["total_price_array"].max()-price_arr[-1])/price_arr[-1])>0.0001:
+        #     return None  
+                        
         # 把past和future重新组合，统一增强
         covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
         if np.random.randint(0,2)==1:

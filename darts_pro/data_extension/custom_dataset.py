@@ -112,9 +112,10 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
         price_array = self.ass_data[code][future_start-1:future_end]
+        total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
-                       "future_start":future_start,"future_end":future_end,"price_array":price_array,
+                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"total_price_array":total_price_array,
                        "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates
@@ -217,8 +218,8 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         # df_all = global_var.get_value("dataset").df_all
         # price_items = df_all[(df_all["time_idx"]>=target_info["future_start"])&(df_all["time_idx"]<target_info["future_end"])&
         #                         (df_all["instrument_rank"]==target_info["item_rank_code"])]["label_ori"].values
-        price_items = target_info["price_array"]
-        price_items = np.expand_dims(price_items,axis=-1)
+        # price_items = target_info["price_array"]
+        # price_items = np.expand_dims(price_items,axis=-1)
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
         price_tar = future_target
         # price_tar = price_items
