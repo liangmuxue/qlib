@@ -64,7 +64,7 @@ class UncertaintyLoss(nn.Module):
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        # corr_loss = self.ccc_loss_comp(input, target)   
+        corr_loss = self.ccc_loss_comp(input, target)   
         # 针对均线最后一个部分，计算交叉熵损失
         # ce_loss = self.last_classify_loss(input_classify,target_classify[:,0])
         # 第3个部分为幅度范围分类，计算交叉熵损失 
@@ -76,10 +76,10 @@ class UncertaintyLoss(nn.Module):
         
         loss_sum = 0
         # 使用不确定性损失模式进行累加
-        loss_sum += 1/2 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
+        loss_sum += 1/3 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
         # loss_sum += 1/4 / (self.sigma[1] ** 2) * ce_loss + torch.log(1 + self.sigma[1] ** 2)
-        # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
+        loss_sum += 1/3 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
+        loss_sum += 1/3 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
         return loss_sum
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):

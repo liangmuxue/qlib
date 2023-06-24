@@ -234,7 +234,7 @@ class _TFTCusModule(_TFTModule):
         # 全部损失
         loss = self._compute_loss((output,out_class,vr_class), (target,target_class))
         # 相关系数损失
-        # corr_loss = self.compute_corr_metrics(output, target)
+        corr_loss = self.compute_ccc_metrics(output, target)
         # 距离损失MSE
         mse_loss = self.compute_mse_metrics(output, target)
         # 走势分类交叉熵损失
@@ -242,7 +242,7 @@ class _TFTCusModule(_TFTModule):
         # 总体涨跌幅度分类损失
         value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class)         
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # value_diff_loss = self.compute_value_diff_metrics(output, target)
