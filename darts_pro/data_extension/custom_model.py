@@ -53,6 +53,7 @@ logger = get_logger(__name__)
 viz_input = TensorViz(env="data_train")
 viz_input_2 = TensorViz(env="data_train_unscale")
 viz_input_aug = TensorViz(env="data_train_aug")
+viz_input_nag_aug = TensorViz(env="data_train_nag_aug")
 
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
@@ -233,18 +234,18 @@ class _TFTCusModule(_TFTModule):
         target_vr_class = target_class[:,1]
         # 全部损失
         loss,detail_loss = self._compute_loss((output,out_class,vr_class), (target,target_class))
-        (value_range_loss,ce_loss,corr_loss) = detail_loss
+        (value_range_loss,ce_loss,corr_loss,mse_loss) = detail_loss
         # 相关系数损失
         # corr_loss = self.compute_ccc_metrics(output, target)
         # 距离损失MSE
-        mse_loss,last_sec_acc,last_sec_out_bool = self.compute_mse_metrics(output, target)
+        _,last_sec_acc,last_sec_out_bool = self.compute_mse_metrics(output, target)
         # 走势分类交叉熵损失
         # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # 总体涨跌幅度分类损失
         # value_range_loss = compute_vr_metrics(vr_class[:,0,:], target_vr_class)         
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_cross_loss", cross_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # value_diff_loss = self.compute_value_diff_metrics(output, target)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -676,9 +677,6 @@ class _TFTCusModule(_TFTModule):
         vr_class_certainlys = vr_class.cpu().numpy()
         vr_class_certainlys_imp_index = np.argwhere((vr_class_certainlys==CLASS_SIMPLE_VALUE_MAX) & last_sec_index)
         size = len(vr_class_certainlys_imp_index) if len(vr_class_certainlys_imp_index)<27 else 27
-        # print("item_codes:",item_codes)
-        loop_range = range(size)      
-        # loop_range = last_batch_index
         df_all = global_var.get_value("dataset").df_all
         code_dict = {}
         idx = 0
@@ -695,8 +693,8 @@ class _TFTCusModule(_TFTModule):
             target_vr_class_sample = target_vr_class[s_index].cpu().numpy()
             vr_class_certainly = vr_class_certainlys[s_index]
             # 检查指定日期的数据
-            if df_all[(df_all["time_idx"]==ts["end"]-1)&(df_all["instrument_rank"]==ts["item_rank_code"])]["datetime"].dt.strftime('%Y%m%d').values[0]!=date_str:
-                continue         
+            # if df_all[(df_all["time_idx"]==ts["end"]-1)&(df_all["instrument_rank"]==ts["item_rank_code"])]["datetime"].dt.strftime('%Y%m%d').values[0]!=date_str:
+            #     continue         
             idx += 1
             if idx>size:
                 break
@@ -1291,7 +1289,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         """重载方法以规避类型检查"""
         _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
     
-    def dynamic_build_training_data(self,item,head_range=2):
+    def dynamic_build_training_data(self,item):
         """使用数据增强，调整训练数据"""
         
         # dc = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
@@ -1303,9 +1301,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
         target_info = item[-1]
         scaler = item[5][0]
         
-        # 重点关注价格指数,只对价格涨幅达标的数据进行增强
+        # 重点关注价格指数,只对价格涨幅不达标的数据进行增强
         p_taraget_class = compute_price_class(target_info["price_array"])
-        if p_taraget_class!=CLASS_SIMPLE_VALUE_MAX:
+        if p_taraget_class not in [0,1]:
             return None
         
         target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
@@ -1317,13 +1315,13 @@ class TFTExtModel(MixedCovariatesTorchModel):
         if slope!=SLOPE_SHAPE_SMOOTH:
             return None
         
-        # 重点关注最后一段上涨的
-        if target_unscale[-1] - target_unscale[-2] <= 0:
-            return None
+        # # 重点关注最后一段上涨的
+        # if target_unscale[-1] - target_unscale[-2] <= 0:
+        #     return None
                 
         # 与近期高点比较，不能差太多
-        # recent_max= target_unscale.values[:self.input_chunk_length].max()
-        # if target_unscale[-1]<recent_max and (recent_max-target_unscale[-1])/recent_max>head_range/100:
+        # recent_max= target_unscale[:self.input_chunk_length].max()
+        # if target_unscale[-1]<recent_max and (recent_max-target_unscale[-1])/recent_max>2/100:
         #     return None   
         #
         # # 之前的价格涨幅筛选判断
@@ -1363,7 +1361,58 @@ class TFTExtModel(MixedCovariatesTorchModel):
             view_data = np.concatenate((target_unscale,price_array),axis=-1)
             viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
         return rtn_item
+ 
+    def dynamic_build_nag_training_data(self,item):
+        """使用数据增强，调整训练数据"""
+
+        past_covariate = item[1]
+        future_past_covariate = item[5][1]
+        past_target = item[0]
+        future_target = item[-2]
+        target_info = item[-1]
+        scaler = item[5][0]
+        
+        # 重点关注价格指数,只对价格跌幅达标的数据进行增强
+        p_taraget_class = compute_price_class(target_info["price_array"])
+        if p_taraget_class!=0:
+            return None
+        
+        target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        target_unscale = scaler.inverse_transform(target[0])
+        
+        # 重点关注前期走势比较平的
+        focus_target = target_unscale[self.input_chunk_length-5:self.input_chunk_length]
+        slope = slope_classify_compute(focus_target,threhold=2)
+        if slope!=SLOPE_SHAPE_SMOOTH:
+            return None
+
+                        
+        # 把past和future重新组合，统一增强
+        covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
+        if np.random.randint(0,2)==1:
+            # 量化方式调整
+            X_aug, Y_aug = tsaug.Quantize(n_levels=10).augment(covariate, target)
+        else:
+            # 降低时间分辨率的方式调整
+            X_aug, Y_aug = tsaug.Pool(size=2).augment(covariate, target)
+        past_covariate = X_aug[0,:self.input_chunk_length,:] 
+        future_target = Y_aug[0,self.input_chunk_length:,:]
+        past_target = Y_aug[0,:self.input_chunk_length,:]
+        rtn_item = (past_target,past_covariate,item[2],item[3],item[4],item[5][0],item[6],future_target,item[8])
+        
+        if np.random.randint(0,90)==1:
+            # 可视化增强的数据
+            index = np.random.randint(0,12)
+            win = "win_{}".format(index)
+            target_title = "code_{}".format(target_info["item_rank_code"])
+            names = ["label","price"]
+            price_array = np.concatenate((np.array([0] * (self.input_chunk_length-1)),target_info["price_array"]))
+            price_array = np.expand_dims(price_array,axis=-1)
+            view_data = np.concatenate((target_unscale,price_array),axis=-1)
+            viz_input_nag_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
+        return rtn_item
     
+        
     def _batch_collate_fn(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
@@ -1406,13 +1455,18 @@ class TFTExtModel(MixedCovariatesTorchModel):
                             batch.append(b_rebuild)
                     elif target_class[1,0]==0:
                         batch.append(rtn_item)
+                        # b_rebuild = self.dynamic_build_nag_training_data(b)
+                        # # 不符合要求则不增强
+                        # if b_rebuild is None:
+                        #     continue    
+                        # batch.append(b_rebuild)
                     else:
                         # 随机减少大类数量
                         if np.random.randint(0,2)==1:
                             batch.append(rtn_item)
         ori_rate = max_cnt/len(ori_batch)
         after_rate = adj_max_cnt/len(batch)
-        # print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
+        print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
         aggregated = []
         first_sample = batch[0]
         for i in range(len(first_sample)):

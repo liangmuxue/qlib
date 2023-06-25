@@ -21,13 +21,15 @@ class MseLoss(_Loss):
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         loss_arr_ori = (input - target) ** 2
-        loss_arr_pun = loss_arr_ori * self.weight
-        # 对于预测值大于实际值的情况，增加惩罚项
-        loss_arr = torch.where((input-target)<0,loss_arr_ori,loss_arr_pun)
+        # 重点关注最后一段距离
+        loss_arr_last = (input[:-2] - target[:-2]) ** 2 
+        # loss_arr_pun = loss_arr_ori * self.weight
+        # # 对于预测值大于实际值的情况，增加惩罚项
+        # loss_arr = torch.where((input-target)<0,loss_arr_ori,loss_arr_pun)
         if self.reduction=="mean":
-            mse_loss = torch.mean(loss_arr)
+            mse_loss = torch.mean(loss_arr_ori) + torch.mean(loss_arr_last)
         else:
-            mse_loss = torch.sum(loss_arr)
+            mse_loss = torch.sum(loss_arr_ori) + torch.sum(loss_arr_last)
         return mse_loss  
 
 class LastClassifyLoss(nn.BCEWithLogitsLoss):
@@ -88,7 +90,7 @@ class UncertaintyLoss(nn.Module):
         # 第3个部分为幅度范围分类，计算交叉熵损失 
         value_range_loss = self.vr_loss(vr_class[:,0,:],target_classify[:,1])              
         # 整体MSE损失
-        # mse_loss = self.mse_loss(input, target[:,:,0])     
+        mse_loss = self.mse_loss(input, target[:,:,0])     
         # 只衡量第一个和最后一个数值
         # value_diff_loss = F.mse_loss(input[:,[0,-1]], target[:,[0,-1],0], reduction=self.mse_reduction)    
         
@@ -96,9 +98,9 @@ class UncertaintyLoss(nn.Module):
         # 使用不确定性损失模式进行累加
         loss_sum += 1/2 / (self.sigma[0] ** 2) * value_range_loss + torch.log(1 + self.sigma[0] ** 2)
         # loss_sum += 1/3 / (self.sigma[1] ** 2) * ce_loss + torch.log(1 + self.sigma[1] ** 2)
-        loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        # loss_sum += 1/3 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-        return loss_sum,(value_range_loss,ce_loss,corr_loss)
+        # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
+        loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
+        return loss_sum,(value_range_loss,ce_loss,corr_loss,mse_loss)
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):
         

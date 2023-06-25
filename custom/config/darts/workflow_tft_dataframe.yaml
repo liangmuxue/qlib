@@ -69,7 +69,7 @@ task:
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
                model_name: 'test8_tft_100_aug'
-               load_weight: True
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
