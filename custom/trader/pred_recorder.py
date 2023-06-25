@@ -434,19 +434,19 @@ class ClassifyRecord(PortAnaRecord):
         rtn_obj = [match_flag,vr_class]
 
         # 前期走势需要比价平稳
-        label_target = np.array([label_arr[-2*dataset.pred_len:-dataset.pred_len]]).transpose(1,0)
-        label_slope_class = slope_classify_compute(label_target,threhold=2)
-        if label_slope_class!=SLOPE_SHAPE_SMOOTH: 
-            return rtn_obj
-        
-        # # 之前的价格涨幅筛选判断
-        # price_arr_slope = (price_arr[1:] - price_arr[:-1])/price_arr[:-1]
+        # label_target = np.array([label_arr[-2*dataset.pred_len:-dataset.pred_len]]).transpose(1,0)
+        # label_slope_class = slope_classify_compute(label_target,threhold=2)
+        # if label_slope_class!=SLOPE_SHAPE_SMOOTH: 
+        #     return rtn_obj
+        #
+        # 之前的价格涨幅筛选判断
+        price_arr_slope = (price_arr[1:] - price_arr[:-1])/price_arr[:-1]
         # # 最近价格连续上涨不可信
         # if price_arr_slope[-1]>0 and price_arr_slope[-2]>0:
         #     return rtn_obj
-        # # 最近一天上涨幅度过高
-        # if (price_arr_slope[-1]*100)>6:
-        #     return rtn_obj   
+        # 最近一天上涨幅度过高
+        if (price_arr_slope[-1]*100)>6:
+            return rtn_obj   
         # # 最后一天需要创出近期新高 
         # if ((ref_price_arr.max()-price_arr[-1])/price_arr[-1])>0.0001:
         #     return rtn_obj              

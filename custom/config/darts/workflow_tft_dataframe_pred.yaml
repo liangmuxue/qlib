@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: "/home/qdata/qlib_data/custom_cn_data"
     region: cn
-market: &market all
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -61,7 +61,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_all_aug'
+               model_name: 'test8_tft_100_aug'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -76,7 +76,7 @@ task:
             segments:
                 train_total: [2022-01-01, 2023-05-31]
                 valid: [2023-01-01, 2023-03-31]
-                test: [2023-04-01, 2023-04-30]
+                test: [2023-04-01, 2023-04-10]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'

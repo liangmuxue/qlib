@@ -103,10 +103,15 @@ def enhance_data(ori_data,mode="smote",bins=None):
     amplitude = np.squeeze(amplitude,axis=1)     
     return amplitude,y_res
 
-def normalization(data,res=0.001):
-    rtn = (data - np.min(data,axis=0) + res)/(np.max(data,axis=0)-np.min(data,axis=0) + res) 
-    rtn = rtn + res  
+def normalization(data,res=0.001,mode="numpy",avoid_zero=True):
+    if mode=="numpy":
+        rtn = (data - np.min(data,axis=0) + res)/(np.max(data,axis=0)-np.min(data,axis=0) + res) 
+    else:
+        rtn = (data - torch.min(data,dim=0)[0] + res)/(torch.max(data,dim=0)[0]-torch.min(data,dim=0)[0] + res) 
+    if avoid_zero:
+        rtn = rtn + res  
     return rtn
+
 
 def compute_series_slope(series_data):
     """计算序列斜率,分段计算"""

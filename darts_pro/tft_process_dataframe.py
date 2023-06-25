@@ -353,7 +353,7 @@ class TftDataframeModel():
             vr_class = self.combine_vr_class(vr_class_total)
             # 可视化
             result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],vr_class[0],
-                              series_total=series_total,dataset=dataset,do_scale=False,scaler_map=None)
+                              series_total=series_total,dataset=dataset,cur_date=cur_date)
             
             vr_imp_pred_price_acc = 0
             vr_imp_pred_price_nag = 0
@@ -523,7 +523,7 @@ class TftDataframeModel():
             viz_input.viz_matrix_var(view_data_past,win=sub_title,title=sub_title,names=past_columns)        
                
     def predict_mesure(self,val_series_list,pred_series_list,pred_class_list,vr_class_list,vr_class_confi_list,
-                       series_total=None,dataset=None,do_scale=False,scaler_map=None):       
+                       series_total=None,dataset=None,cur_date=None):       
 
         group_rank_column = dataset.get_group_rank_column()
         # pred_series_list = dataset.reverse_transform_preds(pred_series_list)
@@ -619,8 +619,8 @@ class TftDataframeModel():
         # cross_mean = cross_all/len(val_series_list)
         vr_acc_mean = vr_acc_all/len(val_series_list)   
         vr_recall_imp_mean = vr_imp_recall/vr_imp_all    
-        print("mape_mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{}".
-              format(mape_mean,corr_mean,diff_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all)) 
+        logger.info("cur_date:{} | mape_mean:{},diff mean:{},cross acc mean:{},vr_acc_mean mean:{},vr_recall_imp_mean:{} with {}/{}".
+              format(cur_date,mape_mean,corr_mean,diff_mean,vr_acc_mean,vr_recall_imp_mean,vr_imp_recall,vr_imp_all)) 
         return result
     
     def filter_judge(self,pred_series,total_series,actual_series,raise_range=3,head_range=3,dataset=None):
@@ -635,6 +635,9 @@ class TftDataframeModel():
         # 整体需要一定涨幅
         if (pred_data[-1] - pred_data[0])/pred_data[0]<(raise_range/100):
             return False
+        # 最后一段需要上涨
+        if (pred_data[-1] - pred_data[-2])<0:
+            return False        
         # 与近期高点比较，不能差太多
         recent_max= recent_data.max()
         if pred_data[0]<recent_max and (recent_max-pred_data[0])/recent_max>head_range/100:
