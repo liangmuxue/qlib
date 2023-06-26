@@ -57,7 +57,7 @@ task:
                 train_total: [2022-01-01, 2023-05-31]
                 valid: [2022-09-01, 2022-12-05]
                 test: [2022-02-01, 2022-03-01]         
-                classify_range: [2023-04-16, 2023-04-30]
+                classify_range: [2023-04-16, 2023-04-20]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'

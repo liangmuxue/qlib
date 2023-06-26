@@ -19,6 +19,7 @@ from cus_utils.common_compute import normalization,slope_last_classify_compute
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 
 import cus_utils.global_var as global_var
+from cus_utils.encoder_cus import StockNormalizer
 
 class CusGenericShiftedDataset(GenericShiftedDataset):
     def __init__(
@@ -210,35 +211,29 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         np.ndarray,
     ]:
 
-        past_target, past_covariate, static_covariate, future_target,target_info,future_past_covariate = self.ds_past[idx]
+        past_target, past_covariate, static_covariate, future_target_ori,target_info,future_past_covariate = self.ds_past[idx]
         
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
-        # 使用原价格作为涨跌幅分类参照
-        # df_all = global_var.get_value("dataset").df_all
-        # price_items = df_all[(df_all["time_idx"]>=target_info["future_start"])&(df_all["time_idx"]<target_info["future_end"])&
-        #                         (df_all["instrument_rank"]==target_info["item_rank_code"])]["label_ori"].values
-        # price_items = target_info["price_array"]
-        # price_items = np.expand_dims(price_items,axis=-1)
+        
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        price_tar = future_target
-        # price_tar = price_items
-        max_value = np.max(price_tar)
-        min_value = np.min(price_tar)
-        if max_value - price_tar[0,0] > price_tar[0,0] - min_value:
-            raise_range = (max_value - price_tar[0,0])/price_tar[0,0]*100
-        else:
-            raise_range = (min_value - price_tar[0,0])/price_tar[0,0]*100
-            
+        raise_range = (future_target_ori[-1,0] - future_target_ori[0,0])/future_target_ori[0,0]*100
         # 先计算涨跌幅度分类，再进行归一化
         p_taraget_class = get_simple_class(raise_range)
-          
+        # 使用涨跌幅度进行衡量,由于涨跌幅限制，因此归一到: [0-2]
+        # target_slope = 1 + (price_tar[:,1:] - price_tar[:,:-1])/price_tar[:,:-1]*10
+        # target_slope = np.where(target_slope>0,target_slope,0)
+        # target_slope = np.where(target_slope<=2,target_slope,2)
+        # target_info["target_slope"] = target_slope
+        # slope_scaler = StockNormalizer(norm_mode="slope_range")
+        # target_slope = slope_scaler.fit_transform(target_slope) 
+        
         # 针对目标数据，进行单独归一化，扩展数据波动范围
-        scaler = MinMaxScaler(feature_range=(0.01,1))
+        scaler = StockNormalizer()
         scaler.fit(past_target)             
         past_target = scaler.transform(past_target)   
-        future_target = scaler.transform(future_target)   
-                
+        future_target = scaler.transform(future_target_ori)   
+        target_info["future_target"] = future_target_ori.squeeze(-1)
         # 对于协变量，也进行单独的归一化    
         past_covariate = normalization(past_covariate)
         future_covariate = normalization(future_covariate)

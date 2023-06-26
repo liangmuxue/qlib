@@ -141,6 +141,8 @@ class TftDataframeModel():
                 with open(df_data_path, "wb") as fout:
                     pickle.dump(dataset.df_all, fout)    
         
+        # dataset.stat_value_range(dataset.df_all)
+        
         self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
         self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
         

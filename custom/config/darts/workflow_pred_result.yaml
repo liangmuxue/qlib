@@ -62,7 +62,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_all_aug'
+               model_name: 'test9_tft_all_aug'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5

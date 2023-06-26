@@ -107,7 +107,26 @@ class TFTSeriesDataset(TFTDataset):
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
         self.build_group_rank_map(df)
         return df    
- 
+    
+    def stat_value_range(self,df):
+        """统计单位时间内上涨下跌幅度情况"""
+        
+        def rl_apply(df_values):
+            values = df_values.values
+            raise_range = (values.max() - values[0])/values[0]
+            fall_range = (values[0] - values.min())/values.min()
+            if raise_range>fall_range:
+                return raise_range
+            return -(values[0] - values.min())/values[0]
+        
+        group_column = self.get_group_column()
+        df_stat = df.groupby(group_column)["label"].rolling(window=self.step_len).apply(rl_apply)
+        raise_desc = df_stat[df_stat>0].describe([.01,.1,.2,.3,.4,.5,.6,.7,.8,.9,.99]).values
+        fall_desc = df_stat[df_stat<0].describe([.01,.1,.2,.3,.4,.5,.6,.7,.8,.9,.99])
+        max_value = raise_desc[-2]
+        min_value = -fall_desc.values[2]
+        print("max_value:{},min_value:{}".format(max_value,min_value))
+    
     def check_clear_valid_df(self):
         """清理验证集合长度不符合的数据"""
 

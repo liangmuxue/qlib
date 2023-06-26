@@ -112,6 +112,41 @@ def normalization(data,res=0.001,mode="numpy",avoid_zero=True):
         rtn = rtn + res  
     return rtn
 
+def price_range_normalization(data,res=0.001,mode="numpy",avoid_zero=True):
+    """针对股市涨跌幅度，进行统一的归一化"""
+    
+    MAX_RANGE = 1.5
+    MIN_RANGE = 0.8
+    
+    # 根据固定的总体幅度，进行最大最小化
+    max_value = data[:,0] * (1+MAX_RANGE)
+    min_value = data[:,0] * (1-MIN_RANGE)
+    
+    if mode=="numpy":
+        rtn = (data - np.min(data,axis=0))/(max_value-min_value) 
+    else:
+        rtn = (data - torch.min(data,dim=0)[0])/(torch.max(data,dim=0)[0]-torch.min(data,dim=0)[0]) 
+    if avoid_zero:
+        rtn = rtn + res  
+    return rtn
+
+def price_range_inverse_normalization(data,res=0.001,mode="numpy",avoid_zero=True):
+    """针对股市涨跌幅度，进行反向的归一化"""
+    
+    MAX_RANGE = 0.85
+    MIN_RANGE = 0.08
+    
+    # 根据固定的总体幅度，进行最大最小化
+    max_value = data[:,0] * (1+MAX_RANGE)
+    min_value = data[:,0] * MIN_RANGE
+    
+    if mode=="numpy":
+        rtn = (data - np.min(data,axis=0))/(max_value-min_value) 
+    else:
+        rtn = (data - torch.min(data,dim=0)[0])/(torch.max(data,dim=0)[0]-torch.min(data,dim=0)[0]) 
+    if avoid_zero:
+        rtn = rtn + res  
+    return rtn
 
 def compute_series_slope(series_data):
     """计算序列斜率,分段计算"""
