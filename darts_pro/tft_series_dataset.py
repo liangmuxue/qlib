@@ -276,47 +276,47 @@ class TFTSeriesDataset(TFTDataset):
                                                  static_cols=static_columns,
                                                  value_cols=target_column)    
         # 生成归一化的目标序列--取消，改为dataset内部进行           
-        # train_series_transformed = []
-        # val_series_transformed = []
-        # total_series_transformed = []
-        #
-        # for index,ts in enumerate(train_series):
-        #     target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
-        #     ts_transformed = target_scaler.fit_transform(ts)
-        #     vs_transformed = target_scaler.transform(val_series[index])
-        #     total_transformed = target_scaler.transform(total_series[index])
-        #     train_series_transformed.append(ts_transformed)
-        #     val_series_transformed.append(vs_transformed)
-        #     total_series_transformed.append(total_transformed)
+        train_series_transformed = []
+        val_series_transformed = []
+        total_series_transformed = []
+        
+        for index,ts in enumerate(train_series):
+            target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
+            ts_transformed = target_scaler.fit_transform(ts)
+            vs_transformed = target_scaler.transform(val_series[index])
+            total_transformed = target_scaler.transform(total_series[index])
+            train_series_transformed.append(ts_transformed)
+            val_series_transformed.append(vs_transformed)
+            total_series_transformed.append(total_transformed)
             
         def build_covariates(column_names,no_transform_columns=None):
             covariates_array = []
             for index,series in enumerate(train_series):
                 group_col_val = series.static_covariates[group_column].values[0]
-                # scaler = Scaler()
+                scaler = Scaler()
                 # 遍历并筛选出不同分组字段(股票)的单个dataframe
                 df_item = df_all[df_all[group_column]==group_col_val]
-                # df_item_train = df_train[df_train[group_column]==group_col_val] 
+                df_item_train = df_train[df_train[group_column]==group_col_val] 
                 covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
                                                          freq='D',
                                                          fill_missing_dates=True,
                                                          value_cols=column_names)  
-                # train_covariates = TimeSeries.from_dataframe(df_item_train,time_col=time_column,
-                #                                          freq='D',
-                #                                          fill_missing_dates=True,
-                #                                          value_cols=column_names)       
+                train_covariates = TimeSeries.from_dataframe(df_item_train,time_col=time_column,
+                                                         freq='D',
+                                                         fill_missing_dates=True,
+                                                         value_cols=column_names)       
                 # 使用训练数据fit，并transform到整个序列    
-                # scaler.fit(train_covariates)
-                # covariates_transformed = scaler.transform(covariates)    
-                # # 对于补充类字段，不需要transform，在此进行拼接
-                # if no_transform_columns is not None:
-                #     att_covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
-                #                                          freq='D',
-                #                                          fill_missing_dates=True,
-                #                                          value_cols=no_transform_columns)  
-                #     covariates_transformed = covariates_transformed.concatenate(att_covariates,axis=1)
-                # covariates_array.append(covariates_transformed)
-                covariates_array.append(covariates)
+                scaler.fit(train_covariates)
+                covariates_transformed = scaler.transform(covariates)    
+                # 对于补充类字段，不需要transform，在此进行拼接
+                if no_transform_columns is not None:
+                    att_covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
+                                                         freq='D',
+                                                         fill_missing_dates=True,
+                                                         value_cols=no_transform_columns)  
+                    covariates_transformed = covariates_transformed.concatenate(att_covariates,axis=1)
+                covariates_array.append(covariates_transformed)
+                # covariates_array.append(covariates)
             return covariates_array            
 
         # 生成过去协变量，并归一化
@@ -333,7 +333,7 @@ class TFTSeriesDataset(TFTDataset):
         if fill_future:           
             future_convariates = self.fill_future_data(future_convariates,future_columns,self.pred_len)
         # 分别返回用于训练预测的序列series_transformed，以及完整序列series
-        return train_series,val_series,total_series,past_convariates,future_convariates
+        return train_series_transformed,val_series_transformed,total_series_transformed,past_convariates,future_convariates
             
 
     def fill_future_data(self,future_convariates,column_names,fill_length):
@@ -573,7 +573,9 @@ class TFTSeriesDataset(TFTDataset):
         
         return filter_list        
         
-        
+    def get_scaler_by_group_code(self,code):
+        return self.target_scalers[code]
+       
     def filter_pred_data_by_mape(self,pred_list,threhold=10,result_id=0):
         """根据得分筛选预测数据"""
         

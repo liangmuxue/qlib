@@ -46,7 +46,9 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
             code = int(series.static_covariates["instrument_rank"].values[0])
             price_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label_ori"].values
-            self.ass_data[code] = price_array
+            label_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["label"].values                                
+            self.ass_data[code] = (label_array,price_array)
             
     def __getitem__(
         self, idx
@@ -112,11 +114,12 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         past_target = target_vals[past_start:past_end]
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
-        price_array = self.ass_data[code][future_start-1:future_end]
-        total_price_array = self.ass_data[code][past_start:future_end]
+        label_array = self.ass_data[code][0][future_start-1:future_end]
+        price_array = self.ass_data[code][1][future_start-1:future_end]
+        # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
-                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"total_price_array":total_price_array,
+                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"label_array":label_array,
                        "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates
@@ -211,32 +214,21 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         np.ndarray,
     ]:
 
-        past_target, past_covariate, static_covariate, future_target_ori,target_info,future_past_covariate = self.ds_past[idx]
+        past_target, past_covariate, static_covariate, future_target,target_info,future_past_covariate = self.ds_past[idx]
         
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
-        
+        # 使用原值衡量涨跌幅度
+        label_array = target_info["label_array"]
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        raise_range = (future_target_ori[-1,0] - future_target_ori[0,0])/future_target_ori[0,0]*100
+        raise_range = (label_array[-1] - label_array[0])/label_array[0]*100
         # 先计算涨跌幅度分类，再进行归一化
         p_taraget_class = get_simple_class(raise_range)
-        # 使用涨跌幅度进行衡量,由于涨跌幅限制，因此归一到: [0-2]
-        # target_slope = 1 + (price_tar[:,1:] - price_tar[:,:-1])/price_tar[:,:-1]*10
-        # target_slope = np.where(target_slope>0,target_slope,0)
-        # target_slope = np.where(target_slope<=2,target_slope,2)
-        # target_info["target_slope"] = target_slope
-        # slope_scaler = StockNormalizer(norm_mode="slope_range")
-        # target_slope = slope_scaler.fit_transform(target_slope) 
-        
-        # 针对目标数据，进行单独归一化，扩展数据波动范围
-        scaler = StockNormalizer()
-        scaler.fit(past_target)             
-        past_target = scaler.transform(past_target)   
-        future_target = scaler.transform(future_target_ori)   
-        target_info["future_target"] = future_target_ori.squeeze(-1)
-        # 对于协变量，也进行单独的归一化    
-        past_covariate = normalization(past_covariate)
-        future_covariate = normalization(future_covariate)
+         
+        target_info["future_target"] = future_target.squeeze(-1)
+        # # 对于协变量，也进行单独的归一化    
+        # past_covariate = normalization(past_covariate)
+        # future_covariate = normalization(future_covariate)
                
         # 添加末段走势分类目标输出
         target_class = slope_last_classify_compute(future_target)
@@ -250,7 +242,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             historic_future_covariate,
             future_covariate,
             static_covariate,
-            (scaler,future_past_covariate),
+            (None,future_past_covariate),
             target_class,
             future_target,
             target_info

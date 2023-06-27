@@ -2,6 +2,7 @@ from typing import Callable, Dict, Iterable, List, Tuple, Union
 import pandas as pd
 import numpy as np
 import torch
+from sklearn.preprocessing import MinMaxScaler
 
 MAX_RANGE = 1.85
 MIN_RANGE = 0.08
@@ -59,5 +60,29 @@ class StockNormalizer(object):
         
         rtn = self.max_value - tar_data * (self.max_value - self.min_value)
         return rtn          
+ 
+class MinMaxNormalizer(MinMaxScaler):
+
+    def __init__(self,feature_range=(0.001,1)):
+        super().__init__(feature_range=feature_range)
+
+    def fit(self, data):
         
+        super().fit(data)
+        return self
+
+    def transform(self,tar_data):
+        return super().transform(tar_data)
+        
+    def fit_transform(self,tar_data):
+        
+        rtn = self.fit(tar_data).transform(tar_data)
+        return rtn        
+        
+    def inverse_transform(self,tar_data):
+        """反向归一化"""
+        
+        rtn = super().inverse_transform(tar_data)
+        return rtn     
+           
         
