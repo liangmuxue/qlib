@@ -172,17 +172,30 @@ def compute_price_range(price_arr):
     slope_range = (price_arr_after - price_arr_before)/price_arr_before*100
     return slope_range
 
-def compute_price_class(price_array):   
+def compute_price_class(price_array,mode="max_range"):   
     cur_price = price_array[0]
-    # target_price = price_array[1:]
-    max_value = np.max(price_array)
-    min_value = np.min(price_array)
-    if max_value - cur_price > cur_price - min_value:
-        raise_range = (max_value - cur_price)/cur_price*100
-    else:
-        raise_range = (min_value - cur_price)/cur_price*100            
+    if mode=="max_range":
+        max_value = np.max(price_array)
+        min_value = np.min(price_array)
+        if max_value - cur_price > cur_price - min_value:
+            raise_range = (max_value - cur_price)/cur_price*100
+        else:
+            raise_range = (min_value - cur_price)/cur_price*100         
+    if mode=="first_last":
+        raise_range = (price_array[-1] - cur_price)/cur_price*100             
+    if mode=="fast":
+        raise_range = (price_array[3] - cur_price)/cur_price*100                
     p_taraget_class = get_simple_class(raise_range)     
     return p_taraget_class
+
+def compute_price_class_batch(price_array,mode="first_last"):   
+    cur_price = price_array[:,0]        
+    if mode=="first_last":
+        raise_range = (price_array[:,-1] - cur_price)/cur_price*100             
+    if mode=="fast":
+        raise_range = (price_array[:,-3] - cur_price)/cur_price*100                
+    p_taraget_class = np.array([get_simple_class(item) for item in raise_range])
+    return p_taraget_class,raise_range
 
 def target_scale(target_ori,range=0.1):
     """针对股市涨跌幅度，实现期间缩放"""

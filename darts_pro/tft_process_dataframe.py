@@ -177,7 +177,7 @@ class TftDataframeModel():
         optimizer_kwargs = self.kwargs["optimizer_kwargs"]
         
         # # 使用余弦退火的学习率方式
-        # scheduler = CosineAnnealingLR
+        scheduler = CosineAnnealingLR
         # scheduler_config = {
         #     "T_max": 5, 
         #     "eta_min": 0,

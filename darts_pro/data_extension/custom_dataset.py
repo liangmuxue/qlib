@@ -114,7 +114,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         past_target = target_vals[past_start:past_end]
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
-        label_array = self.ass_data[code][0][future_start-1:future_end]
+        label_array = self.ass_data[code][0][past_start:future_end]
         price_array = self.ass_data[code][1][future_start-1:future_end]
         # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
@@ -196,6 +196,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         )
         
         self.output_chunk_length = output_chunk_length
+        self.input_chunk_length = input_chunk_length
         self.class1_len = int((output_chunk_length-1)/2)
         self.class2_len = output_chunk_length -1 - self.class1_len
         
@@ -219,7 +220,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
         # 使用原值衡量涨跌幅度
-        label_array = target_info["label_array"]
+        label_array = target_info["label_array"][self.input_chunk_length:]
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
         raise_range = (label_array[-1] - label_array[0])/label_array[0]*100
         # 先计算涨跌幅度分类，再进行归一化
