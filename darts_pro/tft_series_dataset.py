@@ -52,6 +52,7 @@ class TFTSeriesDataset(TFTDataset):
         
         self.dbaccessor = DbAccessor({})
         self.emb_size = 0
+        self.transform_inner = kwargs["transform_inner"]
         
     def _create_target_scalers(self,df):
         scaler_dict = {}
@@ -280,14 +281,15 @@ class TFTSeriesDataset(TFTDataset):
         val_series_transformed = []
         total_series_transformed = []
         
-        for index,ts in enumerate(train_series):
-            target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
-            ts_transformed = target_scaler.fit_transform(ts)
-            vs_transformed = target_scaler.transform(val_series[index])
-            total_transformed = target_scaler.transform(total_series[index])
-            train_series_transformed.append(ts_transformed)
-            val_series_transformed.append(vs_transformed)
-            total_series_transformed.append(total_transformed)
+        if not self.transform_inner:
+            for index,ts in enumerate(train_series):
+                target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
+                ts_transformed = target_scaler.fit_transform(ts)
+                vs_transformed = target_scaler.transform(val_series[index])
+                total_transformed = target_scaler.transform(total_series[index])
+                train_series_transformed.append(ts_transformed)
+                val_series_transformed.append(vs_transformed)
+                total_series_transformed.append(total_transformed)
             
         def build_covariates(column_names,no_transform_columns=None):
             covariates_array = []
@@ -305,6 +307,10 @@ class TFTSeriesDataset(TFTDataset):
                                                          freq='D',
                                                          fill_missing_dates=True,
                                                          value_cols=column_names)       
+                if self.transform_inner:
+                    covariates_array.append(covariates)
+                    continue
+                
                 # 使用训练数据fit，并transform到整个序列    
                 scaler.fit(train_covariates)
                 covariates_transformed = scaler.transform(covariates)    
@@ -316,7 +322,6 @@ class TFTSeriesDataset(TFTDataset):
                                                          value_cols=no_transform_columns)  
                     covariates_transformed = covariates_transformed.concatenate(att_covariates,axis=1)
                 covariates_array.append(covariates_transformed)
-                # covariates_array.append(covariates)
             return covariates_array            
 
         # 生成过去协变量，并归一化
@@ -332,9 +337,11 @@ class TFTSeriesDataset(TFTDataset):
         # 补充未来协变量数据,与验证数据相对应    
         if fill_future:           
             future_convariates = self.fill_future_data(future_convariates,future_columns,self.pred_len)
-        # 分别返回用于训练预测的序列series_transformed，以及完整序列series
-        return train_series_transformed,val_series_transformed,total_series_transformed,past_convariates,future_convariates
             
+        # 分别返回用于训练预测的序列series_transformed，以及完整序列series
+        if not self.transform_inner:
+            return train_series_transformed,val_series_transformed,total_series_transformed,past_convariates,future_convariates
+        return train_series,val_series,total_series,past_convariates,future_convariates   
 
     def fill_future_data(self,future_convariates,column_names,fill_length):
         """补充未来协变量数据"""

@@ -199,6 +199,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         self.input_chunk_length = input_chunk_length
         self.class1_len = int((output_chunk_length-1)/2)
         self.class2_len = output_chunk_length -1 - self.class1_len
+        self.transform_inner = global_var.get_value("dataset").transform_inner
         
     def __len__(self):
         return len(self.ds_past)
@@ -215,7 +216,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         np.ndarray,
     ]:
 
-        past_target, past_covariate, static_covariate, future_target,target_info,future_past_covariate = self.ds_past[idx]
+        past_target, past_covariate, static_covariate, future_target_ori,target_info,future_past_covariate = self.ds_past[idx]
         
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
@@ -225,12 +226,19 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         raise_range = (label_array[-1] - label_array[0])/label_array[0]*100
         # 先计算涨跌幅度分类，再进行归一化
         p_taraget_class = get_simple_class(raise_range)
-         
-        target_info["future_target"] = future_target.squeeze(-1)
-        # # 对于协变量，也进行单独的归一化    
-        # past_covariate = normalization(past_covariate)
-        # future_covariate = normalization(future_covariate)
-               
+        
+        scaler = MinMaxScaler()
+        target_info["future_target"] = future_target_ori.squeeze(-1)
+        # 对于协变量，也进行单独的归一化    
+        if self.transform_inner:
+            past_covariate = normalization(past_covariate)
+            future_covariate = normalization(future_covariate)
+            scaler.fit(past_target)             
+            past_target = scaler.transform(past_target)   
+            future_target = scaler.transform(future_target_ori)        
+        else:
+            future_target = future_target_ori     
+            
         # 添加末段走势分类目标输出
         target_class = slope_last_classify_compute(future_target)
         target_class = np.expand_dims([target_class],axis=-1)
@@ -243,7 +251,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             historic_future_covariate,
             future_covariate,
             static_covariate,
-            (None,future_past_covariate),
+            (scaler,future_past_covariate),
             target_class,
             future_target,
             target_info

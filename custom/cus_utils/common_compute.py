@@ -1,15 +1,11 @@
-from visdom import Visdom
 import torch
 import torch.nn.functional as F
-from torch import nn
 
 import numpy as np
 
-from imblearn.over_sampling import RandomOverSampler
 from imblearn.over_sampling import SMOTE, ADASYN, BorderlineSMOTE,KMeansSMOTE
 from collections import Counter
 from sklearn.preprocessing import MinMaxScaler
-import pandas as pd
 
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 
@@ -24,6 +20,13 @@ def slope_classify_compute(target_ori,threhold=2):
         return SLOPE_SHAPE_SMOOTH    
     return SLOPE_SHAPE_SHAKE
 
+def slope_classify_compute_batch(target,threhold=2):
+    """生成基于斜率的目标分类"""
+    
+    target_slope = (target[:,1:]  - target[:,:-1])/target[:,:-1]
+    slope_index_bool = torch.abs(target_slope)<(threhold/100)
+    slope_index_bool = torch.all(slope_index_bool,dim=-1)
+    return slope_index_bool
 
 def slope_last_classify_compute(target,threhold=0.05):
     """生成基于斜率的目标分类"""

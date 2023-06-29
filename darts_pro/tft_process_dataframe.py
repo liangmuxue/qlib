@@ -165,19 +165,21 @@ class TftDataframeModel():
         
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True)
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)
         
     def _build_model(self,dataset,emb_size=1000,use_model_name=True):
         """生成模型"""
         
         log_every_n_steps = self.kwargs["log_every_n_steps"]
         optimizer_cls = torch.optim.Adam
+        # optimizer_cls = torch.optim.SGD
         scheduler = StepLR
         scheduler_config = self.kwargs["scheduler_config"]
         optimizer_kwargs = self.kwargs["optimizer_kwargs"]
         
+        scheduler = torch.optim.lr_scheduler.CyclicLR
         # # 使用余弦退火的学习率方式
-        scheduler = CosineAnnealingLR
+        # scheduler = CosineAnnealingLR
         # scheduler_config = {
         #     "T_max": 5, 
         #     "eta_min": 0,
