@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_500
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -54,13 +54,13 @@ task:
             n_jobs: 20
             log_every_n_steps: 50
             type: 'train_dataframe'
-            n_epochs : 50
+            n_epochs : 100
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
-               base_lr: 1e-4
+               base_lr: 1e-5
                max_lr: 1e-3     
                cycle_momentum: False
                # step_size: 1   
@@ -73,7 +73,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_500_aug'
+               model_name: 'test8_tft_100_aug'
                load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5

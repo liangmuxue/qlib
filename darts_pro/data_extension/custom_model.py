@@ -281,7 +281,7 @@ class _TFTCusModule(_TFTModule):
         # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
         self.log("import_price_acc", import_price_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
         self.log("import_price_nag", import_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True)   
-        self.log("last_section_acc", import_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        self.log("last_section_acc", last_section_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
         print("import_vr_acc:{},import_price_acc:{},import_price_nag:{},count:{}".
               format(import_vr_acc,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
@@ -343,8 +343,8 @@ class _TFTCusModule(_TFTModule):
     def compute_vr_class_acc(self,vr_class,vr_target_from_ds,target_info=None,output_inverse=None):
         """计算涨跌幅分类准确度"""
 
-        target = np.array([item["label_array"][self.input_chunk_length:] for item in target_info])
-        target_slope = (target[:,1:]  - target[:,:-1])/target[:,:-1]*100
+        label_array = torch.Tensor([item["label_array"] for item in target_info]).to(self.device)
+        target = label_array[:,self.input_chunk_length:]
         vr_target,raise_range = compute_price_class_batch(target,mode="fast")
         vr_target = torch.Tensor(vr_target).to(self.device)
         # 总体准确率
@@ -355,16 +355,17 @@ class _TFTCusModule(_TFTModule):
         slope_out = (output_inverse[:,1:]  - output_inverse[:,:-1])/output_inverse[:,:-1]*100
         # 整体需要有上涨幅度
         import_index_bool = import_index_bool & (torch.sum(slope_out,dim=1)>5)
-        # 最后一段需要上涨
-        import_index_bool = import_index_bool & (slope_out[:,-1]>0)        
+        # # 最后一段需要上涨
+        # import_index_bool = import_index_bool & (slope_out[:,-1]>0)        
         # 与近期高点比较，不能差太多
-        recent_data = torch.Tensor([item["label_array"][:self.input_chunk_length] for item in target_info]).to(self.device)
+        recent_data = label_array[:,:self.input_chunk_length]
         recent_max = torch.max(recent_data,dim=1)[0]
         import_index_bool = import_index_bool & (output_inverse[:,0]>recent_max)
         # 关注前期走势比较平稳的
+        slope_bool = slope_classify_compute_batch(recent_data[:,-3:],threhold=2)
+        import_index_bool = import_index_bool & slope_bool        
+        # 价格走势判断
         focus_target = torch.Tensor([item["price_array"] for item in target_info]).to(self.device)
-        # slope_bool = slope_classify_compute_batch(focus_target,threhold=2)
-        # import_index_bool = import_index_bool & slope_bool        
         import_index = torch.where(import_index_bool)[0]
         
         # 统计准确率
@@ -384,7 +385,7 @@ class _TFTCusModule(_TFTModule):
         # 重点类别的价格准确率
         price_class = []
         for item in target_info:
-            p_taraget_class = compute_price_class(item["price_array"])
+            p_taraget_class = compute_price_class(item["price_array"],mode="fast")
             price_class.append(p_taraget_class)
         price_class = torch.Tensor(np.array(price_class)).int()
         import_price_acc_count = torch.sum(price_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
@@ -397,9 +398,10 @@ class _TFTCusModule(_TFTModule):
             import_price_nag = import_price_nag_count/import_index.shape[0]
         
         # 追加统计最后一段预测准确率
+        target_slope = (target[:,1:]  - target[:,:-1])/target[:,:-1]*100
         last_section_slope_index_bool = slope_out[:,-1]>0
         last_section_slope_index = torch.where(last_section_slope_index_bool)[0]
-        last_section_acc = torch.sum(torch.Tensor(target_slope)[last_section_slope_index,-1]>0)/last_section_slope_index.shape[0]
+        last_section_acc = torch.sum(target_slope[last_section_slope_index,-1]>0)/last_section_slope_index.shape[0]
                  
         return total_acc,import_acc, import_recall,import_price_acc,import_price_nag,price_class,last_section_acc,import_index
 
@@ -1415,9 +1417,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
         
         # 重点关注前期走势比较平的
         focus_target = target_unscale[self.input_chunk_length-5:self.input_chunk_length]
-        # slope = slope_classify_compute(focus_target,threhold=2)
-        # if slope!=SLOPE_SHAPE_SMOOTH:
-        #     return None
+        slope = slope_classify_compute(focus_target,threhold=2)
+        if slope!=SLOPE_SHAPE_SMOOTH:
+            return None
         
         # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
         # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
