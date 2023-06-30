@@ -1417,6 +1417,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         
         # 重点关注前期走势比较平的
         focus_target = target_unscale[self.input_chunk_length-5:self.input_chunk_length]
+        focus_target = target_unscale[self.input_chunk_length-5:self.input_chunk_length]
         slope = slope_classify_compute(focus_target,threhold=2)
         if slope!=SLOPE_SHAPE_SMOOTH:
             return None
