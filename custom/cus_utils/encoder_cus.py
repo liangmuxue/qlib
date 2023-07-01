@@ -12,17 +12,17 @@ def transform_slope_value_no_inverse(target_value):
     return slope_value
 
 def transform_slope_value(target_value):
-    slope_value =  1 + (target_value[:,1:] - target_value[:,:-1])/target_value[:,:-1]*10
+    slope_value = (target_value[:,1:] - target_value[:,:-1])/target_value[:,:-1]*10
     if isinstance(target_value, torch.Tensor):
-        slope_value = torch.where(slope_value>0,slope_value,0.0)
-        slope_value = torch.where(slope_value<=2,slope_value,2.0)
+        slope_value = torch.where(slope_value<1,slope_value,1.0)
+        slope_value = torch.where(slope_value>-1,slope_value,-1.0)
     else:
-        slope_value = np.where(slope_value>0,slope_value,0.0)
-        slope_value = np.where(slope_value<=2,slope_value,2.0)        
+        slope_value = np.where(slope_value<1,slope_value,1.0)
+        slope_value = np.where(slope_value>-1,slope_value,-1.0)        
     return slope_value
 
 def unverse_transform_slope_value(slope_value):
-    target_range = (slope_value - 1)/10
+    target_range = slope_value/10
     return target_range
         
 class StockNormalizer(object):

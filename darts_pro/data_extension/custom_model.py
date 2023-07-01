@@ -282,8 +282,8 @@ class _TFTCusModule(_TFTModule):
         # self.log("import_price_acc", import_price_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
         # self.log("import_price_nag", import_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True)   
         self.log("last_section_acc", out_last_raise_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        self.log("out_last_raise_rate", out_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        self.log("tar_last_raise_rate", tar_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # self.log("out_last_raise_rate", out_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # self.log("tar_last_raise_rate", tar_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
         # print("import_vr_acc:{},import_price_acc:{},import_price_nag:{},count:{}".
         #       format(import_vr_acc,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]

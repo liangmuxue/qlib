@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_100
+market: &market test_500
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -73,7 +73,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_100_aug'
+               model_name: 'test6_tft_500_aug'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
