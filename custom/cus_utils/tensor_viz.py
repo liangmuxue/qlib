@@ -124,7 +124,7 @@ class TensorViz(object):
         
         length = data.shape[0]
         self.viz.histogram(X=data, win=win, opts=dict(numbins=numbins,title=title))  
-                   
+    
 def reals_data_test():
     viz = TensorViz()
     reals = np.load("/home/qdata/project/pytorch-forecasting/viz/reals.npy")

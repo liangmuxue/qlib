@@ -63,11 +63,10 @@ class ScopeLoss(_Loss):
             weight = mse_scope_weight
         self.weight = weight.to(self.device)
 
-    def forward(self, slope_input: Tensor, target: Tensor) -> Tensor:
+    def forward(self, slope_input: Tensor, slope_target: Tensor) -> Tensor:
         # slope_target = transform_slope_value(target)
-        slope_target = target[:,1:] - target[:,:-1]
-        loss_arr = (slope_input - slope_target) ** 2
-        loss_arr = loss_arr # * self.weight
+        slope_arr = (slope_input - slope_target) ** 2
+        loss_arr = slope_arr[:,-2:] # * self.weight
         if self.reduction=="mean":
             loss = torch.mean(loss_arr)
         else:
@@ -81,7 +80,10 @@ class UncertaintyLoss(nn.Module):
         super(UncertaintyLoss, self).__init__()
         
         self.mse_reduction = mse_reduction
-        self.sigma = loss_sigma
+        # self.sigma = loss_sigma
+        sig_params = torch.ones(4, requires_grad=True).to(device)
+        self.sigma = torch.nn.Parameter(sig_params)
+        
         self.device = device
         self.epoch = 0
         
@@ -102,8 +104,8 @@ class UncertaintyLoss(nn.Module):
         input = input_ori[0]
         slope_out = input_ori[1]
         vr_class = input_ori[2]
-        # input_inverse = input_ori[3]
-        target = target_ori[0]
+        (target,future_target,target_class,slope_target) = target_ori
+        target = target[:,:,0]
         future_target = target_ori[1]
         target_classify = target_ori[2]
         # 如果是似然估计下的数据，需要取中间值
@@ -112,26 +114,23 @@ class UncertaintyLoss(nn.Module):
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.ccc_loss_comp(input, target)   
+        corr_loss = 0.0 # self.ccc_loss_comp(input, target)   
         # 针对均线最后一个部分，计算交叉熵损失
         # ce_loss = self.last_classify_loss(input,target[:,:,0])
         # ce_loss = 0
         # 第3个部分为幅度范围分类，计算交叉熵损失 
         value_range_loss = self.vr_loss(vr_class[:,0,:],target_classify[:,1])              
         # 整体MSE损失
-        mse_loss = 0.0 # self.mse_loss(input, target[:,:,0])     
+        mse_loss =  self.mse_loss(input, target)     
         # 涨跌幅度衡量
-        value_diff_loss = 0.0 # self.scope_loss(slope_out, future_target)
-        
+        value_diff_loss = self.scope_loss(slope_out, slope_target)
         loss_sum = 0
         # 使用不确定性损失模式进行累加
         # loss_sum += 1/2 / (self.sigma[0] ** 2) * value_diff_loss + torch.log(1 + self.sigma[0] ** 2)
-        # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
+        # loss_sum += 1/6 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-        corr_loss_value = corr_loss.detach()
-        rate = 0.1 + torch.abs(1-corr_loss_value)
-        loss_sum += (corr_loss + rate * value_range_loss)
+        loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
+        
         return loss_sum,(value_range_loss,value_diff_loss,corr_loss,mse_loss)
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):
@@ -156,7 +155,7 @@ class UncertaintyLoss(nn.Module):
         sd_true = torch.std(target)
         sd_pred = torch.std(input)
         numerator = 2*cor*sd_true*sd_pred
-        mse_part = torch.mean((target_ori[:,:,0]-input_ori)**2 * self.mse_weight)
+        mse_part = torch.mean((target_ori-input_ori)**2) # * self.mse_weight)
         denominator = var_true + var_pred + mse_part
         ccc = numerator/denominator
         ccc_loss = 1 - ccc

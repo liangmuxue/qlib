@@ -60,7 +60,7 @@ task:
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
-               base_lr: 1e-5
+               base_lr: 1e-4
                max_lr: 1e-3     
                cycle_momentum: False
                # step_size: 1   
@@ -74,7 +74,7 @@ task:
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
                model_name: 'test8_tft_100_aug'
-               load_weight: True
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

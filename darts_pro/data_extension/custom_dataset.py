@@ -19,7 +19,7 @@ from cus_utils.common_compute import normalization,slope_last_classify_compute
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 
 import cus_utils.global_var as global_var
-from cus_utils.encoder_cus import StockNormalizer
+from cus_utils.encoder_cus import transform_slope_value
 
 class CusGenericShiftedDataset(GenericShiftedDataset):
     def __init__(
@@ -115,7 +115,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
         label_array = self.ass_data[code][0][past_start:future_end]
-        price_array = self.ass_data[code][1][future_start-1:future_end]
+        price_array = self.ass_data[code][1][past_start:future_end]
         # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
@@ -226,6 +226,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         raise_range = (label_array[-1] - label_array[0])/label_array[0]*100
         # 先计算涨跌幅度分类，再进行归一化
         p_taraget_class = get_simple_class(raise_range)
+        target_info["raise_range"] = transform_slope_value(np.expand_dims(label_array,axis=0))[0]
         
         scaler = MinMaxScaler()
         target_info["future_target"] = future_target_ori.squeeze(-1)
