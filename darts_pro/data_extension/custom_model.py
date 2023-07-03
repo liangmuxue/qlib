@@ -26,7 +26,7 @@ from joblib import Parallel, delayed
 
 from cus_utils.encoder_cus import StockNormalizer,unverse_transform_slope_value
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute
+from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute,slope_classify_compute_batch
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH
@@ -123,6 +123,7 @@ class _TFTCusModule(_TFTModule):
         
         # 分类模式涵盖前后2段，因此定义2个分类层
         mss_num = 4
+        focus_num = 2
         vr_range_num = len(CLASS_SIMPLE_VALUES.keys())
         pred_len = kwargs["output_chunk_length"]
         self.class1_len = int((pred_len-1)/2)
@@ -131,7 +132,7 @@ class _TFTCusModule(_TFTModule):
         self.classify_layer_2 = self._construct_classify_layer(self.class2_len+1,mss_num).to(device)
         self.slope_layer = self._construct_classify_layer(pred_len,pred_len-1).to(device)  
         # 涨跌幅度分类
-        self.classify_vr_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
+        self.classify_vr_layer = self._construct_classify_layer(focus_num,vr_range_num).to(device)  
         # mse损失计算                
         self.mean_squared_error = MeanSquaredError().to(device)
         
@@ -161,9 +162,10 @@ class _TFTCusModule(_TFTModule):
         )        
          
         output_sample = out[:,:,0,0]
+        output_sample_last = output_sample[:,-2:]
         slope_out = self.slope_layer(output_sample)
         # 涨跌幅度分类
-        vr_class = self.classify_vr_layer(output_sample)
+        vr_class = self.classify_vr_layer(output_sample_last)
         vr_class = torch.unsqueeze(vr_class,1)
         return (out,slope_out,vr_class)
     
@@ -415,8 +417,8 @@ class _TFTCusModule(_TFTModule):
         # mse损失
         # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
         
         # self.manual_backward(loss)
@@ -449,34 +451,39 @@ class _TFTCusModule(_TFTModule):
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         vr_class_certainlys = self.build_vr_class_cer(vr_class[:,0,:])
         # last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
-        # vr_acc,import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,last_section_acc,import_index = self.compute_vr_class_acc(
-        #     vr_class_certainlys, target_vr_class,target_info=target_info,
-        #     output_inverse=torch.Tensor(output_inverse).to(self.device))  
+        vr_acc,import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,sec_acc, \
+            sec_recall,sec_price_acc,sec_price_nag,import_index,sec_index = self.compute_vr_class_acc(
+            vr_class_certainlys, target_vr_class,target_info=target_info,
+            output_inverse=torch.Tensor(output_inverse).to(self.device))  
          
-        # out_last_raise_acc,out_last_raise_rate,tar_last_raise_rate,price_class,import_index = self.compute_slope_acc(
+        # out_last_raise_acc,out_last_raise_rate,tar_last_raise_rate,price_class,import_index,out_last_fall_acc = self.compute_slope_acc(
         #     None,slope_out,target_info=target_info,output_inverse=output_inverse)
-        import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,import_index,out_last_raise_acc,out_last_raise_rate \
-             = self.compute_real_class_acc(target, target_vr_class,output_inverse=output_inverse,slope_out=slope_out.cpu().numpy(),target_info=target_info)              
-        # self.log("vr_acc", vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)     
+        # import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,import_index,out_last_raise_acc,out_last_raise_rate \
+        #      = self.compute_real_class_acc(target, target_vr_class,output_inverse=output_inverse,slope_out=slope_out.cpu().numpy(),target_info=target_info)              
+        self.log("vr_acc", vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
         # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
         self.log("import_price_acc", import_price_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
         self.log("import_price_nag", import_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True)   
-        self.log("last_section_acc", out_last_raise_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        self.log("out_last_raise_rate", out_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        self.log("sec_acc", sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        self.log("sec_recall", sec_recall, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        self.log("sec_price_acc", sec_price_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        self.log("sec_price_nag", sec_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # self.log("out_last_raise_rate", out_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # self.log("out_last_fall_acc", out_last_fall_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
         # self.log("tar_last_raise_rate", tar_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
-            format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
+        # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
+        #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
         self.val_metric_show(output,target,price_class,vr_class_certainlys,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
-                             past_target=past_target,target_info=target_info,import_index=import_index)
+                             past_target=past_target,target_info=target_info,import_index=import_index,sec_index=sec_index)
         self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
@@ -535,29 +542,34 @@ class _TFTCusModule(_TFTModule):
 
         label_array = torch.Tensor([item["label_array"] for item in target_info]).to(self.device)
         target = label_array[:,self.input_chunk_length:]
-        vr_target,raise_range = compute_price_class_batch(target,mode="fast")
-        vr_target = torch.Tensor(vr_target).to(self.device)
+        # vr_target,raise_range = compute_price_class_batch(target,mode="fast")
+        # vr_target = torch.Tensor(vr_target).to(self.device)
+        vr_target = vr_target_from_ds
         # 总体准确率
         total_acc = torch.sum(vr_class==vr_target)/vr_target.shape[0]        
         # 重点类别的准确率
         import_index_bool = (vr_class==CLASS_SIMPLE_VALUE_MAX)
+        sec_index_bool = (vr_class==CLASS_SIMPLE_VALUE_SEC)
         # 加入数值判断
         slope_out = (output_inverse[:,1:]  - output_inverse[:,:-1])/output_inverse[:,:-1]*100
-        # # 整体需要有上涨幅度
-        # import_index_bool = import_index_bool & (torch.sum(slope_out,dim=1)>3)
+        # 数值上也需要有上涨幅度
+        sec_index_bool = sec_index_bool & (slope_out[:,-1]>1)
+        
         # 最后一段需要上涨
         # import_index_bool = import_index_bool & (slope_out[:,-1]>0)   
-        import_index_bool = (slope_out[:,-1]>0)    
+        # import_index_bool = (slope_out[:,-1]>0)    
         # 与近期高点比较，不能差太多
-        # recent_data = label_array[:,:self.input_chunk_length]
-        # recent_max = torch.max(recent_data,dim=1)[0]
-        # import_index_bool = import_index_bool & (output_inverse[:,0]>recent_max)
-        # 关注前期走势比较平稳的
-        # slope_bool = slope_classify_compute_batch(recent_data[:,-3:],threhold=2)
-        # import_index_bool = import_index_bool & slope_bool        
+        recent_data = label_array[:,:self.input_chunk_length]
+        recent_max = torch.max(recent_data,dim=1)[0]
+        # sec_index_bool = sec_index_bool & (output_inverse[:,0]>recent_max)
+        # 关注前期走势比较剧烈的
+        slope_bool = slope_classify_compute_batch(recent_data[:,-5:],mode=2,threhold=1,num=2)
+        sec_index_bool = sec_index_bool & slope_bool  
+              
         # 价格走势判断
         focus_target = np.array([item["price_array"] for item in target_info])
         import_index = torch.where(import_index_bool)[0]
+        sec_index = torch.where(sec_index_bool)[0]
         
         # 统计准确率
         import_acc_count = torch.sum(vr_target[import_index]==CLASS_SIMPLE_VALUE_MAX)
@@ -565,57 +577,93 @@ class _TFTCusModule(_TFTModule):
             import_acc = torch.tensor(0.0)
         else:
             import_acc = import_acc_count/import_index.shape[0]
-         
+        sec_acc_count = torch.sum(vr_target[sec_index]==CLASS_SIMPLE_VALUE_SEC)
+        if sec_index.shape[0]==0:
+            sec_acc = torch.tensor(0.0)
+        else:
+            sec_acc = sec_acc_count/sec_index.shape[0]
+                     
         # 重点类别的召回率    
         total_imp_cnt = torch.sum(vr_target==CLASS_SIMPLE_VALUE_MAX)
+        total_sec_cnt = torch.sum(vr_target==CLASS_SIMPLE_VALUE_SEC)
         if total_imp_cnt!=0:
             import_recall = import_acc_count/total_imp_cnt
+            sec_recall = sec_acc_count/total_sec_cnt
         else:
             import_recall = 0
+            sec_recall = 0
 
         # 重点类别的价格准确率
         price_class,raise_range = compute_price_class_batch(focus_target[:,self.input_chunk_length:],mode="fast")
         price_class = torch.Tensor(price_class).int()
         import_price_acc_count = torch.sum(price_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
+        sec_price_acc_count = torch.sum((price_class[sec_index]==CLASS_SIMPLE_VALUE_MAX) | (price_class[sec_index]==CLASS_SIMPLE_VALUE_SEC))
         import_price_nag_count = torch.sum(price_class[import_index]==0)
+        sec_price_nag_count = torch.sum((price_class[sec_index]==0) | (price_class[sec_index]==1))
         if import_index.shape[0]==0:
             import_price_acc = torch.tensor(0.0)
             import_price_nag = torch.tensor(0.0)
         else:
             import_price_acc = import_price_acc_count/import_index.shape[0]
             import_price_nag = import_price_nag_count/import_index.shape[0]
-        
+        if sec_index.shape[0]==0:
+            sec_price_acc = torch.tensor(0.0)
+            sec_price_nag = torch.tensor(0.0)
+        else:
+            sec_price_acc = sec_price_acc_count/sec_index.shape[0]
+            sec_price_nag = sec_price_nag_count/sec_index.shape[0]
+                    
         # 追加统计最后一段预测准确率
-        target_slope = (target[:,1:]  - target[:,:-1])/target[:,:-1]*100
-        last_section_slope_index_bool = slope_out[:,-1]>0
-        last_section_slope_index = torch.where(last_section_slope_index_bool)[0]
-        last_section_acc = torch.sum(target_slope[last_section_slope_index,-1]>0)/last_section_slope_index.shape[0]
+        # target_slope = (target[:,1:]  - target[:,:-1])/target[:,:-1]*100
+        # last_section_slope_index_bool = slope_out[:,-1]>0
+        # last_section_slope_index = torch.where(last_section_slope_index_bool)[0]
+        # last_section_acc = torch.sum(target_slope[last_section_slope_index,-1]>0)/last_section_slope_index.shape[0]
                  
-        return total_acc,import_acc, import_recall,import_price_acc,import_price_nag,price_class,last_section_acc,import_index
+        return total_acc,import_acc, import_recall,import_price_acc,import_price_nag,price_class,sec_acc,sec_recall,sec_price_acc,sec_price_nag,import_index,sec_index
 
     def compute_slope_acc(self,vr_class,slope_out,target_info=None,output_inverse=None):
-        target_slope = torch.Tensor([item["raise_range"] for item in target_info]).to(self.device)
+        """统计上涨幅度准确率"""
+        
+        # 目标上涨幅度计算
+        label_array = torch.Tensor([item["label_array"] for item in target_info]).to(self.device)
+        target = label_array[:,self.input_chunk_length:]
+        target_slope = (target[:,:-1] - target[:,1:])/target[:,1:]
         target_slope = unverse_transform_slope_value(target_slope) * 100
+        # 网络内的上涨幅度输出部分
         slope_out_unverse = unverse_transform_slope_value(slope_out) * 100
-        # slope_out_unverse = (slope_out[:,1:] - output_inverse[:,:-1])/output_inverse[:,:-1]*100
-        out_last_raise_index = torch.where(slope_out_unverse[:,-1]>0)[0]
-        out_last_fall_index = torch.where(slope_out_unverse[:,-1]<0)[0]
+        # 网络内的数值输出部分
+        slope_out_compute = (output_inverse[:,1:]  - output_inverse[:,:-1])/output_inverse[:,:-1]*100
+        slope_out_compute = torch.Tensor(slope_out_compute).to(self.device)
+        # 要求数值大于一定幅度
+        import_index_bool = slope_out_compute[:,-1]>3
+        slope_out_raise_bool = (slope_out_unverse[:,-1]>0) 
+        slope_out_fall_bool = (slope_out_unverse[:,-1]<0) 
+        # 整合
+        slope_out_raise_bool = slope_out_raise_bool & import_index_bool
+        slope_out_fall_bool = slope_out_fall_bool & import_index_bool
+        # 取得索引
+        out_last_raise_index = torch.where(slope_out_raise_bool)[0]
+        out_last_fall_index = torch.where(slope_out_fall_bool)[0]
         tar_last_raise_index = torch.where(target_slope[:,-1]>0)[0]
+        out_last_fall_acc_cnt = torch.sum(target_slope[out_last_fall_index,-1]<0)
         out_last_raise_acc_cnt = torch.sum(target_slope[out_last_raise_index,-1]>0)
         if out_last_raise_index.shape[0]>0:
             out_last_raise_acc = out_last_raise_acc_cnt/out_last_raise_index.shape[0]
+            out_last_fall_acc = out_last_fall_acc_cnt/out_last_fall_index.shape[0]
         else:
             out_last_raise_acc = 0
+            out_last_fall_acc = 0
         out_last_raise_rate = out_last_raise_index.shape[0]/(slope_out.shape[0])
         tar_last_raise_rate = tar_last_raise_index.shape[0]/(slope_out.shape[0])        
         import_index = out_last_raise_index
+        
         
         focus_target = np.array([item["price_array"] for item in target_info])
         label_array = torch.Tensor([item["label_array"] for item in target_info]).to(self.device)
         price_class,raise_range = compute_price_class_batch(focus_target[:,self.input_chunk_length:],mode="fast")
         price_class = torch.Tensor(price_class).int()
         # 返回准确率，以及上涨下跌占比
-        return out_last_raise_acc,out_last_raise_rate,tar_last_raise_rate,price_class,import_index
+        return out_last_raise_acc,out_last_raise_rate,tar_last_raise_rate,price_class,import_index,out_last_fall_acc
         
     def get_inverse_data(self,output,target_info=None,single_way=False,scaler=None):
         dataset = global_var.get_value("dataset")
@@ -1031,13 +1079,13 @@ class _TFTCusModule(_TFTModule):
         return last_batch_index,last_batch_imp_index,item_codes
                                 
     def val_metric_show(self,output,target,price_class,vr_class,target_vr_class,output_inverse=None,
-                        slope_out=None,past_target=None,target_info=None,import_index=None):
+                        slope_out=None,past_target=None,target_info=None,import_index=None,sec_index=None):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
         names = ["output","target","price"]
         vr_class_certainlys = vr_class.cpu().numpy()
         # vr_class_certainlys_imp_index = np.expand_dims(np.array([i for i in range(len(target_info))]),axis=-1)
-        vr_class_certainlys_imp_index = import_index
+        vr_class_certainlys_imp_index = sec_index # import_index
         size = len(vr_class_certainlys_imp_index) if len(vr_class_certainlys_imp_index)<27 else 27
         code_dict = {}
         idx = 0
@@ -1078,9 +1126,9 @@ class _TFTCusModule(_TFTModule):
             win = "win_{}".format(idx)
             slope_out_item = slope_out[s_index]
             target_slope_item = (target_combine_sample[-1] - target_combine_sample[-2])/target_combine_sample[-2]
-            target_title = "time range:{}/{} code:{},price class:{},tar_vr class:{},slope_tar_pred:{}/{}".format(
+            target_title = "time range:{}/{} code:{},tar_vr class:{}/{},price class:{}".format(
                 df_target["datetime"].dt.strftime('%m%d').values[self.input_chunk_length],df_target["datetime"].dt.strftime('%m%d').values[-1],
-                instrument,price_class_item,target_vr_class_sample,round(target_slope_item,3),round(slope_out_item[-1].item(),3))
+                instrument,target_vr_class_sample,vr_class_certainly,price_class_item)
             viz_input_2.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)   
             
             # 最后端涨跌情况排查
@@ -1650,11 +1698,64 @@ class TFTExtModel(MixedCovariatesTorchModel):
         """重载方法以规避类型检查"""
         _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
     
+    def fiter_training_data(self,item,aug_repeat_size=10):
+        """选择性构造训练数据"""
+        
+        past_covariate = item[1]
+        future_past_covariate = item[5][1]
+        past_target = item[0]
+        future_target = item[-2]
+        target_info = item[-1]
+        scaler = item[5][0]        
+
+        target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        target_unscale = scaler.inverse_transform(target[0])
+        focus_target = target_unscale[self.input_chunk_length:]  
+        target_slope = (focus_target[1:] - focus_target[:-1])/focus_target[:-1]*100
+        # 关注最后一段下跌的
+        if target_slope[-1]>=-0.5:
+            return None
+        
+        # 把past和future重新组合，统一增强
+        covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
+        if np.random.randint(0,2)==1:
+            # 量化方式调整
+            X_aug, Y_aug = tsaug.Quantize(n_levels=10,repeats=aug_repeat_size).augment(covariate, target)
+        else:
+            # 降低时间分辨率的方式调整
+            X_aug, Y_aug = tsaug.Pool(size=2,repeats=aug_repeat_size).augment(covariate, target)
+        past_covariate = X_aug[:,:self.input_chunk_length,:] 
+        future_target = Y_aug[:,self.input_chunk_length:,:]
+        past_target = Y_aug[:,:self.input_chunk_length,:]
+        rtn_list = []
+        for i in range(aug_repeat_size):
+            rtn_list.append([past_target[i],past_covariate[i],item[2],item[3],item[4],item[5][0],item[6],future_target[i],item[8]])
+        
+        # if np.random.randint(0,90)==1:
+        #     # 可视化增强的数据
+        #     index = np.random.randint(0,12)
+        #     win = "win_{}".format(index)
+        #     target_title = "code_{}".format(target_info["item_rank_code"])
+        #     names = ["label","price"]
+        #     aug_target = np.concatenate((past_target,future_target),axis=0)
+        #     aug_target_unscale = scaler.inverse_transform(aug_target)
+        #     price_array = np.expand_dims(target_info["price_array"],axis=-1)
+        #     view_data = np.concatenate((aug_target_unscale,price_array),axis=-1)
+        #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
+        return rtn_list
+    
+            
+        # 重点关注前期走势比较平的
+        # slope = slope_classify_compute(focus_target,threhold=2)
+        # if slope!=SLOPE_SHAPE_SMOOTH:
+        #     return None
+        
+        # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
+                        
     def dynamic_build_training_data(self,item):
         """使用数据增强，调整训练数据"""
         
-        # dc = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
-        # dt = np.random.random_integers(1000,1000+dynaimc_range*10)/1000
         past_covariate = item[1]
         future_past_covariate = item[5][1]
         past_target = item[0]
@@ -1669,20 +1770,12 @@ class TFTExtModel(MixedCovariatesTorchModel):
         
         target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
         target_unscale = scaler.inverse_transform(target[0])
-        focus_target = target_unscale[self.input_chunk_length:]  
-        target_slope = (focus_target[1:] - focus_target[:-1])/focus_target[:-1]*100
+        # focus_target = target_unscale[self.input_chunk_length:]  
+        # target_slope = (focus_target[1:] - focus_target[:-1])/focus_target[:-1]*100
         # 关注最后一段下跌的
-        if target_slope[-1]>=-1:
-            return None
-        
-        # 重点关注前期走势比较平的
-        # slope = slope_classify_compute(focus_target,threhold=2)
-        # if slope!=SLOPE_SHAPE_SMOOTH:
+        # if target_slope[-1]>=-1:
         #     return None
         
-        # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
-        # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
-                        
         # 把past和future重新组合，统一增强
         covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
         if np.random.randint(0,2)==1:
@@ -1706,6 +1799,14 @@ class TFTExtModel(MixedCovariatesTorchModel):
             view_data = np.concatenate((target_unscale,price_array),axis=-1)
             viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
         return rtn_item
+            
+        # 重点关注前期走势比较平的
+        # slope = slope_classify_compute(focus_target,threhold=2)
+        # if slope!=SLOPE_SHAPE_SMOOTH:
+        #     return None
+        
+        # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
  
     def dynamic_build_nag_training_data(self,item):
         """使用数据增强，调整训练数据"""
@@ -1763,6 +1864,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
         重载方法，调整数据处理模式
         """
         
+        # return self._batch_collate_filter(ori_batch)
+        
         batch = []
         max_cnt = 0
         adj_max_cnt = 0
@@ -1790,7 +1893,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                         max_cnt += 1
                         batch.append(rtn_item)
                         adj_max_cnt += 1
-                        for i in range(2):
+                        for i in range(10):
                             b_rebuild = self.dynamic_build_training_data(b)
                             # 不符合要求则不增强
                             if b_rebuild is None:
@@ -1799,6 +1902,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                             adj_max_cnt += 1
                             batch.append(b_rebuild)
                     elif target_class[1,0]==0:
+                        pass
                         batch.append(rtn_item)
                         # b_rebuild = self.dynamic_build_nag_training_data(b)
                         # # 不符合要求则不增强
@@ -1806,6 +1910,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                         #     continue    
                         # batch.append(b_rebuild)
                     else:
+                        pass
                         # 随机减少大类数量
                         if np.random.randint(0,2)==1:
                             batch.append(rtn_item)
@@ -1832,7 +1937,75 @@ class TFTExtModel(MixedCovariatesTorchModel):
             elif isinstance(elem, TimeSeries):
                 aggregated.append([sample[i] for sample in batch])
         return tuple(aggregated)
-                                        
+   
+    def _batch_collate_filter(self,ori_batch: List[Tuple]) -> Tuple:
+        """
+        重载方法，调整数据处理模式
+        """
+        
+        batch = []
+        max_cnt = 0
+        adj_max_cnt = 0
+        aug_repeat_size = 180
+        # 过滤不符合条件的记录
+        for b in ori_batch:
+            if self.mode=="train":
+                future_target = b[-2]
+                target_class = b[-3]
+            else:
+                future_target = b[-1]
+            # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
+            if not np.all(future_target == future_target[0]):
+                # 非训练部分，不需要数据增强，直接转换返回
+                if not self.model.training:
+                    if self.mode=="predict":
+                        batch.append(b)
+                    else:
+                        rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                        
+                        batch.append(rtn_item)
+                else:
+                    # 训练部分数据增强
+                    rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                    
+                    # 增加不平衡类别的数量，随机小幅度调整数据
+                    if target_class[1,0]==CLASS_SIMPLE_VALUE_MAX:
+                        max_cnt += 1
+                        batch.append(rtn_item)
+                        adj_max_cnt += 1
+                        b_rebuild = self.fiter_training_data(b,aug_repeat_size=aug_repeat_size)
+                        # 不符合要求则不增强
+                        if b_rebuild is None:
+                            continue
+                        for i in range(aug_repeat_size):
+                            batch.append(b_rebuild[i])
+                        adj_max_cnt += aug_repeat_size
+                    elif target_class[1,0]==0:
+                        pass
+                    else:
+                        pass
+        ori_rate = max_cnt/len(ori_batch)
+        after_rate = adj_max_cnt/len(batch)
+        # print("img data cnt/rate:{}/{},after cnt/rate:{}/{}".format(max_cnt,ori_rate,len(batch),after_rate))
+        aggregated = []
+        first_sample = batch[0]
+        for i in range(len(first_sample)):
+            elem = first_sample[i]
+            if isinstance(elem, np.ndarray):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, MinMaxScaler):
+                aggregated.append([sample[i] for sample in batch])
+            elif isinstance(elem, StockNormalizer):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+            elif isinstance(elem, TimeSeries):
+                aggregated.append([sample[i] for sample in batch])
+        return tuple(aggregated)
+                                                             
     @staticmethod
     def _supports_static_covariates() -> bool:
         return True         

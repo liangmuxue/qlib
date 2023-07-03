@@ -20,12 +20,16 @@ def slope_classify_compute(target_ori,threhold=2):
         return SLOPE_SHAPE_SMOOTH    
     return SLOPE_SHAPE_SHAKE
 
-def slope_classify_compute_batch(target,threhold=2):
+def slope_classify_compute_batch(target,threhold=2,mode=1,num=3):
     """生成基于斜率的目标分类"""
     
     target_slope = (target[:,1:]  - target[:,:-1])/target[:,:-1]
-    slope_index_bool = torch.abs(target_slope)<(threhold/100)
-    slope_index_bool = torch.all(slope_index_bool,dim=-1)
+    if mode==1:
+        slope_index_bool = torch.abs(target_slope)<(threhold/100)
+        slope_index_bool = torch.all(slope_index_bool,dim=-1)
+    if mode==2:
+        slope_index_bool = target_slope>(threhold/100)
+        slope_index_bool = torch.sum(slope_index_bool,dim=1)>=num
     return slope_index_bool
 
 def slope_last_classify_compute(target,threhold=0.05):

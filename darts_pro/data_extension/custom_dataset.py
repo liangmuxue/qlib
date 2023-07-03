@@ -223,7 +223,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         # 使用原值衡量涨跌幅度
         label_array = target_info["label_array"][self.input_chunk_length:]
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        raise_range = (label_array[-1] - label_array[0])/label_array[0]*100
+        raise_range = (label_array[-1] - label_array[-2])/label_array[0]*100
         # 先计算涨跌幅度分类，再进行归一化
         p_taraget_class = get_simple_class(raise_range)
         target_info["raise_range"] = transform_slope_value(np.expand_dims(label_array,axis=0))[0]

@@ -114,7 +114,7 @@ class UncertaintyLoss(nn.Module):
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.ccc_loss_comp(input, target)   
+        corr_loss = self.corr_loss_comp(input, target)   
         # 针对均线最后一个部分，计算交叉熵损失
         # ce_loss = self.last_classify_loss(input,target[:,:,0])
         # ce_loss = 0
@@ -123,7 +123,7 @@ class UncertaintyLoss(nn.Module):
         # 整体MSE损失
         mse_loss = 0.0 # self.mse_loss(input, target)     
         # 涨跌幅度衡量
-        value_diff_loss = self.scope_loss(slope_out, slope_target)
+        value_diff_loss = 0.0 # self.scope_loss(slope_out, slope_target)
         # if slope_out.max()>1:
         #     max_item = slope_out.max(dim=1)[0]
         #     print("slope_out weight >1 cnt:{}".format(torch.sum(max_item>1)))
@@ -133,7 +133,7 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/6 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * corr_loss + torch.log(1 + self.sigma[3] ** 2)
-        loss_sum = corr_loss + 0.1 * value_diff_loss
+        loss_sum = corr_loss + 0.5 * value_range_loss
         
         return loss_sum,(value_range_loss,value_diff_loss,corr_loss,mse_loss)
     
