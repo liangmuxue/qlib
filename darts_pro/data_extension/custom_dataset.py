@@ -16,7 +16,7 @@ from darts.utils.data.utils import CovariateType
 from darts.logging import raise_if_not
 from darts import TimeSeries
 from cus_utils.common_compute import normalization,slope_last_classify_compute
-from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
+from tft.class_define import CLASS_LAST_VALUES,get_simple_class,get_complex_class
 
 import cus_utils.global_var as global_var
 from cus_utils.encoder_cus import transform_slope_value
@@ -223,9 +223,13 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         # 使用原值衡量涨跌幅度
         label_array = target_info["label_array"][self.input_chunk_length:]
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        raise_range = (label_array[-1] - label_array[-2])/label_array[0]*100
+        raise_range = (label_array[-1] - label_array[0])/label_array[0]*100
+        # 添加最后一段的走势分类
+        last_raise_range = (label_array[-1] - label_array[-2])/label_array[-2]*100
         # 先计算涨跌幅度分类，再进行归一化
-        p_taraget_class = get_simple_class(raise_range)
+        p_range_target_class = get_simple_class(raise_range)
+        p_last_target_class = get_simple_class(last_raise_range,range_value=CLASS_LAST_VALUES)
+        p_target_class = get_complex_class(p_range_target_class,p_last_target_class)
         target_info["raise_range"] = transform_slope_value(np.expand_dims(label_array,axis=0))[0]
         
         scaler = MinMaxScaler()
@@ -241,10 +245,11 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             future_target = future_target_ori     
             
         # 添加末段走势分类目标输出
-        target_class = slope_last_classify_compute(future_target)
-        target_class = np.expand_dims([target_class],axis=-1)
-        p_taraget_class = np.expand_dims(np.array([p_taraget_class]),axis=-1)  
-        target_class = np.concatenate((target_class,p_taraget_class),axis=0)
+        # target_class = slope_last_classify_compute(future_target)
+        # target_class = np.expand_dims([target_class],axis=-1)
+        p_target_class = np.expand_dims(np.array([p_target_class]),axis=-1)  
+        p_last_target_class = np.expand_dims(np.array([p_last_target_class]),axis=-1)  
+        target_class = np.concatenate((p_target_class,p_last_target_class),axis=0)
         
         return (
             past_target,

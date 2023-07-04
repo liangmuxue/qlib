@@ -5,17 +5,21 @@ CLASS_VALUES={1:[-1000,-10],2:[-10,-9],3:[-9,-8],4:[-8,-7],5:[-7,-6],6:[-6,-5],7
 # 涨跌幅分类区间,包括区间以及损失权重
 # CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.3],1:[[-5,0],0.1],2:[[0,3],0.2],3:[[3,1000],0.4]}
 # CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.3],1:[[-5,0],0.2],2:[[0,5],0.2],3:[[5,1000],0.3]}
-CLASS_SIMPLE_VALUES={0:[[-1000,-3],0.3],1:[[-3,0],0.2],2:[[0,5],0.3],3:[[3,1000],0.3]}
+CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.4],1:[[-5,0],0.2],2:[[0,5],0.2],3:[[5,1000],0.4]}
 CLASS_SIMPLE_VALUE_MAX = list(CLASS_SIMPLE_VALUES)[-1]
 CLASS_SIMPLE_VALUE_SEC = list(CLASS_SIMPLE_VALUES)[-2]
+
+CLASS_LAST_VALUES={0:[[-1000,-3],0.4],1:[[-3,0],0.2],2:[[0,3],0.2],3:[[3,1000],0.4]}
+CLASS_LAST_VALUE_MAX = list(CLASS_LAST_VALUES)[-1]
+CLASS_LAST_VALUE_SEC = list(CLASS_LAST_VALUES)[-2]
 
 def get_simple_class_weight():
     return [v[1] for k, v in CLASS_SIMPLE_VALUES.items()]
 
-def get_simple_class(target_value):
+def get_simple_class(target_value,range_value=CLASS_SIMPLE_VALUES):
     result = None
     index = 0
-    for k, v in CLASS_SIMPLE_VALUES.items():
+    for k, v in range_value.items():
         index += 1
         if (target_value>=v[0][0] and target_value<v[0][1]):
             result = k
@@ -27,7 +31,22 @@ def get_simple_class(target_value):
         else:
             result = CLASS_SIMPLE_VALUE_MAX
     return result
-       
+
+def get_complex_class(range_class,last_class):
+    if range_class==CLASS_SIMPLE_VALUE_MAX and last_class==CLASS_LAST_VALUE_MAX:
+        return CLASS_SIMPLE_VALUE_MAX
+    if range_class==CLASS_SIMPLE_VALUE_SEC and last_class==CLASS_LAST_VALUE_MAX:
+        return CLASS_SIMPLE_VALUE_MAX    
+    if range_class==CLASS_SIMPLE_VALUE_MAX and last_class<=1:
+        return 0
+    if range_class==CLASS_SIMPLE_VALUE_SEC and last_class<=1:
+        return 1    
+    if range_class<=1 and last_class==CLASS_LAST_VALUE_MAX:
+        return CLASS_SIMPLE_VALUE_MAX   
+    if range_class<=1 and last_class==CLASS_LAST_VALUE_SEC:
+        return 2
+    return 1  
+                  
 VALUE_BINS = [-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0, 1, 2, 3,4, 5, 6, 7,8, 9, 10]
 #CLASS_VALUES={0:[-1000,-10],1:[-10,-5],2:[-5,0],3:[0,5],4:[5,10],5:[10,1000]}
 
