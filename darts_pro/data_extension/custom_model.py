@@ -553,7 +553,7 @@ class _TFTCusModule(_TFTModule):
         # 追加统计最后一段预测准确率
         last_section_index_bool = (last_vr_class_certainlys==CLASS_LAST_VALUE_MAX)
         last_section_index = torch.where(last_section_index_bool)[0]        
-        # import_index_bool = import_index_bool & last_section_index_bool
+        import_index_bool = import_index_bool & last_section_index_bool
         
         # 数值上也需要有上涨幅度
         # import_index_bool = import_index_bool & (slope_out[:,-1]>1)
@@ -1895,7 +1895,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                         max_cnt += 1
                         batch.append(rtn_item)
                         adj_max_cnt += 1
-                        for i in range(10):
+                        for i in range(3):
                             b_rebuild = self.dynamic_build_training_data(b)
                             # 不符合要求则不增强
                             if b_rebuild is None:
@@ -1916,7 +1916,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                             batch.append(rtn_item)
         ori_rate = max_cnt/len(ori_batch)
         after_rate = adj_max_cnt/len(batch)
-        print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
+        # print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
         aggregated = []
         first_sample = batch[0]
         for i in range(len(first_sample)):
