@@ -229,7 +229,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         # 先计算涨跌幅度分类，再进行归一化
         p_range_target_class = get_simple_class(raise_range)
         p_last_target_class = get_simple_class(last_raise_range,range_value=CLASS_LAST_VALUES)
-        p_target_class = get_complex_class(p_range_target_class,p_last_target_class)
+        p_target_class = p_range_target_class # get_complex_class(p_range_target_class,p_last_target_class)
         target_info["raise_range"] = transform_slope_value(np.expand_dims(label_array,axis=0))[0]
         
         scaler = MinMaxScaler()

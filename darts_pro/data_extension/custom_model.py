@@ -546,6 +546,7 @@ class _TFTCusModule(_TFTModule):
         total_acc = torch.sum(vr_class==vr_target)/vr_target.shape[0]        
         # 重点类别的准确率
         import_index_bool = (vr_class==CLASS_SIMPLE_VALUE_MAX)
+        # import_index_bool = (vr_class>=2)
         sec_index_bool = (vr_class==CLASS_SIMPLE_VALUE_SEC)
         # 加入数值判断
         slope_out = (output_inverse[:,1:]  - output_inverse[:,:-1])/output_inverse[:,:-1]*100
@@ -790,12 +791,12 @@ class _TFTCusModule(_TFTModule):
         last_sec_acc = torch.sum(last_sec_acc_list)/compare_target.shape[0]
         return last_sec_acc,last_sec_out_bool
 
-    def compute_value_diff_metrics(self,output,target):
-        output_sample = torch.mean(output[:,:,0,:],dim=-1)
-        output_be = output_sample[:,[0,-1]]
-        target_be = target[:,[0,-1],0]
-        mse_loss = self.mean_squared_error(output_be, target_be)
-        return mse_loss 
+    # def compute_value_diff_metrics(self,output,target):
+    #     output_sample = torch.mean(output[:,:,0,:],dim=-1)
+    #     output_be = output_sample[:,[0,-1]]
+    #     target_be = target[:,[0,-1],0]
+    #     mse_loss = self.mean_squared_error(output_be, target_be)
+    #     return mse_loss 
     
     def _compute_loss(self, output, target):
         """重载父类方法"""
@@ -1890,7 +1891,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                     # 训练部分数据增强
                     rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                    
                     # 增加不平衡类别的数量，随机小幅度调整数据
-                    if target_class[1,0]==CLASS_SIMPLE_VALUE_MAX:
+                    if target_class[0,0]==CLASS_SIMPLE_VALUE_MAX:
                         max_cnt += 1
                         batch.append(rtn_item)
                         adj_max_cnt += 1
@@ -1902,8 +1903,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                             # b_rebuild = rtn_item
                             adj_max_cnt += 1
                             batch.append(b_rebuild)
-                    elif target_class[1,0]==0:
-                        pass
+                    elif target_class[0,0]==0:
                         batch.append(rtn_item)
                         # b_rebuild = self.dynamic_build_nag_training_data(b)
                         # # 不符合要求则不增强
@@ -1911,13 +1911,12 @@ class TFTExtModel(MixedCovariatesTorchModel):
                         #     continue    
                         # batch.append(b_rebuild)
                     else:
-                        pass
                         # 随机减少大类数量
                         if np.random.randint(0,2)==1:
                             batch.append(rtn_item)
         ori_rate = max_cnt/len(ori_batch)
         after_rate = adj_max_cnt/len(batch)
-        # print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
+        print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
         aggregated = []
         first_sample = batch[0]
         for i in range(len(first_sample)):

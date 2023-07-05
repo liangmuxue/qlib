@@ -93,7 +93,7 @@ class UncertaintyLoss(nn.Module):
         self.mse_weight = mse_weight.to(device)
         self.last_classify_loss = nn.CrossEntropyLoss() # LastClassifyLoss()
         self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
-        # self.vr_loss = nn.CrossEntropyLoss()
+        self.vr_loss = nn.CrossEntropyLoss()
         self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
         self.scope_loss = ScopeLoss(reduction=mse_reduction,device=device)
 
