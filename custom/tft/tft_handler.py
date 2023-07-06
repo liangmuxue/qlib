@@ -284,7 +284,11 @@ class TftDataHandler(DataHandlerLP):
             if use("RSI"):
                 # 自定义rsi指标
                 fields += [build_rsi_factor_str(d) for d in windows]
-                names += ["RSI%d" % d for d in windows]           
+                names += ["RSI%d" % d for d in windows]      
+            if use("REV"):
+                # 自定义动量反转指标
+                fields += ["Sum(($volume*$close/Ref($close, 1)),%d)" % d for d in windows]
+                names += ["REV%d" % d for d in windows]                      
         return fields, names
     
     
