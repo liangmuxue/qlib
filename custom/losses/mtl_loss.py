@@ -130,7 +130,7 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * corr_loss + torch.log(1 + self.sigma[3] ** 2)
-        loss_sum = corr_loss + 0.5 * ce_loss
+        loss_sum = corr_loss + 0.1 * ce_loss
         
         return loss_sum,(value_range_loss,value_diff_loss,corr_loss,ce_loss)
     

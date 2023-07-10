@@ -234,10 +234,14 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         
         scaler = MinMaxScaler()
         target_info["future_target"] = future_target_ori.squeeze(-1)
-        # 对于协变量，也进行单独的归一化    
         if self.transform_inner:
-            past_covariate = normalization(past_covariate)
+            # 协变量归一化
+            rev_cov = np.expand_dims(past_covariate[:,0],axis=-1)
+            past_covariate = normalization(past_covariate[:,1:])
+            # 第一个rev因子不进行归一化
+            past_covariate = np.concatenate((rev_cov,past_covariate),axis=-1)
             future_covariate = normalization(future_covariate)
+            # 目标值归一化
             scaler.fit(past_target)             
             past_target = scaler.transform(past_target)   
             future_target = scaler.transform(future_target_ori)        

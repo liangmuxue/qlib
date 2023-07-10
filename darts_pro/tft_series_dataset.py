@@ -103,6 +103,9 @@ class TFTSeriesDataset(TFTDataset):
         logger.debug("end group process")
         # group字段需要转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')   
+        # 归一化指定字段
+        df_rev = df.groupby(group_column,as_index=False).apply(lambda x: (x["REV5"] - x["REV5"].mean()) / x["REV5"].std()).reindex()
+        df["REV5"] = df_rev.reset_index(level=0, drop=True)
         # 按照股票代码，新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
@@ -291,7 +294,7 @@ class TFTSeriesDataset(TFTDataset):
                 val_series_transformed.append(vs_transformed)
                 total_series_transformed.append(total_transformed)
             
-        def build_covariates(column_names,no_transform_columns=None):
+        def build_covariates(column_names,transform_columns=None):
             covariates_array = []
             for index,series in enumerate(train_series):
                 group_col_val = series.static_covariates[group_column].values[0]
@@ -314,13 +317,6 @@ class TFTSeriesDataset(TFTDataset):
                 # 使用训练数据fit，并transform到整个序列    
                 scaler.fit(train_covariates)
                 covariates_transformed = scaler.transform(covariates)    
-                # 对于补充类字段，不需要transform，在此进行拼接
-                if no_transform_columns is not None:
-                    att_covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
-                                                         freq='D',
-                                                         fill_missing_dates=True,
-                                                         value_cols=no_transform_columns)  
-                    covariates_transformed = covariates_transformed.concatenate(att_covariates,axis=1)
                 covariates_array.append(covariates_transformed)
             return covariates_array            
 

@@ -397,6 +397,11 @@ class _TFTCusModule(_TFTModule):
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained
         
+        past_covariate = train_batch[1]
+        for index,ts in enumerate(target_info):
+            if ts["item_rank_code"]==1 and ts["start"]>=2546 and ts["start"]<=2571:
+                print("ggg")
+                past_covariate[index,:,0]        
                 
         loss,detail_loss = self._compute_loss((output,slope_out,vr_class,last_vr_class), (target,target_class,scaler,target_info))
         (value_range_loss,value_diff_loss,corr_loss,last_vr_loss) = detail_loss
@@ -427,6 +432,7 @@ class _TFTCusModule(_TFTModule):
         # val_batch = self.filter_batch_by_spec_date(val_batch_ori)
         val_batch = val_batch_ori
         (output,slope_out,vr_class,last_vr_class) = self._produce_train_output(val_batch[:5])
+        past_covariate = val_batch[1]
         scaler,target_class,target,target_info = val_batch[5:]  
         target_class = target_class[:,:,0]
         target_vr_class = target_class[:,0]
@@ -461,7 +467,8 @@ class _TFTCusModule(_TFTModule):
         # pos_acc,pos_recall,neg_acc,neg_recall = self.compute_slope_acc(
         #     last_vr_class_certainlys,target_info=target_info,last_target_vr_class=last_target_vr_class)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,import_index,out_last_raise_acc,out_last_raise_rate \
-             = self.compute_real_class_acc(target, target_vr_class,vr_class_certainlys=vr_class_certainlys,output_inverse=output_inverse,slope_out=slope_out.cpu().numpy(), \
+             = self.compute_real_class_acc(target, target_vr_class,vr_class_certainlys=vr_class_certainlys,
+                output_inverse=output_inverse,slope_out=slope_out.cpu().numpy(), past_covariate=past_covariate, \
                 target_info=target_info,last_target_vr_class=last_target_vr_class.cpu().numpy(),last_vr_class_certainlys=last_vr_class_certainlys.cpu().numpy())              
         # self.log("vr_acc", vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)     
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
@@ -481,7 +488,7 @@ class _TFTCusModule(_TFTModule):
         past_target = val_batch[0]
         # self.vr_metric_show(target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
         self.val_metric_show(output,target,price_class,vr_class_certainlys,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
-                             past_target=past_target,target_info=target_info,import_index=import_index,
+                             target_info=target_info,import_index=import_index,past_covariate=past_covariate,
                              last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
         self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
@@ -682,15 +689,15 @@ class _TFTCusModule(_TFTModule):
         return np.stack(pred_inverse)
         
     def compute_real_class_acc(self,target_ori,target_vr_class,target_info=None,output_inverse=None,slope_out=None, \
-                               vr_class_certainlys=None,last_target_vr_class=None,last_vr_class_certainlys=None):
+                               vr_class_certainlys=None,last_target_vr_class=None,last_vr_class_certainlys=None,past_covariate=None):
         """计算涨跌幅分类准确度"""
 
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
         vr_target,raise_range = compute_price_class_batch(target_data,mode="fast")
-        
+        rev_cov = past_covariate[:,:,0].cpu().numpy()
         target_slope = (target_data[:,1:]  - target_data[:,:-1])/target_data[:,:-1]*100      
-        slope_out_unverse = unverse_transform_slope_value(slope_out) * 100
-        # slope_out_unverse = (slope_out[:,1:] - output_inverse[:,:-1])/output_inverse[:,:-1]*100
+        # slope_out_unverse = unverse_transform_slope_value(slope_out) * 100
+        slope_out_unverse = (output_inverse[:,1:] - output_inverse[:,:-1])/output_inverse[:,:-1]*100
         out_last_raise_index_bool = slope_out_unverse[:,-1]>0.5
         out_last_raise_index_bool = last_vr_class_certainlys==1
         out_last_raise_index = np.where(out_last_raise_index_bool)[0]
@@ -701,6 +708,8 @@ class _TFTCusModule(_TFTModule):
         output_import_index_bool = np.sum(slope_out_compute,axis=1)>3
         # 最后一段需要上涨
         import_index_bool = output_import_index_bool # & (out_last_raise_index_bool)
+        rev_boole = np.mean(rev_cov,axis=1)>0.3
+        import_index_bool = import_index_bool & rev_boole
         
         # 统计最后一段在上涨趋势下的准确率
         out_last_filter = last_vr_class_certainlys[output_import_index_bool]
@@ -1070,10 +1079,10 @@ class _TFTCusModule(_TFTModule):
         return last_batch_index,last_batch_imp_index,item_codes
                                 
     def val_metric_show(self,output,target,price_class,vr_class,target_vr_class,output_inverse=None,last_vr_class_certainlys=None,
-                        slope_out=None,past_target=None,target_info=None,import_index=None,last_target_vr_class=None):
+                        slope_out=None,past_covariate=None,target_info=None,import_index=None,last_target_vr_class=None):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
-        names = ["output","target","price"]
+        names = ["output","target","price","rev"]
         vr_class_certainlys = vr_class.cpu().numpy()
         # vr_class_certainlys_imp_index = np.expand_dims(np.array([i for i in range(len(target_info))]),axis=-1)
         vr_class_certainlys_imp_index = import_index
@@ -1101,6 +1110,7 @@ class _TFTCusModule(_TFTModule):
                                     (df_all["instrument_rank"]==ts["item_rank_code"])]            
             # 补充画出前面的label数据
             target_combine_sample = df_target["label"].values
+            rev_sample = df_target["REV5"].values
             pad_data = np.array([0 for i in range(self.input_chunk_length)])
             pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
             view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
@@ -1108,6 +1118,7 @@ class _TFTCusModule(_TFTModule):
             price_target = df_target["label_ori"].values    
             price_target = np.expand_dims(price_target,axis=0)        
             view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1)
+            view_data = np.concatenate((view_data,np.expand_dims(rev_sample,axis=1)),axis=1)
             x_range = np.array([i for i in range(ts["start"],ts["end"])])
             if self.monitor is not None:
                 instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
@@ -2019,9 +2030,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
                         batch.append(b)
                     else:
                         # 验证集也使用增强数据
-                        max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
-                        # rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                        
-                        # batch.append(rtn_item)
+                        # max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
+                        rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                        
+                        batch.append(rtn_item)
                 else:
                     max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
         last_raise_range = np.array(last_raise_range)

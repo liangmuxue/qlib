@@ -141,6 +141,8 @@ class TFTDataset(DatasetH):
         data["month"] = data.datetime.astype("str").str.slice(0,7)
         data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
         data["time_idx"] -= data["time_idx"].min() 
+        # 特例处理
+        data["REV5_ORI"] = data["REV5"]
         # 重新编号,解决节假日以及相关日期不连续问题
         data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
         # 补充商品指数数据,按照月份合并
@@ -149,7 +151,7 @@ class TFTDataset(DatasetH):
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek    
         # 保留时间戳
-        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)
+        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)        
         # 使用指定字段
         data = data[self.get_seq_columns() + ["datetime_number"]]
         return data
