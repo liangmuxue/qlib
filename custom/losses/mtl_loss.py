@@ -66,11 +66,10 @@ class ScopeLoss(_Loss):
     def forward(self, slope_input: Tensor, slope_target: Tensor) -> Tensor:
         # slope_target = transform_slope_value(target)
         slope_arr = (slope_input - slope_target) ** 2
-        loss_arr = 8 * slope_arr[:,-1:]  # * self.weight
         if self.reduction=="mean":
-            loss = torch.mean(loss_arr)
+            loss = torch.mean(slope_arr)
         else:
-            loss = torch.sum(loss_arr)        
+            loss = torch.sum(slope_arr)        
         return loss  
                
 class UncertaintyLoss(nn.Module):
@@ -103,6 +102,7 @@ class UncertaintyLoss(nn.Module):
         (input,slope_out,vr_class,last_vr_class) = input_ori
         (target,future_target,target_class,slope_target) = target_ori
         target = target[:,:,0]
+        # slope_target = (target[:,-1] - target[:,0])/target[:,0]
         vr_target= target_class[:,0]
         last_vr_target = target_class[:,1]
         # 如果是似然估计下的数据，需要取中间值
@@ -120,7 +120,7 @@ class UncertaintyLoss(nn.Module):
         # 整体MSE损失
         mse_loss = 0.0 # self.mse_loss(input, target)     
         # 涨跌幅度衡量
-        value_diff_loss = 0.0 # self.scope_loss(slope_out, slope_target)
+        value_diff_loss = self.scope_loss(slope_out, slope_target)
         # if slope_out.max()>1:
         #     max_item = slope_out.max(dim=1)[0]
         #     print("slope_out weight >1 cnt:{}".format(torch.sum(max_item>1)))
@@ -131,6 +131,7 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * corr_loss + torch.log(1 + self.sigma[3] ** 2)
         loss_sum = corr_loss + 0.1 * ce_loss
+        loss_sum = value_diff_loss
         
         return loss_sum,(value_range_loss,value_diff_loss,corr_loss,ce_loss)
     
