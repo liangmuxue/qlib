@@ -151,9 +151,20 @@ class TFTDataset(DatasetH):
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek    
         # 保留时间戳
-        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)        
+        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)     
+        data["label"] = data["label"].astype("float64")
+        # 使用前几天的移动平均值作为目标数值
+        data["label_ori"] = data["label"]
+        group_column = self.get_group_column()
+        data["label"] = data.groupby(group_column)["label"].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
+        
+        def rl_apply(df_values):
+            values = df_values.values
+            return (values[1] - values[0])/values[0]*100 
+        # 计算涨跌幅度
+        data["label_range"] = data.groupby(group_column)["label"].rolling(window=2).apply(rl_apply).reset_index(0,drop=True)           
         # 使用指定字段
-        data = data[self.get_seq_columns() + ["datetime_number"]]
+        data = data[self.get_seq_columns() + ["datetime_number","label_ori"]]
         return data
 
     def _prepare_seg_range(self, slc: slice, **kwargs) -> pd.DataFrame:
@@ -214,7 +225,7 @@ class TFTDataset(DatasetH):
         group_column = self.col_def["group_column"]
         target_column = self.col_def["target_column"]      
         future_covariate_col = self.col_def["future_covariate_col"]
-        columns = [time_column] + [group_column] + [target_column] + col_list + future_covariate_col
+        columns = [time_column] + [group_column] + target_column + col_list + future_covariate_col
         return columns  
 
     def get_without_target_columns(self):

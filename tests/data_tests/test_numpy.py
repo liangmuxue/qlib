@@ -5,6 +5,7 @@ import torch
 from torchvision.transforms import *
 import cv2
 from torch import nn
+from sklearn.metrics import precision_recall_curve
 
 def test_nozero():
     L = np.arange(18).reshape((2, 3, 3))
@@ -434,6 +435,17 @@ def test_ccc():
     c = concordance_correlation_coefficient(y_true,y_pred)  
     c_torch = concordance_correlation_coefficient_torch(torch.tensor(y_true),torch.tensor(y_pred))    
     print("c is:{},and c_torch:{}".format(c,c_torch))
+
+def test_pr():
+    y_true = [0.2, 0.3, 0.5, 0.7]
+    y_score = [0.1, 0.4, 0.35, 0.8]
+     
+     
+    precision, recall, thresholds = precision_recall_curve(y_true, y_score)
+    print(precision)
+    print(recall)
+    print(thresholds)
+
            
 if __name__ == "__main__":
     # test_argwhere()
@@ -464,8 +476,9 @@ if __name__ == "__main__":
     # test_pd_df()
     # test_pd_trans()
     # test_pd_index()
-    test_norm()
+    # test_norm()
     # test_ccc()
+    test_pr()
     
     
     

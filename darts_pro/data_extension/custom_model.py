@@ -159,7 +159,7 @@ class _TFTCusModule(_TFTModule):
          
         output_sample = out[:,:,0,0]
         output_sample_last = output_sample[:,-2:]
-        slope_out = (output_sample_last[:,-1] - output_sample[:,0])/output_sample[:,0]
+        slope_out = (output_sample_last[:,-1] - output_sample[:,0])/output_sample[:,0]*100
         # slope_out = self.slope_layer(output_sample)
         # 涨跌幅度分类
         vr_class = self.classify_vr_layer(output_sample)
@@ -398,25 +398,19 @@ class _TFTCusModule(_TFTModule):
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained
         
-        past_covariate = train_batch[1]
-        for index,ts in enumerate(target_info):
-            if ts["item_rank_code"]==1 and ts["start"]>=2546 and ts["start"]<=2571:
-                print("ggg")
-                past_covariate[index,:,0]        
-                
         loss,detail_loss = self._compute_loss((output,slope_out,vr_class,last_vr_class), (target,target_class,scaler,target_info))
-        (value_range_loss,value_diff_loss,corr_loss,last_vr_loss) = detail_loss
+        (mse_loss,value_diff_loss,corr_loss,last_vr_loss,mean_threhold) = detail_loss
         self.log("base_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
-        # self.log("class1_lr",self.trainer.optimizers[0].param_groups[1]["lr"])
-        # self.log("class2_lr",self.trainer.optimizers[0].param_groups[2]["lr"])
+        # self.log("mean_threhold",mean_threhold,batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.custom_histogram_adder(batch_idx)
         self._calculate_metrics(output, target, self.train_metrics)
         # 走势分类交叉熵损失
         # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # mse损失
-        # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_last_vr_loss", last_vr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
@@ -441,20 +435,12 @@ class _TFTCusModule(_TFTModule):
         output_inverse = self.get_inverse_data(output.cpu().numpy()[:,:,0,0],target_info=target_info,scaler=scaler)
         # 全部损失
         loss,detail_loss = self._compute_loss((output,slope_out,vr_class,last_vr_class), (target,target_class,scaler,target_info))
-        (value_range_loss,value_diff_loss,corr_loss,last_vr_loss) = detail_loss
-        # 相关系数损失
-        # corr_loss = self.compute_ccc_metrics(output, target)
-        # 距离损失MSE
-        # last_sec_acc,last_sec_out_bool = self.compute_scope_metrics(output, target)
-        # 走势分类交叉熵损失
-        # cross_loss = compute_cross_metrics(out_class, target_trend_class)
-        # 总体涨跌幅度分类损失
-        # value_range_loss = compute_vr_metrics(vr_class, target_vr_class)         
+        (mse_loss,value_diff_loss,corr_loss,last_vr_loss,mean_threhold) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         vr_class_certainlys = self.build_vr_class_cer(vr_class)
         last_vr_class_certainlys = self.build_vr_class_cer(last_vr_class)
@@ -640,7 +626,7 @@ class _TFTCusModule(_TFTModule):
         last_raise_range = torch.Tensor([ts["last_raise_range"] for ts in target_info])
 
         # 上升趋势统计
-        pos_index_bool = (slope_out>0)
+        pos_index_bool = (slope_out>0.03)
         pos_index = torch.where(pos_index_bool)[0]
         pos_acc_cnt = torch.sum(last_raise_range[pos_index]>0)
         pos_acc = pos_acc_cnt/pos_index.shape[0]
@@ -688,7 +674,7 @@ class _TFTCusModule(_TFTModule):
         # out_last_raise_index_bool = slope_out_unverse[:,-1]>0.5
         out_last_raise_index_bool = last_vr_class_certainlys==1
         out_last_raise_index_bool = last_vr_class_certainlys!=1
-        out_last_raise_index_bool = slope_out>0
+        out_last_raise_index_bool = slope_out>0.01
         out_last_raise_index = np.where(out_last_raise_index_bool)[0]
         tar_last_raise_index = np.where(target_slope[:,-1]>0)[0]
                       
@@ -1803,7 +1789,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         #     return None
         
         target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
-        target_unscale = scaler.inverse_transform(target[0])
+        target_unscale = scaler.inverse_transform(target[0,:,:1])
         # focus_target = target_unscale[self.input_chunk_length:]  
         # target_slope = (focus_target[1:] - focus_target[:-1])/focus_target[:-1]*100
 
@@ -1996,7 +1982,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         def data_process(batch,batch_item,target_class,max_cnt=0,adj_max_cnt=0):
             # 训练部分数据增强
             rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8])  
-            for i in range(8):
+            for i in range(6):
                 b_rebuild = self.dynamic_build_training_data(batch_item)
                 # 不符合要求则不增强
                 if b_rebuild is None:
@@ -2019,9 +2005,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
                         batch.append(b)
                     else:
                         # 验证集也使用增强数据
-                        max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
-                        # rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                        
-                        # batch.append(rtn_item)
+                        # max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
+                        rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                        
+                        batch.append(rtn_item)
                 else:
                     max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
         last_raise_range = np.array(last_raise_range)

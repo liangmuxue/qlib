@@ -216,7 +216,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         np.ndarray,
     ]:
 
-        past_target, past_covariate, static_covariate, future_target_ori,target_info,future_past_covariate = self.ds_past[idx]
+        past_target_ori, past_covariate, static_covariate, future_target_ori,target_info,future_past_covariate = self.ds_past[idx]
         
         _, historic_future_covariate, future_covariate, _, _ = self.ds_dual[idx]
         
@@ -231,10 +231,10 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         p_last_target_class = get_simple_class(last_raise_range,range_value=CLASS_LAST_VALUES)
         p_target_class = p_range_target_class # get_complex_class(p_range_target_class,p_last_target_class)
         target_info["raise_range"] = transform_slope_value(np.expand_dims(label_array,axis=0))[0]
-        target_info["last_raise_range"] = last_raise_range/100
+        target_info["last_raise_range"] = last_raise_range
         
         scaler = MinMaxScaler()
-        target_info["future_target"] = future_target_ori.squeeze(-1)
+        target_info["future_target"] = future_target_ori[:,0]
         if self.transform_inner:
             # 协变量归一化
             rev_cov = np.expand_dims(past_covariate[:,0],axis=-1)
@@ -243,9 +243,12 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             past_covariate = np.concatenate((rev_cov,past_covariate),axis=-1)
             future_covariate = normalization(future_covariate)
             # 目标值归一化
-            scaler.fit(past_target)             
-            past_target = scaler.transform(past_target)   
-            future_target = scaler.transform(future_target_ori)        
+            pt = np.expand_dims(past_target_ori[:,0],axis=-1)
+            scaler.fit(pt)             
+            past_target = scaler.transform(pt)   
+            past_target = np.concatenate((past_target,past_target_ori[:,1:]),axis=-1)
+            future_target = scaler.transform(np.expand_dims(future_target_ori[:,0],axis=-1))   
+            future_target = np.concatenate((future_target,future_target_ori[:,1:]),axis=-1)     
         else:
             future_target = future_target_ori     
             
