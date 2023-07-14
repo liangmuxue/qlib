@@ -226,6 +226,8 @@ class TFTDataset(DatasetH):
         target_column = self.col_def["target_column"]      
         future_covariate_col = self.col_def["future_covariate_col"]
         columns = [time_column] + [group_column] + target_column + col_list + future_covariate_col
+        # 去重
+        columns = list(set(columns))
         return columns  
 
     def get_without_target_columns(self):
