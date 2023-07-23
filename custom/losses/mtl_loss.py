@@ -118,7 +118,7 @@ class UncertaintyLoss(nn.Module):
         # 第3个部分为幅度范围分类，计算交叉熵损失 
         value_range_loss = self.vr_loss(vr_class,vr_target)               
         # 整体MSE损失
-        mse_loss = self.mse_loss(input[:,:,1], target[:,:,1])     
+        mse_loss = self.ccc_loss_comp(input[:,:,1], target[:,:,1])     
         # 涨跌幅度衡量
         value_diff_loss,mean_threhold = self.scope_loss(slope_out, slope_target)
         # if slope_out.max()>1:

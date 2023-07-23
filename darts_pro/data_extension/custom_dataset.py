@@ -243,12 +243,9 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             past_covariate = np.concatenate((rev_cov,past_covariate),axis=-1)
             future_covariate = normalization(future_covariate)
             # 目标值归一化
-            pt = np.expand_dims(past_target_ori[:,0],axis=-1)
-            scaler.fit(pt)             
-            past_target = scaler.transform(pt)   
-            past_target = np.concatenate((past_target,past_target_ori[:,1:]),axis=-1)
-            future_target = scaler.transform(np.expand_dims(future_target_ori[:,0],axis=-1))   
-            future_target = np.concatenate((future_target,future_target_ori[:,1:]),axis=-1)     
+            scaler.fit(past_target_ori)             
+            past_target = scaler.transform(past_target_ori)   
+            future_target = scaler.transform(future_target_ori)   
         else:
             future_target = future_target_ori     
             

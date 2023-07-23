@@ -2,6 +2,10 @@ from visdom import Visdom
 import torch
 import numpy as np
 
+import matplotlib
+import matplotlib.pyplot as plt
+import mplfinance as mpf
+
 def test_normal_vis():
     viz = Visdom(env="debug",port=7098)
     t = torch.tensor([[1.85640e+02, 1.15424e+02, 7.67866e-01],
@@ -124,6 +128,35 @@ class TensorViz(object):
         
         length = data.shape[0]
         self.viz.histogram(X=data, win=win, opts=dict(numbins=numbins,title=title))  
+
+    def viz_mpf_data(self,primary_data,pri_cols=None,sec_cols=None,target_title=None,file_path=None):
+        """预测数据单条显示"""
+        
+        primary_data.index.name = "Time Index"
+        primary_data.rename(columns={'OPEN':'Open','CLOSE':'Close','HIGH':'High','LOW':'Low','VOLUME_CLOSE':'Volume'},inplace=True)
+        apds = []
+        # 主要数据
+        for index,col_name in enumerate(pri_cols):
+            if index==0:
+                color = "lime"
+            if index==1:
+                color = "c"                                                
+            if index==2:
+                color = "dimgray"                  
+            mpf_data = mpf.make_addplot(primary_data[col_name],panel=0,color=color,secondary_y=False)
+            apds.append(mpf_data)
+        # 附加数据
+        for index,col_name in enumerate(sec_cols):
+            if index==0:
+                color = "lime"
+            if index==1:
+                color = "c"            
+            mpf_data = mpf.make_addplot(primary_data[col_name],panel=index+2,color=color,secondary_y=False,y_on_right=True)
+            apds.append(mpf_data)            
+        mav = (5, 10, 20)
+        mav = ()
+        fig, axes = mpf.plot(primary_data, title=target_title,type='candle',addplot=apds, mav=mav,volume=True,returnfig=True,savefig=file_path,figsize=(12, 8))
+        axes[0].legend(pri_cols,loc='upper left')        
     
 def reals_data_test():
     viz = TensorViz()

@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_100
+market: &market test_500
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -73,8 +73,8 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test9_tft_100_multi'
-               load_weight: False
+               model_name: 'test8_tft_500_multi'
+               load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
@@ -108,10 +108,10 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['label','REV5']
+                target_column: ['label','label_ori']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['PRICE_SCOPE', 'CORR5','RESI10','TURNOVER_CLOSE']  
+                past_covariate_col: ['PRICE_SCOPE', 'CORR5','RESI10','TURNOVER_CLOSE','VOLUME_CLOSE']  
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 

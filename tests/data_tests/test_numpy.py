@@ -446,6 +446,15 @@ def test_pr():
     print(recall)
     print(thresholds)
 
+def test_scaler():
+    from sklearn.preprocessing import MinMaxScaler
+    
+    X = np.array([[1.0,2.0,3.0],[5.0,6.0,7.0]])
+    X = X.transpose(1,0)
+    scaler = MinMaxScaler()
+    scaler.fit(X)             
+    target = scaler.transform(X)      
+    print(target)
            
 if __name__ == "__main__":
     # test_argwhere()
@@ -478,7 +487,8 @@ if __name__ == "__main__":
     # test_pd_index()
     # test_norm()
     # test_ccc()
-    test_pr()
+    # test_pr()
+    test_scaler()
     
     
     

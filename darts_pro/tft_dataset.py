@@ -164,7 +164,7 @@ class TFTDataset(DatasetH):
         # 计算涨跌幅度
         data["label_range"] = data.groupby(group_column)["label"].rolling(window=2).apply(rl_apply).reset_index(0,drop=True)           
         # 使用指定字段
-        data = data[self.get_seq_columns() + ["datetime_number","label_ori"]]
+        data = data[self.get_seq_columns() + ["datetime_number"]]
         return data
 
     def _prepare_seg_range(self, slc: slice, **kwargs) -> pd.DataFrame:
