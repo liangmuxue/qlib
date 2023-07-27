@@ -150,12 +150,14 @@ class TensorViz(object):
             if index==0:
                 color = "lime"
             if index==1:
-                color = "c"            
-            mpf_data = mpf.make_addplot(primary_data[col_name],panel=index+2,color=color,secondary_y=False,y_on_right=True)
+                color = "c"   
+            if index==2:
+                color = "dimgray"                            
+            mpf_data = mpf.make_addplot(primary_data[col_name],panel=1,color=color,secondary_y=False,y_on_right=True)
             apds.append(mpf_data)            
         mav = (5, 10, 20)
         mav = ()
-        fig, axes = mpf.plot(primary_data, title=target_title,type='candle',addplot=apds, mav=mav,volume=True,returnfig=True,savefig=file_path,figsize=(12, 8))
+        fig, axes = mpf.plot(primary_data, title=target_title,type='candle',addplot=apds, mav=mav,volume=False,returnfig=True,savefig=file_path,figsize=(12, 8))
         axes[0].legend(pri_cols,loc='upper left')        
     
 def reals_data_test():

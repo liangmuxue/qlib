@@ -288,7 +288,10 @@ class TftDataHandler(DataHandlerLP):
             if use("REV"):
                 # 自定义动量反转指标
                 fields += ["Sum(($volume*$close/Ref($close, 1)),%d)" % d for d in windows]
-                names += ["REV%d" % d for d in windows]                      
+                names += ["REV%d" % d for d in windows]         
+            if use("WR"):
+                fields += ["(Max($HIGH,%d)-$close)/(Max($HIGH,%d)-Min($LOW,%d))*100" % d for d in windows]
+                names += ["WR%d" % d for d in windows]                             
         return fields, names
     
     

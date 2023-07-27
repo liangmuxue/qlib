@@ -136,7 +136,7 @@ class TFTDataset(DatasetH):
         # 价格不能为负数
         data = data[data["label"]>0]
         # 清除极值数据
-        data = self.filter_extremum_data(data, columns=self.col_def["past_covariate_col"])
+        # data = self.filter_extremum_data(data, columns=self.col_def["past_covariate_col"])
         # 补充辅助数据,添加日期编号
         data["month"] = data.datetime.astype("str").str.slice(0,7)
         data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
@@ -162,54 +162,37 @@ class TFTDataset(DatasetH):
             values = df_values.values
             return (values[1] - values[0])/values[0]*100 
         # 计算涨跌幅度
-        data["label_range"] = data.groupby(group_column)["label"].rolling(window=2).apply(rl_apply).reset_index(0,drop=True)           
+        data["label_range"] = data.groupby(group_column)["label"].rolling(window=2).apply(rl_apply).reset_index(0,drop=True)         
+        # 生成KDJ指标
+        self.compute_kdj(data)         
         # 使用指定字段
         data = data[self.get_seq_columns() + ["datetime_number"]]
         return data
 
-    def _prepare_seg_range(self, slc: slice, **kwargs) -> pd.DataFrame:
-        """
-        组装数据,内容加工
-        """
+    def compute_kdj(self,df):
+        window_size = 9
         
-        # 使用成交量作为标签时的处理
-        # return self.prepare_seg_volume(slc)
+        low_list=df['LOW'].rolling(window=window_size).min()
+        low_list.fillna(value=df['LOW'].expanding().min(), inplace=True)
+        high_list = df['HIGH'].rolling(window=window_size).max()
+        high_list.fillna(value=df['HIGH'].expanding().max(), inplace=True)
+        rsv = (df['CLOSE'] - low_list) / (high_list - low_list) * 100
+        df['KDJ_K'] = rsv.ewm(com=2).mean()  
+        df['KDJ_D'] = df['KDJ_K'].ewm(com=2).mean()
+        df['KDJ_J'] = 3 * df['KDJ_K'] - 2 * df['KDJ_D']
+
+    def compute_wr(self,df):
+        window_size = 14
         
-        ext_slice = self._extend_slice(slc, self.cal, self.step_len)
-        data = super()._prepare_seg(ext_slice, **kwargs)
-        # 恢复成一维列索引
-        data = data.reset_index() 
-        # 重新定义动态数据字段,忽略前面几个无效字段,并手工添加label字段
-        self.reals_cols = data.columns.get_level_values(1).values[2:-1]
-        self.reals_cols  = np.concatenate((self.reals_cols,['label']))
-        # 重建字段名，添加日期和股票字段
-        new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols))
-        data.columns = pd.Index(new_cols_idx)    
-        # 清除NAN数据
-        data = data.dropna() 
-        # 清除极值数据
-        data = self.filter_extremum_data(data, columns=self.col_def["past_covariate_col"])
-        # 删除涨跌幅度过大的数据 
-        data = data[data.label.abs()<=0.1]  
-        # 增大取值范围
-        data['label'] = data['label'] * 100
-        # 补充辅助数据,添加日期编号
-        data["month"] = data.datetime.astype("str").str.slice(0,7)
-        data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
-        data["time_idx"] -= data["time_idx"].min() 
-        # 重新编号,解决节假日以及相关日期不连续问题
-        data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
-        # 补充商品指数数据,按照月份合并
-        data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
-        # month重新编号为1到12
-        data["month"] = data["month"].str.slice(5,7)
-        data["dayofweek"] = data.datetime.dt.dayofweek    
-        # 保留时间戳
-        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)
-        # 使用指定字段
-        data = data[self.get_seq_columns() + ["datetime_number"]]
-        return data
-        
+        low_list=df['LOW'].rolling(window=window_size).min()
+        low_list.fillna(value=df['LOW'].expanding().min(), inplace=True)
+        high_list = df['HIGH'].rolling(window=window_size).max()
+        high_list.fillna(value=df['HIGH'].expanding().max(), inplace=True)
+        rsv = (df['CLOSE'] - low_list) / (high_list - low_list) * 100
+        df['KDJ_K'] = rsv.ewm(com=2).mean()  
+        df['KDJ_D'] = df['KDJ_K'].ewm(com=2).mean()
+        df['KDJ_J'] = 3 * df['KDJ_K'] - 2 * df['KDJ_D']
+            
     def filter_extremum_data(self,data,columns=[]):
         """清除极值数据"""
         

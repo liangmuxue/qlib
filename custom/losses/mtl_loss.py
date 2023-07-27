@@ -27,7 +27,9 @@ class MseLoss(_Loss):
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         loss_arr_ori = (input - target) ** 2
-        loss_arr_pun = loss_arr_ori # * self.weight
+        nag_jud_weight = (input>target).int()
+        # 倾向于预测值小于实际值，在此进行加权
+        loss_arr_pun = loss_arr_ori + loss_arr_ori * nag_jud_weight
         if self.reduction=="mean":
             mse_loss = torch.mean(loss_arr_pun)
         else:
@@ -91,7 +93,7 @@ class UncertaintyLoss(nn.Module):
         vr_loss_weight = get_simple_class_weight()
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
         self.mse_weight = mse_weight.to(device)
-        self.last_classify_loss = nn.CrossEntropyLoss() # LastClassifyLoss()
+        self.last_classify_loss = ScopeLoss(reduction=mse_reduction,device=device)
         self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
         self.vr_loss = nn.CrossEntropyLoss()
         self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
@@ -105,22 +107,32 @@ class UncertaintyLoss(nn.Module):
         # slope_target = (target[:,-1] - target[:,0])/target[:,0]
         vr_target= target_class[:,0]
         last_vr_target = target_class[:,1]
+        first_input = input[:,:,0]
+        first_label = target[:,:,0]
+        second_input = input[:,:,1]
+        second_label = target[:,:,1]     
+        # 计算最末段涨跌幅度，并比较   
+        last_section_input = first_input[:,-1] - first_input[:,-2]
+        last_section_label = first_label[:,-1] - first_label[:,-2]
         # 如果是似然估计下的数据，需要取中间值
         if len(input.shape)==4:
             input = torch.mean(input[:,:,0,:],dim=-1)
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.ccc_loss_comp(input[:,:,0], target[:,:,0])   
-        # 针对均线最后一个部分，计算交叉熵损失
-        ce_loss = self.last_classify_loss(last_vr_class,last_vr_target)
+        corr_loss = self.ccc_loss_comp(first_input, first_label)   
+        # 针对均线最后一个部分，计算损失
+        ce_loss,mean_threhold = self.last_classify_loss(last_section_input,last_section_label)
+        ce_loss = ce_loss * 10
         # ce_loss = 0
         # 第3个部分为幅度范围分类，计算交叉熵损失 
-        value_range_loss = self.vr_loss(vr_class,vr_target)               
+        # value_range_loss = self.vr_loss(vr_class,vr_target)               
         # 整体MSE损失
-        mse_loss = self.ccc_loss_comp(input[:,:,1], target[:,:,1])     
+        mse_loss = 0.0 # self.ccc_loss_comp(second_input, second_label)     
         # 涨跌幅度衡量
-        value_diff_loss,mean_threhold = self.scope_loss(slope_out, slope_target)
+        # value_diff_loss,mean_threhold = self.scope_loss(slope_out, slope_target)
+        value_diff_loss = 0.0
+        mean_threhold = 0.0 
         # if slope_out.max()>1:
         #     max_item = slope_out.max(dim=1)[0]
         #     print("slope_out weight >1 cnt:{}".format(torch.sum(max_item>1)))
@@ -128,9 +140,9 @@ class UncertaintyLoss(nn.Module):
         # 使用不确定性损失模式进行累加
         # loss_sum += 1/3 / (self.sigma[0] ** 2) * ce_loss + torch.log(1 + self.sigma[0] ** 2)
         # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
-        loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-        # loss_sum = corr_loss + 0.1 * value_diff_loss
+        # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
+        # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
+        loss_sum = corr_loss + ce_loss
         # loss_sum = value_diff_loss
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
@@ -157,7 +169,7 @@ class UncertaintyLoss(nn.Module):
         sd_true = torch.std(target)
         sd_pred = torch.std(input)
         numerator = 2*cor*sd_true*sd_pred
-        mse_part = torch.mean((target_ori-input_ori)**2) # * self.mse_weight)
+        mse_part = self.mse_loss(input_ori,target_ori)
         denominator = var_true + var_pred + mse_part
         ccc = numerator/denominator
         ccc_loss = 1 - ccc
