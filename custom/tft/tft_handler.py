@@ -104,7 +104,7 @@ class TftDataHandler(DataHandlerLP):
                 "(Less($open, $close)-$low)/($high-$low+1e-12)",
                 "(2*$close-$high-$low)/$open",
                 "(2*$close-$high-$low)/($high-$low+1e-12)",
-                "(EMA($close, 12) - EMA($close, 26))/$close - EMA((EMA($close, 12) - EMA($close, 26))/$close, 9)/$close"
+                "100*((EMA($close, 12) - EMA($close, 26))/$close - EMA((EMA($close, 12) - EMA($close, 26))/$close, 9)/$close)"
             ]
             names += [
                 "KMID",
@@ -290,7 +290,7 @@ class TftDataHandler(DataHandlerLP):
                 fields += ["Sum(($volume*$close/Ref($close, 1)),%d)" % d for d in windows]
                 names += ["REV%d" % d for d in windows]         
             if use("WR"):
-                fields += ["(Max($HIGH,%d)-$close)/(Max($HIGH,%d)-Min($LOW,%d))*100" % d for d in windows]
+                fields += ["(Max($HIGH,{})-$close)/(Max($HIGH,{})-Min($LOW,{}))*100".format(d,d,d) for d in windows]
                 names += ["WR%d" % d for d in windows]                             
         return fields, names
     
