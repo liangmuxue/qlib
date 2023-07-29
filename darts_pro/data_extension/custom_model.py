@@ -459,9 +459,7 @@ class _TFTCusModule(_TFTModule):
         rev_threhold = 1
         # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,import_price_instrument_acc,import_price_instrument_nag,import_index \
-             = self.compute_real_class_acc(rev_threhold=rev_threhold,
-                output_inverse=output_inverse,output_slope=output_slope, target_slope=target_slope, \
-                target_info=target_info)              
+             = self.compute_real_class_acc(rev_threhold=rev_threhold, output_inverse=output_inverse, target_slope=target_slope,target_info=target_info)              
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
         # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
@@ -494,7 +492,7 @@ class _TFTCusModule(_TFTModule):
         # self.process_val_results(record_results,self.current_epoch)
         return loss
  
-    def filter_batch_by_condition(self,val_batch,rev_threhold=5,recent_threhold=2):
+    def filter_batch_by_condition(self,val_batch,rev_threhold=2,recent_threhold=5):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch    
@@ -511,7 +509,7 @@ class _TFTCusModule(_TFTModule):
         # 近期均值大于阈值
         rev_boole = np.mean(rev_cov_recent,axis=1)>rev_threhold
         # 最近数值处于比较高的点
-        rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(rev_threhold/100))
+        rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(recent_threhold/100))
         
         import_index_bool = import_index_bool & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
@@ -717,20 +715,21 @@ class _TFTCusModule(_TFTModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,rev_threhold=5,target_info=None,output_inverse=None,output_slope=None,target_slope=None):
+    def compute_real_class_acc(self,rev_threhold=5,target_info=None,output_inverse=None,target_slope=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
         vr_target,raise_range = compute_price_class_batch(target_data,mode="fast")
         
+        output_label_inverse = output_inverse[:,:,0] 
+        output_second_inverse = output_inverse[:,:,1]
         # 价格范围判断
-        second_range = (output_slope[:,-1] - output_slope[:,0])/output_slope[:,0] * 100
+        second_range = (output_second_inverse[:,-1] - output_second_inverse[:,0])/output_second_inverse[:,0] * 100
         pos_index_bool = (second_range>rev_threhold) # & (price_range>rev_threhold)
-        
-        output_label_inverse = output_inverse[:,:,0]          
+                 
         # 整体需要有上涨幅度
-        slope_out_compute = (output_label_inverse[:,1:]  - output_label_inverse[:,:-1])/output_label_inverse[:,:-1]*100
-        output_import_index_bool = np.sum(slope_out_compute,axis=1)>3
+        slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
+        output_import_index_bool = slope_out_compute>rev_threhold
         # # 最后一段要求上涨幅度大于0
         # last_output_import_index_bool = slope_out_compute[:,-1]>0
         # REV动量数据需要整体上涨
@@ -786,6 +785,8 @@ class _TFTCusModule(_TFTModule):
         if import_index.shape[0]==0:
             import_price_acc = 0
             import_price_nag = 0
+            import_price_instrument_acc = 0
+            import_price_instrument_nag = 0
         else:
             import_price_acc = import_price_acc_count/import_index.shape[0]
             import_price_nag = import_price_nag_count/import_index.shape[0]
@@ -1110,7 +1111,7 @@ class _TFTCusModule(_TFTModule):
         vr_class_certainlys = vr_class.cpu().numpy()
         # vr_class_certainlys_imp_index = np.expand_dims(np.array([i for i in range(len(target_info))]),axis=-1)
         vr_class_certainlys_imp_index = import_index
-        size = len(vr_class_certainlys_imp_index) if len(vr_class_certainlys_imp_index)<27 else 27
+        size = len(vr_class_certainlys_imp_index) if len(vr_class_certainlys_imp_index)<99 else 99
         code_dict = {}
         idx = 0
         date_str = "20230313"
@@ -1138,7 +1139,7 @@ class _TFTCusModule(_TFTModule):
             df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
                                     (df_all["instrument_rank"]==ts["item_rank_code"])]            
             # 补充画出前面的label数据
-            target_combine_sample = df_target["label"].values
+            target_combine_sample = df_target["RSI5"].values
             rev_out = output[s_index,:,1,0].cpu().numpy()
             time_index = df_target["datetime"]
             rev_sample = df_target["REV5"].values
@@ -1149,7 +1150,7 @@ class _TFTCusModule(_TFTModule):
             price_class_item = price_class[s_index]
             price_target = df_target["label_ori"].values    
             price_target = np.expand_dims(price_target,axis=0)    
-            second_target = df_target["MACD"].values 
+            second_target = df_target["label"].values 
             second_target = np.expand_dims(second_target,axis=-1)  
             view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
             # view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
