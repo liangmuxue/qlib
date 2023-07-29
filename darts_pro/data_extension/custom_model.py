@@ -494,7 +494,7 @@ class _TFTCusModule(_TFTModule):
         # self.process_val_results(record_results,self.current_epoch)
         return loss
  
-    def filter_batch_by_condition(self,val_batch,rev_threhold=1,recent_threhold=2):
+    def filter_batch_by_condition(self,val_batch,rev_threhold=5,recent_threhold=2):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch    
@@ -510,8 +510,8 @@ class _TFTCusModule(_TFTModule):
         rev_cov_recent = rev_cov[:,-5:]
         # 近期均值大于阈值
         rev_boole = np.mean(rev_cov_recent,axis=1)>rev_threhold
-        # 最近数值处于最高点
-        rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=0.01)
+        # 最近数值处于比较高的点
+        rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(rev_threhold/100))
         
         import_index_bool = import_index_bool & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
@@ -1106,6 +1106,7 @@ class _TFTCusModule(_TFTModule):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
         names = ["output","target","price_tar","macd_output","macd_tar"]
+        names = ["output","target","price_tar"]
         vr_class_certainlys = vr_class.cpu().numpy()
         # vr_class_certainlys_imp_index = np.expand_dims(np.array([i for i in range(len(target_info))]),axis=-1)
         vr_class_certainlys_imp_index = import_index
@@ -1151,8 +1152,8 @@ class _TFTCusModule(_TFTModule):
             second_target = df_target["MACD"].values 
             second_target = np.expand_dims(second_target,axis=-1)  
             view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
-            view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
-            view_data = np.concatenate((view_data,second_target),axis=1)  
+            # view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
+            # view_data = np.concatenate((view_data,second_target),axis=1)  
             # view_data = np.concatenate((view_data,np.expand_dims(rev_sample,axis=1)),axis=1)
             x_range = np.array([i for i in range(ts["start"],ts["end"])])
             if self.monitor is not None:

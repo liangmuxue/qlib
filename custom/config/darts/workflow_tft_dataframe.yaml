@@ -15,7 +15,7 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['REV5','REV5_ORI','MACD','WR10','WR5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','PRICE_SCOPE','RESI10','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J']                 
+              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','WR5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','PRICE_SCOPE','RESI10','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J']                 
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -108,7 +108,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['label','MACD']
+                target_column: ['MACD','label']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J']  
