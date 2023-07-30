@@ -290,8 +290,13 @@ class TftDataHandler(DataHandlerLP):
                 fields += ["Sum(($volume*$close/Ref($close, 1)),%d)" % d for d in windows]
                 names += ["REV%d" % d for d in windows]         
             if use("WR"):
+                # 自定义威廉指数
                 fields += ["(Max($HIGH,{})-$close)/(Max($HIGH,{})-Min($LOW,{}))*100".format(d,d,d) for d in windows]
-                names += ["WR%d" % d for d in windows]                             
+                names += ["WR%d" % d for d in windows]      
+            if use("OBV"):
+                # 自定义能量潮指标
+                fields += ["Mean((($close-$LOW) - ($HIGH-$close))/($HIGH-$LOW)*$volume,{})".format(d) for d in windows]
+                names += ["OBV%d" % d for d in windows]                                        
         return fields, names
     
     

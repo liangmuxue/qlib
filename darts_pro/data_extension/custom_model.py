@@ -410,7 +410,7 @@ class _TFTCusModule(_TFTModule):
         # 走势分类交叉熵损失
         # cross_loss = compute_cross_metrics(out_class, target_trend_class)
         # mse损失
-        # self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_last_vr_loss", last_vr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -447,7 +447,7 @@ class _TFTCusModule(_TFTModule):
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
         vr_class_certainlys = self.build_vr_class_cer(vr_class)
@@ -494,7 +494,7 @@ class _TFTCusModule(_TFTModule):
         # self.process_val_results(record_results,self.current_epoch)
         return loss
  
-    def filter_batch_by_condition(self,val_batch,rev_threhold=2,recent_threhold=5):
+    def filter_batch_by_condition(self,val_batch,rev_threhold=3,recent_threhold=3):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch    
@@ -727,22 +727,29 @@ class _TFTCusModule(_TFTModule):
         
         output_label_inverse = output_inverse[:,:,0] 
         output_second_inverse = output_inverse[:,:,1]
-
+        output_third_inverse = output_inverse[:,:,2]
                  
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
         output_import_index_bool = slope_out_compute>rev_threhold
+        
         # 辅助指标判断
         second_slope_range = (output_second_inverse[:,1:] - output_second_inverse[:,:-1])/output_second_inverse[:,:-1]
+        third_slope_range = (output_third_inverse[:,1:] - output_third_inverse[:,:-1])/output_third_inverse[:,:-1]
         # 第一段上升
         pos_index_bool = (second_slope_range[:,0]>0)
         # 预测最低值大于之前的最低值
         pos_index_bool = pos_index_bool & (np.min(output_second_inverse,axis=1)>np.min(past_target,axis=1))
         # 预测结束数据值大于30
         pos_index_bool = pos_index_bool & (output_second_inverse[:,-1]>30)
-        # pos_index_bool = pos_index_bool & (second_slope_range[:,-1]>0)
+        
+        # 第三指标判断
+        # 整体上升或上升幅度与下降幅度差值较小
+        third_max = np.max(output_third_inverse,axis=-1)
+        third_index_bool = ((third_max - output_third_inverse[:,0])/(third_max - output_third_inverse[:,-1]))>0.5
+        
         # 综合判别
-        import_index_bool = output_import_index_bool & pos_index_bool
+        import_index_bool = output_import_index_bool & pos_index_bool & third_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -1115,8 +1122,8 @@ class _TFTCusModule(_TFTModule):
                         slope_out=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
-        names = ["output","target","price_tar","rsi_output","rsi_tar"]
-        names = ["rsi_output","rsi_tar"]
+        names = ["pred","label","price","rsi_output","rsi_tar","obv_output","obv_tar"]
+        # names = ["rsi_output","rsi_tar","obv_output","obv_tar"]
         if import_price_result.shape[0]==0:
             return
         import_index,instrument_index = np.unique(import_price_result,axis=1,return_index=True)
@@ -1126,10 +1133,8 @@ class _TFTCusModule(_TFTModule):
         idx_nor = 0
         date_str = "20230313"
         result = []
-        viz_result_fail
+        max_cnt = 100
         for r_index in range(import_price_result.shape[0]-1):
-            if r_index>100:
-                break
             s_index = import_price_result[r_index,0]
             ts = target_info[s_index]
             code_dict[ts["item_rank_code"]] = 1
@@ -1142,6 +1147,7 @@ class _TFTCusModule(_TFTModule):
             pred_data = output_inverse[s_index]
             pred_center_data = pred_data[:,0]
             pred_second_data = pred_data[:,1]
+            pred_third_data = pred_data[:,2]
             # 可以从全局变量中，通过索引获得实际价格
             df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
                                     (df_all["instrument_rank"]==ts["item_rank_code"])]            
@@ -1153,16 +1159,21 @@ class _TFTCusModule(_TFTModule):
             pad_data = np.array([0 for i in range(self.input_chunk_length)])
             pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
             pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
+            pred_third_data = np.concatenate((pad_data,pred_third_data),axis=-1)
             view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
             price_class_item = import_price_result[r_index,2]
             price_target = df_target["label_ori"].values    
             price_target = np.expand_dims(price_target,axis=0)    
             second_target = df_target["RSI5"].values 
             second_target = np.expand_dims(second_target,axis=-1)  
+            third_target = df_target["OBV5"].values 
+            third_target = np.expand_dims(third_target,axis=-1)              
             view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
             view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
             view_data = np.concatenate((view_data,second_target),axis=1)  
-            view_data = view_data[:,3:]
+            view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
+            view_data = np.concatenate((view_data,third_target),axis=1)  
+            # view_data = view_data[:,3:]
             x_range = np.array([i for i in range(ts["start"],ts["end"])])
             if self.monitor is not None:
                 instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
@@ -1176,14 +1187,20 @@ class _TFTCusModule(_TFTModule):
                 instrument,price_class_item)
             if price_class_item==CLASS_SIMPLE_VALUE_MAX:
                 idx_suc += 1
+                if idx_suc>(max_cnt/3):
+                    continue                  
                 win = "win_{}_{}".format(batch_idx,idx_suc)
                 viz_result_suc.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)   
             elif price_class_item==0:
                 idx_nag += 1
+                if idx_nag>(max_cnt/3):
+                    continue                
                 win = "win_{}_{}".format(batch_idx,idx_nag)               
                 viz_result_fail.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range) 
             else:
                 idx_nor += 1
+                if idx_nor>(max_cnt/3):
+                    continue
                 win = "win_{}_{}".format(batch_idx,idx_nor)                 
                 viz_result_nor.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)           
             df_target["pred_data"] = np.concatenate((target_combine_sample[:self.input_chunk_length],pred_center_data[self.input_chunk_length:]),axis=-1)
