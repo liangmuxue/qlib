@@ -73,7 +73,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_500_multi'
+               model_name: 'test6_tft_500_multi'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -108,7 +108,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['RSI5','label']
+                target_column: ['label','RSI5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J']  

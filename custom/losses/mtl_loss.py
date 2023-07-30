@@ -128,7 +128,7 @@ class UncertaintyLoss(nn.Module):
         # 第3个部分为幅度范围分类，计算交叉熵损失 
         # value_range_loss = self.vr_loss(vr_class,vr_target)               
         # 整体MSE损失
-        mse_loss = self.mse_loss(second_input, second_label)     
+        mse_loss = self.ccc_loss_comp(second_input, second_label)     
         # 涨跌幅度衡量
         # value_diff_loss,mean_threhold = self.scope_loss(slope_out, slope_target)
         value_diff_loss = 0.0
@@ -141,7 +141,7 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-        loss_sum = corr_loss # + mse_loss
+        loss_sum = corr_loss + mse_loss
         # loss_sum = value_diff_loss
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)

@@ -395,7 +395,7 @@ class TftDataframeModel():
         load_weight = self.optargs["load_weight"]
         if load_weight:
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
-            self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
+            self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=True)
             self.model.batch_size = self.batch_size     
         else:
             # 使用股票代码数量作为embbding长度
