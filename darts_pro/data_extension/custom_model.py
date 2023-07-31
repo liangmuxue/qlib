@@ -410,7 +410,7 @@ class _TFTCusModule(_TFTModule):
         # mse损失
         self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
         
@@ -444,7 +444,7 @@ class _TFTCusModule(_TFTModule):
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
@@ -456,10 +456,9 @@ class _TFTCusModule(_TFTModule):
         #     sec_recall,sec_price_acc,sec_price_nag,import_index,sec_index,last_section_acc,import_last_section_acc = self.compute_vr_class_acc(
         #     vr_class_certainlys, target_vr_class,target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,
         #     last_target_vr_class=last_target_vr_class,output_inverse=torch.Tensor(output_inverse).to(self.device))  
-        rev_threhold = 1
         # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
-             = self.compute_real_class_acc(rev_threhold=rev_threhold, output_inverse=output_inverse, past_target=past_target_inverse, \
+             = self.compute_real_class_acc(output_inverse=output_inverse, past_target=past_target_inverse, \
                second_class=second_class_certainlys,third_class=third_class_certainlys,target_vr_class=target_vr_class,target_info=target_info)              
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
@@ -493,7 +492,7 @@ class _TFTCusModule(_TFTModule):
         # self.process_val_results(record_results,self.current_epoch)
         return loss
  
-    def filter_batch_by_condition(self,val_batch,rev_threhold=3,recent_threhold=3):
+    def filter_batch_by_condition(self,val_batch,rev_threhold=3,recent_threhold=1):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch    
@@ -716,7 +715,7 @@ class _TFTCusModule(_TFTModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,rev_threhold=5,target_info=None,output_inverse=None,second_class=None,third_class=None
+    def compute_real_class_acc(self,label_threhold=5,target_info=None,output_inverse=None,second_class=None,third_class=None
                                ,target_vr_class=None,past_target=None):
         """计算涨跌幅分类准确度"""
         
@@ -731,9 +730,10 @@ class _TFTCusModule(_TFTModule):
                  
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
-        output_import_index_bool = slope_out_compute>rev_threhold
+        output_import_index_bool = slope_out_compute>label_threhold
         # 辅助指标判断
         second_slope_range = (output_second_inverse[:,1:] - output_second_inverse[:,:-1])/output_second_inverse[:,:-1]
+        second_total_range = (output_second_inverse[:,-1] - output_second_inverse[:,0])/output_second_inverse[:,0]
         third_slope_range = (output_third_inverse[:,1:] - output_third_inverse[:,:-1])/output_third_inverse[:,:-1]
         # 第一段上升
         pos_index_bool = (second_slope_range[:,0]>0)
@@ -741,18 +741,21 @@ class _TFTCusModule(_TFTModule):
         pos_index_bool = pos_index_bool & (np.min(output_second_inverse,axis=1)>np.min(past_target,axis=1))
         # 预测结束数据值大于30
         pos_index_bool = pos_index_bool & (output_second_inverse[:,-1]>30)
+        # 总体上升
+        pos_index_bool = (second_total_range>0)
         # 直接使用分类
-        pos_index_bool = second_class==CLASS_SIMPLE_VALUE_MAX
-        pos_index_bool = pos_index_bool
+        # pos_index_bool = second_class==CLASS_SIMPLE_VALUE_MAX
                 
         # 第三指标判断
-        # 整体上升或上升幅度与下降幅度差值较小
+        # 整体上升幅度与振幅差值较小
         third_max = np.max(output_third_inverse,axis=-1)
-        third_index_bool = ((third_max - output_third_inverse[:,0])/(third_max - output_third_inverse[:,-1]))>0.5
+        third_min = np.min(output_third_inverse,axis=-1)
+        third_index_bool = ((output_third_inverse[:,-1] - output_third_inverse[:,0])/(third_max - third_min))>0.5
+
         # 直接使用分类
-        third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
+        # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 综合判别
-        import_index_bool = pos_index_bool & third_index_bool
+        import_index_bool = output_import_index_bool & pos_index_bool & third_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -1202,7 +1205,7 @@ class _TFTCusModule(_TFTModule):
                 viz_result_fail.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range) 
             else:
                 idx_nor += 1
-                if idx_nor>(max_cnt/3):
+                if idx_nor>15:
                     continue
                 win = "win_{}_{}".format(batch_idx,idx_nor)                 
                 viz_result_nor.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)           

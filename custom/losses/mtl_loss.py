@@ -97,7 +97,7 @@ class UncertaintyLoss(nn.Module):
         # self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
         self.vr_loss = nn.CrossEntropyLoss()
         self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
-        self.scope_loss = ScopeLoss(reduction=mse_reduction,device=device)
+        self.scope_loss = nn.CrossEntropyLoss()
 
     def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
@@ -119,13 +119,13 @@ class UncertaintyLoss(nn.Module):
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.ccc_loss_comp(second_input, second_label)   
+        corr_loss = self.ccc_loss_comp(first_input, first_label)   
         # 第二指标分类
-        ce_loss = self.vr_loss(second_class, vr_target)
+        ce_loss = 0.0 # self.vr_loss(second_class, vr_target)
         # 第三指标计算
-        mse_loss = self.ccc_loss_comp(third_input, third_label)     
+        mse_loss = self.ccc_loss_comp(second_input, second_label)     
         # 第三指标分类 
-        value_diff_loss = self.vr_loss(third_class,vr_target)  
+        value_diff_loss = self.ccc_loss_comp(third_input,third_label)  
         # value_diff_loss = 0.0
         mean_threhold = 0.0 
         # if slope_out.max()>1:
@@ -136,8 +136,8 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-        loss_sum = corr_loss + mse_loss + 0.2 * ce_loss + 0.2 * value_diff_loss 
-        loss_sum = ce_loss + value_diff_loss
+        loss_sum = corr_loss + mse_loss + value_diff_loss
+        # loss_sum = ce_loss + value_diff_loss
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
     
