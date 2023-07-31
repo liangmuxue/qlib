@@ -127,7 +127,7 @@ class _TFTCusModule(_TFTModule):
         vr_range_num = len(CLASS_SIMPLE_VALUES.keys())
         pred_len = kwargs["output_chunk_length"]
         self.classify_last_layer = self._construct_classify_layer(focus_num,2).to(device)
-        self.slope_layer = self._construct_classify_layer(pred_len,pred_len-1).to(device)  
+        self.slope_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
         # 涨跌幅度分类
         self.classify_vr_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
         # mse损失计算                
@@ -158,14 +158,12 @@ class _TFTCusModule(_TFTModule):
             batch_size, self.output_chunk_length, self.n_targets, self.loss_size
         )        
          
-        output_sample = out[:,:,0,0]
-        output_sample_last = output_sample[:,-2:]
-        slope_out = (output_sample_last[:,-1] - output_sample[:,0])/output_sample[:,0]*100
-        # slope_out = self.slope_layer(output_sample)
-        # 涨跌幅度分类
-        vr_class = self.classify_vr_layer(output_sample)
-        last_vr_class = self.classify_last_layer(output_sample_last)
-        return (out,slope_out,vr_class,last_vr_class)
+        second_output = out[:,:,1,0]
+        third_output = out[:,:,2,0]
+        # 针对第二和第三指标进行分类
+        second_class = self.classify_vr_layer(second_output)
+        third_class = self.slope_layer(third_output)
+        return (out,third_output,second_class,third_class)
     
     def forward_super(
         self, x_in: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]
@@ -391,7 +389,7 @@ class _TFTCusModule(_TFTModule):
         train_batch = self.filter_batch_by_condition(train_batch)
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
         # 包括数值数据，以及分类输出
-        (output,slope_out,vr_class,last_vr_class) = self._produce_train_output(train_batch[:5])
+        (output,slope_out,second_class,third_class) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
         scaler,target_class,target,target_info = train_batch[5:]
         target_class = target_class[:,:,0]
@@ -399,8 +397,8 @@ class _TFTCusModule(_TFTModule):
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained
         
-        loss,detail_loss = self._compute_loss((output,slope_out,vr_class,last_vr_class), (target,target_class,scaler,target_info))
-        (mse_loss,value_diff_loss,corr_loss,last_vr_loss,mean_threhold) = detail_loss
+        loss,detail_loss = self._compute_loss((output,slope_out,second_class,third_class), (target,target_class,scaler,target_info))
+        (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("base_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
         # self.log("mean_threhold",mean_threhold,batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -412,9 +410,9 @@ class _TFTCusModule(_TFTModule):
         # mse损失
         self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("train_last_vr_loss", last_vr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
+        self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
         
         # self.manual_backward(loss)
         # if (batch_idx + 1) % self.lr_freq["frequency"] == 0:
@@ -428,7 +426,7 @@ class _TFTCusModule(_TFTModule):
         # 只关注重点部分
         val_batch = self.filter_batch_by_condition(val_batch_ori)
         # val_batch = val_batch_ori
-        (output,slope_out,vr_class,last_vr_class) = self._produce_train_output(val_batch[:5])
+        (output,slope_out,second_class,third_class) = self._produce_train_output(val_batch[:5])
         past_target = val_batch[0]
         past_covariate = val_batch[1]
         scaler,target_class,target,target_info = val_batch[5:]  
@@ -438,20 +436,20 @@ class _TFTCusModule(_TFTModule):
         output_inverse = self.get_inverse_data(output.cpu().numpy()[:,:,:,0],target_info=target_info,scaler=scaler)
         past_target_inverse = self.get_inverse_data(past_target.cpu().numpy(),target_info=target_info,scaler=scaler)
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,slope_out,vr_class,last_vr_class), (target,target_class,scaler,target_info))
+        loss,detail_loss = self._compute_loss((output,slope_out,second_class,third_class), (target,target_class,scaler,target_info))
         # 第二个目标
         past_target_inverse = past_target_inverse[:,:,1]
         output_slope = output_inverse[:,:,1]
-        (mse_loss,value_diff_loss,corr_loss,last_vr_loss,mean_threhold) = detail_loss
+        (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_value_range_loss", value_range_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
-        vr_class_certainlys = self.build_vr_class_cer(vr_class)
-        last_vr_class_certainlys = self.build_vr_class_cer(last_vr_class)
+        second_class_certainlys = self.build_vr_class_cer(second_class)
+        third_class_certainlys = self.build_vr_class_cer(third_class)
         # last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
         # vr_acc,import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,sec_acc, \
@@ -461,7 +459,8 @@ class _TFTCusModule(_TFTModule):
         rev_threhold = 1
         # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
-             = self.compute_real_class_acc(rev_threhold=rev_threhold, output_inverse=output_inverse, past_target=past_target_inverse,target_info=target_info)              
+             = self.compute_real_class_acc(rev_threhold=rev_threhold, output_inverse=output_inverse, past_target=past_target_inverse, \
+               second_class=second_class_certainlys,third_class=third_class_certainlys,target_vr_class=target_vr_class,target_info=target_info)              
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
         # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
@@ -480,9 +479,9 @@ class _TFTCusModule(_TFTModule):
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
         # self.vr_metric_show(target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
-        self.val_metric_show(output,target,price_class,vr_class_certainlys,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
+        self.val_metric_show(output,target,price_class,second_class_certainlys,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
                              target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                             last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+                             third_class_certainlys=third_class_certainlys,last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
@@ -717,7 +716,7 @@ class _TFTCusModule(_TFTModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,rev_threhold=5,target_info=None,output_inverse=None,past_target=None):
+    def compute_real_class_acc(self,rev_threhold=5,target_info=None,output_inverse=None,second_class=None,third_class=None,target_vr_class=None,past_target=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
@@ -732,7 +731,6 @@ class _TFTCusModule(_TFTModule):
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
         output_import_index_bool = slope_out_compute>rev_threhold
-        
         # 辅助指标判断
         second_slope_range = (output_second_inverse[:,1:] - output_second_inverse[:,:-1])/output_second_inverse[:,:-1]
         third_slope_range = (output_third_inverse[:,1:] - output_third_inverse[:,:-1])/output_third_inverse[:,:-1]
@@ -742,14 +740,18 @@ class _TFTCusModule(_TFTModule):
         pos_index_bool = pos_index_bool & (np.min(output_second_inverse,axis=1)>np.min(past_target,axis=1))
         # 预测结束数据值大于30
         pos_index_bool = pos_index_bool & (output_second_inverse[:,-1]>30)
-        
+        # 直接使用分类
+        pos_index_bool = second_class==target_vr_class
+        pos_index_bool = pos_index_bool
+                
         # 第三指标判断
         # 整体上升或上升幅度与下降幅度差值较小
         third_max = np.max(output_third_inverse,axis=-1)
         third_index_bool = ((third_max - output_third_inverse[:,0])/(third_max - output_third_inverse[:,-1]))>0.5
-        
+        # 直接使用分类
+        third_index_bool = (third_class==target_vr_class)
         # 综合判别
-        import_index_bool = output_import_index_bool & pos_index_bool & third_index_bool
+        import_index_bool = pos_index_bool & third_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -1118,7 +1120,7 @@ class _TFTCusModule(_TFTModule):
                         
         return last_batch_index,last_batch_imp_index,item_codes
                                 
-    def val_metric_show(self,output,target,price_class,vr_class,target_vr_class,output_inverse=None,last_vr_class_certainlys=None,
+    def val_metric_show(self,output,target,price_class,second_class_certainlys,target_vr_class,output_inverse=None,third_class_certainlys=None,
                         slope_out=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
@@ -1142,7 +1144,7 @@ class _TFTCusModule(_TFTModule):
             # 检查指定日期的数据
             # if df_all[(df_all["time_idx"]==ts["end"]-1)&(df_all["instrument_rank"]==ts["item_rank_code"])]["datetime"].dt.strftime('%Y%m%d').values[0]!=date_str:
             #     continue         
-            last_vr_class = last_vr_class_certainlys[s_index]
+            last_vr_class = second_class_certainlys[s_index]
             last_target_class = last_target_vr_class[s_index]
             pred_data = output_inverse[s_index]
             pred_center_data = pred_data[:,0]

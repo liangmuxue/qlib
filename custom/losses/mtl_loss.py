@@ -94,7 +94,7 @@ class UncertaintyLoss(nn.Module):
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
         self.mse_weight = mse_weight.to(device)
         self.last_classify_loss = ScopeLoss(reduction=mse_reduction,device=device)
-        self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
+        # self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
         self.vr_loss = nn.CrossEntropyLoss()
         self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
         self.scope_loss = ScopeLoss(reduction=mse_reduction,device=device)
@@ -102,7 +102,7 @@ class UncertaintyLoss(nn.Module):
     def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
-        (input,slope_out,vr_class,last_vr_class) = input_ori
+        (input,slope_out,second_class,third_class) = input_ori
         (target,future_target,target_class,slope_target) = target_ori
         # slope_target = (target[:,-1] - target[:,0])/target[:,0]
         vr_target= target_class[:,0]
@@ -119,16 +119,13 @@ class UncertaintyLoss(nn.Module):
         else:
             input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.ccc_loss_comp(first_input, first_label)   
-        # 针对均线最后一个部分，计算损失
-        # ce_loss,mean_threhold = self.last_classify_loss(last_section_input,last_section_label)
-        ce_loss = 0
-        # 第3个部分为幅度范围分类，计算交叉熵损失 
-        # value_range_loss = self.vr_loss(vr_class,vr_target)               
-        # 第二指标计算
-        mse_loss = self.ccc_loss_comp(second_input, second_label)     
+        corr_loss = self.ccc_loss_comp(second_input, second_label)   
+        # 第二指标分类
+        ce_loss = self.vr_loss(second_class, vr_target)
         # 第三指标计算
-        value_diff_loss = self.ccc_loss_comp(third_input, third_label)
+        mse_loss = self.ccc_loss_comp(third_input, third_label)     
+        # 第三指标分类 
+        value_diff_loss = self.vr_loss(third_class,vr_target)  
         # value_diff_loss = 0.0
         mean_threhold = 0.0 
         # if slope_out.max()>1:
@@ -139,7 +136,7 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-        loss_sum = corr_loss + mse_loss + value_diff_loss
+        loss_sum = ce_loss + value_diff_loss 
         # loss_sum = value_diff_loss
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
