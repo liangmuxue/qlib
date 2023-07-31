@@ -716,13 +716,14 @@ class _TFTCusModule(_TFTModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,rev_threhold=5,target_info=None,output_inverse=None,second_class=None,third_class=None,target_vr_class=None,past_target=None):
+    def compute_real_class_acc(self,rev_threhold=5,target_info=None,output_inverse=None,second_class=None,third_class=None
+                               ,target_vr_class=None,past_target=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
         price_data = np.array([item["price_array"][self.input_chunk_length-1:] for item in target_info])
-        vr_target,_ = compute_price_class_batch(target_data,mode="fast")
-        vr_price_target,_ = compute_price_class_batch(price_data,mode="fast")
+        # vr_target,_ = compute_price_class_batch(target_data,mode="fast")
+        # vr_price_target,_ = compute_price_class_batch(price_data,mode="fast")
         
         output_label_inverse = output_inverse[:,:,0] 
         output_second_inverse = output_inverse[:,:,1]
@@ -741,7 +742,7 @@ class _TFTCusModule(_TFTModule):
         # 预测结束数据值大于30
         pos_index_bool = pos_index_bool & (output_second_inverse[:,-1]>30)
         # 直接使用分类
-        pos_index_bool = second_class==target_vr_class
+        pos_index_bool = second_class==CLASS_SIMPLE_VALUE_MAX
         pos_index_bool = pos_index_bool
                 
         # 第三指标判断
@@ -749,7 +750,7 @@ class _TFTCusModule(_TFTModule):
         third_max = np.max(output_third_inverse,axis=-1)
         third_index_bool = ((third_max - output_third_inverse[:,0])/(third_max - output_third_inverse[:,-1]))>0.5
         # 直接使用分类
-        third_index_bool = (third_class==target_vr_class)
+        third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 综合判别
         import_index_bool = pos_index_bool & third_index_bool
         
@@ -758,15 +759,15 @@ class _TFTCusModule(_TFTModule):
         import_index = np.where(import_index_bool)[0]
 
         # 重点类别的准确率
-        import_acc_count = np.sum(vr_target[import_index]==CLASS_SIMPLE_VALUE_MAX)
-        import_price_count = np.sum(vr_price_target[import_index]==CLASS_SIMPLE_VALUE_MAX)
+        import_acc_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
+        import_price_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
         if import_index.shape[0]==0:
             import_acc = torch.tensor(0.0)
         else:
             import_acc = import_acc_count/import_index.shape[0]
          
         # 重点类别的召回率    
-        total_imp_cnt = np.sum(vr_target==CLASS_SIMPLE_VALUE_MAX)
+        total_imp_cnt = np.sum(target_vr_class==CLASS_SIMPLE_VALUE_MAX)
         if total_imp_cnt!=0:
             import_recall = import_acc_count/total_imp_cnt
         else:
@@ -777,8 +778,8 @@ class _TFTCusModule(_TFTModule):
         import_price_result = []
         for i,imp_idx in enumerate(import_index):
             target_info_item = target_info[imp_idx]
-            price_array = target_info_item["price_array"][self.input_chunk_length-1:]
-            p_taraget_class = compute_price_class(price_array,mode="fast")
+            price_array = target_info_item["price_array"][self.input_chunk_length:]
+            p_taraget_class = compute_price_class(price_array,mode="first_last")
             import_price_result.append([imp_idx,target_info_item["item_rank_code"],p_taraget_class])
         import_price_result = np.array(import_price_result)        
         price_class = np.array(price_class)
@@ -1140,7 +1141,7 @@ class _TFTCusModule(_TFTModule):
             s_index = import_price_result[r_index,0]
             ts = target_info[s_index]
             code_dict[ts["item_rank_code"]] = 1
-            target_vr_class_sample = target_vr_class[s_index].cpu().numpy()
+            target_vr_class_sample = target_vr_class[s_index]
             # 检查指定日期的数据
             # if df_all[(df_all["time_idx"]==ts["end"]-1)&(df_all["instrument_rank"]==ts["item_rank_code"])]["datetime"].dt.strftime('%Y%m%d').values[0]!=date_str:
             #     continue         
