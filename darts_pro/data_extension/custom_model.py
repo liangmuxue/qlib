@@ -431,7 +431,7 @@ class _TFTCusModule(_TFTModule):
         past_covariate = val_batch[1]
         scaler,target_class,target,target_info = val_batch[5:]  
         target_class = target_class[:,:,0]
-        target_vr_class = target_class[:,0]
+        target_vr_class = target_class[:,0].cpu().numpy()
         last_target_vr_class = target_class[:,1]
         output_inverse = self.get_inverse_data(output.cpu().numpy()[:,:,:,0],target_info=target_info,scaler=scaler)
         past_target_inverse = self.get_inverse_data(past_target.cpu().numpy(),target_info=target_info,scaler=scaler)
@@ -448,8 +448,8 @@ class _TFTCusModule(_TFTModule):
         self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
-        second_class_certainlys = self.build_vr_class_cer(second_class)
-        third_class_certainlys = self.build_vr_class_cer(third_class)
+        second_class_certainlys = self.build_vr_class_cer(second_class).cpu().numpy()
+        third_class_certainlys = self.build_vr_class_cer(third_class).cpu().numpy()
         # last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
         # vr_acc,import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,sec_acc, \
