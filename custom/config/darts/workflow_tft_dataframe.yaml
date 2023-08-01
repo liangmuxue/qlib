@@ -74,7 +74,7 @@ task:
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
                model_name: 'test8_tft_500_multi'
-               load_weight: False
+               load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
@@ -111,7 +111,7 @@ task:
                 target_column: ['label','RSI5','OBV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','VOLUME_CLOSE','TURNOVER_CLOSE']  
+                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J']  
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 

@@ -419,7 +419,17 @@ class _TFTCusModule(_TFTModule):
         #     opt.step()
         #     opt.zero_grad()
         return loss
-    
+
+    def on_validation_epoch_start(self):
+        self.import_price_result = None
+        
+    def on_validation_epoch_end(self):
+        if self.import_price_result is None:
+            return
+        res_group = self.import_price_result.groupby("result")
+        ins_unique = res_group.nunique()['instrument']
+        app_logger.debug("ins_unique:{}".format(ins_unique))        
+                 
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -459,7 +469,17 @@ class _TFTCusModule(_TFTModule):
         # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
              = self.compute_real_class_acc(output_inverse=output_inverse, past_target=past_target_inverse, \
-               second_class=second_class_certainlys,third_class=third_class_certainlys,target_vr_class=target_vr_class,target_info=target_info)              
+               second_class=second_class_certainlys,third_class=third_class_certainlys,target_vr_class=target_vr_class,target_info=target_info)   
+        
+        # 累加结果集，后续统计   
+        if self.import_price_result is None:
+            self.import_price_result = import_price_result    
+        else:
+            if import_price_result is not None:
+                import_price_result_array = import_price_result.values
+                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)
+                
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
         # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
@@ -492,7 +512,7 @@ class _TFTCusModule(_TFTModule):
         # self.process_val_results(record_results,self.current_epoch)
         return loss
  
-    def filter_batch_by_condition(self,val_batch,rev_threhold=3,recent_threhold=1):
+    def filter_batch_by_condition(self,val_batch,rev_threhold=3,recent_threhold=3):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch    
@@ -715,7 +735,7 @@ class _TFTCusModule(_TFTModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,label_threhold=5,target_info=None,output_inverse=None,second_class=None,third_class=None
+    def compute_real_class_acc(self,label_threhold=3,target_info=None,output_inverse=None,second_class=None,third_class=None
                                ,target_vr_class=None,past_target=None):
         """计算涨跌幅分类准确度"""
         
@@ -747,15 +767,22 @@ class _TFTCusModule(_TFTModule):
         # pos_index_bool = second_class==CLASS_SIMPLE_VALUE_MAX
                 
         # 第三指标判断
+        # 不能全都小于0
+        ptv_number = np.sum(output_third_inverse>0,axis=-1)
+        third_index_bool = (output_third_inverse[:,-1] - output_third_inverse[:,0]) > 0
+        # third_index_bool = third_index_bool & (ptv_number>0)
         # 整体上升幅度与振幅差值较小
         third_max = np.max(output_third_inverse,axis=-1)
-        third_min = np.min(output_third_inverse,axis=-1)
-        third_index_bool = ((output_third_inverse[:,-1] - output_third_inverse[:,0])/(third_max - third_min))>0.5
-
+        third_min = np.min(output_third_inverse,axis=-1)        
+        third_index_bool = third_index_bool & (((output_third_inverse[:,-1] - output_third_inverse[:,0])/(third_max - third_min))>0.5)
+        # 最后一个值大于0
+        third_index_bool = third_index_bool & (output_third_inverse[:,-1]>0)
+        # 最后一段上升
+        third_index_bool = third_index_bool & (output_third_inverse[:,-1]>output_third_inverse[:,-2])        
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 综合判别
-        import_index_bool = output_import_index_bool & pos_index_bool & third_index_bool
+        import_index_bool = third_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -813,7 +840,11 @@ class _TFTCusModule(_TFTModule):
             import_price_nag = import_price_nag_count/import_index.shape[0]
             instrument_acc = instrument_acc_count/total_instrument_count
             instrument_nag = instrument_nag_count/total_instrument_count         
-             
+        
+        if import_price_result.shape[0]==0:
+            import_price_result = None
+        else:
+            import_price_result = pd.DataFrame(import_price_result,columns=["index","instrument","result"])     
 
         return import_acc, import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result
         
@@ -1128,110 +1159,108 @@ class _TFTCusModule(_TFTModule):
                         slope_out=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
-        names = ["pred","label","price","rsi_output","rsi_tar","obv_output","obv_tar"]
+        names = ["pred","label","price","obv_output","obv_tar"]
         # names = ["rsi_output","rsi_tar","obv_output","obv_tar"]
-        if import_price_result.shape[0]==0:
+        
+        if import_price_result is None or import_price_result.shape[0]==0:
             return
         import_index,instrument_index = np.unique(import_price_result,axis=1,return_index=True)
+
         code_dict = {}
         idx_suc = 0
         idx_nag = 0 
         idx_nor = 0
         date_str = "20230313"
         result = []
-        max_cnt = 100
-        for r_index in range(import_price_result.shape[0]-1):
-            s_index = import_price_result[r_index,0]
-            ts = target_info[s_index]
-            code_dict[ts["item_rank_code"]] = 1
-            target_vr_class_sample = target_vr_class[s_index]
-            # 检查指定日期的数据
-            # if df_all[(df_all["time_idx"]==ts["end"]-1)&(df_all["instrument_rank"]==ts["item_rank_code"])]["datetime"].dt.strftime('%Y%m%d').values[0]!=date_str:
-            #     continue         
-            last_vr_class = second_class_certainlys[s_index]
-            last_target_class = last_target_vr_class[s_index]
-            pred_data = output_inverse[s_index]
-            pred_center_data = pred_data[:,0]
-            pred_second_data = pred_data[:,1]
-            pred_third_data = pred_data[:,2]
-            # 可以从全局变量中，通过索引获得实际价格
-            df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
-                                    (df_all["instrument_rank"]==ts["item_rank_code"])]            
-            # 补充画出前面的label数据
-            target_combine_sample = df_target["label"].values
-            rev_out = output[s_index,:,1,0].cpu().numpy()
-            time_index = df_target["datetime"]
-            rev_sample = df_target["REV5"].values
-            pad_data = np.array([0 for i in range(self.input_chunk_length)])
-            pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
-            pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
-            pred_third_data = np.concatenate((pad_data,pred_third_data),axis=-1)
-            view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
-            price_class_item = import_price_result[r_index,2]
-            price_target = df_target["label_ori"].values    
-            price_target = np.expand_dims(price_target,axis=0)    
-            second_target = df_target["RSI5"].values 
-            second_target = np.expand_dims(second_target,axis=-1)  
-            third_target = df_target["OBV5"].values 
-            third_target = np.expand_dims(third_target,axis=-1)              
-            view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
-            view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
-            view_data = np.concatenate((view_data,second_target),axis=1)  
-            view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
-            view_data = np.concatenate((view_data,third_target),axis=1)  
-            # view_data = view_data[:,3:]
-            x_range = np.array([i for i in range(ts["start"],ts["end"])])
-            if self.monitor is not None:
-                instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
-                datetime_range = self.monitor.get_datetime_with_index(instrument,ts["start"],ts["end"])
-            else:
-                instrument = df_target["instrument"].values[0]
-                datetime_range = x_range
-            # result.append({"instrument":instrument,"datetime":df_target["datetime"].dt.strftime('%Y%m%d').values[0]})
-            target_title = "time range:{}/{} code:{},price class:{}".format(
-                df_target["datetime"].dt.strftime('%m%d').values[self.input_chunk_length],df_target["datetime"].dt.strftime('%m%d').values[-1],
-                instrument,price_class_item)
-            if price_class_item==CLASS_SIMPLE_VALUE_MAX:
-                idx_suc += 1
-                if idx_suc>(max_cnt/3):
-                    continue                  
-                win = "win_{}_{}".format(batch_idx,idx_suc)
-                viz_result_suc.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)   
-            elif price_class_item==0:
-                idx_nag += 1
-                if idx_nag>(max_cnt/3):
-                    continue                
-                win = "win_{}_{}".format(batch_idx,idx_nag)               
-                viz_result_fail.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range) 
-            else:
-                idx_nor += 1
-                if idx_nor>15:
-                    continue
-                win = "win_{}_{}".format(batch_idx,idx_nor)                 
-                viz_result_nor.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)           
-            df_target["pred_data"] = np.concatenate((target_combine_sample[:self.input_chunk_length],pred_center_data[self.input_chunk_length:]),axis=-1)
-            df_target["rev_pred"] = np.concatenate((rev_sample[:self.input_chunk_length],rev_out),axis=-1)
-            primary_data = df_target
-            primary_data.set_index("datetime",inplace=True)
-            file_path = "custom/data/darts/result_view/{}.png".format(win)
-            pri_cols = ["label","pred_data"]
-            sec_cols = ["KDJ_K","KDJ_D","KDJ_J"]
-            # viz_input_2.viz_mpf_data(primary_data,pri_cols=pri_cols,sec_cols=sec_cols,target_title=target_title,file_path=file_path)
-            
-            # 最后端涨跌情况排查
-            # target_slope_unverse = unverse_transform_slope_value(target_slope) * 100     
-            # target_slope_unverse = np.expand_dims(target_slope_unverse,axis=0)
-            # slope_out_unverse = unverse_transform_slope_value(slope_out_item) * 100     
-            # slope_out_unverse = slope_out_unverse.cpu().numpy()
-            # slope_out_unverse = np.expand_dims(slope_out_unverse,axis=0)
-            # view_data = np.concatenate((target_slope_unverse,slope_out_unverse),axis=0).transpose(1,0)
-            # view_data = view_data[2:,:]
-            # bar_names = ["target","pred"]
-            # target_title = "time range:{}/{} code:{}".format(df_target["datetime"].dt.strftime('%Y%m%d').values[self.input_chunk_length],
-            #                                                  df_target["datetime"].dt.strftime('%Y%m%d').values[-1],
-            #                                                  instrument)
-            # win = "win_bar_{}".format(idx)
-            # viz_input_2.viz_data_bar(view_data,win=win,title=target_title,names=bar_names)       
+        # viz_result_suc.remove_env()
+        # viz_result_nor.remove_env()
+        # viz_result_fail.remove_env()
+              
+        res_group = import_price_result.groupby("result")
+
+        for result,group in res_group:
+            r_index = -1
+            unique_group = group.drop_duplicates(subset=['instrument'], keep='first')
+            for index, row in unique_group.iterrows():
+                r_index += 1
+                s_index = row["index"]
+                ts = target_info[s_index]
+                code_dict[ts["item_rank_code"]] = 1
+                pred_data = output_inverse[s_index]
+                pred_center_data = pred_data[:,0]
+                pred_second_data = pred_data[:,1]
+                pred_third_data = pred_data[:,2]
+                # 可以从全局变量中，通过索引获得实际价格
+                df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
+                                        (df_all["instrument_rank"]==ts["item_rank_code"])]            
+                # 补充画出前面的label数据
+                target_combine_sample = df_target["label"].values
+                rev_out = output[s_index,:,1,0].cpu().numpy()
+                time_index = df_target["datetime"]
+                rev_sample = df_target["REV5"].values
+                pad_data = np.array([0 for i in range(self.input_chunk_length)])
+                pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
+                pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
+                pred_third_data = np.concatenate((pad_data,pred_third_data),axis=-1)
+                view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
+                price_class_item = result
+                price_target = df_target["label_ori"].values    
+                price_target = np.expand_dims(price_target,axis=0)    
+                second_target = df_target["RSI5"].values 
+                second_target = np.expand_dims(second_target,axis=-1)  
+                third_target = df_target["OBV5"].values 
+                third_target = np.expand_dims(third_target,axis=-1)              
+                view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
+                # view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
+                # view_data = np.concatenate((view_data,second_target),axis=1)  
+                view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
+                view_data = np.concatenate((view_data,third_target),axis=1)  
+                # view_data = view_data[:,3:]
+                x_range = np.array([i for i in range(ts["start"],ts["end"])])
+                if self.monitor is not None:
+                    instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
+                    datetime_range = self.monitor.get_datetime_with_index(instrument,ts["start"],ts["end"])
+                else:
+                    instrument = df_target["instrument"].values[0]
+                    datetime_range = x_range
+                # result.append({"instrument":instrument,"datetime":df_target["datetime"].dt.strftime('%Y%m%d').values[0]})
+                target_title = "time range:{}/{} code:{},price class:{}".format(
+                    df_target["datetime"].dt.strftime('%m%d').values[self.input_chunk_length],df_target["datetime"].dt.strftime('%m%d').values[-1],
+                    instrument,price_class_item)
+                win = "win_{}_{}".format(batch_idx,r_index)
+                if r_index>15:
+                    break
+                if result==CLASS_SIMPLE_VALUE_MAX:                 
+                    viz = viz_result_suc
+                elif result==0:                 
+                    viz = viz_result_fail   
+                else:
+                    viz = viz_result_nor                   
+                viz.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)     
+                
+                # df_target["pred_data"] = np.concatenate((target_combine_sample[:self.input_chunk_length],pred_center_data[self.input_chunk_length:]),axis=-1)
+                # df_target["rev_pred"] = np.concatenate((rev_sample[:self.input_chunk_length],rev_out),axis=-1)
+                # primary_data = df_target
+                # primary_data.set_index("datetime",inplace=True)
+                # file_path = "custom/data/darts/result_view/{}.png".format(win)
+                # pri_cols = ["label","pred_data"]
+                # sec_cols = ["KDJ_K","KDJ_D","KDJ_J"]
+                # viz_input_2.viz_mpf_data(primary_data,pri_cols=pri_cols,sec_cols=sec_cols,target_title=target_title,file_path=file_path)
+                
+                # 最后端涨跌情况排查
+                # target_slope_unverse = unverse_transform_slope_value(target_slope) * 100     
+                # target_slope_unverse = np.expand_dims(target_slope_unverse,axis=0)
+                # slope_out_unverse = unverse_transform_slope_value(slope_out_item) * 100     
+                # slope_out_unverse = slope_out_unverse.cpu().numpy()
+                # slope_out_unverse = np.expand_dims(slope_out_unverse,axis=0)
+                # view_data = np.concatenate((target_slope_unverse,slope_out_unverse),axis=0).transpose(1,0)
+                # view_data = view_data[2:,:]
+                # bar_names = ["target","pred"]
+                # target_title = "time range:{}/{} code:{}".format(df_target["datetime"].dt.strftime('%Y%m%d').values[self.input_chunk_length],
+                #                                                  df_target["datetime"].dt.strftime('%Y%m%d').values[-1],
+                #                                                  instrument)
+                # win = "win_bar_{}".format(idx)
+                # viz_input_2.viz_data_bar(view_data,win=win,title=target_title,names=bar_names)       
         # print("pred result:{}".format(result))
 
     def vr_metric_show(self,target_info=None,last_vr_class_certainlys=None,last_target_vr_class=None):

@@ -50,9 +50,10 @@ def test_normal_vis():
 class TensorViz(object):
     def __init__(self,env="debug",type="cont_data"):
         self.viz = Visdom(env=env,port=8098)  
+        self.env = env
     
-    def remove_env(self,env):
-        self.viz.delete_env(env)
+    def remove_env(self):
+        self.viz.delete_env(self.env)
         
     def viz_data_bar(self,data,win="matrix",names=None,desc=None,title=None):     
         """绘制柱状比较图"""
