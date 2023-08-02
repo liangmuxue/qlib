@@ -118,27 +118,30 @@ class _TFTCusModule(_TFTModule):
         monitor=None,
         **kwargs,
     ):
-        
         super().__init__(output_dim,variables_meta,num_static_components,hidden_size,lstm_layers,num_attention_heads,
-                                full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
+                                    full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
         
-        # 分类模式涵盖前后2段，因此定义2个分类层
-        focus_num = 2
-        vr_range_num = len(CLASS_SIMPLE_VALUES.keys())
-        pred_len = kwargs["output_chunk_length"]
-        self.classify_last_layer = self._construct_classify_layer(focus_num,2).to(device)
-        self.slope_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
-        # 涨跌幅度分类
-        self.classify_vr_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
-        # mse损失计算                
-        self.mean_squared_error = MeanSquaredError().to(device)
-        
-        # 提前初始化loss计算对象，避免在加载权重的时候出现空指针
-        if use_weighted_loss_func and not isinstance(self.criterion,UncertaintyLoss):
-            params = torch.ones(loss_number, requires_grad=True)
-            loss_sigma = torch.nn.Parameter(params)    
-            self.criterion = UncertaintyLoss(loss_sigma=loss_sigma,device=device) 
-        
+        model_list = []
+        for i in range(2):
+            model =  _TFTModule(output_dim,variables_meta,num_static_components,hidden_size,lstm_layers,num_attention_heads,
+                                    full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
+            # 分类模式涵盖前后2段，因此定义2个分类层
+            focus_num = 2
+            vr_range_num = len(CLASS_SIMPLE_VALUES.keys())
+            pred_len = kwargs["output_chunk_length"]
+            model.classify_last_layer = self._construct_classify_layer(focus_num,2).to(device)
+            model.slope_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
+            # 涨跌幅度分类
+            model.classify_vr_layer = self._construct_classify_layer(pred_len,vr_range_num).to(device)  
+            # mse损失计算                
+            model.mean_squared_error = MeanSquaredError().to(device)
+            model_list.append(model)
+        self.sub_models = nn.ModuleList(model_list) 
+        if use_weighted_loss_func and not isinstance(model.criterion,UncertaintyLoss):
+            # params = torch.ones(loss_number, requires_grad=True)
+            # loss_sigma = torch.nn.Parameter(params)    
+            self.criterion = UncertaintyLoss(device=device) 
+                    
         self.val_results = {}
         
         # 优化器执行频次
@@ -150,204 +153,13 @@ class _TFTCusModule(_TFTModule):
     ) -> torch.Tensor:
         """重载训练方法，加入分类模式"""
         
-        encoder_length = self.input_chunk_length
-        out_super,batch_size = self.forward_super(x_in)
-        # generate output for n_targets and loss_size elements for loss evaluation
-        out = self.output_layer(out_super[:, encoder_length:] if self.full_attention else out_super)
-        out = out.view(
-            batch_size, self.output_chunk_length, self.n_targets, self.loss_size
-        )        
-         
-        second_output = out[:,:,1,0]
-        third_output = out[:,:,2,0]
-        # 针对第二和第三指标进行分类
-        second_class = self.classify_vr_layer(second_output)
-        third_class = self.slope_layer(third_output)
-        return (out,third_output,second_class,third_class)
-    
-    def forward_super(
-        self, x_in: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]
-    ) -> torch.Tensor:
-        x_cont_past, x_cont_future, x_static = x_in
-        dim_samples, dim_time, dim_variable = 0, 1, 2
-
-        batch_size = x_cont_past.shape[dim_samples]
-        encoder_length = self.input_chunk_length
-        decoder_length = self.output_chunk_length
-        time_steps = encoder_length + decoder_length
-
-        # avoid unnecessary regeneration of attention mask
-        if batch_size != self.batch_size_last:
-            if self.full_attention:
-                self.attention_mask = self.get_attention_mask_full(
-                    time_steps=time_steps,
-                    batch_size=batch_size,
-                    dtype=x_cont_past.dtype,
-                    device=self.device,
-                )
-            else:
-                self.attention_mask = self.get_attention_mask_future(
-                    encoder_length=encoder_length,
-                    decoder_length=decoder_length,
-                    batch_size=batch_size,
-                    device=self.device,
-                )
-            if self.add_relative_index:
-                self.relative_index = self.get_relative_index(
-                    encoder_length=encoder_length,
-                    decoder_length=decoder_length,
-                    batch_size=batch_size,
-                    device=self.device,
-                    dtype=x_cont_past.dtype,
-                )
-
-            self.batch_size_last = batch_size
-
-        if self.add_relative_index:
-            x_cont_past = torch.cat(
-                [
-                    ts[:, :encoder_length, :]
-                    for ts in [x_cont_past, self.relative_index]
-                    if ts is not None
-                ],
-                dim=dim_variable,
-            )
-            x_cont_future = torch.cat(
-                [
-                    ts[:, -decoder_length:, :]
-                    for ts in [x_cont_future, self.relative_index]
-                    if ts is not None
-                ],
-                dim=dim_variable,
-            )
-
-        input_vectors_past = {
-            name: x_cont_past[..., idx].unsqueeze(-1)
-            for idx, name in enumerate(self.encoder_variables)
-        }
-        input_vectors_future = {
-            name: x_cont_future[..., idx].unsqueeze(-1)
-            for idx, name in enumerate(self.decoder_variables)
-        }
-
-        # Embedding and variable selection
-        if self.static_variables:
-            # categorical static covariate embeddings
-            if self.categorical_static_variables:
-                static_input = torch.cat(
-                        [
-                            x_static[:, :, idx]
-                            for idx, name in enumerate(self.static_variables)
-                            if name in self.categorical_static_variables
-                        ],
-                        dim=1,
-                    ).int()
-                static_embedding = self.input_embeddings(static_input)
-            else:
-                static_embedding = {}
-            # add numerical static covariates
-            static_embedding.update(
-                {
-                    name: x_static[:, :, idx]
-                    for idx, name in enumerate(self.static_variables)
-                    if name in self.numeric_static_variables
-                }
-            )
-            static_embedding, static_covariate_var = self.static_covariates_vsn(
-                static_embedding
-            )
-        else:
-            static_embedding = torch.zeros(
-                (x_cont_past.shape[0], self.hidden_size),
-                dtype=x_cont_past.dtype,
-                device=self.device,
-            )
-
-        static_context_expanded = self.expand_static_context(
-            context=self.static_context_grn(static_embedding), time_steps=time_steps
-        )
-
-        embeddings_varying_encoder = {
-            name: input_vectors_past[name] for name in self.encoder_variables
-        }
-        embeddings_varying_encoder, encoder_sparse_weights = self.encoder_vsn(
-            x=embeddings_varying_encoder,
-            context=static_context_expanded[:, :encoder_length],
-        )
-
-        embeddings_varying_decoder = {
-            name: input_vectors_future[name] for name in self.decoder_variables
-        }
-        embeddings_varying_decoder, decoder_sparse_weights = self.decoder_vsn(
-            x=embeddings_varying_decoder,
-            context=static_context_expanded[:, encoder_length:],
-        )
-
-        # LSTM
-        # calculate initial state
-        input_hidden = (
-            self.static_context_hidden_encoder_grn(static_embedding)
-            .expand(self.lstm_layers, -1, -1)
-            .contiguous()
-        )
-        input_cell = (
-            self.static_context_cell_encoder_grn(static_embedding)
-            .expand(self.lstm_layers, -1, -1)
-            .contiguous()
-        )
-
-        # run local lstm encoder
-        encoder_out, (hidden, cell) = self.lstm_encoder(
-            input=embeddings_varying_encoder, hx=(input_hidden, input_cell)
-        )
-
-        # run local lstm decoder
-        decoder_out, _ = self.lstm_decoder(
-            input=embeddings_varying_decoder, hx=(hidden, cell)
-        )
-
-        lstm_layer = torch.cat([encoder_out, decoder_out], dim=dim_time)
-        input_embeddings = torch.cat(
-            [embeddings_varying_encoder, embeddings_varying_decoder], dim=dim_time
-        )
-
-        # post lstm GateAddNorm
-        lstm_out = self.post_lstm_gan(x=lstm_layer, skip=input_embeddings)
-
-        # static enrichment
-        static_context_enriched = self.static_context_enrichment(static_embedding)
-        attn_input = self.static_enrichment_grn(
-            x=lstm_out,
-            context=self.expand_static_context(
-                context=static_context_enriched, time_steps=time_steps
-            ),
-        )
-
-        # multi-head attention
-        attn_out, attn_out_weights = self.multihead_attn(
-            q=attn_input if self.full_attention else attn_input[:, encoder_length:],
-            k=attn_input,
-            v=attn_input,
-            mask=self.attention_mask,
-        )
-
-        # skip connection over attention
-        attn_out = self.post_attn_gan(
-            x=attn_out,
-            skip=attn_input if self.full_attention else attn_input[:, encoder_length:],
-        )
-
-        # feed-forward
-        out = self.feed_forward_block(x=attn_out)
-
-        # skip connection over temporal fusion decoder from LSTM post _GateAddNorm
-        out = self.pre_output_gan(
-            x=out,
-            skip=lstm_out if self.full_attention else lstm_out[:, encoder_length:],
-        )
-        return out,batch_size
-
-                  
+        out_total= []
+        # 分别单独运行模型
+        for m in self.sub_models:
+            out = m(x_in)
+            out_total.append(out)
+        return (out_total[0],out_total[1])
+ 
     def _construct_classify_layer(self, input_dim, output_dim):
         """使用全连接进行分类数值输出"""
         return nn.Linear(input_dim, output_dim).double()
@@ -389,7 +201,7 @@ class _TFTCusModule(_TFTModule):
         train_batch = self.filter_batch_by_condition(train_batch)
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
         # 包括数值数据，以及分类输出
-        (output,slope_out,second_class,third_class) = self._produce_train_output(train_batch[:5])
+        (output,slope_out) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
         scaler,target_class,target,target_info = train_batch[5:]
         target_class = target_class[:,:,0]
@@ -397,7 +209,7 @@ class _TFTCusModule(_TFTModule):
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained
         
-        loss,detail_loss = self._compute_loss((output,slope_out,second_class,third_class), (target,target_class,scaler,target_info))
+        loss,detail_loss = self._compute_loss((output,slope_out), (target,target_class,scaler,target_info))
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("base_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
         # self.log("mean_threhold",mean_threhold,batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -436,20 +248,20 @@ class _TFTCusModule(_TFTModule):
         # 只关注重点部分
         val_batch = self.filter_batch_by_condition(val_batch_ori)
         # val_batch = val_batch_ori
-        (output,slope_out,second_class,third_class) = self._produce_train_output(val_batch[:5])
+        (output,slope_out) = self._produce_train_output(val_batch[:5])
         past_target = val_batch[0]
         past_covariate = val_batch[1]
         scaler,target_class,target,target_info = val_batch[5:]  
         target_class = target_class[:,:,0]
         target_vr_class = target_class[:,0].cpu().numpy()
         last_target_vr_class = target_class[:,1]
-        output_inverse = self.get_inverse_data(output.cpu().numpy()[:,:,:,0],target_info=target_info,scaler=scaler)
+        output_combine = torch.cat((output,slope_out),2)[:,:,:,0].cpu().numpy()
+        output_inverse = self.get_inverse_data(output_combine,target_info=target_info,scaler=scaler)
         past_target_inverse = self.get_inverse_data(past_target.cpu().numpy(),target_info=target_info,scaler=scaler)
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,slope_out,second_class,third_class), (target,target_class,scaler,target_info))
+        loss,detail_loss = self._compute_loss((output,slope_out), (target,target_class,scaler,target_info))
         # 第二个目标
         past_target_inverse = past_target_inverse[:,:,1]
-        output_slope = output_inverse[:,:,1]
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -458,8 +270,6 @@ class _TFTCusModule(_TFTModule):
         self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
-        second_class_certainlys = self.build_vr_class_cer(second_class).cpu().numpy()
-        third_class_certainlys = self.build_vr_class_cer(third_class).cpu().numpy()
         # last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
         # vr_acc,import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,sec_acc, \
@@ -468,8 +278,7 @@ class _TFTCusModule(_TFTModule):
         #     last_target_vr_class=last_target_vr_class,output_inverse=torch.Tensor(output_inverse).to(self.device))  
         # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
-             = self.compute_real_class_acc(output_inverse=output_inverse, past_target=past_target_inverse, \
-               second_class=second_class_certainlys,third_class=third_class_certainlys,target_vr_class=target_vr_class,target_info=target_info)   
+             = self.compute_real_class_acc(output_inverse=output_inverse, past_target=past_target_inverse,target_vr_class=target_vr_class,target_info=target_info)   
         
         # 累加结果集，后续统计   
         if self.import_price_result is None:
@@ -498,9 +307,9 @@ class _TFTCusModule(_TFTModule):
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
         # self.vr_metric_show(target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
-        self.val_metric_show(output,target,price_class,second_class_certainlys,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
+        self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
                              target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                             third_class_certainlys=third_class_certainlys,last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+                            last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
@@ -735,8 +544,7 @@ class _TFTCusModule(_TFTModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,label_threhold=3,target_info=None,output_inverse=None,second_class=None,third_class=None
-                               ,target_vr_class=None,past_target=None):
+    def compute_real_class_acc(self,label_threhold=0.5,target_info=None,output_inverse=None,target_vr_class=None,past_target=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
@@ -745,24 +553,23 @@ class _TFTCusModule(_TFTModule):
         # vr_price_target,_ = compute_price_class_batch(price_data,mode="fast")
         
         output_label_inverse = output_inverse[:,:,0] 
-        output_second_inverse = output_inverse[:,:,1]
-        output_third_inverse = output_inverse[:,:,2]
+        # output_second_inverse = output_inverse[:,:,1]
+        output_third_inverse = output_inverse[:,:,1]
                  
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
         output_import_index_bool = slope_out_compute>label_threhold
-        # 辅助指标判断
-        second_slope_range = (output_second_inverse[:,1:] - output_second_inverse[:,:-1])/output_second_inverse[:,:-1]
-        second_total_range = (output_second_inverse[:,-1] - output_second_inverse[:,0])/output_second_inverse[:,0]
-        third_slope_range = (output_third_inverse[:,1:] - output_third_inverse[:,:-1])/output_third_inverse[:,:-1]
-        # 第一段上升
-        pos_index_bool = (second_slope_range[:,0]>0)
-        # 预测最低值大于之前的最低值
-        pos_index_bool = pos_index_bool & (np.min(output_second_inverse,axis=1)>np.min(past_target,axis=1))
-        # 预测结束数据值大于30
-        pos_index_bool = pos_index_bool & (output_second_inverse[:,-1]>30)
-        # 总体上升
-        pos_index_bool = (second_total_range>0)
+        # # 辅助指标判断
+        # second_slope_range = (output_second_inverse[:,1:] - output_second_inverse[:,:-1])/output_second_inverse[:,:-1]
+        # second_total_range = (output_second_inverse[:,-1] - output_second_inverse[:,0])/output_second_inverse[:,0]
+        # # 第一段上升
+        # pos_index_bool = (second_slope_range[:,0]>0)
+        # # 预测最低值大于之前的最低值
+        # pos_index_bool = pos_index_bool & (np.min(output_second_inverse,axis=1)>np.min(past_target,axis=1))
+        # # 预测结束数据值大于30
+        # pos_index_bool = pos_index_bool & (output_second_inverse[:,-1]>30)
+        # # 总体上升
+        # pos_index_bool = (second_total_range>0)
         # 直接使用分类
         # pos_index_bool = second_class==CLASS_SIMPLE_VALUE_MAX
                 
@@ -782,7 +589,7 @@ class _TFTCusModule(_TFTModule):
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 综合判别
-        import_index_bool = third_index_bool
+        import_index_bool = output_import_index_bool & third_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -878,7 +685,7 @@ class _TFTCusModule(_TFTModule):
     def _compute_loss(self, output, target):
         """重载父类方法"""
         
-        (output_value,slope_out,vr_class,last_vr_class) = output
+        (output_value,slope_out) = output
         (target_real,target_class,scaler,target_info) = target
         future_target_list = []
         target_slope_list = []
@@ -891,7 +698,7 @@ class _TFTCusModule(_TFTModule):
         # for i in range(output_value.shape[0]):
         #     out_inverse = scaler[i].inverse_transform(output_value[i,:,0,0]) 
         #     output_inverse.append(out_inverse)                                             
-        output_combine = (output_value.squeeze(dim=-1),slope_out,vr_class,last_vr_class)
+        output_combine = (output_value.squeeze(dim=-1),slope_out.squeeze(dim=-1))
         
         if self.likelihood:
             # 把似然估计损失叠加到自定义多任务损失里
@@ -934,16 +741,15 @@ class _TFTCusModule(_TFTModule):
 
         # 对于最后的全连接层，使用高倍数lr
         optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
-        ignored_params = list(map(id, self.classify_last_layer.parameters())) + \
-            list(map(id, self.slope_layer.parameters())) + \
-            list(map(id, self.classify_vr_layer.parameters()))
+        ignored_params = list()
         base_params = filter(lambda p: id(p) not in ignored_params, self.parameters())       
         base_lr = self.optimizer_kwargs["lr"] 
         optimizer_kws["params"] = [
                     {'params': base_params},
-                    {'params': self.classify_last_layer.parameters(), 'lr': base_lr*10},
-                    {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
-                    {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}]
+                    # {'params': self.classify_last_layer.parameters(), 'lr': base_lr*10},
+                    # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
+                    # {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}
+                    ]
 
         optimizer = _create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
         
@@ -1155,7 +961,7 @@ class _TFTCusModule(_TFTModule):
                         
         return last_batch_index,last_batch_imp_index,item_codes
                                 
-    def val_metric_show(self,output,target,price_class,second_class_certainlys,target_vr_class,output_inverse=None,third_class_certainlys=None,
+    def val_metric_show(self,output,target,price_class,target_vr_class,output_inverse=None,
                         slope_out=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
@@ -1188,19 +994,16 @@ class _TFTCusModule(_TFTModule):
                 code_dict[ts["item_rank_code"]] = 1
                 pred_data = output_inverse[s_index]
                 pred_center_data = pred_data[:,0]
-                pred_second_data = pred_data[:,1]
-                pred_third_data = pred_data[:,2]
+                # pred_second_data = pred_data[:,1]
+                pred_third_data = pred_data[:,1]
                 # 可以从全局变量中，通过索引获得实际价格
                 df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
                                         (df_all["instrument_rank"]==ts["item_rank_code"])]            
                 # 补充画出前面的label数据
                 target_combine_sample = df_target["label"].values
-                rev_out = output[s_index,:,1,0].cpu().numpy()
-                time_index = df_target["datetime"]
-                rev_sample = df_target["REV5"].values
                 pad_data = np.array([0 for i in range(self.input_chunk_length)])
                 pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
-                pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
+                # pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
                 pred_third_data = np.concatenate((pad_data,pred_third_data),axis=-1)
                 view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
                 price_class_item = result
@@ -1428,12 +1231,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 ],
                 axis=1,
             )
-
-        self.output_dim = (
-            (future_target.shape[1], 1)
-            if self.likelihood is None
-            else (future_target.shape[1], self.likelihood.num_parameters)
-        )
+        
+        # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
+        self.output_dim = (1,1)
 
         tensors = [
             past_target,
