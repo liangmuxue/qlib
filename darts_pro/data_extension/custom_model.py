@@ -100,7 +100,7 @@ class _TFTCusModule(_TFTModule):
     def __init__(
         self,
         output_dim: Tuple[int, int],
-        variables_meta: Dict[str, Dict[str, List[str]]],
+        variables_meta_array: Tuple[Dict[str, Dict[str, List[str]]],Dict[str, Dict[str, List[str]]]],
         num_static_components: int,
         hidden_size: Union[int, List[int]],
         lstm_layers: int,
@@ -113,17 +113,21 @@ class _TFTCusModule(_TFTModule):
         add_relative_index: bool,
         norm_type: Union[str, nn.Module],
         use_weighted_loss_func=False,
+        past_split=None,
         loss_number=3,
         device="cpu",
         monitor=None,
         **kwargs,
     ):
-        super().__init__(output_dim,variables_meta,num_static_components,hidden_size,lstm_layers,num_attention_heads,
+        # 模拟初始化，实际未使用
+        super().__init__(output_dim,variables_meta_array[0],num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
         
+        self.past_split = past_split
         model_list = []
-        for i in range(2):
-            model =  _TFTModule(output_dim,variables_meta,num_static_components,hidden_size,lstm_layers,num_attention_heads,
+        for i in range(len(past_split)):
+            # 拆分过去协变量,形成不同的网络配置，给到不同的model
+            model =  _TFTModule(output_dim,variables_meta_array[i],num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
             # 分类模式涵盖前后2段，因此定义2个分类层
             focus_num = 2
@@ -149,14 +153,17 @@ class _TFTCusModule(_TFTModule):
         # self.automatic_optimization = False
                
     def forward(
-        self, x_in: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]
+        self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]
     ) -> torch.Tensor:
         """重载训练方法，加入分类模式"""
         
         out_total= []
         # 分别单独运行模型
-        for m in self.sub_models:
-            out = m(x_in)
+        for i,m in enumerate(self.sub_models):
+            # 根据配置，不同的模型使用不同的过去协变量
+            past_convs_item = x_in[0][i]
+            x_in_item = (past_convs_item,x_in[1],x_in[2])
+            out = m(x_in_item)
             out_total.append(out)
         return (out_total[0],out_total[1])
  
@@ -170,7 +177,7 @@ class _TFTCusModule(_TFTModule):
 
     def _process_input_batch(
         self, input_batch
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         """重载方法，以适应数据结构变化"""
         (
             past_target,
@@ -181,19 +188,25 @@ class _TFTCusModule(_TFTModule):
         ) = input_batch
         dim_variable = 2
 
-        x_past = torch.cat(
-            [
-                tensor
-                for tensor in [
-                    past_target,
-                    past_covariates,
-                    historic_future_covariates,
-                ]
-                if tensor is not None
-            ],
-            dim=dim_variable,
-        )
-        return x_past, future_covariates, static_covariates
+        # 生成多组过去协变量，用于不同子模型匹配
+        x_past_array = []
+        for i,p_index in enumerate(self.past_split):
+            past_conv_index = self.past_split[i]
+            past_covariates_item = past_covariates[:,:,past_conv_index[0]:past_conv_index[1]]
+            x_past = torch.cat(
+                [
+                    tensor
+                    for tensor in [
+                        past_target,
+                        past_covariates_item,
+                        historic_future_covariates,
+                    ]
+                    if tensor is not None
+                ],
+                dim=dim_variable,
+            )
+            x_past_array.append(x_past)
+        return x_past_array, future_covariates, static_covariates
                
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """performs the training step"""
@@ -1146,6 +1159,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         loss_number=3,
         monitor=None,
         mode="train",
+        past_split=None,
         **kwargs,
     ):
         """重载darts相关类"""
@@ -1194,55 +1208,11 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.output_dim: Optional[Tuple[int, int]] = None
         self.norm_type = norm_type
         self.monitor = monitor
+        self.past_split = past_split
+    
+    
+    def _build_vriable_metas(self,tensors,static_covariates):   
         
-    def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
-        """重载创建模型方法，使用自定义模型"""
-        (
-            past_target,
-            past_covariate,
-            historic_future_covariate,
-            future_covariate,
-            static_covariates,
-            target_scaler,
-            future_target_class,
-            future_target,
-            target_info,
-        ) = train_sample
-
-        # add a covariate placeholder so that relative index will be included
-        if self.add_relative_index:
-            time_steps = self.input_chunk_length + self.output_chunk_length
-
-            expand_future_covariate = np.arange(time_steps).reshape((time_steps, 1))
-
-            historic_future_covariate = np.concatenate(
-                [
-                    ts[: self.input_chunk_length]
-                    for ts in [historic_future_covariate, expand_future_covariate]
-                    if ts is not None
-                ],
-                axis=1,
-            )
-            future_covariate = np.concatenate(
-                [
-                    ts[-self.output_chunk_length :]
-                    for ts in [future_covariate, expand_future_covariate]
-                    if ts is not None
-                ],
-                axis=1,
-            )
-        
-        # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
-        self.output_dim = (1,1)
-
-        tensors = [
-            past_target,
-            past_covariate,
-            historic_future_covariate,  # for time varying encoders
-            future_covariate,
-            future_target,  # for time varying decoders
-            static_covariates,  # for static encoder
-        ]
         type_names = [
             "past_target",
             "past_covariate",
@@ -1343,8 +1313,67 @@ class TFTExtModel(MixedCovariatesTorchModel):
         )
         variables_meta["model_config"]["static_input_categorical"] = list(
             dict.fromkeys(static_input_categorical)
-        )
+        )    
+        
+        return variables_meta,categorical_embedding_sizes  
+        
+    def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
+        """重载创建模型方法，使用自定义模型"""
+        (
+            past_target,
+            past_covariate,
+            historic_future_covariate,
+            future_covariate,
+            static_covariates,
+            target_scaler,
+            future_target_class,
+            future_target,
+            target_info,
+        ) = train_sample
 
+        # add a covariate placeholder so that relative index will be included
+        if self.add_relative_index:
+            time_steps = self.input_chunk_length + self.output_chunk_length
+
+            expand_future_covariate = np.arange(time_steps).reshape((time_steps, 1))
+
+            historic_future_covariate = np.concatenate(
+                [
+                    ts[: self.input_chunk_length]
+                    for ts in [historic_future_covariate, expand_future_covariate]
+                    if ts is not None
+                ],
+                axis=1,
+            )
+            future_covariate = np.concatenate(
+                [
+                    ts[-self.output_chunk_length :]
+                    for ts in [future_covariate, expand_future_covariate]
+                    if ts is not None
+                ],
+                axis=1,
+            )
+        
+        # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
+        self.output_dim = (1,1)
+        
+        
+        # 根据拆分的过去协变量，生成多个配置
+        variables_meta_array = []
+        for i in range(len(self.past_split)):
+            past_index = self.past_split[i]
+            past_covariate_item = past_covariate[:,past_index[0]:past_index[1]]
+            tensors = [
+                past_target,
+                past_covariate_item,
+                historic_future_covariate,  # for time varying encoders
+                future_covariate,
+                future_target,  # for time varying decoders
+                static_covariates,  # for static encoder
+            ]            
+            variables_meta,categorical_embedding_sizes = self._build_vriable_metas(tensors, static_covariates)
+            variables_meta_array.append(variables_meta)
+        
         n_static_components = (
             len(static_covariates) if static_covariates is not None else 0
         )
@@ -1353,7 +1382,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         
         return _TFTCusModule(
             output_dim=self.output_dim,
-            variables_meta=variables_meta,
+            variables_meta_array=variables_meta_array,
             num_static_components=n_static_components,
             hidden_size=self.hidden_size,
             lstm_layers=self.lstm_layers,
@@ -1367,6 +1396,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             norm_type=self.norm_type,
             use_weighted_loss_func=self.use_weighted_loss_func,
             loss_number=self.loss_number,
+            past_split=self.past_split,
             device=self.device,
             **self.pl_module_params,
         )      

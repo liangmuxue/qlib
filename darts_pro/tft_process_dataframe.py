@@ -227,6 +227,7 @@ class TftDataframeModel():
         categorical_embedding_sizes = {"dayofweek": 5,dataset.get_group_rank_column(): emb_size}
         # categorical_embedding_sizes = None    
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
+        past_split = self.optargs["past_split"] 
         model_name = self.optargs["model_name"]
         if not use_model_name:
             model_name = None
@@ -266,6 +267,7 @@ class TftDataframeModel():
             force_reset=True,
             log_tensorboard=True,
             save_checkpoints=True,
+            past_split=past_split,
             work_dir=self.optargs["work_dir"],
             lr_scheduler_cls=scheduler,
             lr_scheduler_kwargs=scheduler_config,
