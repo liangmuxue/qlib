@@ -165,7 +165,10 @@ class _TFTCusModule(_TFTModule):
             x_in_item = (past_convs_item,x_in[1],x_in[2])
             out = m(x_in_item)
             out_total.append(out)
-        return (out_total[0],out_total[1])
+        if len(out_total)==1:
+            fake_out = torch.ones(156, 5, 1, 1)
+            out_total.append(out)
+        return out_total
  
     def _construct_classify_layer(self, input_dim, output_dim):
         """使用全连接进行分类数值输出"""
@@ -253,7 +256,14 @@ class _TFTCusModule(_TFTModule):
             return
         res_group = self.import_price_result.groupby("result")
         ins_unique = res_group.nunique()['instrument']
-        app_logger.debug("ins_unique:{}".format(ins_unique))        
+        app_logger.debug("ins_unique:{}".format(ins_unique))     
+        total_cnt = ins_unique[ins_unique.columns[1]].sum()
+        for index, row in ins_unique.iterrows():
+            score = row.values[0]
+            cnt = row.values[0]
+            rate = cnt/total_cnt
+            self.log("score_{} cnt".format(score), cnt, prog_bar=True)      
+            self.log("score_{} rate".format(score), rate, prog_bar=True)  
                  
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
@@ -273,8 +283,6 @@ class _TFTCusModule(_TFTModule):
         past_target_inverse = self.get_inverse_data(past_target.cpu().numpy(),target_info=target_info,scaler=scaler)
         # 全部损失
         loss,detail_loss = self._compute_loss((output,slope_out), (target,target_class,scaler,target_info))
-        # 第二个目标
-        past_target_inverse = past_target_inverse[:,:,1]
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -291,7 +299,7 @@ class _TFTCusModule(_TFTModule):
         #     last_target_vr_class=last_target_vr_class,output_inverse=torch.Tensor(output_inverse).to(self.device))  
         # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
-             = self.compute_real_class_acc(output_inverse=output_inverse, past_target=past_target_inverse,target_vr_class=target_vr_class,target_info=target_info)   
+             = self.compute_real_class_acc(output_inverse=output_inverse,target_vr_class=target_vr_class,target_info=target_info)   
         
         # 累加结果集，后续统计   
         if self.import_price_result is None:
@@ -307,8 +315,8 @@ class _TFTCusModule(_TFTModule):
         # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
         self.log("import_price_acc", import_price_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
         self.log("import_price_nag", import_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True)   
-        self.log("instrument_acc", instrument_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
-        self.log("instrument_nag", instrument_nag, batch_size=val_batch[0].shape[0], prog_bar=True)          
+        # self.log("instrument_acc", instrument_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
+        # self.log("instrument_nag", instrument_nag, batch_size=val_batch[0].shape[0], prog_bar=True)          
         # self.log("last_section_acc", last_section_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
         # self.log("pos_acc", pos_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
         # self.log("pos_recall", pos_recall, batch_size=val_batch[0].shape[0], prog_bar=True) 
@@ -557,7 +565,7 @@ class _TFTCusModule(_TFTModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,label_threhold=0.5,target_info=None,output_inverse=None,target_vr_class=None,past_target=None):
+    def compute_real_class_acc(self,label_threhold=0.5,target_info=None,output_inverse=None,target_vr_class=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
@@ -755,6 +763,9 @@ class _TFTCusModule(_TFTModule):
         # 对于最后的全连接层，使用高倍数lr
         optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
         ignored_params = list()
+        # ignored_params = list(map(id, self.classify_last_layer.parameters())) + \
+        #     list(map(id, self.slope_layer.parameters())) + \
+        #     list(map(id, self.classify_vr_layer.parameters()))        
         base_params = filter(lambda p: id(p) not in ignored_params, self.parameters())       
         base_lr = self.optimizer_kwargs["lr"] 
         optimizer_kws["params"] = [

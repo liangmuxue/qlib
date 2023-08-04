@@ -78,8 +78,11 @@ def test_variable():
 def test_index():
     x = np.array([[1, 0, 18], [2, 3, 7]])
     y = x[:, 0:2]
-    print("x is:", x)   
-    print("y is:", y)  
+    # print("x is:", x)   
+    # print("y is:", y)  
+    
+    list = ['KDJ_K','KDJ_D','KDJ_J','TURNOVER_CLOSE','VOLUME_CLOSE']  
+    print(list[3:5])
 
     
 def test_index2(): 
@@ -467,7 +470,7 @@ if __name__ == "__main__":
     # test_each()
     # test_split_compute()
     # test_variable()
-    # test_index()
+    test_index()
     # test_temp()
     # test_pd_ser()
     # test_torch_vision()
@@ -488,7 +491,7 @@ if __name__ == "__main__":
     # test_norm()
     # test_ccc()
     # test_pr()
-    test_scaler()
+    # test_scaler()
     
     
     
