@@ -255,12 +255,11 @@ class _TFTCusModule(_TFTModule):
         if self.import_price_result is None:
             return
         res_group = self.import_price_result.groupby("result")
-        ins_unique = res_group.nunique()['instrument']
+        ins_unique = res_group.nunique()
         app_logger.debug("ins_unique:{}".format(ins_unique))     
-        total_cnt = ins_unique[ins_unique.columns[1]].sum()
-        for index, row in ins_unique.iterrows():
-            score = row.values[0]
-            cnt = row.values[0]
+        total_cnt = ins_unique.values[:,1].sum()
+        for score, row in ins_unique.iterrows():
+            cnt = row.values[1]
             rate = cnt/total_cnt
             self.log("score_{} cnt".format(score), cnt, prog_bar=True)      
             self.log("score_{} rate".format(score), rate, prog_bar=True)  
@@ -301,14 +300,6 @@ class _TFTCusModule(_TFTModule):
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
              = self.compute_real_class_acc(output_inverse=output_inverse,target_vr_class=target_vr_class,target_info=target_info)   
         
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)
                 
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
@@ -331,7 +322,19 @@ class _TFTCusModule(_TFTModule):
         self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
                              target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
                             last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+        
+        # 累加结果集，后续统计   
+        if self.import_price_result is None:
+            self.import_price_result = import_price_result    
+        else:
+            if import_price_result is not None:
+                import_price_result_array = import_price_result.values
+                # 修改编号，避免重复
+                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*1000
+                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
         self._calculate_metrics(output, target, self.val_metrics)
+        
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
         cr_loss = 0
@@ -672,7 +675,7 @@ class _TFTCusModule(_TFTModule):
         if import_price_result.shape[0]==0:
             import_price_result = None
         else:
-            import_price_result = pd.DataFrame(import_price_result,columns=["index","instrument","result"])     
+            import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","result"])     
 
         return import_acc, import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result
         
@@ -1013,7 +1016,7 @@ class _TFTCusModule(_TFTModule):
             unique_group = group.drop_duplicates(subset=['instrument'], keep='first')
             for index, row in unique_group.iterrows():
                 r_index += 1
-                s_index = row["index"]
+                s_index = row["imp_index"]
                 ts = target_info[s_index]
                 code_dict[ts["item_rank_code"]] = 1
                 pred_data = output_inverse[s_index]
