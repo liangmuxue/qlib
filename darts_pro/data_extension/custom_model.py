@@ -167,7 +167,7 @@ class _TFTCusModule(_TFTModule):
             out_total.append(out)
         if len(out_total)==1:
             fake_out = torch.ones(156, 5, 1, 1)
-            out_total.append(out)
+            out_total.append(fake_out)
         return out_total
  
     def _construct_classify_layer(self, input_dim, output_dim):
@@ -262,7 +262,7 @@ class _TFTCusModule(_TFTModule):
             cnt = row.values[1]
             rate = cnt/total_cnt
             self.log("score_{} rate".format(score), rate, prog_bar=True)  
-        self.log("total cnt".format(total_cnt), cnt, prog_bar=True)  
+        self.log("total cnt".format(total_cnt), total_cnt, prog_bar=True)  
                  
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""

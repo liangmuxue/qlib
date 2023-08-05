@@ -261,7 +261,7 @@ class TFTSeriesDataset(TFTDataset):
                                                  freq='D',
                                                  fill_missing_dates=True,
                                                  static_cols=static_columns,
-                                                 value_cols=target_column)    
+                                                 value_cols=target_column)   
         val_series = TimeSeries.from_group_dataframe(df_val,
                                                 time_col=time_column,
                                                  group_cols=group_column,# 会自动成为静态协变量

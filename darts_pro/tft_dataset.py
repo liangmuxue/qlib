@@ -166,7 +166,12 @@ class TFTDataset(DatasetH):
         # 生成KDJ指标
         self.compute_kdj(data)         
         # 使用指定字段
-        data = data[self.get_seq_columns() + ["datetime_number"]]
+        columns = self.get_seq_columns() + ["label","datetime_number"]
+        columns = list(set(columns))
+        data = data[columns]
+        # 目标字段值转换为64位
+        for col in self.get_target_column():
+            data[col] = data[col].astype(np.float64)
         return data
 
     def compute_kdj(self,df):
@@ -206,7 +211,7 @@ class TFTDataset(DatasetH):
         time_column = self.col_def["time_column"]
         col_list = self.col_def["col_list"]
         group_column = self.col_def["group_column"]
-        target_column = self.col_def["target_column"]      
+        target_column = self.col_def["target_column"]     
         future_covariate_col = self.col_def["future_covariate_col"]
         columns = [time_column] + [group_column] + target_column + col_list + future_covariate_col
         # 去重
