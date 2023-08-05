@@ -261,8 +261,8 @@ class _TFTCusModule(_TFTModule):
         for score, row in ins_unique.iterrows():
             cnt = row.values[1]
             rate = cnt/total_cnt
-            self.log("score_{} cnt".format(score), cnt, prog_bar=True)      
             self.log("score_{} rate".format(score), rate, prog_bar=True)  
+        self.log("total cnt".format(total_cnt), cnt, prog_bar=True)  
                  
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
