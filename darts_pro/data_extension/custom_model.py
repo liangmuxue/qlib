@@ -165,6 +165,7 @@ class _TFTCusModule(_TFTModule):
             x_in_item = (past_convs_item,x_in[1],x_in[2])
             out = m(x_in_item)
             out_total.append(out)
+        # 如果只有一个目标，则输出端模拟第二个用于数量对齐
         if len(out_total)==1:
             fake_out = torch.ones(156, 5, 1, 1)
             out_total.append(fake_out)
@@ -262,7 +263,7 @@ class _TFTCusModule(_TFTModule):
             cnt = row.values[1]
             rate = cnt/total_cnt
             self.log("score_{} rate".format(score), rate, prog_bar=True)  
-        self.log("total cnt".format(total_cnt), total_cnt, prog_bar=True)  
+        self.log("total cnt", total_cnt, prog_bar=True)  
                  
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
