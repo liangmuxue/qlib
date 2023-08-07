@@ -60,6 +60,8 @@ viz_result_nor = TensorViz(env="train_result_nor")
 viz_input_aug = TensorViz(env="data_train_aug")
 viz_input_nag_aug = TensorViz(env="data_train_nag_aug")
 
+hide_target = True
+
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
      input_series: TimeSeries,
@@ -114,6 +116,7 @@ class _TFTCusModule(_TFTModule):
         norm_type: Union[str, nn.Module],
         use_weighted_loss_func=False,
         past_split=None,
+        filter_conv_index=0,
         loss_number=3,
         device="cpu",
         monitor=None,
@@ -124,6 +127,7 @@ class _TFTCusModule(_TFTModule):
                                     full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
         
         self.past_split = past_split
+        self.filter_conv_index = filter_conv_index
         model_list = []
         for i in range(len(past_split)):
             # 拆分过去协变量,形成不同的网络配置，给到不同的model
@@ -167,7 +171,7 @@ class _TFTCusModule(_TFTModule):
             out_total.append(out)
         # 如果只有一个目标，则输出端模拟第二个用于数量对齐
         if len(out_total)==1:
-            fake_out = torch.ones(156, 5, 1, 1)
+            fake_out = torch.ones(out_total[0].shape).to(self.device)
             out_total.append(fake_out)
         return out_total
  
@@ -197,15 +201,22 @@ class _TFTCusModule(_TFTModule):
         for i,p_index in enumerate(self.past_split):
             past_conv_index = self.past_split[i]
             past_covariates_item = past_covariates[:,:,past_conv_index[0]:past_conv_index[1]]
+            # 修改协变量生成模式，取消目标协变量，直接在配置中声明
+            if hide_target:
+                conv_defs = [
+                            past_covariates_item,
+                            historic_future_covariates,
+                    ]
+            else:
+                conv_defs = [
+                            past_target,
+                            past_covariates_item,
+                            historic_future_covariates,
+                    ]              
             x_past = torch.cat(
                 [
                     tensor
-                    for tensor in [
-                        past_target,
-                        past_covariates_item,
-                        historic_future_covariates,
-                    ]
-                    if tensor is not None
+                    for tensor in conv_defs if tensor is not None
                 ],
                 dim=dim_variable,
             )
@@ -215,7 +226,7 @@ class _TFTCusModule(_TFTModule):
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """performs the training step"""
         
-        train_batch = self.filter_batch_by_condition(train_batch)
+        train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
         # 包括数值数据，以及分类输出
         (output,slope_out) = self._produce_train_output(train_batch[:5])
@@ -269,7 +280,7 @@ class _TFTCusModule(_TFTModule):
         """训练验证部分"""
         
         # 只关注重点部分
-        val_batch = self.filter_batch_by_condition(val_batch_ori)
+        val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
         # val_batch = val_batch_ori
         (output,slope_out) = self._produce_train_output(val_batch[:5])
         past_target = val_batch[0]
@@ -346,7 +357,7 @@ class _TFTCusModule(_TFTModule):
         # self.process_val_results(record_results,self.current_epoch)
         return loss
  
-    def filter_batch_by_condition(self,val_batch,rev_threhold=3,recent_threhold=3):
+    def filter_batch_by_condition(self,val_batch,filter_conv_index=0,rev_threhold=3,recent_threhold=3):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch    
@@ -356,8 +367,8 @@ class _TFTCusModule(_TFTModule):
         recent_max = np.max(recent_data,axis=1)
         import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
         
-        # 动量指标筛选
-        rev_cov = past_covariates[:,:,0].cpu().numpy()
+        # 通过指标筛选(配置参数里指定哪种指标)
+        rev_cov = past_covariates[:,:,filter_conv_index].cpu().numpy()
         rev_cov_max = np.max(rev_cov,axis=1)
         rev_cov_recent = rev_cov[:,-5:]
         # 近期均值大于阈值
@@ -365,7 +376,7 @@ class _TFTCusModule(_TFTModule):
         # 最近数值处于比较高的点
         rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(recent_threhold/100))
         
-        import_index_bool = import_index_bool & rev_boole        
+        import_index_bool = import_index_bool # & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
         
         val_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
@@ -1175,6 +1186,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         monitor=None,
         mode="train",
         past_split=None,
+        filter_conv_index=0,
         **kwargs,
     ):
         """重载darts相关类"""
@@ -1224,7 +1236,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.norm_type = norm_type
         self.monitor = monitor
         self.past_split = past_split
-    
+        self.filter_conv_index = filter_conv_index
     
     def _build_vriable_metas(self,tensors,static_covariates):   
         
@@ -1264,14 +1276,22 @@ class TFTExtModel(MixedCovariatesTorchModel):
         static_input_numeric = []
         static_input_categorical = []
         categorical_embedding_sizes = {}
-        for input_var in type_names:
-            if input_var in variables_meta["input"]:
-                vars_meta = variables_meta["input"][input_var]
-                if input_var in [
+        # 修改相关设置，取消目标值作为输入参数
+        if hide_target:
+            conv_defs = [
+                    "past_covariate",
+                    "historic_future_covariate",
+                ]
+        else:
+            conv_defs = [
                     "past_target",
                     "past_covariate",
                     "historic_future_covariate",
-                ]:
+                ]            
+        for input_var in type_names:
+            if input_var in variables_meta["input"]:
+                vars_meta = variables_meta["input"][input_var]
+                if input_var in conv_defs:
                     time_varying_encoder_input += vars_meta
                     reals_input += vars_meta
                 elif input_var in ["future_covariate"]:
@@ -1412,6 +1432,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             use_weighted_loss_func=self.use_weighted_loss_func,
             loss_number=self.loss_number,
             past_split=self.past_split,
+            filter_conv_index=self.filter_conv_index,
             device=self.device,
             **self.pl_module_params,
         )      
@@ -1925,7 +1946,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         def data_process(batch,batch_item,target_class,max_cnt=0,adj_max_cnt=0):
             # 训练部分数据增强
             rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8])  
-            for i in range(2):
+            for i in range(1):
                 b_rebuild = self.dynamic_build_training_data(batch_item)
                 # 不符合要求则不增强
                 if b_rebuild is None:

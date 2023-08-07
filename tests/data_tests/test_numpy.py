@@ -81,8 +81,8 @@ def test_index():
     # print("x is:", x)   
     # print("y is:", y)  
     
-    list = ['KDJ_K','KDJ_D','KDJ_J','TURNOVER_CLOSE','VOLUME_CLOSE']  
-    print(list[3:5])
+    list = ['label','KDJ_K','KDJ_D','KDJ_J','OBV5','RSI5'] 
+    print(list[4:6])
 
     
 def test_index2(): 

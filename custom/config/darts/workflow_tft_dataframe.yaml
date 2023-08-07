@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_500
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -78,7 +78,8 @@ task:
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,3],[-1,-1]]
+               past_split: [[0,4]]
+               filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
         module_path: darts_pro.tft_series_dataset
@@ -109,10 +110,10 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['label','OBV5']
+                target_column: ['OBV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','TURNOVER_CLOSE','VOLUME_CLOSE']  
+                past_covariate_col: ['OBV5','MACD','RSI5']  
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 
