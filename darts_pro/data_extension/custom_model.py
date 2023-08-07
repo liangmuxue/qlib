@@ -2023,8 +2023,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
                         max_cnt += 1
                         batch.append(rtn_item)
                         adj_max_cnt += 1
-                        for i in range(3):
-                            b_rebuild = self.dynamic_build_training_data(b)
+                        for i in range(1):
+                            b_rebuild = b # self.dynamic_build_training_data(b)
                             # 不符合要求则不增强
                             if b_rebuild is None:
                                 continue
