@@ -368,7 +368,7 @@ class _TFTCusModule(_TFTModule):
         import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
         
         # 通过指标筛选(配置参数里指定哪种指标)
-        rev_cov = past_covariates[:,:,filter_conv_index].cpu().numpy()
+        rev_cov = np.array([item["macd_array"][:self.input_chunk_length] for item in target_info])
         rev_cov_max = np.max(rev_cov,axis=1)
         rev_cov_recent = rev_cov[:,-5:]
         # 近期均值大于阈值
@@ -376,7 +376,7 @@ class _TFTCusModule(_TFTModule):
         # 最近数值处于比较高的点
         rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(recent_threhold/100))
         
-        import_index_bool = import_index_bool # & rev_boole        
+        import_index_bool = import_index_bool & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
         
         val_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
@@ -1946,7 +1946,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         def data_process(batch,batch_item,target_class,max_cnt=0,adj_max_cnt=0):
             # 训练部分数据增强
             rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8])  
-            for i in range(1):
+            for i in range(2):
                 b_rebuild = self.dynamic_build_training_data(batch_item)
                 # 不符合要求则不增强
                 if b_rebuild is None:

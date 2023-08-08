@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_100
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -113,7 +113,7 @@ task:
                 target_column: ['OBV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['OBV5','MACD','RSI5']  
+                past_covariate_col: ['MACD','OBV5']  
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 
