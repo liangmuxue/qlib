@@ -60,7 +60,7 @@ viz_result_nor = TensorViz(env="train_result_nor")
 viz_input_aug = TensorViz(env="data_train_aug")
 viz_input_nag_aug = TensorViz(env="data_train_nag_aug")
 
-hide_target = True
+hide_target = False
 
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
