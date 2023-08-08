@@ -166,7 +166,9 @@ class TFTDataset(DatasetH):
         # 生成KDJ指标
         self.compute_kdj(data)         
         # 使用指定字段
-        data = data[self.get_seq_columns() + ["datetime_number"]]
+        data = data[self.get_seq_columns() + ["label","datetime_number"]]
+        for col in self.get_target_column():
+            data[col] = data[col].astype(np.float64)        
         return data
 
     def compute_kdj(self,df):

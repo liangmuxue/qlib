@@ -158,8 +158,8 @@ class _TFTCusModule(_TFTModule):
             batch_size, self.output_chunk_length, self.n_targets, self.loss_size
         )        
          
-        second_output = out[:,:,1,0]
-        third_output = out[:,:,2,0]
+        second_output = torch.ones((out.shape[0],out.shape[1])).to(self.device)
+        third_output = second_output
         # 针对第二和第三指标进行分类
         second_class = self.classify_vr_layer(second_output)
         third_class = self.slope_layer(third_output)
@@ -444,12 +444,9 @@ class _TFTCusModule(_TFTModule):
         target_vr_class = target_class[:,0].cpu().numpy()
         last_target_vr_class = target_class[:,1]
         output_inverse = self.get_inverse_data(output.cpu().numpy()[:,:,:,0],target_info=target_info,scaler=scaler)
-        past_target_inverse = self.get_inverse_data(past_target.cpu().numpy(),target_info=target_info,scaler=scaler)
         # 全部损失
         loss,detail_loss = self._compute_loss((output,slope_out,second_class,third_class), (target,target_class,scaler,target_info))
         # 第二个目标
-        past_target_inverse = past_target_inverse[:,:,1]
-        output_slope = output_inverse[:,:,1]
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -467,41 +464,41 @@ class _TFTCusModule(_TFTModule):
         #     vr_class_certainlys, target_vr_class,target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,
         #     last_target_vr_class=last_target_vr_class,output_inverse=torch.Tensor(output_inverse).to(self.device))  
         # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
-        import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
-             = self.compute_real_class_acc(output_inverse=output_inverse, past_target=past_target_inverse, \
-               second_class=second_class_certainlys,third_class=third_class_certainlys,target_vr_class=target_vr_class,target_info=target_info)   
-        
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)
-                
-        self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
-        self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
-        # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
-        self.log("import_price_acc", import_price_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
-        self.log("import_price_nag", import_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True)   
-        self.log("instrument_acc", instrument_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
-        self.log("instrument_nag", instrument_nag, batch_size=val_batch[0].shape[0], prog_bar=True)          
-        # self.log("last_section_acc", last_section_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        # self.log("pos_acc", pos_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        # self.log("pos_recall", pos_recall, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        # self.log("neg_acc", neg_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        # self.log("neg_recall", neg_recall, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        # self.log("out_last_fall_acc", out_last_fall_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        # self.log("tar_last_raise_rate", tar_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
-        # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
-        #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
-        past_target = val_batch[0]
-        # self.vr_metric_show(target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
-        self.val_metric_show(output,target,price_class,second_class_certainlys,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
-                             target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                             third_class_certainlys=third_class_certainlys,last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
-        self._calculate_metrics(output, target, self.val_metrics)
+        # import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
+        #      = self.compute_real_class_acc(output_inverse=output_inverse, past_target=past_target_inverse, \
+        #        second_class=second_class_certainlys,third_class=third_class_certainlys,target_vr_class=target_vr_class,target_info=target_info)   
+        #
+        # # 累加结果集，后续统计   
+        # if self.import_price_result is None:
+        #     self.import_price_result = import_price_result    
+        # else:
+        #     if import_price_result is not None:
+        #         import_price_result_array = import_price_result.values
+        #         import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+        #         self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)
+        #
+        # self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
+        # self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
+        # # self.log("last_section_slop_acc", last_sec_acc, batch_size=val_batch[0].shape[0], prog_bar=True)  
+        # self.log("import_price_acc", import_price_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
+        # self.log("import_price_nag", import_price_nag, batch_size=val_batch[0].shape[0], prog_bar=True)   
+        # self.log("instrument_acc", instrument_acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
+        # self.log("instrument_nag", instrument_nag, batch_size=val_batch[0].shape[0], prog_bar=True)          
+        # # self.log("last_section_acc", last_section_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # # self.log("pos_acc", pos_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # # self.log("pos_recall", pos_recall, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # # self.log("neg_acc", neg_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # # self.log("neg_recall", neg_recall, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # # self.log("out_last_fall_acc", out_last_fall_acc, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # # self.log("tar_last_raise_rate", tar_last_raise_rate, batch_size=val_batch[0].shape[0], prog_bar=True) 
+        # # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
+        # #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
+        # past_target = val_batch[0]
+        # # self.vr_metric_show(target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
+        # self.val_metric_show(output,target,price_class,second_class_certainlys,target_vr_class,output_inverse=output_inverse,slope_out=slope_out,
+        #                      target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+        #                      third_class_certainlys=third_class_certainlys,last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+        # self._calculate_metrics(output, target, self.val_metrics)
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
         cr_loss = 0
@@ -518,12 +515,13 @@ class _TFTCusModule(_TFTModule):
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch    
         
         recent_data = np.array([item["label_array"][:self.input_chunk_length] for item in target_info])
+        
         # 与近期高点比较，不能差太多
         recent_max = np.max(recent_data,axis=1)
         import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
         
         # 动量指标筛选
-        rev_cov = past_covariates[:,:,0].cpu().numpy()
+        rev_cov = np.array([item["macd_array"][:self.input_chunk_length] for item in target_info])
         rev_cov_max = np.max(rev_cov,axis=1)
         rev_cov_recent = rev_cov[:,-5:]
         # 近期均值大于阈值
