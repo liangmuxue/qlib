@@ -155,7 +155,7 @@ class _TFTCusModule(_TFTModule):
         # 优化器执行频次
         self.lr_freq = {"interval":"step","frequency":88}
         # self.automatic_optimization = False
-               
+                
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]
     ) -> torch.Tensor:
