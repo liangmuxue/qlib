@@ -109,8 +109,8 @@ class UncertaintyLoss(nn.Module):
         last_vr_target = target_class[:,1]
         first_input = input[:,:,0]
         first_label = target[:,:,0]
-        second_input = slope_out[:,:,0]
-        second_label = target[:,:,1]     
+        # second_input = slope_out[:,:,0]
+        # second_label = target[:,:,1]     
         # third_input = input[:,:,2]
         # third_label = target[:,:,2]          
         # 如果是似然估计下的数据，需要取中间值
@@ -123,7 +123,7 @@ class UncertaintyLoss(nn.Module):
         # 第二指标分类
         ce_loss = 0.0 # self.vr_loss(second_class, vr_target)
         # 第三指标计算
-        mse_loss = self.ccc_loss_comp(second_input, second_label)     
+        mse_loss = 0.0 # self.ccc_loss_comp(second_input, second_label)     
         # 第三指标分类 
         value_diff_loss = 0.0 # self.ccc_loss_comp(third_input,third_label)  
         # value_diff_loss = 0.0

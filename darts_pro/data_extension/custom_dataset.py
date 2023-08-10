@@ -49,7 +49,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
             label_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label"].values           
             macd_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
-                                &(df_all["instrument_rank"]==code)]["MACD"].values                                                        
+                                &(df_all["instrument_rank"]==code)]["KDJ_K"].values                                                        
             self.ass_data[code] = (label_array,price_array,macd_array)
             
     def __getitem__(
