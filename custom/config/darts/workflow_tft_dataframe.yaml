@@ -74,11 +74,11 @@ task:
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
                model_name: 'test6_tft_500_macd'
-               load_weight: False
+               load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,3],[3,4]]
+               past_split: [[0,3],[0,3]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
