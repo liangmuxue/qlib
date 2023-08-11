@@ -371,17 +371,20 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 与近期高点比较，不能差太多
         recent_max = np.max(recent_data,axis=1)
         import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
+        # 当前价格不能处于下降趋势
+        less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
+        import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
         
         # 通过指标筛选(配置参数里指定哪种指标)
-        # rev_cov = np.array([item["kdj_array"][:self.input_chunk_length] for item in target_info])
-        rev_cov = np.array([item["macd_array"][:self.input_chunk_length] for item in target_info])
+        rev_cov = np.array([item["kdj_array"][:self.input_chunk_length] for item in target_info])
+        # rev_cov = np.array([item["macd_array"][:self.input_chunk_length] for item in target_info])
         rev_cov_max = np.max(rev_cov,axis=1)
         rev_cov_recent = rev_cov[:,-5:]
         # 近期均值大于阈值
         rev_boole = np.mean(rev_cov_recent,axis=1)>rev_threhold
         # 最近数值处于比较高的点
         rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(recent_threhold/100))
-        
+        print("total size:{},import_index_bool size:{},rev_boole size:{}".format(import_index_bool.shape[0],np.sum(import_index_bool),np.sum(rev_boole)))
         import_index_bool = import_index_bool & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
         
@@ -1544,7 +1547,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             num_workers=num_loader_workers,
             pin_memory=True,
             drop_last=False,
-            collate_fn=self._batch_collate_fn,
+            collate_fn=self._batch_collate_filter,
         )
 
         # Prepare validation data
@@ -1558,7 +1561,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 num_workers=num_loader_workers,
                 pin_memory=True,
                 drop_last=False,
-                collate_fn=self._batch_collate_fn,
+                collate_fn=self._batch_collate_filter,
             )
         )
 
@@ -1682,15 +1685,15 @@ class TFTExtModel(MixedCovariatesTorchModel):
         past_target = Y_aug[0,:self.input_chunk_length,:]
         rtn_item = (past_target,past_covariate,item[2],item[3],item[4],item[5][0],item[6],future_target,item[8])
         
-        if np.random.randint(0,900)==1:
-            # 可视化增强的数据
-            index = np.random.randint(0,12)
-            win = "win_{}".format(index)
-            target_title = "code_{}".format(target_info["item_rank_code"])
-            names = ["label","price"]
-            price_array = np.expand_dims(target_info["price_array"],axis=-1)
-            view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
-            viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
+        # if np.random.randint(0,900)==1:
+        #     # 可视化增强的数据
+        #     index = np.random.randint(0,12)
+        #     win = "win_{}".format(index)
+        #     target_title = "code_{}".format(target_info["item_rank_code"])
+        #     names = ["label","price"]
+        #     price_array = np.expand_dims(target_info["price_array"],axis=-1)
+        #     view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
+        #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
         return rtn_item
             
         # 重点关注前期走势比较平的
@@ -1700,135 +1703,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         
         # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
         # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
- 
-    def dynamic_build_nag_training_data(self,item):
-        """使用数据增强，调整训练数据"""
 
-        past_covariate = item[1]
-        future_past_covariate = item[5][1]
-        past_target = item[0]
-        future_target = item[-2]
-        target_info = item[-1]
-        scaler = item[5][0]
-        
-        # 重点关注价格指数,只对价格跌幅达标的数据进行增强
-        p_taraget_class = compute_price_class(target_info["price_array"])
-        if p_taraget_class!=0:
-            return None
-        
-        target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
-        target_unscale = scaler.inverse_transform(target[0])
-        
-        # 重点关注前期走势比较平的
-        focus_target = target_unscale[self.input_chunk_length-5:self.input_chunk_length]
-        slope = slope_classify_compute(focus_target,threhold=2)
-        if slope!=SLOPE_SHAPE_SMOOTH:
-            return None
-
-                        
-        # 把past和future重新组合，统一增强
-        covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
-        if np.random.randint(0,2)==1:
-            # 量化方式调整
-            X_aug, Y_aug = tsaug.Quantize(n_levels=10).augment(covariate, target)
-        else:
-            # 降低时间分辨率的方式调整
-            X_aug, Y_aug = tsaug.Pool(size=2).augment(covariate, target)
-        past_covariate = X_aug[0,:self.input_chunk_length,:] 
-        future_target = Y_aug[0,self.input_chunk_length:,:]
-        past_target = Y_aug[0,:self.input_chunk_length,:]
-        rtn_item = (past_target,past_covariate,item[2],item[3],item[4],item[5][0],item[6],future_target,item[8])
-        
-        if np.random.randint(0,90)==1:
-            # 可视化增强的数据
-            index = np.random.randint(0,12)
-            win = "win_{}".format(index)
-            target_title = "code_{}".format(target_info["item_rank_code"])
-            names = ["label","price"]
-            price_array = np.concatenate((np.array([0] * (self.input_chunk_length-1)),target_info["price_array"]))
-            price_array = np.expand_dims(price_array,axis=-1)
-            view_data = np.concatenate((target_unscale,price_array),axis=-1)
-            viz_input_nag_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
-        return rtn_item
-    
-        
-    def _batch_collate_fn(self,ori_batch: List[Tuple]) -> Tuple:
-        """
-        重载方法，调整数据处理模式
-        """
-        
-        return self._batch_collate_filter(ori_batch)
-        
-        batch = []
-        max_cnt = 0
-        adj_max_cnt = 0
-        # 过滤不符合条件的记录
-        for b in ori_batch:
-            if self.mode=="train":
-                future_target = b[-2]
-                target_class = b[-3]
-            else:
-                future_target = b[-1]
-            # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
-            if not np.all(future_target == future_target[0]):
-                # 非训练部分，不需要数据增强，直接转换返回
-                if not self.model.training:
-                    if self.mode=="predict":
-                        batch.append(b)
-                    else:
-                        rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                        
-                        batch.append(rtn_item)
-                else:
-                    # 训练部分数据增强
-                    rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5][0],b[6],b[7],b[8])                    
-                    # 增加不平衡类别的数量，随机小幅度调整数据
-                    if target_class[0,0]==CLASS_SIMPLE_VALUE_MAX:
-                        max_cnt += 1
-                        batch.append(rtn_item)
-                        adj_max_cnt += 1
-                        for i in range(3):
-                            b_rebuild = self.dynamic_build_training_data(b)
-                            # 不符合要求则不增强
-                            if b_rebuild is None:
-                                continue
-                            # b_rebuild = rtn_item
-                            adj_max_cnt += 1
-                            batch.append(b_rebuild)
-                    elif target_class[0,0]==0:
-                        batch.append(rtn_item)
-                        # b_rebuild = self.dynamic_build_nag_training_data(b)
-                        # # 不符合要求则不增强
-                        # if b_rebuild is None:
-                        #     continue    
-                        # batch.append(b_rebuild)
-                    else:
-                        # 随机减少大类数量
-                        if np.random.randint(0,2)==1:
-                            batch.append(rtn_item)
-        ori_rate = max_cnt/len(ori_batch)
-        after_rate = adj_max_cnt/len(batch)
-        # print("img data rate:{},after rate:{}".format(ori_rate,after_rate))
-        aggregated = []
-        first_sample = batch[0]
-        for i in range(len(first_sample)):
-            elem = first_sample[i]
-            if isinstance(elem, np.ndarray):
-                sample_list = [sample[i] for sample in batch]
-                aggregated.append(
-                    torch.from_numpy(np.stack(sample_list, axis=0))
-                )
-            elif isinstance(elem, MinMaxScaler):
-                aggregated.append([sample[i] for sample in batch])
-            elif isinstance(elem, StockNormalizer):
-                aggregated.append([sample[i] for sample in batch])                
-            elif isinstance(elem, Dict):
-                aggregated.append([sample[i] for sample in batch])                
-            elif elem is None:
-                aggregated.append(None)                
-            elif isinstance(elem, TimeSeries):
-                aggregated.append([sample[i] for sample in batch])
-        return tuple(aggregated)
-   
     def _batch_collate_filter(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
@@ -1842,8 +1717,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
         
         def data_process(batch,batch_item,target_class,max_cnt=0,adj_max_cnt=0):
             # 训练部分数据增强
-            rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8])  
-            for i in range(2):
+            rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8]) 
+            batch.append(rtn_item) 
+            for i in range(1):
                 b_rebuild = self.dynamic_build_training_data(batch_item)
                 # 不符合要求则不增强
                 if b_rebuild is None:

@@ -458,7 +458,15 @@ def test_scaler():
     scaler.fit(X)             
     target = scaler.transform(X)      
     print(target)
-           
+
+def test_compute():
+    vector_1d = np.array([3,4,5])
+    numbers_1_to_12 = np.arange(start = 1, stop = 13)
+    matrix_2d_ordered = numbers_1_to_12.reshape((3,4))
+    print(matrix_2d_ordered)
+    result = np.subtract(matrix_2d_ordered.transpose(1,0),vector_1d).transpose(1,0)
+    print(result)
+               
 if __name__ == "__main__":
     # test_argwhere()
     # test_condition3()
@@ -470,7 +478,8 @@ if __name__ == "__main__":
     # test_each()
     # test_split_compute()
     # test_variable()
-    test_index()
+    # test_index()
+    test_compute()
     # test_temp()
     # test_pd_ser()
     # test_torch_vision()
