@@ -174,10 +174,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
             # 根据配置，不同的模型使用不同的过去协变量
             past_convs_item = x_in[0][i]
             x_in_item = (past_convs_item,x_in[1],x_in[2])
-            out = m(x_in_item,i)
+            out = m(x_in_item)
             out_total.append(out)
-            if not self.training and i==1:
-                print("ggg")
+            # if not self.training and i==1:
+            #     print("ggg")
         # 如果只有一个目标，则输出端模拟第二个用于数量对齐
         if len(out_total)==1:
             fake_out = torch.ones(out_total[0].shape).to(self.device)
@@ -238,7 +238,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
-        # 包括数值数据，以及分类输出
+        # 包括第一及第二部分数值数据
         (output,slope_out) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
         scaler,target_class,target,target_info = train_batch[5:]
@@ -293,7 +293,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 动态冻结网络参数
         corr_loss = self.trainer.callback_metrics["val_corr_loss"]
         mse_loss = self.trainer.callback_metrics["val_mse_loss"]
-        if mse_loss>0.65:
+        if mse_loss>0.65 and False:
             ignore_mode = 1
         else:
             ignore_mode = 2
@@ -1701,7 +1701,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             # 训练部分数据增强
             rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8]) 
             batch.append(rtn_item) 
-            for i in range(1):
+            for i in range(2):
                 b_rebuild = self.dynamic_build_training_data(batch_item)
                 # 不符合要求则不增强
                 if b_rebuild is None:
