@@ -61,7 +61,7 @@ viz_result_nor = TensorViz(env="train_result_nor")
 viz_input_aug = TensorViz(env="data_train_aug")
 viz_input_nag_aug = TensorViz(env="data_train_nag_aug")
 
-hide_target = False
+hide_target = True
 
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
@@ -137,7 +137,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         for i in range(len(past_split)):
             # 拆分过去协变量,形成不同的网络配置，给到不同的model
             model =  _TFTModule(output_dim,variables_meta_array[i],num_static_components,hidden_size,lstm_layers,num_attention_heads,
-                                    full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,dropout,add_relative_index,norm_type,**kwargs)
+                                    full_attention,feed_forward,hidden_continuous_size,categorical_embedding_sizes,
+                                    dropout,add_relative_index,norm_type,**kwargs)
             # 分类模式涵盖前后2段，因此定义2个分类层
             focus_num = 2
             vr_range_num = len(CLASS_SIMPLE_VALUES.keys())
@@ -159,6 +160,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         # 优化器执行频次
         self.lr_freq = {"interval":"step","frequency":88}
+        self.ignore_mode = 1
         # self.automatic_optimization = False
                 
     def forward(
@@ -172,8 +174,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
             # 根据配置，不同的模型使用不同的过去协变量
             past_convs_item = x_in[0][i]
             x_in_item = (past_convs_item,x_in[1],x_in[2])
-            out = m(x_in_item)
+            out = m(x_in_item,i)
             out_total.append(out)
+            if not self.training and i==1:
+                print("ggg")
         # 如果只有一个目标，则输出端模拟第二个用于数量对齐
         if len(out_total)==1:
             fake_out = torch.ones(out_total[0].shape).to(self.device)
@@ -206,9 +210,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
         for i,p_index in enumerate(self.past_split):
             past_conv_index = self.past_split[i]
             past_covariates_item = past_covariates[:,:,past_conv_index[0]:past_conv_index[1]]
-            # 修改协变量生成模式，取消目标协变量，直接在配置中声明
+            # 修改协变量生成模式，只取自相关目标作为协变量
             if hide_target:
                 conv_defs = [
+                            past_target[:,:,i:i+1],
                             past_covariates_item,
                             historic_future_covariates,
                     ]
@@ -269,17 +274,30 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.import_price_result = None
         
     def on_validation_epoch_end(self):
-        if self.import_price_result is None:
-            return
-        res_group = self.import_price_result.groupby("result")
-        ins_unique = res_group.nunique()
-        app_logger.debug("ins_unique:{}".format(ins_unique))     
-        total_cnt = ins_unique.values[:,1].sum()
-        for score, row in ins_unique.iterrows():
-            cnt = row.values[1]
-            rate = cnt/total_cnt
-            self.log("score_{} rate".format(score), rate, prog_bar=True)  
-        self.log("total cnt", total_cnt, prog_bar=True)  
+        if self.import_price_result is not None:
+            res_group = self.import_price_result.groupby("result")
+            ins_unique = res_group.nunique()
+            app_logger.debug("ins_unique:{}".format(ins_unique))     
+            total_cnt = ins_unique.values[:,1].sum()
+            for i in range(4):
+                cnt_values = ins_unique[ins_unique.index==i].values
+                if cnt_values.shape[0]==0:
+                    cnt = 0
+                else:
+                    cnt = cnt_values[0,1]
+                rate = cnt/total_cnt
+                print("cnt:{} with score:{},total_cnt:{},rate:{}".format(cnt,i,total_cnt,rate))
+                self.log("score_{} rate".format(i), rate, prog_bar=True) 
+            self.log("total cnt", total_cnt, prog_bar=True)  
+        
+        # 动态冻结网络参数
+        corr_loss = self.trainer.callback_metrics["val_corr_loss"]
+        mse_loss = self.trainer.callback_metrics["val_mse_loss"]
+        if mse_loss>0.65:
+            ignore_mode = 1
+        else:
+            ignore_mode = 2
+        self.freeze_apply(mode=ignore_mode)
                  
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
@@ -313,7 +331,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         #     sec_recall,sec_price_acc,sec_price_nag,import_index,sec_index,last_section_acc,import_last_section_acc = self.compute_vr_class_acc(
         #     vr_class_certainlys, target_vr_class,target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,
         #     last_target_vr_class=last_target_vr_class,output_inverse=torch.Tensor(output_inverse).to(self.device))  
-        # pos_acc,pos_recall = self.compute_rev_acc(target_info=target_info,output_rev=output_slope,target_rev=target_slope,threhold=rev_threhold)
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
              = self.compute_real_class_acc(output_inverse=output_inverse,target_vr_class=target_vr_class,target_info=target_info)   
         
@@ -372,19 +389,19 @@ class _TFTCusModule(PLMixedCovariatesModule):
         recent_max = np.max(recent_data,axis=1)
         import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
         # 当前价格不能处于下降趋势
-        less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
-        import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
+        # less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
+        # import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
         
         # 通过指标筛选(配置参数里指定哪种指标)
         rev_cov = np.array([item["kdj_array"][:self.input_chunk_length] for item in target_info])
-        # rev_cov = np.array([item["macd_array"][:self.input_chunk_length] for item in target_info])
+        rev_cov = np.array([item["macd_array"][:self.input_chunk_length] for item in target_info])
         rev_cov_max = np.max(rev_cov,axis=1)
         rev_cov_recent = rev_cov[:,-5:]
         # 近期均值大于阈值
         rev_boole = np.mean(rev_cov_recent,axis=1)>rev_threhold
         # 最近数值处于比较高的点
         rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(recent_threhold/100))
-        print("total size:{},import_index_bool size:{},rev_boole size:{}".format(import_index_bool.shape[0],np.sum(import_index_bool),np.sum(rev_boole)))
+        # print("total size:{},import_index_bool size:{},rev_boole size:{}".format(import_index_bool.shape[0],np.sum(import_index_bool),np.sum(rev_boole)))
         import_index_bool = import_index_bool & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
         
@@ -432,27 +449,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
 
         # 返回准确率，以及上涨下跌占比
         return pos_acc,pos_recall
- 
-    def compute_rev_acc(self,target_info=None,output_rev=None,target_rev=None,threhold=5):
-        """统计反转趋势准确率"""
-        
-        # 目标上涨幅度计算
-        label_array = torch.Tensor([item["label_array"] for item in target_info]).to(self.device)
-        target = label_array[:,self.input_chunk_length:]
-        last_raise_range = torch.Tensor([ts["last_raise_range"] for ts in target_info])
-        output_slope = (output_rev[:,1:] - output_rev[:,:-1])/output_rev[:,:-1] * 100
-        target_slope = (target_rev[:,1:] - target_rev[:,:-1])/target_rev[:,:-1] * 100
-        # 上升趋势统计
-        pos_index_bool = (torch.sum(output_slope,dim=-1)>threhold)
-        pos_index = torch.where(pos_index_bool)[0]
-        pos_acc_bool = torch.sum(target_slope[pos_index],dim=-1)>threhold
-        pos_acc_cnt = torch.sum(pos_acc_bool)
-        pos_acc = pos_acc_cnt/pos_index.shape[0]
-        pos_all_bool = torch.sum(target_slope,dim=-1)>threhold
-        pos_recall = pos_acc_cnt/torch.where(pos_all_bool)[0].shape[0]
-
-        # 返回准确率，以及上涨下跌占比
-        return pos_acc,pos_recall
            
     def get_inverse_data(self,output,target_info=None,single_way=False,scaler=None):
         dataset = global_var.get_value("dataset")
@@ -495,25 +491,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
         output_import_index_bool = slope_out_compute>label_threhold
-        # # 辅助指标判断
-        # second_slope_range = (output_second_inverse[:,1:] - output_second_inverse[:,:-1])/output_second_inverse[:,:-1]
-        # second_total_range = (output_second_inverse[:,-1] - output_second_inverse[:,0])/output_second_inverse[:,0]
-        # # 第一段上升
-        # pos_index_bool = (second_slope_range[:,0]>0)
-        # # 预测最低值大于之前的最低值
-        # pos_index_bool = pos_index_bool & (np.min(output_second_inverse,axis=1)>np.min(past_target,axis=1))
-        # # 预测结束数据值大于30
-        # pos_index_bool = pos_index_bool & (output_second_inverse[:,-1]>30)
-        # # 总体上升
-        # pos_index_bool = (second_total_range>0)
-        # 直接使用分类
-        # pos_index_bool = second_class==CLASS_SIMPLE_VALUE_MAX
-                
-        # 第三指标判断
-        # 不能全都小于0
-        ptv_number = np.sum(output_third_inverse>0,axis=-1)
+        # 辅助指标判断
         third_index_bool = (output_third_inverse[:,-1] - output_third_inverse[:,0]) > 0
-        # third_index_bool = third_index_bool & (ptv_number>0)
         # 整体上升幅度与振幅差值较小
         third_max = np.max(output_third_inverse,axis=-1)
         third_min = np.min(output_third_inverse,axis=-1)        
@@ -590,33 +569,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
             import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","result"])     
 
         return import_acc, import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result
-        
-    def compute_corr_metrics(self,output,target):
-        num_outputs = output.shape[0]
-        self.pearson = torchmetrics.PearsonCorrCoef(num_outputs=num_outputs).to(self.device)
-        output_sample = torch.mean(output[:,:,0,:],dim=-1)
-        corr_loss = self.pearson(output_sample.transpose(1,0),target.squeeze(-1).transpose(1,0))  
-        corr_loss = torch.mean(1 - corr_loss)
-        return corr_loss      
- 
-    def compute_ccc_metrics(self,output,target):
-        return self.criterion.ccc_loss_comp(output,target)
-       
-    def compute_scope_metrics(self,output,target):
-        output_sample = torch.mean(output[:,:,0,:],dim=-1)
-        compare_target = target[:,:,0]
-        last_sec_out_bool = (output_sample[:,-1] - output_sample[:,-2])>0
-        last_sec_tar_bool  = (compare_target[:,-1] - compare_target[:,-2])>0
-        last_sec_acc_list = (last_sec_out_bool==last_sec_tar_bool)
-        last_sec_acc = torch.sum(last_sec_acc_list)/compare_target.shape[0]
-        return last_sec_acc,last_sec_out_bool
-
-    # def compute_value_diff_metrics(self,output,target):
-    #     output_sample = torch.mean(output[:,:,0,:],dim=-1)
-    #     output_be = output_sample[:,[0,-1]]
-    #     target_be = target[:,[0,-1],0]
-    #     mse_loss = self.mean_squared_error(output_be, target_be)
-    #     return mse_loss 
     
     def _compute_loss(self, output, target):
         """重载父类方法"""
@@ -658,39 +610,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
     def configure_optimizers(self):
         """configures optimizers and learning rate schedulers for model optimization."""
-
-        # A utility function to create optimizer and lr scheduler from desired classes
-        def _create_from_cls_and_kwargs(cls, kws):
-            try:
-                return cls(**kws)
-            except (TypeError, ValueError) as e:
-                raise_log(
-                    ValueError(
-                        "Error when building the optimizer or learning rate scheduler;"
-                        "please check the provided class and arguments"
-                        "\nclass: {}"
-                        "\narguments (kwargs): {}"
-                        "\nerror:\n{}".format(cls, kws, e)
-                    ),
-                    logger,
-                )
-
-        # 对于最后的全连接层，使用高倍数lr
-        optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
-        ignored_params = list()
-        # ignored_params = list(map(id, self.classify_last_layer.parameters())) + \
-        #     list(map(id, self.slope_layer.parameters())) + \
-        #     list(map(id, self.classify_vr_layer.parameters()))        
-        base_params = filter(lambda p: id(p) not in ignored_params, self.parameters())       
-        base_lr = self.optimizer_kwargs["lr"] 
-        optimizer_kws["params"] = [
-                    {'params': base_params},
-                    # {'params': self.classify_last_layer.parameters(), 'lr': base_lr*10},
-                    # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
-                    # {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}
-                    ]
-
-        optimizer = _create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
+        
+        optimizer = self.build_dynamic_optimizers()
         
         if self.lr_scheduler_cls is not None:
             lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
@@ -699,7 +620,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             # ReduceLROnPlateau requires a metric to "monitor" which must be set separately, most others do not
             lr_monitor = lr_sched_kws.pop("monitor", None)
 
-            lr_scheduler = _create_from_cls_and_kwargs(
+            lr_scheduler = self.create_from_cls_and_kwargs(
                 self.lr_scheduler_cls, lr_sched_kws
             )
                     
@@ -710,8 +631,65 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 "monitor": lr_monitor if lr_monitor is not None else "val_loss",
             }
         else:
-            return optimizer
-             
+            return optimizer          
+
+    def create_from_cls_and_kwargs(self,cls, kws):
+        try:
+            return cls(**kws)
+        except (TypeError, ValueError) as e:
+            raise_log(
+                ValueError(
+                    "Error when building the optimizer or learning rate scheduler;"
+                    "please check the provided class and arguments"
+                    "\nclass: {}"
+                    "\narguments (kwargs): {}"
+                    "\nerror:\n{}".format(cls, kws, e)
+                ),
+                logger,
+            )
+    
+    def freeze_apply(self,mode=0):
+        """ 动态冻结指定参数
+           Params:
+              mode 冻结参数配置，0-不冻结 1 忽略第一部分 2 忽略第二波分          
+        """
+        
+        if mode==0:
+            for param in self.sub_models[0].parameters():
+                param.requires_grad = True
+            for param in self.sub_models[1].parameters():
+                param.requires_grad = True            
+        elif mode==1:
+            for param in self.sub_models[0].parameters():
+                param.requires_grad = False
+            for param in self.sub_models[1].parameters():
+                param.requires_grad = True
+        else:
+            for param in self.sub_models[0].parameters():
+                param.requires_grad = True
+            for param in self.sub_models[1].parameters():
+                param.requires_grad = False
+                    
+    def build_dynamic_optimizers(self):
+        """动态生成优化器配置
+
+        """
+
+        optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
+        # 根据配置，决定是否忽略某层参数
+        ignored_params = list()
+                
+        base_params = filter(lambda p: id(p) not in ignored_params, self.parameters())       
+        optimizer_kws["params"] = [
+                    {'params': base_params},
+                    # {'params': self.classify_last_layer.parameters(), 'lr': base_lr*10},
+                    # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
+                    # {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}
+                    ]
+
+        optimizer = self.create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
+        return optimizer
+            
     def predict_step(
         self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
     ) -> Sequence[TimeSeries]:
@@ -1138,7 +1116,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.past_split = past_split
         self.filter_conv_index = filter_conv_index
     
-    def _build_vriable_metas(self,tensors,static_covariates):   
+    def _build_vriable_metas(self,tensors,static_covariates,seq=0):   
         
         type_names = [
             "past_target",
@@ -1156,15 +1134,30 @@ class TFTExtModel(MixedCovariatesTorchModel):
             "target",
             "static_covariate",
         ]
-
+        conv_defs = [
+                "past_target",
+                "past_covariate",
+                "historic_future_covariate",
+            ]          
+        input_meta = {}
+        for i in range(len(type_names)):
+            type_name = type_names[i]
+            var_name = variable_names[i]
+            tensor = tensors[i]
+            # 根据相关设置，决定是否使用单独目标参数
+            if hide_target:
+                if type_name=="past_target":
+                    type_values = ["target_0"]
+                elif type_name=="future_target":
+                    type_values = ["target_0"]
+                else:
+                    type_values = [f"{var_name}_{i}" for i in range(tensor.shape[1])]
+            else:
+                type_values = [f"{var_name}_{i}" for i in range(tensor.shape[1])]
+            input_meta[type_name] = type_values
+            
         variables_meta = {
-            "input": {
-                type_name: [f"{var_name}_{i}" for i in range(tensor.shape[1])]
-                for type_name, var_name, tensor in zip(
-                    type_names, variable_names, tensors
-                )
-                if tensor is not None
-            },
+            "input": input_meta,
             "model_config": {},
         }
 
@@ -1176,18 +1169,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         static_input_numeric = []
         static_input_categorical = []
         categorical_embedding_sizes = {}
-        # 修改相关设置，取消目标值作为输入参数
-        if hide_target:
-            conv_defs = [
-                    "past_covariate",
-                    "historic_future_covariate",
-                ]
-        else:
-            conv_defs = [
-                    "past_target",
-                    "past_covariate",
-                    "historic_future_covariate",
-                ]            
+           
         for input_var in type_names:
             if input_var in variables_meta["input"]:
                 vars_meta = variables_meta["input"][input_var]
@@ -1306,7 +1288,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 future_target,  # for time varying decoders
                 static_covariates,  # for static encoder
             ]            
-            variables_meta,categorical_embedding_sizes = self._build_vriable_metas(tensors, static_covariates)
+            variables_meta,categorical_embedding_sizes = self._build_vriable_metas(tensors, static_covariates,seq=i)
             variables_meta_array.append(variables_meta)
         
         n_static_components = (
