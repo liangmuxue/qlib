@@ -98,33 +98,29 @@ class UncertaintyLoss(nn.Module):
         self.vr_loss = nn.CrossEntropyLoss()
         self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
         self.scope_loss = nn.CrossEntropyLoss()
+        # 设置损失函数的组合模式
+        self.loss_mode = 0
 
     def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
-        (input,slope_out) = input_ori
+        (input,vr_class) = input_ori
         (target,future_target,target_class,slope_target) = target_ori
         # slope_target = (target[:,-1] - target[:,0])/target[:,0]
-        vr_target= target_class[:,0]
-        last_vr_target = target_class[:,1]
-        first_input = input[:,:,0]
+        first_input = input[0][:,:,0]
         first_label = target[:,:,0]
-        second_input = slope_out[:,:,0]
+        second_input = input[1][:,:,0]
         second_label = target[:,:,1]     
         # third_input = input[:,:,2]
         # third_label = target[:,:,2]          
         # 如果是似然估计下的数据，需要取中间值
-        if len(input.shape)==4:
-            input = torch.mean(input[:,:,0,:],dim=-1)
-        else:
-            input = torch.squeeze(input,-1)
         # 相关系数损失
-        corr_loss = self.ccc_loss_comp(first_input, first_label)   
-        # 第二指标分类
-        ce_loss = 0.0 # self.vr_loss(second_class, vr_target)
-        # 第三指标计算
-        mse_loss = self.ccc_loss_comp(second_input, second_label)     
-        # 第三指标分类 
+        corr_loss = 1.0   
+        # 指标分类
+        ce_loss = 1.0 
+        # 第二指标计算
+        mse_loss = 1.0     
+        # 第二指标分类 
         value_diff_loss = 0.0 # self.ccc_loss_comp(third_input,third_label)  
         # value_diff_loss = 0.0
         mean_threhold = 0.0 
@@ -136,12 +132,19 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
         # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-        # if mse_loss>=0.66:
-        #     loss_sum = mse_loss
-        # else:
-        #     loss_sum = corr_loss + mse_loss
-        loss_sum = corr_loss + mse_loss
-        # loss_sum = ce_loss + value_diff_loss
+
+        # 不同阶段使用不同的损失函数组合
+        if self.loss_mode==0:
+            mse_loss = self.ccc_loss_comp(second_input, second_label) 
+        if self.loss_mode==1:
+            mse_loss = self.ccc_loss_comp(second_input, second_label) 
+            corr_loss = self.ccc_loss_comp(first_input, first_label) 
+        if self.loss_mode==2:
+            mse_loss = self.ccc_loss_comp(second_input, second_label) 
+            corr_loss = self.ccc_loss_comp(first_input, first_label) 
+            ce_loss = self.vr_loss(vr_class, target_class[:,0])
+            
+        loss_sum = corr_loss + mse_loss + ce_loss                      
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
     
