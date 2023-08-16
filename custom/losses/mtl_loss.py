@@ -101,7 +101,7 @@ class UncertaintyLoss(nn.Module):
         # 设置损失函数的组合模式
         self.loss_mode = 0
 
-    def forward(self, input_ori: Tensor, target_ori: Tensor,outer_loss=None,epoch=0):
+    def forward(self, input_ori: Tensor, target_ori: Tensor,optimizers_idx=0,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
         (input,vr_class) = input_ori
@@ -115,11 +115,11 @@ class UncertaintyLoss(nn.Module):
         # third_label = target[:,:,2]          
         # 如果是似然估计下的数据，需要取中间值
         # 相关系数损失
-        corr_loss = 1.0   
+        corr_loss = 0.0   
         # 指标分类
-        ce_loss = 1.0 
+        ce_loss = 0.0 
         # 第二指标计算
-        mse_loss = 1.0     
+        mse_loss = 0.0     
         # 第二指标分类 
         value_diff_loss = 0.0 # self.ccc_loss_comp(third_input,third_label)  
         # value_diff_loss = 0.0
@@ -134,17 +134,21 @@ class UncertaintyLoss(nn.Module):
         # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
 
         # 不同阶段使用不同的损失函数组合
-        if self.loss_mode==0:
+        if optimizers_idx==0:
+            corr_loss = self.ccc_loss_comp(first_input, first_label)
+            loss_sum = corr_loss
+        if optimizers_idx==1:
             mse_loss = self.ccc_loss_comp(second_input, second_label) 
-        if self.loss_mode==1:
-            mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            corr_loss = self.ccc_loss_comp(first_input, first_label) 
-        if self.loss_mode==2:
-            mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            corr_loss = self.ccc_loss_comp(first_input, first_label) 
+            loss_sum = mse_loss
+        if optimizers_idx==2:
             ce_loss = self.vr_loss(vr_class, target_class[:,0])
-            
-        loss_sum = corr_loss + mse_loss + ce_loss                      
+            loss_sum = ce_loss            
+        # 验证推理阶段使用全部损失
+        if optimizers_idx==-1:   
+            corr_loss = self.ccc_loss_comp(first_input, first_label)
+            mse_loss = self.ccc_loss_comp(second_input, second_label) 
+            ce_loss = self.vr_loss(vr_class, target_class[:,0])
+            loss_sum = corr_loss + mse_loss + ce_loss                      
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
     
