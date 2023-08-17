@@ -111,8 +111,8 @@ class UncertaintyLoss(nn.Module):
         first_label = target[:,:,0]
         second_input = input[1][:,:,0]
         second_label = target[:,:,1]     
-        # third_input = input[:,:,2]
-        # third_label = target[:,:,2]          
+        third_input = input[2][:,:,0]
+        third_label = target[:,:,2]          
         # 如果是似然估计下的数据，需要取中间值
         # 相关系数损失
         corr_loss = 0.0   
@@ -141,14 +141,15 @@ class UncertaintyLoss(nn.Module):
             mse_loss = self.ccc_loss_comp(second_input, second_label) 
             loss_sum = mse_loss
         if optimizers_idx==2:
-            ce_loss = self.vr_loss(vr_class, target_class[:,0])
-            loss_sum = ce_loss            
+            value_diff_loss = self.ccc_loss_comp(third_input,third_label) 
+            # ce_loss = self.vr_loss(vr_class, target_class[:,0])
+            loss_sum = value_diff_loss            
         # 验证推理阶段使用全部损失
         if optimizers_idx==-1:   
             corr_loss = self.ccc_loss_comp(first_input, first_label)
             mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            ce_loss = self.vr_loss(vr_class, target_class[:,0])
-            loss_sum = corr_loss + mse_loss + ce_loss                      
+            value_diff_loss = self.ccc_loss_comp(third_input,third_label) 
+            loss_sum = corr_loss + mse_loss + value_diff_loss                      
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
     

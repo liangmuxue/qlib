@@ -186,17 +186,6 @@ class TFTDataset(DatasetH):
         df['KDJ_D'] = df['KDJ_K'].ewm(com=2).mean()
         df['KDJ_J'] = 3 * df['KDJ_K'] - 2 * df['KDJ_D']
 
-    def compute_wr(self,df):
-        window_size = 14
-        
-        low_list=df['LOW'].rolling(window=window_size).min()
-        low_list.fillna(value=df['LOW'].expanding().min(), inplace=True)
-        high_list = df['HIGH'].rolling(window=window_size).max()
-        high_list.fillna(value=df['HIGH'].expanding().max(), inplace=True)
-        rsv = (df['CLOSE'] - low_list) / (high_list - low_list) * 100
-        df['KDJ_K'] = rsv.ewm(com=2).mean()  
-        df['KDJ_D'] = df['KDJ_K'].ewm(com=2).mean()
-        df['KDJ_J'] = 3 * df['KDJ_K'] - 2 * df['KDJ_D']
             
     def filter_extremum_data(self,data,columns=[]):
         """清除极值数据"""

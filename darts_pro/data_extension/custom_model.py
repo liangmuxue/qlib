@@ -193,9 +193,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         # 优化器执行频次
         self.lr_freq = {"interval":"step","frequency":88}
-        # 初始化冻结模式
-        self.freeze_mode = freeze_mode
-        # self.automatic_optimization = False
                 
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]
@@ -275,8 +272,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
     def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
         """performs the training step"""
         
-        freeze_mode = self.freeze_mode
-        
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
         # 包括第一及第二部分数值数据,以及分类数据
@@ -290,7 +285,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         loss,detail_loss = self._compute_loss((output,vr_class), (target,target_class,scaler,target_info),optimizers_idx=optimizer_idx)
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
-        self.log("base_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
+        self.log("m1_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
+        self.log("m2_lr",self.trainer.optimizers[1].param_groups[0]["lr"])
+        self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
         # self.log("mean_threhold",mean_threhold,batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -299,8 +296,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # mse损失
         self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("train_value_range_loss", value_range_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
         
         # self.manual_backward(loss)
@@ -369,7 +365,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
@@ -525,7 +521,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,label_threhold=3,target_info=None,output_inverse=None,vr_class=None,target_vr_class=None):
+    def compute_real_class_acc(self,label_threhold=1,target_info=None,output_inverse=None,vr_class=None,target_vr_class=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
@@ -533,25 +529,28 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         output_label_inverse = output_inverse[:,:,0] 
         # output_second_inverse = output_inverse[:,:,1]
-        output_third_inverse = output_inverse[:,:,1]
+        output_second_inverse = output_inverse[:,:,1]
+        output_third_inverse = output_inverse[:,:,2]
                  
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
         output_import_index_bool = slope_out_compute>label_threhold
+        # 最后一段上涨
+        output_import_index_bool = output_import_index_bool & ((output_label_inverse[:,-1] - output_label_inverse[:,-2])>0)
         # 辅助指标判断
-        third_index_bool = (output_third_inverse[:,-1] - output_third_inverse[:,0]) > 0
+        second_index_bool = (output_second_inverse[:,-1] - output_second_inverse[:,0]) > 0.5
         # 整体上升幅度与振幅差值较小
-        third_max = np.max(output_third_inverse,axis=-1)
-        third_min = np.min(output_third_inverse,axis=-1)        
-        third_index_bool = third_index_bool & (((output_third_inverse[:,-1] - output_third_inverse[:,0])/(third_max - third_min))>0.5)
+        second_max = np.max(output_third_inverse,axis=-1)
+        second_min = np.min(output_third_inverse,axis=-1)        
+        second_index_bool = second_index_bool & (((output_second_inverse[:,-1] - output_second_inverse[:,0])/(second_max - second_min))>0.5)
         # 最后一个值大于0
-        third_index_bool = third_index_bool & (output_third_inverse[:,-1]>0)
+        second_index_bool = second_index_bool & (output_second_inverse[:,-1]>0)
         # 最后一段上升
-        third_index_bool = third_index_bool & (output_third_inverse[:,-1]>output_third_inverse[:,-2])        
+        second_index_bool = second_index_bool & (output_second_inverse[:,-1]>output_second_inverse[:,-2])        
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 综合判别
-        import_index_bool = output_import_index_bool & third_index_bool
+        import_index_bool = output_import_index_bool & second_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -658,22 +657,28 @@ class _TFTCusModule(PLMixedCovariatesModule):
     def configure_optimizers(self):
         optimizers = self.build_dynamic_optimizers()
         
-        lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
-        lr_sched_kws["optimizer"] = optimizers[0]
-
-        # ReduceLROnPlateau requires a metric to "monitor" which must be set separately, most others do not
-        lr_monitor = lr_sched_kws.pop("monitor", None)
-
-        lr_scheduler = self.create_from_cls_and_kwargs(
-            self.lr_scheduler_cls, lr_sched_kws
-        )
+        # 对应优化器，生成多个学习率
+        lr_schedulers = []
+        for i in range(len(self.past_split)):
+            lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
+            lr_sched_kws["optimizer"] = optimizers[i]
+            lr_monitor = lr_sched_kws.pop("monitor", None)
+            # # 分类层增加学习率
+            # if i==len(self.past_split):
+            #     lr_sched_kws["base_lr"] = lr_sched_kws["base_lr"] * 10
+            #     lr_sched_kws["max_lr"] = lr_sched_kws["max_lr"] * 10
                 
-        return optimizers, {
-            "scheduler": lr_scheduler,
-            "interval": self.lr_freq["interval"],
-            "frequency": self.lr_freq["frequency"],              
-            "monitor": lr_monitor if lr_monitor is not None else "val_loss",
-        }        
+            lr_scheduler = self.create_from_cls_and_kwargs(
+                self.lr_scheduler_cls, lr_sched_kws
+            )
+            lr_scheduler_config = {
+                "scheduler": lr_scheduler,
+                "interval": self.lr_freq["interval"],
+                "frequency": self.lr_freq["frequency"],              
+                "monitor": lr_monitor if lr_monitor is not None else "val_loss",
+            } 
+            lr_schedulers.append(lr_scheduler_config)  
+        return optimizers, lr_schedulers       
 
     def create_from_cls_and_kwargs(self,cls, kws):
         try:
@@ -730,11 +735,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
         optimizers = []
         # 针对不同子模型，分别生成优化器
-        for i in range(len(self.past_split)+1):
-            if i==len(self.past_split):
-                avalabel_params = list(map(id, self.classify_vr_layer.parameters()))
-            else:
-                avalabel_params = list(map(id, self.sub_models[i].parameters()))
+        for i in range(len(self.past_split)):
+            avalabel_params = list(map(id, self.sub_models[i].parameters()))
             base_params = filter(lambda p: id(p) in avalabel_params, self.parameters())
             optimizer_kws["params"] = [
                         {'params': base_params},
@@ -742,9 +744,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                         # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
                         # {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}
                         ]
-        
             optimizer = self.create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
-            
             optimizers.append(optimizer)
         return optimizers
             
@@ -940,7 +940,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                         vr_class=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
-        names = ["pred","label","price","obv_output","obv_tar"]
+        names = ["pred","label","price","obv_output","obv_tar","rsi_output","rsi_tar"]
         # names = ["rsi_output","rsi_tar","obv_output","obv_tar"]
         
         if import_price_result is None or import_price_result.shape[0]==0:
@@ -969,8 +969,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 code_dict[ts["item_rank_code"]] = 1
                 pred_data = output_inverse[s_index]
                 pred_center_data = pred_data[:,0]
-                # pred_second_data = pred_data[:,1]
-                pred_third_data = pred_data[:,1]
+                pred_second_data = pred_data[:,1]
+                pred_third_data = pred_data[:,2]
                 # 可以从全局变量中，通过索引获得实际价格
                 df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
                                         (df_all["instrument_rank"]==ts["item_rank_code"])]            
@@ -978,19 +978,19 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 target_combine_sample = df_target["label"].values
                 pad_data = np.array([0 for i in range(self.input_chunk_length)])
                 pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
-                # pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
+                pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
                 pred_third_data = np.concatenate((pad_data,pred_third_data),axis=-1)
                 view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
                 price_class_item = result
                 price_target = df_target["label_ori"].values    
                 price_target = np.expand_dims(price_target,axis=0)    
-                second_target = df_target["RSI5"].values 
+                second_target = df_target["OBV5"].values 
                 second_target = np.expand_dims(second_target,axis=-1)  
-                third_target = df_target["OBV5"].values 
+                third_target = df_target["RSI5"].values 
                 third_target = np.expand_dims(third_target,axis=-1)              
                 view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
-                # view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
-                # view_data = np.concatenate((view_data,second_target),axis=1)  
+                view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
+                view_data = np.concatenate((view_data,second_target),axis=1)  
                 view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
                 view_data = np.concatenate((view_data,third_target),axis=1)  
                 # view_data = view_data[:,3:]
