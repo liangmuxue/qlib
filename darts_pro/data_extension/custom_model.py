@@ -940,7 +940,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                         vr_class=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
-        names = ["pred","label","price","obv_output","obv_tar","rsi_output","rsi_tar"]
+        names = ["pred","label","price","obv_output","obv_tar","kdj_output","kdj_tar"]
         # names = ["rsi_output","rsi_tar","obv_output","obv_tar"]
         
         if import_price_result is None or import_price_result.shape[0]==0:
@@ -986,7 +986,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 price_target = np.expand_dims(price_target,axis=0)    
                 second_target = df_target["OBV5"].values 
                 second_target = np.expand_dims(second_target,axis=-1)  
-                third_target = df_target["RSI5"].values 
+                third_target = df_target["KDJ_J"].values 
                 third_target = np.expand_dims(third_target,axis=-1)              
                 view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
                 view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
