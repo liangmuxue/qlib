@@ -26,6 +26,7 @@ from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from joblib import Parallel, delayed
 
+from .series_data_utils import StatDataAssis
 from cus_utils.encoder_cus import StockNormalizer,unverse_transform_slope_value
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute,slope_classify_compute_batch
@@ -190,7 +191,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
             self.criterion = UncertaintyLoss(device=device) 
                     
         self.val_results = {}
-        
+        # 辅助数据功能
+        self.data_assis = StatDataAssis()
         # 优化器执行频次
         self.lr_freq = {"interval":"step","frequency":88}
                 
@@ -273,6 +275,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         """performs the training step"""
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
+        if self.current_epoch==0:
+            self.data_assis.build_filter_target_data(train_batch,batch_idx,type="train")
+            # return torch.randn(1, requires_grad=True).cuda()
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
         # 包括第一及第二部分数值数据,以及分类数据
         (output,vr_class) = self._produce_train_output(train_batch[:5])
@@ -304,11 +309,17 @@ class _TFTCusModule(PLMixedCovariatesModule):
         #     opt.step()
         #     opt.zero_grad()
         return loss
-
+    
+    def on_train_epoch_end(self):
+        if self.current_epoch==0:
+            self.data_assis.finish_build_target(type="train")
+        
     def on_validation_epoch_start(self):
         self.import_price_result = None
         
     def on_validation_epoch_end(self):
+        if self.current_epoch==0:
+            self.data_assis.finish_build_target(type="valid")        
         # SANITY CHECKING模式下，不进行处理
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
             return
@@ -327,7 +338,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 print("cnt:{} with score:{},total_cnt:{},rate:{}".format(cnt,i,total_cnt,rate))
                 self.log("score_{} rate".format(i), rate, prog_bar=True) 
             self.log("total cnt", total_cnt, prog_bar=True)  
-        
         # # 动态冻结网络参数
         # corr_loss = self.trainer.callback_metrics["val_corr_loss"]
         # mse_loss = self.trainer.callback_metrics["val_mse_loss"]
@@ -347,6 +357,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         # 只关注重点部分
         val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
+        if self.current_epoch==0:
+            self.data_assis.build_filter_target_data(val_batch,batch_idx,type="valid")       
         # val_batch = val_batch_ori
         (output,vr_class) = self._produce_train_output(val_batch[:5])
         past_target = val_batch[0]
@@ -1759,13 +1771,13 @@ class TFTExtModel(MixedCovariatesTorchModel):
             # 训练部分数据增强
             rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8]) 
             batch.append(rtn_item) 
-            for i in range(2):
-                b_rebuild = self.dynamic_build_training_data(batch_item)
-                # 不符合要求则不增强
-                if b_rebuild is None:
-                    continue
-                adj_max_cnt += 1
-                batch.append(b_rebuild)   
+            # for i in range(2):
+            #     b_rebuild = self.dynamic_build_training_data(batch_item)
+            #     # 不符合要求则不增强
+            #     if b_rebuild is None:
+            #         continue
+            #     adj_max_cnt += 1
+            #     batch.append(b_rebuild)   
             return max_cnt,adj_max_cnt
         # 过滤不符合条件的记录
         for b in ori_batch:
