@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 def test_tensor():
+    a = torch.randn(1, requires_grad=True).cuda()
     y = torch.tensor([31,-3],dtype=torch.float).cuda()
     n = y.where(y > 30.0 ,y.log())   
     print(n)
@@ -35,7 +36,7 @@ def test_softmax():
     print(index)
           
 if __name__ == "__main__":
-    # test_tensor()    
+    test_tensor()    
     # test_embedding()
     # test_zip()
-    test_softmax()
+    # test_softmax()

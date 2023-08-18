@@ -24,7 +24,6 @@ from numba.core.types import none
 from cus_utils.db_accessor import DbAccessor
 
 from cus_utils.log_util import AppLogger
-from gym import logger
 logger = AppLogger()
 
 class TFTSeriesDataset(TFTDataset):
