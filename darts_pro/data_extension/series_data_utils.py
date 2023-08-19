@@ -119,20 +119,25 @@ class StatDataAssis():
         
         if type=="train":
             target_data = self.target_data_train
-            output_data = self.output_data_train   
             target_class_data = self.target_class_data_train             
         else:
             target_data = self.target_data_valid
-            output_data = self.output_data_valid 
             target_class_data = self.target_class_data_valid            
         
         data_filepath = "{}/data_{}.npy".format(self.filepath,type)
         class_filepath = "{}/class_{}.npy".format(self.filepath,type)
-        output_filepath = "{}/output_{}.npy".format(self.filepath,type)
         np.save(data_filepath,target_data)
         np.save(class_filepath,target_class_data)
+        
+    def finish_build_output(self,type="train"):   
+        if type=="train":
+            output_data = self.output_data_train   
+        else:
+            output_data = self.output_data_valid 
+        
+        output_filepath = "{}/output_{}.npy".format(self.filepath,type)
         np.save(output_filepath,output_data)
-      
+                    
     def view_data(self):
         viz = TensorViz(env="stat_knn_data")
         
@@ -155,7 +160,7 @@ class StatDataAssis():
         # price_array = X[:,:,-1]
         # raise_range = (price_array[:,-1] - price_array[:,0])/price_array[:,0]*100
         # y_real = [get_simple_class(rr) for rr in raise_range]
-        train_end = 10000
+        train_end = 1000
         X = X[:train_end,:,:]
         y = y[:train_end]
         # y_test = y[train_end:test_start]
@@ -193,6 +198,7 @@ class StatDataAssis():
         X = X[:train_end,:,:]
         y = y[:train_end]
         output = output[:train_end,:,:2]
+        # output = X[:,:,:2]
         # y_test = y[train_end:test_start]
         # predicted_labels,X_test,y_test = self.predict_data(X,y)
         predicted_labels = self.fit_pred_data(output)
@@ -227,7 +233,7 @@ class StatDataAssis():
         X_test_ori = X[train_end:,:,:]
         y_train = y[:train_end]
         y_test = y[train_end:]
-        knn_clf = KNeighborsTimeSeriesClassifier(n_neighbors=5, metric="softdtw")
+        knn_clf = KNeighborsTimeSeriesClassifier(n_neighbors=4, metric="softdtw")
         logger.debug("begin fit")
         knn_clf.fit(X_train, y_train)
         predicted_labels = knn_clf.predict(X_test)    
@@ -281,6 +287,6 @@ class StatDataAssis():
 if __name__ == "__main__":       
     data_assis = StatDataAssis()
     # data_assis.view_data()
-    data_assis.analysis_data()
-    # data_assis.analysis_output_data()
+    # data_assis.analysis_data()
+    data_assis.analysis_output_data()
         

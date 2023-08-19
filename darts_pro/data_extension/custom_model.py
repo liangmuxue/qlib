@@ -61,10 +61,9 @@ viz_result_suc = TensorViz(env="train_result_suc")
 viz_result_fail = TensorViz(env="train_result_fail")
 viz_result_nor = TensorViz(env="train_result_nor")
 viz_input_aug = TensorViz(env="data_train_aug")
-viz_input_nag_aug = TensorViz(env="data_train_nag_aug")
+viz_target = TensorViz(env="data_target")
 
 hide_target = True
-asis_mode = False
 
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
@@ -276,16 +275,11 @@ class _TFTCusModule(PLMixedCovariatesModule):
         """performs the training step"""
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        if self.current_epoch==0 and asis_mode:
-            self.data_assis.build_filter_target_data(train_batch,batch_idx,type="train")
-            # return torch.randn(1, requires_grad=True).cuda()
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
         # 包括第一及第二部分数值数据,以及分类数据
         (output,vr_class) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
         scaler,target_class,target,target_info = train_batch[5:]
-        if self.current_epoch==0 and asis_mode:
-            self.data_assis.build_output_data(output,batch_idx,type="train")        
         target_class = target_class[:,:,0]
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
@@ -306,29 +300,21 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
-        
-        if self.current_epoch==0:
-            output_combine = [output_item[:,:,0,0] for output_item in output]
-            output_combine = torch.stack(output_combine,dim=2).detach().cpu().numpy()            
-            output_inverse = self.get_inverse_data(output_combine,target_info=target_info,scaler=scaler)
-            self.data_assis.build_output_data(output_inverse,batch_idx,type="train")   
+  
         return loss
     
     def on_train_epoch_end(self):
-        if self.current_epoch==0 and asis_mode:
-            self.data_assis.finish_build_target(type="train")
+        pass
+        # if self.current_epoch==0 and asis_mode:
+        #     self.data_assis.finish_build_target(type="train")
         
     def on_validation_epoch_start(self):
         self.import_price_result = None
         
     def on_validation_epoch_end(self):
-        if self.current_epoch==0 and asis_mode:
-            self.data_assis.finish_build_target(type="valid")        
         # SANITY CHECKING模式下，不进行处理
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
-            return
-        if self.current_epoch==0:
-            self.data_assis.finish_build_target(type="valid")           
+            return    
         if self.import_price_result is not None:
             res_group = self.import_price_result.groupby("result")
             ins_unique = res_group.nunique()
@@ -413,9 +399,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
-        # self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
-        #                      target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-        #                     last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+        self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
+                             target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+                            last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         
         # 累加结果集，后续统计   
         if self.import_price_result is None:
@@ -428,19 +414,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
                 self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
         self._calculate_metrics(output, target, self.val_metrics)
-        
-        if self.current_epoch==0:
-            self.data_assis.build_filter_target_data(val_batch,batch_idx,type="valid")   
-            self.data_assis.build_output_data(output_inverse,batch_idx,type="valid")            
             
-        # 记录相关统计数据
-        # cr_loss = round(cross_loss.item(),5)
-        cr_loss = 0
-        # record_results = {"val_loss":round(loss.item(),5),"val_corr_loss":round(corr_loss.item(),5),
-        #                       "ce_loss":cr_loss,"value_diff_loss":round(value_diff_loss.item(),5),
-        #                       "value_range_loss":round(value_range_loss.item(),5),"vr_acc":round(vr_acc.item(),5),
-        #                       "import_vr_acc":round(import_vr_acc.item(),5)}
-        # self.process_val_results(record_results,self.current_epoch)
         return loss
  
     def filter_batch_by_condition(self,val_batch,filter_conv_index=0,rev_threhold=3,recent_threhold=3):
@@ -540,7 +514,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,label_threhold=1,target_info=None,output_inverse=None,vr_class=None,target_vr_class=None):
+    def compute_real_class_acc(self,label_threhold=3,target_info=None,output_inverse=None,vr_class=None,target_vr_class=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
@@ -569,7 +543,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 综合判别
-        import_index_bool = output_import_index_bool & second_index_bool
+        import_index_bool = output_import_index_bool # & second_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -957,27 +931,37 @@ class _TFTCusModule(PLMixedCovariatesModule):
                                 
     def val_metric_show(self,output,target,price_class,target_vr_class,output_inverse=None,
                         vr_class=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
-        dataset = global_var.get_value("dataset")
-        df_all = dataset.df_all
-        names = ["pred","label","price","obv_output","obv_tar","kdj_output","kdj_tar"]
-        # names = ["rsi_output","rsi_tar","obv_output","obv_tar"]
         
         if import_price_result is None or import_price_result.shape[0]==0:
             return
-        import_index,instrument_index = np.unique(import_price_result,axis=1,return_index=True)
-
-        code_dict = {}
-        idx_suc = 0
-        idx_nag = 0 
-        idx_nor = 0
-        date_str = "20230313"
+        # if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
+        #     return 
+        
+        dataset = global_var.get_value("dataset")
+        df_all = dataset.df_all
+        names = ["pred","label","price","obv_output","obv_tar","kdj_output","kdj_tar"]               
         result = []
+        
         # viz_result_suc.remove_env()
         # viz_result_nor.remove_env()
         # viz_result_fail.remove_env()
               
         res_group = import_price_result.groupby("result")
 
+        target_imp_index = np.where(target_vr_class==3)[0]
+        if target_imp_index.shape[0]>0:
+            for i in range(15):
+                rand_index = np.random.randint(0,target_imp_index.shape[0]-1)
+                s_index = target_imp_index[rand_index]
+                ts = target_info[s_index]
+                pred_data = output_inverse[s_index]
+                pred_center_data = pred_data[:,0]
+                pred_second_data = pred_data[:,1]            
+                df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
+                                        (df_all["instrument_rank"]==ts["item_rank_code"])]   
+                win = "win_target_{}".format(batch_idx,i)
+                self.draw_row(pred_center_data, pred_second_data, df_target=df_target, ts=ts, names=names,viz=viz_target,win=win)
+                            
         for result,group in res_group:
             r_index = -1
             unique_group = group.drop_duplicates(subset=['instrument'], keep='first')
@@ -985,45 +969,13 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 r_index += 1
                 s_index = row["imp_index"]
                 ts = target_info[s_index]
-                code_dict[ts["item_rank_code"]] = 1
                 pred_data = output_inverse[s_index]
                 pred_center_data = pred_data[:,0]
                 pred_second_data = pred_data[:,1]
-                pred_third_data = pred_data[:,2]
+                # pred_third_data = pred_data[:,2]
                 # 可以从全局变量中，通过索引获得实际价格
                 df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
                                         (df_all["instrument_rank"]==ts["item_rank_code"])]            
-                # 补充画出前面的label数据
-                target_combine_sample = df_target["label"].values
-                pad_data = np.array([0 for i in range(self.input_chunk_length)])
-                pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
-                pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
-                pred_third_data = np.concatenate((pad_data,pred_third_data),axis=-1)
-                view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
-                price_class_item = result
-                price_target = df_target["label_ori"].values    
-                price_target = np.expand_dims(price_target,axis=0)    
-                second_target = df_target["OBV5"].values 
-                second_target = np.expand_dims(second_target,axis=-1)  
-                third_target = df_target["KDJ_J"].values 
-                third_target = np.expand_dims(third_target,axis=-1)              
-                view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
-                view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
-                view_data = np.concatenate((view_data,second_target),axis=1)  
-                view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
-                view_data = np.concatenate((view_data,third_target),axis=1)  
-                # view_data = view_data[:,3:]
-                x_range = np.array([i for i in range(ts["start"],ts["end"])])
-                if self.monitor is not None:
-                    instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
-                    datetime_range = self.monitor.get_datetime_with_index(instrument,ts["start"],ts["end"])
-                else:
-                    instrument = df_target["instrument"].values[0]
-                    datetime_range = x_range
-                # result.append({"instrument":instrument,"datetime":df_target["datetime"].dt.strftime('%Y%m%d').values[0]})
-                target_title = "time range:{}/{} code:{},price class:{}".format(
-                    df_target["datetime"].dt.strftime('%m%d').values[self.input_chunk_length],df_target["datetime"].dt.strftime('%m%d').values[-1],
-                    instrument,price_class_item)
                 win = "win_{}_{}".format(batch_idx,r_index)
                 if r_index>15:
                     break
@@ -1032,34 +984,47 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 elif result==0:                 
                     viz = viz_result_fail   
                 else:
-                    viz = viz_result_nor                   
-                viz.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)     
-                
-                # df_target["pred_data"] = np.concatenate((target_combine_sample[:self.input_chunk_length],pred_center_data[self.input_chunk_length:]),axis=-1)
-                # df_target["rev_pred"] = np.concatenate((rev_sample[:self.input_chunk_length],rev_out),axis=-1)
-                # primary_data = df_target
-                # primary_data.set_index("datetime",inplace=True)
-                # file_path = "custom/data/darts/result_view/{}.png".format(win)
-                # pri_cols = ["label","pred_data"]
-                # sec_cols = ["KDJ_K","KDJ_D","KDJ_J"]
-                # viz_input_2.viz_mpf_data(primary_data,pri_cols=pri_cols,sec_cols=sec_cols,target_title=target_title,file_path=file_path)
-                
-                # 最后端涨跌情况排查
-                # target_slope_unverse = unverse_transform_slope_value(target_slope) * 100     
-                # target_slope_unverse = np.expand_dims(target_slope_unverse,axis=0)
-                # slope_out_unverse = unverse_transform_slope_value(slope_out_item) * 100     
-                # slope_out_unverse = slope_out_unverse.cpu().numpy()
-                # slope_out_unverse = np.expand_dims(slope_out_unverse,axis=0)
-                # view_data = np.concatenate((target_slope_unverse,slope_out_unverse),axis=0).transpose(1,0)
-                # view_data = view_data[2:,:]
-                # bar_names = ["target","pred"]
-                # target_title = "time range:{}/{} code:{}".format(df_target["datetime"].dt.strftime('%Y%m%d').values[self.input_chunk_length],
-                #                                                  df_target["datetime"].dt.strftime('%Y%m%d').values[-1],
-                #                                                  instrument)
-                # win = "win_bar_{}".format(idx)
-                # viz_input_2.viz_data_bar(view_data,win=win,title=target_title,names=bar_names)       
-        # print("pred result:{}".format(result))
-
+                    viz = viz_result_nor  
+                self.draw_row(pred_center_data, pred_second_data, df_target=df_target, ts=ts, names=names,viz=viz,win=win)
+                      
+    def draw_row(self,pred_center_data,pred_second_data,df_target=None,ts=None,names=None,viz=None,win="win"):
+        """draw one line"""
+        
+        # 补充画出前面的label数据
+        target_combine_sample = df_target["label"].values
+        pad_data = np.array([0 for i in range(self.input_chunk_length)])
+        pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
+        pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)
+        # pred_third_data = np.concatenate((pad_data,pred_third_data),axis=-1)
+        view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
+        price_target = df_target["label_ori"].values    
+        price_target = np.expand_dims(price_target,axis=0)    
+        second_target = df_target["OBV5"].values 
+        second_target = np.expand_dims(second_target,axis=-1)  
+        # third_target = df_target["KDJ_J"].values 
+        # third_target = np.expand_dims(third_target,axis=-1)              
+        view_data = np.concatenate((view_data,price_target.transpose(1,0)),axis=1) 
+        view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
+        view_data = np.concatenate((view_data,second_target),axis=1)  
+        # view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
+        # view_data = np.concatenate((view_data,third_target),axis=1)  
+        # view_data = view_data[:,3:]
+        x_range = np.array([i for i in range(ts["start"],ts["end"])])
+        if self.monitor is not None:
+            instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
+            datetime_range = self.monitor.get_datetime_with_index(instrument,ts["start"],ts["end"])
+        else:
+            instrument = df_target["instrument"].values[0]
+            datetime_range = x_range
+        price_array = ts["price_array"]
+        price_class_item = compute_price_class(price_array,mode="first_last")
+        # result.append({"instrument":instrument,"datetime":df_target["datetime"].dt.strftime('%Y%m%d').values[0]})
+        target_title = "time range:{}/{} code:{},price class:{}".format(
+            df_target["datetime"].dt.strftime('%m%d').values[self.input_chunk_length],df_target["datetime"].dt.strftime('%m%d').values[-1],
+            instrument,price_class_item)
+                  
+        viz.viz_matrix_var(view_data,win=win,title=target_title,names=names,x_range=datetime_range)            
+    
     def vr_metric_show(self,target_info=None,last_vr_class_certainlys=None,last_target_vr_class=None):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
