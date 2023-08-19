@@ -3,6 +3,8 @@ import pandas as pd
 from darts.timeseries import TimeSeries
 import xarray as xr
 import torch
+
+import joblib
 from sklearn.metrics import accuracy_score
 import sklearn.neighbors
 from tslearn.generators import random_walk_blobs
@@ -101,32 +103,35 @@ class StatDataAssis():
         else:
             target_data = self.output_data_valid
         
-        output = output[0].cpu().numpy()
+        # output = [output_item[:,:,0,0].detach().cpu().numpy() for output_item in output]
+        # output = np.stack(output,axis=-1)
         if target_data is None:
             target_data = output
         else:
             target_data = np.concatenate((target_data,output),axis=0)
 
         if type=="train":
-            self.target_data_train = target_data
+            self.output_data_train = target_data
         else:
-            self.target_data_valid = target_data
+            self.output_data_valid = target_data
                                 
     def finish_build_target(self,type="train"):    
         
         if type=="train":
-            df_target_all = self.df_target_train
             target_data = self.target_data_train
+            output_data = self.output_data_train   
             target_class_data = self.target_class_data_train             
         else:
-            df_target_all = self.df_target_valid
             target_data = self.target_data_valid
+            output_data = self.output_data_valid 
             target_class_data = self.target_class_data_valid            
         
         data_filepath = "{}/data_{}.npy".format(self.filepath,type)
         class_filepath = "{}/class_{}.npy".format(self.filepath,type)
+        output_filepath = "{}/output_{}.npy".format(self.filepath,type)
         np.save(data_filepath,target_data)
         np.save(class_filepath,target_class_data)
+        np.save(output_filepath,output_data)
       
     def view_data(self):
         viz = TensorViz(env="stat_knn_data")
@@ -150,21 +155,24 @@ class StatDataAssis():
         # price_array = X[:,:,-1]
         # raise_range = (price_array[:,-1] - price_array[:,0])/price_array[:,0]*100
         # y_real = [get_simple_class(rr) for rr in raise_range]
-        train_end = 300
+        train_end = 10000
         X = X[:train_end,:,:]
         y = y[:train_end]
         # y_test = y[train_end:test_start]
         # predicted_labels,X_test,y_test = self.predict_data(X,y)
-        predicted_labels,X_test,y_test = self.fit_pred_data(X,y)
+        predicted_labels,X_test,y_test = self.fit_target_data(X,y)
+        # self.fit_pred_data_batch(X,y)
         predicted_labels_imp_index = np.where(predicted_labels==3)[0]
         acc_cnt = np.sum(y_test[predicted_labels_imp_index]==3)
         acc_rate = acc_cnt/predicted_labels_imp_index.shape[0]
+        total_imp_acc = np.sum(y_test==3)
         logger.debug("Correct classification rate:{}".format(accuracy_score(y_test, predicted_labels)))    
-        logger.debug("important Correct classification cnt:{}, rate:{}".format(acc_cnt,acc_rate))  
+        logger.debug("important Correct classification cnt:{}, rate:{},total_cnt:{}".format(acc_cnt,acc_rate,total_imp_acc))  
         viz = TensorViz(env="stat_pred_data")
         names = ["label","obv","price"]
         for i in range(10):  
-            idx = predicted_labels_imp_index[i]
+            rand_index = np.random.randint(0,predicted_labels_imp_index.shape[0]-1)
+            idx = predicted_labels_imp_index[rand_index]
             view_data = np.concatenate((X_test[idx,:,:2],X_test[idx,:,-1:]),axis=-1)
             label = y_test[idx]
             pred = int(predicted_labels[idx])
@@ -172,8 +180,45 @@ class StatDataAssis():
             win = "ana_pred_win_{}".format(i)
             title = "class_{},pred_{}".format(label,pred)
             viz.viz_matrix_var(view_data,win=win,title=title,names=names)          
-    
-    def fit_pred_data(self,X,y):
+
+    def analysis_output_data(self):
+        X = np.load("custom/data/asis/data_train.npy")
+        y = np.load("custom/data/asis/class_train.npy")[:,0,0]
+        output = np.load("custom/data/asis/output_train.npy")
+        
+        # price_array = X[:,:,-1]
+        # raise_range = (price_array[:,-1] - price_array[:,0])/price_array[:,0]*100
+        # y_real = [get_simple_class(rr) for rr in raise_range]
+        train_end = 300
+        X = X[:train_end,:,:]
+        y = y[:train_end]
+        output = output[:train_end,:,:2]
+        # y_test = y[train_end:test_start]
+        # predicted_labels,X_test,y_test = self.predict_data(X,y)
+        predicted_labels = self.fit_pred_data(output)
+        # self.fit_pred_data_batch(X,y)
+        predicted_labels_imp_index = np.where(predicted_labels==3)[0]
+        acc_cnt = np.sum(y[predicted_labels_imp_index]==3)
+        acc_rate = acc_cnt/predicted_labels_imp_index.shape[0]
+        total_imp_acc = np.sum(y==3)
+        logger.debug("Correct classification rate:{}".format(accuracy_score(y, predicted_labels)))    
+        logger.debug("important Correct classification cnt:{}, rate:{},total_cnt:{}".format(acc_cnt,acc_rate,total_imp_acc))  
+        viz = TensorViz(env="stat_pred_data")
+        names = ["label","obv","price","pred_label","pred_obv"]
+        for i in range(10):  
+            rand_index = np.random.randint(0,predicted_labels_imp_index.shape[0]-1)
+            idx = predicted_labels_imp_index[rand_index]
+            output_item = output[idx]
+            view_data = np.concatenate((X[idx,:,:2],X[idx,:,-1:]),axis=-1)
+            view_data = np.concatenate((view_data,output_item[:,:2]),axis=-1)
+            label = y[idx]
+            pred = int(predicted_labels[idx])
+            # view_data = view_data.transpose(1,0)
+            win = "ana_pred_win_{}".format(i)
+            title = "class_{},pred_{}".format(label,pred)
+            viz.viz_matrix_var(view_data,win=win,title=title,names=names) 
+                
+    def fit_target_data(self,X,y):
         scaler = TimeSeriesScalerMinMax(value_range=(0., 1.))
         X_scaled = scaler.fit_transform(X[:,:,:2])       
         train_end = X_scaled.shape[0]//3*2
@@ -182,12 +227,40 @@ class StatDataAssis():
         X_test_ori = X[train_end:,:,:]
         y_train = y[:train_end]
         y_test = y[train_end:]
-        knn_clf = KNeighborsTimeSeriesClassifier(n_neighbors=4, metric="softdtw")
+        knn_clf = KNeighborsTimeSeriesClassifier(n_neighbors=5, metric="softdtw")
         logger.debug("begin fit")
         knn_clf.fit(X_train, y_train)
         predicted_labels = knn_clf.predict(X_test)    
+        model_path = "{}/knn_clf.model".format(self.filepath)
+        joblib.dump(knn_clf, model_path)        
         return predicted_labels,X_test_ori,y_test
+
+    def fit_pred_data(self,output):
+        model_path = "{}/knn_clf.model".format(self.filepath)
+        knn_clf = joblib.load(model_path)
+        logger.debug("begin pred")
+        predicted_labels = knn_clf.predict(output)    
+        return predicted_labels
     
+    def fit_pred_data_batch(self,X,y):
+        scaler = TimeSeriesScalerMinMax(value_range=(0., 1.))
+        X_scaled = scaler.fit_transform(X[:,:,:2])      
+        knn_clf = KNeighborsTimeSeriesClassifier(n_neighbors=4, metric="softdtw")
+        batch_size = 1000
+        epoch_num = X_scaled.shape[0]//batch_size - 1
+        logger.debug("begin fit")
+        for epoch in range(epoch_num):
+            start = batch_size*epoch
+            end = batch_size*epoch + batch_size
+            X_train = X_scaled[start:end,:,:]
+            y_train = y[start:end]
+            knn_clf.partial_fit(X_train, y_train)
+            logger.debug("fit epoch:{}".format(epoch))
+        
+        model_path = "{}/knn_clf.model".format(self.filepath)
+        joblib.dump(knn_clf, model_path)
+        logger.debug("fit_pred_data_batch ok")
+        
     def predict_data(self,X,y):
         predicted_labels = np.ones(X.shape[0])
         data = X[:,:,0]
@@ -209,4 +282,5 @@ if __name__ == "__main__":
     data_assis = StatDataAssis()
     # data_assis.view_data()
     data_assis.analysis_data()
+    # data_assis.analysis_output_data()
         
