@@ -5,6 +5,7 @@ import torch
 import torchmetrics
 from torch import Tensor
 import numpy as np
+from tslearn.metrics import SoftDTWLossPyTorch
 
 from cus_utils.common_compute import normalization
 from cus_utils.encoder_cus import transform_slope_value
@@ -98,6 +99,7 @@ class UncertaintyLoss(nn.Module):
         self.vr_loss = nn.CrossEntropyLoss()
         self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
         self.scope_loss = nn.CrossEntropyLoss()
+        self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
         # 设置损失函数的组合模式
         self.loss_mode = 0
 
@@ -111,8 +113,8 @@ class UncertaintyLoss(nn.Module):
         first_label = target[:,:,0]
         second_input = input[1][:,:,0]
         second_label = target[:,:,1]     
-        third_input = input[2][:,:,0]
-        third_label = target[:,:,2]          
+        # third_input = input[2][:,:,0]
+        # third_label = target[:,:,2]          
         # 如果是似然估计下的数据，需要取中间值
         # 相关系数损失
         corr_loss = 0.0   
@@ -135,20 +137,20 @@ class UncertaintyLoss(nn.Module):
 
         # 不同阶段使用不同的损失函数组合
         if optimizers_idx==0:
-            corr_loss = self.ccc_loss_comp(first_input, first_label)
+            corr_loss = self.compute_dtw_loss(first_input, first_label)
             loss_sum = corr_loss
         if optimizers_idx==1:
-            mse_loss = self.ccc_loss_comp(second_input, second_label) 
+            mse_loss = self.compute_dtw_loss(second_input, second_label) 
             loss_sum = mse_loss
         if optimizers_idx==2:
-            value_diff_loss = self.ccc_loss_comp(third_input,third_label) 
+            # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
             # ce_loss = self.vr_loss(vr_class, target_class[:,0])
             loss_sum = value_diff_loss            
         # 验证推理阶段使用全部损失
         if optimizers_idx==-1:   
-            corr_loss = self.ccc_loss_comp(first_input, first_label)
-            mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            value_diff_loss = self.ccc_loss_comp(third_input,third_label) 
+            corr_loss = self.compute_dtw_loss(first_input, first_label)
+            mse_loss = self.compute_dtw_loss(second_input, second_label) 
+            # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
             loss_sum = corr_loss + mse_loss + value_diff_loss                      
         
         return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
@@ -180,7 +182,13 @@ class UncertaintyLoss(nn.Module):
         ccc = numerator/denominator
         ccc_loss = 1 - ccc
         return ccc_loss
-           
+    
+    def compute_dtw_loss(self,input,target):
+        input_real = torch.unsqueeze(input,-1)
+        target_real = torch.unsqueeze(target,-1)
+        loss = self.dtw_loss(input_real, target_real).mean()       
+        return loss
+          
 # if __name__ == '__main__':
 #     weighted_loss_func = UncertaintyLoss(2)
 #     weighted_loss_func.to(device)

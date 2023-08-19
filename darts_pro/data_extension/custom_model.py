@@ -64,6 +64,7 @@ viz_input_aug = TensorViz(env="data_train_aug")
 viz_input_nag_aug = TensorViz(env="data_train_nag_aug")
 
 hide_target = True
+asis_mode = False
 
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
@@ -275,7 +276,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         """performs the training step"""
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        if self.current_epoch==0:
+        if self.current_epoch==0 and asis_mode:
             self.data_assis.build_filter_target_data(train_batch,batch_idx,type="train")
             # return torch.randn(1, requires_grad=True).cuda()
         # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
@@ -283,7 +284,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         (output,vr_class) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
         scaler,target_class,target,target_info = train_batch[5:]
-        if self.current_epoch==0:
+        if self.current_epoch==0 and asis_mode:
             self.data_assis.build_output_data(output,batch_idx,type="train")        
         target_class = target_class[:,:,0]
         # 给criterion对象设置epoch数量。用于动态loss策略
@@ -294,7 +295,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("m1_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
         self.log("m2_lr",self.trainer.optimizers[1].param_groups[0]["lr"])
-        self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
+        # self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
         # self.log("mean_threhold",mean_threhold,batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -313,14 +314,14 @@ class _TFTCusModule(PLMixedCovariatesModule):
         return loss
     
     def on_train_epoch_end(self):
-        if self.current_epoch==0:
+        if self.current_epoch==0 and asis_mode:
             self.data_assis.finish_build_target(type="train")
         
     def on_validation_epoch_start(self):
         self.import_price_result = None
         
     def on_validation_epoch_end(self):
-        if self.current_epoch==0:
+        if self.current_epoch==0 and asis_mode:
             self.data_assis.finish_build_target(type="valid")        
         # SANITY CHECKING模式下，不进行处理
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
@@ -412,9 +413,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
         # self.vr_metric_show(target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
-        self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
-                             target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                            last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+        # self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
+        #                      target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+        #                     last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         
         # 累加结果集，后续统计   
         if self.import_price_result is None:
@@ -544,7 +545,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         output_label_inverse = output_inverse[:,:,0] 
         # output_second_inverse = output_inverse[:,:,1]
         output_second_inverse = output_inverse[:,:,1]
-        output_third_inverse = output_inverse[:,:,2]
+        # output_third_inverse = output_inverse[:,:,2]
                  
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
@@ -554,8 +555,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 辅助指标判断
         second_index_bool = (output_second_inverse[:,-1] - output_second_inverse[:,0]) > 0.5
         # 整体上升幅度与振幅差值较小
-        second_max = np.max(output_third_inverse,axis=-1)
-        second_min = np.min(output_third_inverse,axis=-1)        
+        second_max = np.max(output_second_inverse,axis=-1)
+        second_min = np.min(output_second_inverse,axis=-1)        
         second_index_bool = second_index_bool & (((output_second_inverse[:,-1] - output_second_inverse[:,0])/(second_max - second_min))>0.5)
         # 最后一个值大于0
         second_index_bool = second_index_bool & (output_second_inverse[:,-1]>0)
