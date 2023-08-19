@@ -283,8 +283,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         (output,vr_class) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
         scaler,target_class,target,target_info = train_batch[5:]
-        if self.current_epoch==0:
-            self.data_assis.build_output_data(output,batch_idx,type="train")        
         target_class = target_class[:,:,0]
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
@@ -299,17 +297,18 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.custom_histogram_adder(batch_idx)
-        self._calculate_metrics(output, target, self.train_metrics)
+        # self._calculate_metrics(output, target, self.train_metrics)
         # mse损失
         self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
         
-        # self.manual_backward(loss)
-        # if (batch_idx + 1) % self.lr_freq["frequency"] == 0:
-        #     opt.step()
-        #     opt.zero_grad()
+        if self.current_epoch==0:
+            output_combine = [output_item[:,:,0,0] for output_item in output]
+            output_combine = torch.stack(output_combine,dim=2).detach().cpu().numpy()            
+            output_inverse = self.get_inverse_data(output_combine,target_info=target_info,scaler=scaler)
+            self.data_assis.build_output_data(output_inverse,batch_idx,type="train")   
         return loss
     
     def on_train_epoch_end(self):
@@ -320,11 +319,11 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.import_price_result = None
         
     def on_validation_epoch_end(self):
-        if self.current_epoch==0:
-            self.data_assis.finish_build_target(type="valid")        
         # SANITY CHECKING模式下，不进行处理
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
             return
+        if self.current_epoch==0:
+            self.data_assis.finish_build_target(type="valid")           
         if self.import_price_result is not None:
             res_group = self.import_price_result.groupby("result")
             ins_unique = res_group.nunique()
@@ -359,8 +358,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         # 只关注重点部分
         val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
-        if self.current_epoch==0:
-            self.data_assis.build_filter_target_data(val_batch,batch_idx,type="valid")       
         # val_batch = val_batch_ori
         (output,vr_class) = self._produce_train_output(val_batch[:5])
         past_target = val_batch[0]
@@ -428,6 +425,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
         self._calculate_metrics(output, target, self.val_metrics)
         
+        if self.current_epoch==0:
+            self.data_assis.build_filter_target_data(val_batch,batch_idx,type="valid")   
+            self.data_assis.build_output_data(output_inverse,batch_idx,type="valid")            
+            
         # 记录相关统计数据
         # cr_loss = round(cross_loss.item(),5)
         cr_loss = 0
