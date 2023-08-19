@@ -412,7 +412,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
-        # self.vr_metric_show(target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,last_target_vr_class=last_target_vr_class)
         # self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
         #                      target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
         #                     last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
