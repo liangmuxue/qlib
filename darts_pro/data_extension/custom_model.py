@@ -25,6 +25,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from joblib import Parallel, delayed
+import joblib
 
 from .series_data_utils import StatDataAssis
 from cus_utils.encoder_cus import StockNormalizer,unverse_transform_slope_value
@@ -39,6 +40,7 @@ from torchmetrics import MeanSquaredError
 from sklearn.preprocessing import MinMaxScaler
 import tsaug
 from losses.mtl_loss import UncertaintyLoss,MseLoss
+
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -64,6 +66,7 @@ viz_input_aug = TensorViz(env="data_train_aug")
 viz_target = TensorViz(env="data_target")
 
 hide_target = True
+knn_clf = joblib.load("custom/data/asis/knn_clf.model")
 
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
@@ -195,7 +198,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.data_assis = StatDataAssis()
         # 优化器执行频次
         self.lr_freq = {"interval":"step","frequency":88}
-                
+
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]
     ) -> torch.Tensor:
@@ -310,6 +313,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
     def on_validation_epoch_start(self):
         self.import_price_result = None
+        self.total_imp_cnt = 0
         
     def on_validation_epoch_end(self):
         # SANITY CHECKING模式下，不进行处理
@@ -330,6 +334,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 print("cnt:{} with score:{},total_cnt:{},rate:{}".format(cnt,i,total_cnt,rate))
                 self.log("score_{} rate".format(i), rate, prog_bar=True) 
             self.log("total cnt", total_cnt, prog_bar=True)  
+        self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
         # # 动态冻结网络参数
         # corr_loss = self.trainer.callback_metrics["val_corr_loss"]
         # mse_loss = self.trainer.callback_metrics["val_mse_loss"]
@@ -380,7 +385,11 @@ class _TFTCusModule(PLMixedCovariatesModule):
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,instrument_acc,instrument_nag,import_price_result \
              = self.compute_real_class_acc(output_inverse=output_inverse,vr_class=vr_class.cpu().numpy(),
                                            target_vr_class=target_vr_class,target_info=target_info)   
-        
+        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        if self.total_imp_cnt==0:
+            self.total_imp_cnt = total_imp_cnt
+        else:
+            self.total_imp_cnt += total_imp_cnt
                 
         self.log("import_vr_acc", import_vr_acc, batch_size=val_batch[0].shape[0], prog_bar=True)    
         self.log("import_recall", import_recall, batch_size=val_batch[0].shape[0], prog_bar=True)   
@@ -542,8 +551,13 @@ class _TFTCusModule(PLMixedCovariatesModule):
         second_index_bool = second_index_bool & (output_second_inverse[:,-1]>output_second_inverse[:,-2])        
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
+        # 使用knn分类模式判别
+        print("begin knn_clf")
+        predicted_labels = knn_clf.predict(output_inverse)
+        print("begin end")
+        import_index_bool = predicted_labels==3
         # 综合判别
-        import_index_bool = output_import_index_bool # & second_index_bool
+        # import_index_bool = second_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -934,8 +948,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         if import_price_result is None or import_price_result.shape[0]==0:
             return
-        # if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
-        #     return 
+        if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
+            return 
         
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
@@ -947,7 +961,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # viz_result_fail.remove_env()
               
         res_group = import_price_result.groupby("result")
-
         target_imp_index = np.where(target_vr_class==3)[0]
         if target_imp_index.shape[0]>0:
             for i in range(15):
@@ -1016,7 +1029,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         else:
             instrument = df_target["instrument"].values[0]
             datetime_range = x_range
-        price_array = ts["price_array"]
+        price_array = ts["price_array"][-5:]
         price_class_item = compute_price_class(price_array,mode="first_last")
         # result.append({"instrument":instrument,"datetime":df_target["datetime"].dt.strftime('%Y%m%d').values[0]})
         target_title = "time range:{}/{} code:{},price class:{}".format(
@@ -1743,13 +1756,15 @@ class TFTExtModel(MixedCovariatesTorchModel):
             # 训练部分数据增强
             rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8]) 
             batch.append(rtn_item) 
-            # for i in range(2):
-            #     b_rebuild = self.dynamic_build_training_data(batch_item)
-            #     # 不符合要求则不增强
-            #     if b_rebuild is None:
-            #         continue
-            #     adj_max_cnt += 1
-            #     batch.append(b_rebuild)   
+            # 训练阶段做增强
+            if self.trainer.state.stage==RunningStage.TRAINING:
+                for i in range(3):
+                    b_rebuild = self.dynamic_build_training_data(batch_item)
+                    # 不符合要求则不增强
+                    if b_rebuild is None:
+                        continue
+                    adj_max_cnt += 1
+                    batch.append(b_rebuild)   
             return max_cnt,adj_max_cnt
         # 过滤不符合条件的记录
         for b in ori_batch:

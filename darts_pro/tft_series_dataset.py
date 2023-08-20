@@ -108,6 +108,10 @@ class TFTSeriesDataset(TFTDataset):
         self.build_group_rank_map(df)
         return df    
     
+    def filter_by_indicator(self,df):
+        """通过指标，进一步筛选数据集"""
+        pass
+    
     def stat_value_range(self,df):
         """统计单位时间内上涨下跌幅度情况"""
         

@@ -140,7 +140,7 @@ class UncertaintyLoss(nn.Module):
             corr_loss = self.compute_dtw_loss(first_input, first_label)
             loss_sum = corr_loss
         if optimizers_idx==1:
-            mse_loss = self.compute_dtw_loss(second_input, second_label) 
+            mse_loss = self.ccc_loss_comp(second_input, second_label) 
             loss_sum = mse_loss
         if optimizers_idx==2:
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
