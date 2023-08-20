@@ -162,8 +162,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         filter_conv_index=0,
         loss_number=3,
         device="cpu",
-        monitor=None,
-        freeze_mode=0,
         **kwargs,
     ):
         # 模拟初始化，实际未使用

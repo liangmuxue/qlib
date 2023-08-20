@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from darts.timeseries import TimeSeries
 import xarray as xr
-import torch
 
 import joblib
 from sklearn.metrics import accuracy_score
@@ -16,6 +15,7 @@ from tslearn.neighbors import KNeighborsTimeSeriesClassifier, \
 from tft.class_define import CLASS_LAST_VALUES,get_simple_class,get_complex_class
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.log_util import AppLogger
+
 logger = AppLogger()
 
 def get_pred_center_value(series):
@@ -283,7 +283,9 @@ class StatDataAssis():
             index = index = np.where(condition)[0]
             predicted_labels[index] = i
         return predicted_labels,X,y
-                      
+
+    
+                          
 if __name__ == "__main__":       
     data_assis = StatDataAssis()
     # data_assis.view_data()

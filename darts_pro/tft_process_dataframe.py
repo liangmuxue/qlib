@@ -48,6 +48,7 @@ from cus_utils.data_aug import random_int_list
 from cus_utils.metrics import corr_dis,series_target_scale,diff_dis,cel_acc_compute,vr_acc_compute
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC
 from darts_pro.data_extension.custom_model import TFTExtModel
+from darts_pro.data_extension.custom_nor_model import TFTAsisModel
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 
 from cus_utils.common_compute import compute_price_class
@@ -99,13 +100,17 @@ class TftDataframeModel():
         self.kwargs = kwargs
         
         global_var._init()
-        
+
     def fit(
         self,
         dataset: TFTSeriesDataset,
     ):
         global_var.set_value("dataset", dataset)
-        
+
+        if self.type.startswith("data_asis"):
+            self.fit_data_asis(dataset)
+            return   
+                
         if self.type.startswith("pred"):
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
@@ -166,8 +171,33 @@ class TftDataframeModel():
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
+
+    def fit_data_asis(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+          
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(df_data_path)   
+        else:
+            # 生成tft时间序列数据集,包括目标数据、协变量等
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+            if self.save_dataset_file:
+                df_data_path = self.pred_data_path + "/df_all.pkl"
+                with open(df_data_path, "wb") as fout:
+                    pickle.dump(dataset.df_all, fout)   
+        emb_size = dataset.get_emb_size()
+        self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
         
-    def _build_model(self,dataset,emb_size=1000,use_model_name=True):
+        self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
+                
+    def _build_model(self,dataset,emb_size=1000,use_model_name=True,mode=0):
         """生成模型"""
         
         log_every_n_steps = self.kwargs["log_every_n_steps"]
@@ -242,42 +272,79 @@ class TftDataframeModel():
                     config,
                 )   
                 lightning_callbacks.append(callback)             
-            
-        my_model = TFTExtModel(
-            input_chunk_length=input_chunk_length,
-            output_chunk_length=self.optargs["forecast_horizon"],
-            hidden_size=64,
-            lstm_layers=1,
-            num_attention_heads=4,
-            dropout=self.optargs["dropout"],
-            batch_size=self.batch_size,
-            n_epochs=self.n_epochs,
-            add_relative_index=True,
-            add_encoders=None,
-            categorical_embedding_sizes=categorical_embedding_sizes,
-            # likelihood=QuantileRegression(
-            #     quantiles=quantiles
-            # ), 
-            likelihood=None,
-            # loss_fn=torch.nn.MSELoss(),
-            use_weighted_loss_func=True,
-            loss_number=4,
-            # torch_metrics=metric_collection,
-            random_state=42,
-            model_name=model_name,
-            force_reset=True,
-            log_tensorboard=True,
-            save_checkpoints=True,
-            past_split=past_split,
-            filter_conv_index=filter_conv_index,
-            work_dir=self.optargs["work_dir"],
-            lr_scheduler_cls=scheduler,
-            lr_scheduler_kwargs=scheduler_config,
-            optimizer_cls=optimizer_cls,
-            optimizer_kwargs=optimizer_kwargs,
-            pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
-            # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
-        )
+        
+        if mode==0:  
+            my_model = TFTExtModel(
+                    input_chunk_length=input_chunk_length,
+                    output_chunk_length=self.optargs["forecast_horizon"],
+                    hidden_size=64,
+                    lstm_layers=1,
+                    num_attention_heads=4,
+                    dropout=self.optargs["dropout"],
+                    batch_size=self.batch_size,
+                    n_epochs=self.n_epochs,
+                    add_relative_index=True,
+                    add_encoders=None,
+                    categorical_embedding_sizes=categorical_embedding_sizes,
+                    # likelihood=QuantileRegression(
+                    #     quantiles=quantiles
+                    # ), 
+                    likelihood=None,
+                    # loss_fn=torch.nn.MSELoss(),
+                    use_weighted_loss_func=True,
+                    loss_number=4,
+                    # torch_metrics=metric_collection,
+                    random_state=42,
+                    model_name=model_name,
+                    force_reset=True,
+                    log_tensorboard=True,
+                    save_checkpoints=True,
+                    past_split=past_split,
+                    filter_conv_index=filter_conv_index,
+                    work_dir=self.optargs["work_dir"],
+                    lr_scheduler_cls=scheduler,
+                    lr_scheduler_kwargs=scheduler_config,
+                    optimizer_cls=optimizer_cls,
+                    optimizer_kwargs=optimizer_kwargs,
+                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                )
+        else:
+            my_model = TFTAsisModel(
+                    input_chunk_length=input_chunk_length,
+                    output_chunk_length=self.optargs["forecast_horizon"],
+                    hidden_size=64,
+                    lstm_layers=1,
+                    num_attention_heads=4,
+                    dropout=self.optargs["dropout"],
+                    batch_size=self.batch_size,
+                    n_epochs=self.n_epochs,
+                    add_relative_index=True,
+                    add_encoders=None,
+                    categorical_embedding_sizes=categorical_embedding_sizes,
+                    # likelihood=QuantileRegression(
+                    #     quantiles=quantiles
+                    # ), 
+                    likelihood=None,
+                    # loss_fn=torch.nn.MSELoss(),
+                    use_weighted_loss_func=True,
+                    loss_number=4,
+                    # torch_metrics=metric_collection,
+                    random_state=42,
+                    model_name=model_name,
+                    force_reset=True,
+                    log_tensorboard=True,
+                    save_checkpoints=True,
+                    past_split=past_split,
+                    filter_conv_index=filter_conv_index,
+                    work_dir=self.optargs["work_dir"],
+                    lr_scheduler_cls=scheduler,
+                    lr_scheduler_kwargs=scheduler_config,
+                    optimizer_cls=optimizer_cls,
+                    optimizer_kwargs=optimizer_kwargs,
+                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                )            
         return my_model          
 
             

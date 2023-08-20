@@ -53,8 +53,8 @@ task:
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'train_dataframe'
-            n_epochs : 200
+            type: 'data_asis'
+            n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
@@ -73,7 +73,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test9_tft_500_dtwloss'
+               model_name: 'test8_tft_500_dtwloss'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
