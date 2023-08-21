@@ -276,7 +276,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         """performs the training step"""
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        # app_logger.debug("train_batch shape:{}".format(train_batch[0].shape))
+        return self.training_step_real(train_batch, batch_idx, optimizer_idx)
+    
+    def training_step_real(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
         # 包括第一及第二部分数值数据,以及分类数据
         (output,vr_class) = self._produce_train_output(train_batch[:5])
         # 目标数据里包含分类信息
@@ -303,7 +305,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
   
         return loss
-    
+        
     def on_train_epoch_end(self):
         pass
         # if self.current_epoch==0 and asis_mode:
@@ -346,13 +348,17 @@ class _TFTCusModule(PLMixedCovariatesModule):
         #         self.freeze_apply(mode=2)
         # else:
         #     self.freeze_apply(mode=0)
-                 
+
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
         # 只关注重点部分
         val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
-        # val_batch = val_batch_ori
+        return self.validation_step_real(val_batch, batch_idx)
+                                 
+    def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
+        """训练验证部分"""
+        
         (output,vr_class) = self._produce_train_output(val_batch[:5])
         past_target = val_batch[0]
         past_covariate = val_batch[1]
@@ -1464,7 +1470,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 past_covariates=val_past_covariates,
                 future_covariates=val_future_covariates,
                 max_samples_per_ts=max_samples_per_ts,
-                mode="val"
+                mode="valid"
             )
         else:
             val_dataset = None
@@ -1517,7 +1523,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
     ):
         """重载父类方法，规避相关数据检查"""
         self._fit_called = True
-        self._verify_train_dataset_type(train_dataset)
+        # self._verify_train_dataset_type(train_dataset)
 
         # Pro-actively catch length exceptions to display nicer messages
         train_length_ok, val_length_ok = True, True
