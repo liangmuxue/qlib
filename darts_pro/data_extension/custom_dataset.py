@@ -41,9 +41,11 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                          max_samples_per_ts,covariate_type,use_static_covariates)
         
         df_all = global_var.get_value("dataset").df_all
+        
         self.ass_data = {}
         for series in self.target_series:
             code = int(series.static_covariates["instrument_rank"].values[0])
+            instrument = global_var.get_value("dataset").get_group_code_by_rank(code)
             price_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label_ori"].values
             label_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
@@ -52,7 +54,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                                 &(df_all["instrument_rank"]==code)]["MACD"].values      
             kdj_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["KDJ_K"].values                                                                                    
-            self.ass_data[code] = (label_array,price_array,macd_array,kdj_array)
+            self.ass_data[code] = (instrument,label_array,price_array,macd_array,kdj_array)
             
     def __getitem__(
         self, idx
@@ -118,12 +120,13 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         past_target = target_vals[past_start:past_end]
         # 返回目标信息，用于后续调试,包括目标值，当前索引，总条目等
         code = int(target_series.static_covariates["instrument_rank"].values[0])
-        label_array = self.ass_data[code][0][past_start:future_end]
-        price_array = self.ass_data[code][1][past_start:future_end]
-        macd_array = self.ass_data[code][2][past_start:future_end]
-        kdj_array = self.ass_data[code][3][past_start:future_end]
+        instrument = self.ass_data[code][0]
+        label_array = self.ass_data[code][1][past_start:future_end]
+        price_array = self.ass_data[code][2][past_start:future_end]
+        macd_array = self.ass_data[code][3][past_start:future_end]
+        kdj_array = self.ass_data[code][4][past_start:future_end]
         # total_price_array = self.ass_data[code][past_start:future_end]
-        target_info = {"item_rank_code":code,"start":target_series.time_index[past_start],
+        target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
                        "future_start":future_start,"future_end":future_end,"price_array":price_array,"label_array":label_array,"macd_array":macd_array,
                        "kdj_array":kdj_array,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
