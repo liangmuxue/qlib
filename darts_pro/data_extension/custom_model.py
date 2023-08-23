@@ -422,7 +422,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*1000
                 import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
                 self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
-        self._calculate_metrics(output, target, self.val_metrics)
+        # self._calculate_metrics(output, target, self.val_metrics)
             
         return loss
  
@@ -523,7 +523,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,label_threhold=3,target_info=None,output_inverse=None,vr_class=None,target_vr_class=None):
+    def compute_real_class_acc(self,label_threhold=0.5,target_info=None,output_inverse=None,vr_class=None,target_vr_class=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
@@ -552,12 +552,12 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 使用knn分类模式判别
-        print("begin knn_clf")
-        predicted_labels = knn_clf.predict(output_inverse)
-        print("begin end")
-        import_index_bool = predicted_labels==3
+        # print("begin knn_clf")
+        # predicted_labels = knn_clf.predict(output_inverse)
+        # print("begin end")
+        # import_index_bool = predicted_labels==3
         # 综合判别
-        # import_index_bool = second_index_bool
+        import_index_bool = output_import_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -953,7 +953,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
-        names = ["pred","label","price","obv_output","obv_tar","kdj_output","kdj_tar"]               
+        names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
+        names = ["pred","label","price","cci_output","cci_tar"]          
         result = []
         
         # viz_result_suc.remove_env()
@@ -962,18 +963,18 @@ class _TFTCusModule(PLMixedCovariatesModule):
               
         res_group = import_price_result.groupby("result")
         target_imp_index = np.where(target_vr_class==3)[0]
-        if target_imp_index.shape[0]>0:
-            for i in range(15):
-                rand_index = np.random.randint(0,target_imp_index.shape[0]-1)
-                s_index = target_imp_index[rand_index]
-                ts = target_info[s_index]
-                pred_data = output_inverse[s_index]
-                pred_center_data = pred_data[:,0]
-                pred_second_data = pred_data[:,1]            
-                df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
-                                        (df_all["instrument_rank"]==ts["item_rank_code"])]   
-                win = "win_target_{}".format(batch_idx,i)
-                self.draw_row(pred_center_data, pred_second_data, df_target=df_target, ts=ts, names=names,viz=viz_target,win=win)
+        # if target_imp_index.shape[0]>0:
+        #     for i in range(15):
+        #         rand_index = np.random.randint(0,target_imp_index.shape[0]-1)
+        #         s_index = target_imp_index[rand_index]
+        #         ts = target_info[s_index]
+        #         pred_data = output_inverse[s_index]
+        #         pred_center_data = pred_data[:,0]
+        #         pred_second_data = pred_data[:,1]            
+        #         df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
+        #                                 (df_all["instrument_rank"]==ts["item_rank_code"])]   
+        #         win = "win_target_{}".format(batch_idx,i)
+        #         self.draw_row(pred_center_data, pred_second_data, df_target=df_target, ts=ts, names=names,viz=viz_target,win=win)
                             
         for result,group in res_group:
             r_index = -1
@@ -1012,7 +1013,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
         price_target = df_target["label_ori"].values    
         price_target = np.expand_dims(price_target,axis=0)    
-        second_target = df_target["OBV5"].values 
+        second_target = df_target["CCI5"].values 
         second_target = np.expand_dims(second_target,axis=-1)  
         # third_target = df_target["KDJ_J"].values 
         # third_target = np.expand_dims(third_target,axis=-1)              

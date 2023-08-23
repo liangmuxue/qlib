@@ -137,7 +137,7 @@ class UncertaintyLoss(nn.Module):
 
         # 不同阶段使用不同的损失函数组合
         if optimizers_idx==0:
-            corr_loss = self.compute_dtw_loss(first_input, first_label)
+            corr_loss = self.ccc_loss_comp(first_input, first_label)
             loss_sum = corr_loss
         if optimizers_idx==1:
             mse_loss = self.ccc_loss_comp(second_input, second_label) 
@@ -148,8 +148,8 @@ class UncertaintyLoss(nn.Module):
             loss_sum = value_diff_loss            
         # 验证推理阶段使用全部损失
         if optimizers_idx==-1:   
-            corr_loss = self.compute_dtw_loss(first_input, first_label)
-            mse_loss = self.compute_dtw_loss(second_input, second_label) 
+            corr_loss = self.ccc_loss_comp(first_input, first_label)
+            mse_loss = self.ccc_loss_comp(second_input, second_label) 
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
             loss_sum = corr_loss + mse_loss + value_diff_loss                      
         

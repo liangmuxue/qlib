@@ -293,6 +293,15 @@ class TftDataHandler(DataHandlerLP):
                 # 自定义威廉指数
                 fields += ["(Max($HIGH,{})-$close)/(Max($HIGH,{})-Min($LOW,{}))*100".format(d,d,d) for d in windows]
                 names += ["WR%d" % d for d in windows]      
+            if use("CCI"):
+                # 自定义顺势指标
+                for d in windows:
+                    tp_str = "($HIGH+$LOW+$close)/3"
+                    ma_str = "Mean(({}),{})".format(tp_str,d)
+                    md_str = "Mean(Abs({}-{}),{})".format(ma_str,tp_str,d)
+                    field_combine = "({}-{})/{}/0.015".format(tp_str,ma_str,md_str)   
+                    fields += [field_combine]              
+                names += ["CCI%d" % d for d in windows]                 
             if use("OBV"):
                 # 自定义能量潮指标
                 fields += ["Mean((($close-$LOW) - ($HIGH-$close))/($HIGH-$LOW)*$volume,{})".format(d) for d in windows]
