@@ -49,6 +49,7 @@ from cus_utils.metrics import corr_dis,series_target_scale,diff_dis,cel_acc_comp
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.data_extension.custom_nor_model import TFTAsisModel,TFTBatchModel
+from darts_pro.data_extension.batch_dataset import BatchDataset
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 
 from cus_utils.common_compute import compute_price_class
@@ -107,10 +108,12 @@ class TftDataframeModel():
     ):
         global_var.set_value("dataset", dataset)
 
-        if self.type.startswith("data_asis"):
-            self.fit_data_asis(dataset)
+        if self.type.startswith("build_data_asis"):
+            self.build_data_asis(dataset)
             return   
-        
+        if self.type.startswith("data_pca"):
+            self.data_pca(dataset)
+            return           
         if self.type.startswith("fit_batch"):
             self.fit_batch(dataset)
             return  
@@ -176,7 +179,7 @@ class TftDataframeModel():
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
 
-    def fit_data_asis(
+    def build_data_asis(
         self,
         dataset: TFTSeriesDataset,
     ):
@@ -201,6 +204,34 @@ class TftDataframeModel():
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
 
+    def data_pca(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        """对数据进行主成分分析"""
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+          
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(df_data_path,no_series_data=True)   
+        else:
+            # 生成tft时间序列数据集,包括目标数据、协变量等
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+            if self.save_dataset_file:
+                df_data_path = self.pred_data_path + "/df_all.pkl"
+                with open(df_data_path, "wb") as fout:
+                    pickle.dump(dataset.df_all, fout)   
+        batch_file_path = self.kwargs["batch_file_path"]
+        batch_file = "{}/train_batch.pickel".format(batch_file_path)
+        col_list = dataset.col_def["col_list"]
+        col_list.remove("label_ori")
+        col_list.remove("REV5_ORI")
+        ds = BatchDataset(batch_file,fit_names=col_list)
+        ds.build_pca_data()
+        
     def fit_batch(
         self,
         dataset: TFTSeriesDataset,
@@ -225,7 +256,7 @@ class TftDataframeModel():
         
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=3)
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=2)
                         
     def _build_model(self,dataset,emb_size=1000,use_model_name=True,mode=0):
         """生成模型"""

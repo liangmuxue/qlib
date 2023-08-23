@@ -74,7 +74,7 @@ class _TFTModuleAsis(_TFTCusModule):
                          future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
                          target.cpu().detach().numpy(),target_info]
         self.train_data += data
-        print("len(self.train_data):{}".format(len(self.train_data)))
+        # print("len(self.train_data):{}".format(len(self.train_data)))
         fake_loss = torch.ones(1,requires_grad=True).to(self.device)
         return fake_loss
 
