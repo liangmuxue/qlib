@@ -63,6 +63,7 @@ class _TFTModuleAsis(_TFTCusModule):
         self.train_data = []
         self.valid_data = []
         self.train_filepath = "custom/data/asis/train_batch.pickel"
+        self.train_part_filepath = "custom/data/asis/train_part_batch.pickel"
         self.valid_filepath = "custom/data/asis/valid_batch.pickel"
         
     def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
@@ -73,7 +74,9 @@ class _TFTModuleAsis(_TFTCusModule):
         data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
                          future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
                          target.cpu().detach().numpy(),target_info]
-        self.train_data += data
+        part_data = [target_class.cpu().detach().numpy(),target_info]
+        pickle.dump(data,self.train_fout) 
+        pickle.dump(part_data,self.train_part_fout) 
         # print("len(self.train_data):{}".format(len(self.train_data)))
         fake_loss = torch.ones(1,requires_grad=True).to(self.device)
         return fake_loss
@@ -93,6 +96,8 @@ class _TFTModuleAsis(_TFTCusModule):
      
     def on_train_start(self):  
         torch.set_grad_enabled(True)
+        self.train_fout = open(self.train_filepath, "wb")
+        self.train_part_fout = open(self.train_part_filepath, "wb")
         # for param in self.sub_models[0].parameters():
         #     param.requires_grad = False        
         # for param in self.sub_models[1].parameters():
@@ -105,11 +110,10 @@ class _TFTModuleAsis(_TFTCusModule):
         # np.save(self.train_filepath,train_data)
         # valid_data = np.stack(self.valid_data)
         # np.save(self.valid_filepath,valid_data)
-        with open(self.train_filepath, "wb") as fout:
-            pickle.dump(self.train_data, fout)    
-        with open(self.valid_filepath, "wb") as fout:
-            pickle.dump(self.valid_data, fout)                     
-
+           
+        self.train_fout.close()
+        self.train_part_fout.close()
+        
 class _TFTModuleBatch(_TFTCusModule):
     def __init__(
         self,
