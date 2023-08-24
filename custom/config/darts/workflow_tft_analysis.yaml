@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_100
+market: &market test_500
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -45,26 +45,26 @@ port_analysis_config: &port_analysis_config
             min_cost: 5
 task:
     model:
-        class: TftDataframeModel
-        module_path: darts_pro.tft_process_dataframe
+        class: TftDatafAnalysis
+        module_path: darts_pro.tft_process
         kwargs:
             GPU: 0
             batch_size: 3072
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'train'
-            n_epochs : 1
+            type: 'data_lstm'
+            n_epochs : 100
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
-               base_lr: 5e-5
-               max_lr: 1.5e-4     
+               base_lr: 1e-4
+               max_lr: 1e-3     
                cycle_momentum: False
-               step_size_up: 200   
+               # step_size: 1   
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -74,7 +74,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test8_tft_500_dtwloss'
+               model_name: 'test8_tft_500_analysis'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
@@ -111,7 +111,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['label','CCI5']
+                target_column: ['label','OBV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','MACD']  

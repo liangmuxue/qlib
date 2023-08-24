@@ -224,7 +224,7 @@ class StatDataAssis():
             title = "class_{},pred_{}".format(label,pred)
             viz.viz_matrix_var(view_data,win=win,title=title,names=names) 
                 
-    def fit_target_data(self,X,y):
+    def fit_target_data(self,X,y,save_weight=True):
         scaler = TimeSeriesScalerMinMax(value_range=(0., 1.))
         X_scaled = scaler.fit_transform(X[:,:,:2])       
         train_end = X_scaled.shape[0]//3*2
@@ -234,11 +234,11 @@ class StatDataAssis():
         y_train = y[:train_end]
         y_test = y[train_end:]
         knn_clf = KNeighborsTimeSeriesClassifier(n_neighbors=4, metric="softdtw")
-        logger.debug("begin fit")
         knn_clf.fit(X_train, y_train)
         predicted_labels = knn_clf.predict(X_test)    
-        model_path = "{}/knn_clf.model".format(self.filepath)
-        joblib.dump(knn_clf, model_path)        
+        if save_weight:
+            model_path = "{}/knn_clf.model".format(self.filepath)
+            joblib.dump(knn_clf, model_path)        
         return predicted_labels,X_test_ori,y_test
 
     def fit_pred_data(self,output):
