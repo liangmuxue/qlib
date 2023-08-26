@@ -11,6 +11,7 @@ from darts.utils.data.training_dataset import (
 from darts.models.forecasting.tft_submodels import (
     get_embedding_size,
 )
+from cus_utils.process import create_from_cls_and_kwargs
 
 import pickle
 import sys
@@ -21,7 +22,6 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
-from fastai.torch_core import requires_grad
 from sklearn.preprocessing import MinMaxScaler
 
 from cus_utils.encoder_cus import StockNormalizer
@@ -97,61 +97,13 @@ class _TFTModuleAsis(_TFTCusModule):
     def on_train_start(self):  
         torch.set_grad_enabled(True)
         self.train_fout = open(self.train_filepath, "wb")
-        self.train_part_fout = open(self.train_part_filepath, "wb")
-        # for param in self.sub_models[0].parameters():
-        #     param.requires_grad = False        
-        # for param in self.sub_models[1].parameters():
-        #     param.requires_grad = False    
-        # for param in self.classify_vr_layer.parameters():
-        #     param.requires_grad = False    
+        self.train_part_fout = open(self.train_part_filepath, "wb")  
                                      
     def on_train_epoch_end(self):
-        # train_data = np.stack(self.train_data)
-        # np.save(self.train_filepath,train_data)
-        # valid_data = np.stack(self.valid_data)
-        # np.save(self.valid_filepath,valid_data)
            
         self.train_fout.close()
         self.train_part_fout.close()
         
-class _TFTModuleBatch(_TFTCusModule):
-    def __init__(
-        self,
-        output_dim: Tuple[int, int],
-        variables_meta_array: Tuple[Dict[str, Dict[str, List[str]]],Dict[str, Dict[str, List[str]]]],
-        num_static_components: int,
-        hidden_size: Union[int, List[int]],
-        lstm_layers: int,
-        num_attention_heads: int,
-        full_attention: bool,
-        feed_forward: str,
-        hidden_continuous_size: int,
-        categorical_embedding_sizes: Dict[str, Tuple[int, int]],
-        dropout: float,
-        add_relative_index: bool,
-        norm_type: Union[str, nn.Module],
-        use_weighted_loss_func=False,
-        past_split=None,
-        filter_conv_index=0,
-        loss_number=3,
-        device="cpu",
-        **kwargs,
-    ):
-        super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
-                                    full_attention,feed_forward,hidden_continuous_size,
-                                    categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
-                                    device=device,**kwargs)  
-        
-    def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
-        """use to export data"""
-        
-        return self.training_step_real(train_batch, batch_idx, optimizer_idx)
-
-    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
-        """训练验证部分"""
-        
-        return self.validation_step_real(val_batch, batch_idx)    
-                                        
 class TFTAsisModel(TFTExtModel):
     
     def __init__(
@@ -270,7 +222,49 @@ class TFTAsisModel(TFTExtModel):
             device=self.device,
             **self.pl_module_params,
         )    
+
+
+class _TFTModuleBatch(_TFTCusModule):
+    def __init__(
+        self,
+        output_dim: Tuple[int, int],
+        variables_meta_array: Tuple[Dict[str, Dict[str, List[str]]],Dict[str, Dict[str, List[str]]]],
+        num_static_components: int,
+        hidden_size: Union[int, List[int]],
+        lstm_layers: int,
+        num_attention_heads: int,
+        full_attention: bool,
+        feed_forward: str,
+        hidden_continuous_size: int,
+        categorical_embedding_sizes: Dict[str, Tuple[int, int]],
+        dropout: float,
+        add_relative_index: bool,
+        norm_type: Union[str, nn.Module],
+        use_weighted_loss_func=False,
+        past_split=None,
+        filter_conv_index=0,
+        loss_number=3,
+        device="cpu",
+        **kwargs,
+    ):
+        super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
+                                    full_attention,feed_forward,hidden_continuous_size,
+                                    categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
+                                    use_weighted_loss_func=use_weighted_loss_func,
+                                    device=device,**kwargs)  
+        self.automatic_optimization = True
         
+    def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
+        """use to export data"""
+        loss,detail_loss = self.training_step_real(train_batch, batch_idx, optimizer_idx) 
+        # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
+        return loss
+
+    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
+        """训练验证部分"""
+        
+        return self.validation_step_real(val_batch, batch_idx)    
+
 class TFTBatchModel(TFTExtModel):
     
     def __init__(
@@ -317,7 +311,7 @@ class TFTBatchModel(TFTExtModel):
     ) -> BatchDataset:
         
         return BatchDataset(
-            filepath = "{}/{}_batch.npy".format(self.batch_file_path,mode)
+            filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode)
         )     
 
     def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:

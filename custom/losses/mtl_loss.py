@@ -117,15 +117,15 @@ class UncertaintyLoss(nn.Module):
         # third_label = target[:,:,2]          
         # 如果是似然估计下的数据，需要取中间值
         # 相关系数损失
-        corr_loss = 0.0   
+        corr_loss = torch.tensor(0).to(self.device)
         # 指标分类
-        ce_loss = 0.0 
+        ce_loss = torch.tensor(0).to(self.device) 
         # 第二指标计算
-        mse_loss = 0.0     
+        mse_loss = torch.tensor(0).to(self.device)    
         # 第二指标分类 
-        value_diff_loss = 0.0 # self.ccc_loss_comp(third_input,third_label)  
+        value_diff_loss = torch.tensor(0).to(self.device) # self.ccc_loss_comp(third_input,third_label)  
         # value_diff_loss = 0.0
-        mean_threhold = 0.0 
+        mean_threhold = torch.tensor(0).to(self.device)
         # if slope_out.max()>1:
         #     max_item = slope_out.max(dim=1)[0]
         #     print("slope_out weight >1 cnt:{}".format(torch.sum(max_item>1)))
@@ -154,7 +154,7 @@ class UncertaintyLoss(nn.Module):
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
             loss_sum = corr_loss + mse_loss + ce_loss                      
         
-        return loss_sum,(mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold)
+        return loss_sum,[mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold]
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):
         

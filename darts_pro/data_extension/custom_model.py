@@ -289,7 +289,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         """performs the training step"""
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        return self.training_step_real(train_batch, batch_idx, optimizer_idx)
+        loss,detail_loss = self.training_step_real(train_batch, batch_idx, optimizer_idx) 
+        return loss
     
     def training_step_real(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
         """包括第一及第二部分数值数据,以及分类数据"""
@@ -306,27 +307,29 @@ class _TFTCusModule(PLMixedCovariatesModule):
             self.criterion.epoch = self.epochs_trained
         
         loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,scaler,target_info),optimizers_idx=optimizer_idx)
-        (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
-        self.log("m1_lr",self.trainer.optimizers[0].param_groups[0]["lr"])
-        self.log("m2_lr",self.trainer.optimizers[1].param_groups[0]["lr"])
-        # self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
-        # self.log("mean_threhold",mean_threhold,batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.custom_histogram_adder(batch_idx)
-        # self._calculate_metrics(output, target, self.train_metrics)
-        # mse损失
-        self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_corr_loss", corr_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_mse_loss", mse_loss, batch_size=train_batch[0].shape[0], prog_bar=True)        
-  
-        return loss
-        
+        self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("m1_lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("m2_lr",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
+        self.loss_data.append(detail_loss)
+        return loss,detail_loss
+
+    def on_train_epoch_start(self):
+        self.loss_data = []
+           
     def on_train_epoch_end(self):
-        pass
-        # if self.current_epoch==0 and asis_mode:
-        #     self.data_assis.finish_build_target(type="train")
+        
+        mse_loss = torch.stack([item[0] for item in self.loss_data]).sum()
+        value_diff_loss = torch.stack([item[1] for item in self.loss_data]).sum()
+        corr_loss = torch.stack([item[2] for item in self.loss_data]).sum()
+        ce_loss = torch.stack([item[3] for item in self.loss_data]).sum()
+        self.log("train_mse_loss", mse_loss,  prog_bar=True)
+        # self.custom_histogram_adder(batch_idx)
+        # self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("train_corr_loss", corr_loss, prog_bar=True)
+        self.log("train_mse_loss", ce_loss, prog_bar=True)
+        self.log("train_ce_loss", ce_loss, prog_bar=True)
         
     def on_validation_epoch_start(self):
         self.import_price_result = None
@@ -438,9 +441,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
-        self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
-                             target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                            last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+        # self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
+        #                      target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+        #                     last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         
         # 累加结果集，后续统计   
         if self.import_price_result is None:
