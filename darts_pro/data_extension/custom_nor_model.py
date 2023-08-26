@@ -20,7 +20,7 @@ import pandas as pd
 import torch
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
-import pytorch_lightning as pl
+from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
@@ -70,13 +70,13 @@ class _TFTModuleAsis(_TFTCusModule):
         """use to export data"""
         
         # train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
-        data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
-                         future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-                         target.cpu().detach().numpy(),target_info]
-        part_data = [target_class.cpu().detach().numpy(),target_info]
-        pickle.dump(data,self.train_fout) 
-        pickle.dump(part_data,self.train_part_fout) 
+        # (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
+        # data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
+        #                  future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
+        #                  target.cpu().detach().numpy(),target_info]
+        # part_data = [target_class.cpu().detach().numpy(),target_info]
+        # pickle.dump(data,self.train_fout) 
+        # pickle.dump(part_data,self.train_part_fout) 
         # print("len(self.train_data):{}".format(len(self.train_data)))
         fake_loss = torch.ones(1,requires_grad=True).to(self.device)
         return fake_loss
@@ -84,12 +84,16 @@ class _TFTModuleAsis(_TFTCusModule):
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
+        # SANITY CHECKING模式下，不进行处理
+        if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
+            return            
         # 只关注重点部分
         val_batch = val_batch_ori # self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch 
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
                          future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]
-        self.valid_data += data
+        print("dump valid,batch:{},target shape:{}".format(batch_idx,past_target.shape))
+        pickle.dump(data,self.valid_fout) 
         fake_loss = torch.ones(1).to(self.device)
         self.log("val_loss", fake_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         return fake_loss     
@@ -98,11 +102,13 @@ class _TFTModuleAsis(_TFTCusModule):
         torch.set_grad_enabled(True)
         self.train_fout = open(self.train_filepath, "wb")
         self.train_part_fout = open(self.train_part_filepath, "wb")  
+        self.valid_fout = open(self.valid_filepath, "wb")
                                      
     def on_train_epoch_end(self):
            
         self.train_fout.close()
         self.train_part_fout.close()
+        self.valid_fout.close()
         
 class TFTAsisModel(TFTExtModel):
     
@@ -253,6 +259,7 @@ class _TFTModuleBatch(_TFTCusModule):
                                     use_weighted_loss_func=use_weighted_loss_func,
                                     device=device,**kwargs)  
         self.automatic_optimization = True
+        self.lr_freq = {"interval":"epoch","frequency":1}
         
     def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
         """use to export data"""
