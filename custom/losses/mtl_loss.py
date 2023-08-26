@@ -95,10 +95,11 @@ class UncertaintyLoss(nn.Module):
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
         self.mse_weight = mse_weight.to(device)
         self.last_classify_loss = ScopeLoss(reduction=mse_reduction,device=device)
-        # self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
-        self.vr_loss = nn.CrossEntropyLoss()
+        self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
+        # self.vr_loss = nn.CrossEntropyLoss()
         self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
         self.tar_loss = nn.CrossEntropyLoss()
+        self.tar_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
         # 设置损失函数的组合模式
         self.loss_mode = 0
@@ -144,13 +145,13 @@ class UncertaintyLoss(nn.Module):
             loss_sum = mse_loss
         if optimizers_idx==2:
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
-            ce_loss = self.tar_loss(vr_class, target_class[:,0])
+            ce_loss = self.vr_loss(vr_class, target_class[:,0])
             loss_sum = ce_loss            
         # 验证推理阶段使用全部损失
         if optimizers_idx==-1:   
             corr_loss = self.ccc_loss_comp(first_input, first_label)
             mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            ce_loss = self.tar_loss(tar_class, target_class[:,0])
+            ce_loss = self.vr_loss(tar_class, target_class[:,0])
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
             loss_sum = corr_loss + mse_loss + ce_loss                      
         
