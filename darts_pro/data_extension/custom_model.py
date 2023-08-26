@@ -199,7 +199,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 辅助数据功能
         self.data_assis = StatDataAssis()
         # 优化器执行频次
-        self.lr_freq = {"interval":"step","frequency":88}
+        self.lr_freq = {"interval":"epoch","frequency":1}
 
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],

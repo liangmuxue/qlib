@@ -69,14 +69,14 @@ class _TFTModuleAsis(_TFTCusModule):
     def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
         """use to export data"""
         
-        # train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        # (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
-        # data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
-        #                  future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-        #                  target.cpu().detach().numpy(),target_info]
-        # part_data = [target_class.cpu().detach().numpy(),target_info]
-        # pickle.dump(data,self.train_fout) 
-        # pickle.dump(part_data,self.train_part_fout) 
+        train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
+        data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
+                         future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
+                         target.cpu().detach().numpy(),target_info]
+        part_data = [target_class.cpu().detach().numpy(),target_info]
+        pickle.dump(data,self.train_fout) 
+        pickle.dump(part_data,self.train_part_fout) 
         # print("len(self.train_data):{}".format(len(self.train_data)))
         fake_loss = torch.ones(1,requires_grad=True).to(self.device)
         return fake_loss
