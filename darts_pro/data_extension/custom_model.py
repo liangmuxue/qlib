@@ -212,7 +212,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据优化器编号匹配计算
-            if optimizer_idx==i or optimizer_idx==-1:
+            if optimizer_idx==i or optimizer_idx==len(self.sub_models) or optimizer_idx==-1:
                 # 根据配置，不同的模型使用不同的过去协变量
                 past_convs_item = x_in[0][i]
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
@@ -228,11 +228,11 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         out_for_class = torch.cat(out_total,dim=2)[:,:,:,0] 
         #  根据预测数据进行分类
-        vr_class = self.classify_tar_layer(out_for_class)
+        vr_class = self.classify_vr_layer(out_for_class)
         tar_class = self.classify_tar_layer(future_target)
         return out_total,vr_class,tar_class
  
-    def _construct_classify_layer(self, input_dim, output_dim,layer_dim=3,hidden_dim=64,device=None):
+    def _construct_classify_layer(self, input_dim, output_dim,layer_dim=2,hidden_dim=64,device=None):
         """使用全连接进行分类数值输出
           Params
             layer_num： 层数
@@ -324,12 +324,11 @@ class _TFTCusModule(PLMixedCovariatesModule):
         value_diff_loss = torch.stack([item[1] for item in self.loss_data]).sum()
         corr_loss = torch.stack([item[2] for item in self.loss_data]).sum()
         ce_loss = torch.stack([item[3] for item in self.loss_data]).sum()
-        self.log("train_mse_loss", mse_loss,  prog_bar=True)
-        # self.custom_histogram_adder(batch_idx)
+        self.custom_histogram_adder()
         # self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_corr_loss", corr_loss, prog_bar=True)
-        self.log("train_mse_loss", ce_loss, prog_bar=True)
-        self.log("train_ce_loss", ce_loss, prog_bar=True)
+        # self.log("train_corr_loss", corr_loss, prog_bar=True)
+        # self.log("train_mse_loss", mse_loss, prog_bar=True)
+        # self.log("train_ce_loss", ce_loss, prog_bar=True)
         
     def on_validation_epoch_start(self):
         self.import_price_result = None
@@ -700,11 +699,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
         else:
             return self.criterion(output_combine, (target_real,future_target,target_class,slope_target),optimizers_idx=optimizers_idx)
 
-    def custom_histogram_adder(self,batch_idx):
+    def custom_histogram_adder(self):
         # iterating through all parameters
-        for name,params in self.named_parameters():
-            global_step = self.current_epoch*1000 + batch_idx
-            global_step = batch_idx
+        for name,params in self.classify_vr_layer.named_parameters():
+            global_step = self.current_epoch
             if params is not None:
                 self.logger.experiment.add_histogram(name + "_weights",params,global_step)
             if params.grad is not None:
@@ -735,6 +733,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             } 
             lr_schedulers.append(lr_scheduler_config)  
         lr_schedulers.append(lr_scheduler_config)  
+        lr_schedulers.append(lr_scheduler_config) 
         return optimizers, lr_schedulers       
 
     def build_dynamic_optimizers(self):
@@ -742,8 +741,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
 
         optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
         optimizers = []
-        lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
-        base_lr = lr_sched_kws["base_lr"]
         # 针对不同子模型，分别生成优化器
         for i in range(len(self.past_split)):
             avalabel_params = list(map(id, self.sub_models[i].parameters()))
@@ -755,13 +752,26 @@ class _TFTCusModule(PLMixedCovariatesModule):
                         ]
             optimizer = create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
             optimizers.append(optimizer)
+            
         # 单独定义分类损失优化器   
+        avalabel_params = list(map(id, self.classify_vr_layer.parameters()))
+        base_params = filter(lambda p: id(p) in avalabel_params, self.parameters())
         optimizer_kws["params"] = [
-                    {'params': self.classify_tar_layer.parameters(), 'lr': base_lr*3},
+                    {'params': base_params},
                     # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
-                    # {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}
+                    # {'params': self.classify_vr_layer.parameters()}
                     ]
         optimizer = create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
+        optimizers.append(optimizer)
+        
+        avalabel_params = list(map(id, self.classify_tar_layer.parameters()))
+        base_params = filter(lambda p: id(p) in avalabel_params, self.parameters())
+        optimizer_kws["params"] = [
+                    {'params': base_params},
+                    # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
+                    # {'params': self.classify_vr_layer.parameters()}
+                    ]
+        optimizer = create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)        
         optimizers.append(optimizer)        
         return optimizers
 

@@ -69,14 +69,17 @@ class _TFTModuleAsis(_TFTCusModule):
     def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
         """use to export data"""
         
-        train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
-        data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
-                         future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-                         target.cpu().detach().numpy(),target_info]
-        part_data = [target_class.cpu().detach().numpy(),target_info]
-        pickle.dump(data,self.train_fout) 
-        pickle.dump(part_data,self.train_part_fout) 
+        if optimizer_idx==0:
+            train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
+            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
+            data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
+                             future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
+                             target.cpu().detach().numpy(),target_info]            
+            part_data = [target_class.cpu().detach().numpy(),target_info]
+            print("dump train,target shape:{}".format(past_target.shape))
+            self.total_target_cnt += past_target.shape[0]            
+            pickle.dump(data,self.train_fout) 
+            pickle.dump(part_data,self.train_part_fout) 
         # print("len(self.train_data):{}".format(len(self.train_data)))
         fake_loss = torch.ones(1,requires_grad=True).to(self.device)
         return fake_loss
@@ -88,7 +91,7 @@ class _TFTModuleAsis(_TFTCusModule):
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
             return            
         # 只关注重点部分
-        val_batch = val_batch_ori # self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
+        val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch 
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
                          future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]
@@ -99,13 +102,14 @@ class _TFTModuleAsis(_TFTCusModule):
         return fake_loss     
      
     def on_train_start(self):  
+        self.total_target_cnt = 0
         torch.set_grad_enabled(True)
         self.train_fout = open(self.train_filepath, "wb")
         self.train_part_fout = open(self.train_part_filepath, "wb")  
         self.valid_fout = open(self.valid_filepath, "wb")
                                      
     def on_train_epoch_end(self):
-           
+        print("self.total_target_cnt:{}".format(self.total_target_cnt))
         self.train_fout.close()
         self.train_part_fout.close()
         self.valid_fout.close()

@@ -20,34 +20,40 @@ class BatchDataset(Dataset):
         self.fit_names = fit_names      
         self.range_num = range_num        
         
+        batch_data = []
         with open(filepath, "rb") as fin:
-            aggregated = pickle.load(fin)   
+            while True:
+                try:
+                    batch_data.append(pickle.load(fin))
+                except EOFError:
+                    break            
             
-        # aggregated = []   
-        # first_sample = batch[0]
-        # for i in range(len(first_sample)):
-        #     elem = first_sample[i][0]
-        #     if isinstance(elem, np.ndarray):
-        #         sample_list = np.concatenate([sample[i] for sample in batch],axis=0)
-        #         aggregated.append(
-        #             sample_list
-        #         )
-        #     elif isinstance(elem, MinMaxScaler):
-        #         s_list = []
-        #         for sample in batch:
-        #             for item in sample[i]:
-        #                 s_list.append(item)
-        #         aggregated.append(s_list)
-        #     elif isinstance(elem, StockNormalizer):
-        #         aggregated.append([sample[i] for sample in batch])                
-        #     elif isinstance(elem, Dict):
-        #         d_list = []
-        #         for sample in batch:
-        #             for item in sample[i]:
-        #                 d_list.append(item)    
-        #         aggregated.append(d_list)       
-        #     elif elem is None:
-        #         aggregated.append(None)  
+        first_sample = batch_data[0]
+        aggregated = []
+        for i in range(len(first_sample)):
+            elem = first_sample[i][0]
+            if isinstance(elem, np.ndarray):
+                sample_list = np.concatenate([sample[i] for sample in batch_data],axis=0)
+                aggregated.append(
+                    sample_list
+                )
+            elif isinstance(elem, MinMaxScaler):
+                s_list = []
+                for sample in batch_data:
+                    for item in sample[i]:
+                        s_list.append(item)
+                aggregated.append(s_list)
+            elif isinstance(elem, StockNormalizer):
+                aggregated.append([sample[i] for sample in batch_data])                
+            elif isinstance(elem, Dict):
+                d_list = []
+                for sample in batch_data:
+                    for item in sample[i]:
+                        d_list.append(item)    
+                aggregated.append(d_list)       
+            elif elem is None:
+                aggregated.append(None)  
+                
         if self.mode=="process":
             self.batch_data = aggregated     
         
