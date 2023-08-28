@@ -35,7 +35,7 @@ from cus_utils.common_compute import compute_price_class,compute_price_class_bat
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
-from darts_pro.data_extension.custom_tcn_model import LSTMClassifier
+from darts_pro.data_extension.custom_tcn_model import LSTMReg
 
 import torchmetrics
 from torchmetrics import MeanSquaredError
@@ -240,7 +240,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             output_dim： 类别数
         """
         
-        class_layer = LSTMClassifier(input_dim, hidden_dim, layer_dim, output_dim)
+        class_layer = LSTMReg(input_dim, hidden_dim, layer_dim, output_dim)
         class_layer = class_layer.cuda(device)
         return class_layer
 
@@ -698,7 +698,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             mtl_loss = self.criterion(output_combine, target_real,outer_loss=loss_like)
             return mtl_loss
         else:
-            return self.criterion(output_combine, (target_real,future_target,target_class,slope_target),optimizers_idx=optimizers_idx)
+            return self.criterion(output_combine, (target_real,target_class,target_info),optimizers_idx=optimizers_idx)
 
     def custom_histogram_adder(self,batch_idx):
         # iterating through all parameters

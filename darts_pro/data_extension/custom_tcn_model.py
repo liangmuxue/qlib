@@ -62,7 +62,35 @@ class LSTMClassifier(nn.Module):
         c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
         return [t.cuda() for t in (h0, c0)]
 
+class LSTMReg(nn.Module):
+    """lstm回归问题"""
     
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.layer_dim = layer_dim
+        self.rnn = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
+        self.batch_size = None
+        self.hidden = None
+        self.reg = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, output_dim),
+        )  # regression       
+    
+    def forward(self, x):
+        y = self.rnn(x)[0]  # y, (h, c) = self.rnn(x)
+        seq_len, batch_size, hid_dim = y.shape
+        y = y.view(-1, hid_dim)
+        y = self.reg(y)
+        y = y.view(seq_len, batch_size, -1)
+        return y
+ 
+    def init_hidden(self, x):
+        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
+        c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
+        return [t.cuda() for t in (h0, c0)]
+       
     
 class ClassifierTrainer():  
       
