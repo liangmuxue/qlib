@@ -35,7 +35,7 @@ from cus_utils.common_compute import compute_price_class,compute_price_class_bat
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
-from darts_pro.data_extension.custom_tcn_model import LSTMClassifier
+from darts_pro.data_extension.custom_tcn_model import LSTMReg
 
 import torchmetrics
 from torchmetrics import MeanSquaredError
@@ -188,10 +188,11 @@ class _TFTCusModule(PLMixedCovariatesModule):
             model_list.append(model)
         self.sub_models = nn.ModuleList(model_list) 
         # 涨跌幅度分类
-        vr_range_num = len(CLASS_SIMPLE_VALUES.keys())       
+        vr_range_num = len(CLASS_SIMPLE_VALUES.keys())     
+        vr_range_num = 1  
         # 序列分类层，包括目标分类和输出分类
-        self.classify_vr_layer = self._construct_classify_layer(len(past_split),vr_range_num,device=device)        
-        self.classify_tar_layer = self._construct_classify_layer(len(past_split),vr_range_num,device=device)  
+        self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)        
+        self.classify_tar_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)  
         if use_weighted_loss_func and not isinstance(model.criterion,UncertaintyLoss):
             self.criterion = UncertaintyLoss(device=device) 
                     
@@ -200,6 +201,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.data_assis = StatDataAssis()
         # 优化器执行频次
         self.lr_freq = {"interval":"epoch","frequency":1}
+        # 手动控制参数更新
+        self.automatic_optimization = False
+        self.freeze_mode = torch.ones(len(past_split)+2).to(device)
 
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
@@ -212,7 +216,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据优化器编号匹配计算
-            if optimizer_idx==i or optimizer_idx==len(self.sub_models) or optimizer_idx==-1:
+            if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
                 # 根据配置，不同的模型使用不同的过去协变量
                 past_convs_item = x_in[0][i]
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
@@ -232,7 +236,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         tar_class = self.classify_tar_layer(future_target)
         return out_total,vr_class,tar_class
  
-    def _construct_classify_layer(self, input_dim, output_dim,layer_dim=2,hidden_dim=64,device=None):
+    def _construct_classify_layer(self, input_dim, seq_len,output_dim,hidden_dim=64,device=None):
         """使用全连接进行分类数值输出
           Params
             layer_num： 层数
@@ -240,7 +244,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             output_dim： 类别数
         """
         
-        class_layer = LSTMClassifier(input_dim, hidden_dim, layer_dim, output_dim)
+        class_layer = LSTMReg(input_dim, seq_len, output_dim,hidden_dim)
         class_layer = class_layer.cuda(device)
         return class_layer
 
@@ -285,34 +289,43 @@ class _TFTCusModule(PLMixedCovariatesModule):
             x_past_array.append(x_past)
         return x_past_array, future_covariates, static_covariates
                
-    def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
+    def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """performs the training step"""
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        loss,detail_loss = self.training_step_real(train_batch, batch_idx, optimizer_idx) 
+        loss,detail_loss = self.training_step_real(train_batch, batch_idx) 
         return loss
     
-    def training_step_real(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
+    def training_step_real(self, train_batch, batch_idx) -> torch.Tensor:
         """包括第一及第二部分数值数据,以及分类数据"""
         
         input_batch = self._process_input_batch(train_batch[:5])
         # 收集目标数据用于分类
         future_target = train_batch[-2]
-        (output,vr_class,tar_class) = self(input_batch,future_target,optimizer_idx=optimizer_idx)
         # 目标数据里包含分类信息
         scaler,target_class,target,target_info = train_batch[5:]
-        target_class = target_class[:,:,0]
+        target_class = target_class[:,:,0]     
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
-            self.criterion.epoch = self.epochs_trained
-        
-        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,scaler,target_info),optimizers_idx=optimizer_idx)
-        self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("m1_lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("m2_lr",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
-        # self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
-        self.loss_data.append(detail_loss)
+            self.criterion.epoch = self.epochs_trained           
+        for i in range(len(self.past_split)+1):
+            (output,vr_class,tar_class) = self(input_batch,future_target,optimizer_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,scaler,target_info),optimizers_idx=i)
+            self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+            # self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
+            # self.log("m1_lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
+            # self.log("m2_lr",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
+            # self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
+            self.loss_data.append(detail_loss)
+            # 手动更新参数
+            opt = self.trainer.optimizers[i]
+            # 如果已冻结则不执行更新
+            if self.freeze_mode[i]==1:
+                opt.zero_grad()
+                self.manual_backward(loss)
+                opt.step()  
+        # 手动维护global_step变量  
+        self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return loss,detail_loss
 
     def on_train_epoch_start(self):
@@ -325,6 +338,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         corr_loss = torch.stack([item[2] for item in self.loss_data]).sum()
         ce_loss = torch.stack([item[3] for item in self.loss_data]).sum()
         self.custom_histogram_adder()
+        # self.trainer.save_checkpoint("example.ckpt")
         # self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         # self.log("train_corr_loss", corr_loss, prog_bar=True)
         # self.log("train_mse_loss", mse_loss, prog_bar=True)
@@ -354,20 +368,15 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 self.log("score_{} rate".format(i), rate, prog_bar=True) 
             self.log("total cnt", total_cnt, prog_bar=True)  
         self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
-        # # 动态冻结网络参数
-        # corr_loss = self.trainer.callback_metrics["val_corr_loss"]
-        # mse_loss = self.trainer.callback_metrics["val_mse_loss"]
-        # if self.current_epoch>0:
-        #     if mse_loss>0.68:
-        #         self.freeze_apply(mode=0)
-        #     elif corr_loss>0.65:
-        #         self.freeze_apply(mode=1)
-        #     else:
-        #         # 数值loss都达到指标后，打开分类层
-        #         self.freeze_apply(mode=2)
-        # else:
-        #     self.freeze_apply(mode=0)
-
+        
+        # 动态冻结网络参数
+        corr_loss = self.trainer.callback_metrics["val_corr_loss"]
+        mse_loss = self.trainer.callback_metrics["val_mse_loss"]
+        if corr_loss<0.59:
+            self.freeze_apply(mode=0)
+        if mse_loss<0.66:
+            self.freeze_apply(mode=1)
+            
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -440,9 +449,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
-        # self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
-        #                      target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-        #                     last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+        self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
+                             target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+                            last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         
         # 累加结果集，后续统计   
         if self.import_price_result is None:
@@ -481,8 +490,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 最近数值处于比较高的点
         rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(recent_threhold/100))
         # print("total size:{},import_index_bool size:{},rev_boole size:{}".format(import_index_bool.shape[0],np.sum(import_index_bool),np.sum(rev_boole)))
-        import_index_bool = import_index_bool & rev_boole        
+        import_index_bool = import_index_bool # & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
+        rtn_index = rtn_index[0:2]
         
         val_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
                             future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
@@ -697,7 +707,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             mtl_loss = self.criterion(output_combine, target_real,outer_loss=loss_like)
             return mtl_loss
         else:
-            return self.criterion(output_combine, (target_real,future_target,target_class,slope_target),optimizers_idx=optimizers_idx)
+            return self.criterion(output_combine, (target_real,target_class,target_info),optimizers_idx=optimizers_idx)
 
     def custom_histogram_adder(self):
         # iterating through all parameters
@@ -776,38 +786,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         return optimizers
 
     def freeze_apply(self,mode=0):
-        """ 动态冻结指定参数
-           Params:
-              mode 冻结参数配置， 0 冻结第一部分 1 冻结第二部分,打开第一部分  2-冻结一二部分，使用分类层
-        """
-        
-        # 如果小于当前模式，则不处理
-        if self.freeze_mode>=mode:
-            return
-        
-        print('do mode:{},self.freeze_mode:{}'.format(mode,self.freeze_mode))
-        # 修改保存此超参数
-        self.freeze_mode = mode
-        if mode==0:
-            self.criterion.loss_mode = 0    
-            # 冻结第一部分模型参数
-            for param in self.sub_models[0].parameters():
-                param.requires_grad = False    
-            self.criterion.loss_mode = 0             
-        if mode==1:
-            # 冻结第二部分,打开第一部分
-            for param in self.sub_models[0].parameters():
-                param.requires_grad = True   
-            for param in self.sub_models[1].parameters():
-                param.requires_grad = False           
-            self.criterion.loss_mode = 1
-        if mode==2:
-            # 冻结一二部分，使用分类层
-            for param in self.sub_models[0].parameters():
-                param.requires_grad = False   
-            for param in self.sub_models[1].parameters():
-                param.requires_grad = False              
-            self.criterion.loss_mode = 2
+        """ 动态冻结指定参数"""
+         
+        self.freeze_mode[mode] = 0
                         
     def predict_step(
         self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
@@ -1067,7 +1048,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         view_data = np.stack((pred_center_data,target_combine_sample),axis=0).transpose(1,0)
         price_target = df_target["label_ori"].values    
         price_target = np.expand_dims(price_target,axis=0)    
-        second_target = df_target["CCI5"].values 
+        second_target = df_target["OBV5"].values 
         second_target = np.expand_dims(second_target,axis=-1)  
         # third_target = df_target["KDJ_J"].values 
         # third_target = np.expand_dims(third_target,axis=-1)              

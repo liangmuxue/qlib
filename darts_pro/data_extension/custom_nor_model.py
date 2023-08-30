@@ -262,12 +262,11 @@ class _TFTModuleBatch(_TFTCusModule):
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
                                     use_weighted_loss_func=use_weighted_loss_func,
                                     device=device,**kwargs)  
-        self.automatic_optimization = True
         self.lr_freq = {"interval":"epoch","frequency":1}
         
-    def training_step(self, train_batch, batch_idx, optimizer_idx) -> torch.Tensor:
+    def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """use to export data"""
-        loss,detail_loss = self.training_step_real(train_batch, batch_idx, optimizer_idx) 
+        loss,detail_loss = self.training_step_real(train_batch, batch_idx) 
         # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         return loss
 

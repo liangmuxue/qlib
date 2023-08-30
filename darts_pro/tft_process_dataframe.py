@@ -254,7 +254,7 @@ class TftDataframeModel():
                     
         # 使用股票代码数量作为embbding长度
         emb_size = dataset.get_emb_size()
-        emb_size = 500
+        # emb_size = 500
         load_weight = self.optargs["load_weight"]
         if "monitor" in self.optargs:
             monitor = dataset

@@ -121,6 +121,9 @@ class BatchDataset(Dataset):
         if self.mode=="process":
             batch_data = [item[index] for item in self.batch_data]
             (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = batch_data  
+            price_array = target_info["price_array"]
+            raise_range = (price_array[-1] - price_array[-5])/price_array[-5]*10
+            target_info["raise_range"] = raise_range
             return past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info
         if self.mode=="analysis":
             return self.target_data[index],self.target_class[index]

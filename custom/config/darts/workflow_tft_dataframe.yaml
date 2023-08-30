@@ -49,7 +49,7 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 3072
+            batch_size: 2048
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -74,8 +74,8 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'test9_tft_500_multi'
-               load_weight: True
+               model_name: 'test9_tft_5_multi'
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
