@@ -35,7 +35,7 @@ from cus_utils.common_compute import compute_price_class,compute_price_class_bat
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
-from darts_pro.data_extension.custom_tcn_model import LSTMReg
+from darts_pro.data_extension.custom_tcn_model import LSTMReg,TargetDataReg
 
 import torchmetrics
 from torchmetrics import MeanSquaredError
@@ -43,6 +43,7 @@ from sklearn.preprocessing import MinMaxScaler
 import tsaug
 from losses.mtl_loss import UncertaintyLoss,MseLoss
 from cus_utils.process import raise_if_not
+from fastai.torch_core import requires_grad
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -191,7 +192,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         vr_range_num = len(CLASS_SIMPLE_VALUES.keys())     
         vr_range_num = 1  
         # 序列分类层，包括目标分类和输出分类
-        self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)        
+        self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length-1,vr_range_num,device=device)        
         self.classify_tar_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)  
         if use_weighted_loss_func and not isinstance(model.criterion,UncertaintyLoss):
             self.criterion = UncertaintyLoss(device=device) 
@@ -208,6 +209,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
         future_target,
+        scaler,
+        target_info=None,
         optimizer_idx=-1
     ) -> torch.Tensor:
         """重载训练方法，加入分类模式"""
@@ -231,8 +234,22 @@ class _TFTCusModule(PLMixedCovariatesModule):
         #     out_total.append(fake_out)
         
         out_for_class = torch.cat(out_total,dim=2)[:,:,:,0] 
+        output_slope_data = []
+        for i in range(out_for_class.shape[0]):
+            scaler_sample = scaler[i]
+            if self.trainer.state.stage==RunningStage.TRAINING:
+                output_item = out_for_class[i].detach().cpu().numpy()
+            else:
+                output_item = out_for_class[i].cpu().numpy()
+            output_inverse = scaler_sample.inverse_transform(output_item)
+            ouput_slope = (output_inverse[1:,:] - output_inverse[:-1,:])/output_inverse[:-1,:]*10
+            # 利用预存的scaler做归一化
+            target_range_scaler = target_info[i]["target_range_scaler"]
+            ouput_slope = target_range_scaler.transform(ouput_slope)
+            output_slope_data.append(ouput_slope)
+        output_slope_data = torch.Tensor(np.stack(output_slope_data)).to(self.device)
         #  根据预测数据进行分类
-        vr_class = self.classify_vr_layer(out_for_class)
+        vr_class = self.classify_vr_layer(output_slope_data)
         tar_class = self.classify_tar_layer(future_target)
         return out_total,vr_class,tar_class
  
@@ -244,7 +261,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             output_dim： 类别数
         """
         
-        class_layer = LSTMReg(input_dim, seq_len, output_dim,hidden_dim)
+        class_layer = TargetDataReg(input_dim, seq_len, output_dim,hidden_dim)
         class_layer = class_layer.cuda(device)
         return class_layer
 
@@ -298,31 +315,28 @@ class _TFTCusModule(PLMixedCovariatesModule):
     
     def training_step_real(self, train_batch, batch_idx) -> torch.Tensor:
         """包括第一及第二部分数值数据,以及分类数据"""
-        
-        input_batch = self._process_input_batch(train_batch[:5])
+
         # 收集目标数据用于分类
         future_target = train_batch[-2]
         # 目标数据里包含分类信息
-        scaler,target_class,target,target_info = train_batch[5:]
+        scaler,target_class,target,target_info = train_batch[5:]        
+        input_batch = self._process_input_batch(train_batch[:5])
         target_class = target_class[:,:,0]     
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained           
         for i in range(len(self.past_split)+1):
-            (output,vr_class,tar_class) = self(input_batch,future_target,optimizer_idx=i)
+            (output,vr_class,tar_class) = self(input_batch,future_target,scaler,optimizer_idx=i,target_info=target_info)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,scaler,target_info),optimizers_idx=i)
             self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
             # self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
-            # self.log("m1_lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
-            # self.log("m2_lr",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
-            # self.log("m3_lr",self.trainer.optimizers[2].param_groups[0]["lr"])
             self.loss_data.append(detail_loss)
             # 手动更新参数
             opt = self.trainer.optimizers[i]
             # 如果已冻结则不执行更新
+            opt.zero_grad()
+            self.manual_backward(loss)
             if self.freeze_mode[i]==1:
-                opt.zero_grad()
-                self.manual_backward(loss)
                 opt.step()  
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
@@ -389,11 +403,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
 
         input_batch = self._process_input_batch(val_batch[:5])
         # 收集目标数据用于分类
-        future_target = val_batch[-2]
-        (output,vr_class,tar_class) = self(input_batch,future_target,optimizer_idx=-1)
+        scaler,target_class,future_target,target_info = val_batch[5:]  
+        (output,vr_class,tar_class) = self(input_batch,future_target,scaler,target_info=target_info,optimizer_idx=-1)
         past_target = val_batch[0]
         past_covariate = val_batch[1]
-        scaler,target_class,target,target_info = val_batch[5:]  
         target_class = target_class[:,:,0]
         target_vr_class = target_class[:,0].cpu().numpy()
         last_target_vr_class = target_class[:,1]
@@ -402,7 +415,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         output_inverse = self.get_inverse_data(output_combine,target_info=target_info,scaler=scaler)
         past_target_inverse = self.get_inverse_data(past_target.cpu().numpy(),target_info=target_info,scaler=scaler)
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,scaler,target_info),optimizers_idx=-1)
+        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,scaler,target_info),optimizers_idx=-1)
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -449,7 +462,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
-        self.val_metric_show(output,target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
+        self.val_metric_show(output,future_target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
                              target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
                             last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         

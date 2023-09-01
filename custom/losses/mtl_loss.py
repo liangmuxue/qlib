@@ -106,7 +106,7 @@ class UncertaintyLoss(nn.Module):
     def forward(self, input_ori: Tensor, target_ori: Tensor,optimizers_idx=0,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
-        (input,vr_class,tar_class) = input_ori
+        (input,slope_data,tar_class) = input_ori
         (target,target_class,target_info) = target_ori
         # slope_target = (target[:,-1] - target[:,0])/target[:,0]
         raise_range = torch.Tensor(np.array([ts["raise_range"] for ts in target_info])).to(self.device)
@@ -146,7 +146,7 @@ class UncertaintyLoss(nn.Module):
             loss_sum = mse_loss
         if optimizers_idx==2:
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
-            ce_loss = self.vr_loss(vr_class, raise_range)
+            ce_loss = self.vr_loss(slope_data, raise_range)
             loss_sum = ce_loss      
         if optimizers_idx==3:
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
@@ -156,7 +156,7 @@ class UncertaintyLoss(nn.Module):
         if optimizers_idx==-1:   
             corr_loss = self.ccc_loss_comp(first_input, first_label)
             mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            ce_loss = self.vr_loss(vr_class, raise_range)
+            ce_loss = self.vr_loss(slope_data, raise_range)
             value_diff_loss = self.tar_loss(tar_class, target_class[:,0])
             loss_sum = corr_loss + mse_loss + ce_loss + value_diff_loss                     
         

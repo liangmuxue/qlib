@@ -120,10 +120,20 @@ class BatchDataset(Dataset):
         
         if self.mode=="process":
             batch_data = [item[index] for item in self.batch_data]
-            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = batch_data  
+            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = batch_data
+            # 生成价位幅度目标 
             price_array = target_info["price_array"]
             raise_range = (price_array[-1] - price_array[-5])/price_array[-5]*10
             target_info["raise_range"] = raise_range
+            past_target_ori = scaler.inverse_transform(past_target)
+            # invoid inf
+            mask_idx = np.where(past_target_ori<0.01)[0]
+            past_target_ori[mask_idx] = 0.01
+            past_target_slope = (past_target_ori[1:,:] - past_target_ori[:-1,:])/past_target_ori[:-1,:]*10
+            # 生成目标缩放器，用于后续反归一化
+            target_range_scaler = MinMaxScaler()
+            target_range_scaler.fit(past_target_slope)
+            target_info["target_range_scaler"] = target_range_scaler
             return past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info
         if self.mode=="analysis":
             return self.target_data[index],self.target_class[index]

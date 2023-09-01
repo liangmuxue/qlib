@@ -245,9 +245,11 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         scaler = MinMaxScaler()
         target_info["future_target"] = future_target_ori[:,0]
         if self.transform_inner:
+            # 因子归一化
             past_covariate = MinMaxScaler().fit_transform(past_covariate)
             future_covariate = MinMaxScaler().fit_transform(future_covariate)        
             future_past_covariate = MinMaxScaler().fit_transform(future_past_covariate)         
+            static_covariate = MinMaxScaler().fit_transform(static_covariate)       
             # 目标值归一化
             scaler.fit(past_target_ori)             
             past_target = scaler.transform(past_target_ori)   

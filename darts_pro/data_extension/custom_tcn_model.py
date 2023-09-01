@@ -87,7 +87,31 @@ class LSTMReg(nn.Module):
         c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
         return [t.cuda() for t in (h0, c0)]
        
+class TargetDataReg(nn.Module):
+    """结果数据再分析"""
     
+    def __init__(self, input_dim, seq_len, output_dim,hidden_dim):
+        super().__init__()
+        self.input_dim = input_dim
+        self.seq_len = seq_len
+        self.fc1 = nn.Linear(input_dim*seq_len, hidden_dim)  # notice input shape
+        self.fc2 = nn.Linear(hidden_dim,1)        
+    
+    def forward(self, x):
+        x = x.reshape((-1, self.input_dim * self.seq_len))
+        reg = nn.Sequential(
+                    self.fc1,
+                    nn.ReLU(),
+                    self.fc2,
+                )                   
+        output = reg(x)
+        return output                
+ 
+    def init_hidden(self, x):
+        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
+        c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
+        return [t.cuda() for t in (h0, c0)]
+        
 class ClassifierTrainer():  
       
     def __init__(self,train_ds,valid_ds,input_dim=2):
