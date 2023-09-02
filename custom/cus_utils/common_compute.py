@@ -9,6 +9,13 @@ from sklearn.preprocessing import MinMaxScaler
 
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 
+def slope_compute(target_ori):
+    target = target_ori
+    mask_idx = np.where(target<0.01)[0]
+    target[mask_idx] = 0.01
+    target_slope = (target[1:,:] - target[:-1,:])/target[:-1,:]
+    return target_slope
+        
 def slope_classify_compute(target_ori,threhold=2):
     """生成基于斜率的目标分类"""
     

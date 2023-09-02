@@ -4,7 +4,7 @@ qlib_init:
 market: &market test_500
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
-    init_data: True
+    init_data: False
     start_time: 2008-01-01
     end_time: 2023-12-31
     fit_start_time: 2008-01-01
@@ -53,10 +53,10 @@ task:
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'data_lstm'
+            type: 'data_corr'
             n_epochs : 100
-            save_dataset_file: False
-            load_dataset_file: &load_dataset_file False
+            save_dataset_file: True
+            load_dataset_file: &load_dataset_file True
             batch_file_path: 'custom/data/asis'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 

@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 from darts.timeseries import TimeSeries
 import xarray as xr
-
+import seaborn as sns
+import matplotlib.pyplot as plt
 import joblib
 from sklearn.metrics import accuracy_score
 import sklearn.neighbors
@@ -11,9 +12,10 @@ from tslearn.preprocessing import TimeSeriesScalerMinMax, \
     TimeSeriesScalerMeanVariance
 from tslearn.neighbors import KNeighborsTimeSeriesClassifier, \
     KNeighborsTimeSeries
-    
+import cus_utils.global_var as global_var    
 from tft.class_define import CLASS_LAST_VALUES,get_simple_class,get_complex_class
 from cus_utils.tensor_viz import TensorViz
+from cus_utils.common_compute import slope_compute
 from cus_utils.log_util import AppLogger
 
 logger = AppLogger()
@@ -284,7 +286,37 @@ class StatDataAssis():
             predicted_labels[index] = i
         return predicted_labels,X,y
 
-    
+    def data_corr_analysis(self,ds_data):
+        dataset = global_var.get_value("dataset")
+        df_all = dataset.df_all
+        # df_expirement = df_all[["label","CLOSE"]]
+        # df_expirement = df_expirement.iloc[:3000]
+        # df_corr = df_expirement.corr(method="spearman")
+        # print(df_corr)
+        # sns.heatmap(df_corr, vmax=1, vmin=-1, center=0)
+        fit_names = ds_data.fit_names
+        size = ds_data.batch_data[0].shape[0]
+        analysis_columns = ["label_ori","RSI5"]
+        df_combine = None
+        for i in range(size):
+            df_item = pd.DataFrame(ds_data.target_data[i],columns=fit_names)
+            tar_data = []
+            for col in analysis_columns:
+                values = df_item[col].values
+                slope_values = slope_compute(np.expand_dims(values,axis=-1))[:,0]
+                # tar_data.append(values)
+                tar_data.append(slope_values)
+            tar_data = np.stack(tar_data,axis=-1)
+            tar_data = pd.DataFrame(tar_data,columns=analysis_columns)
+            df_corr = tar_data.corr(method="spearman").iloc[[0]]
+            if df_combine is None:
+                df_combine = df_corr
+            else:
+                df_combine = pd.concat([df_combine,df_corr])
+        print("corr value:{}".format(df_combine[analysis_columns[-1]].mean()))
+        # plt.savefig('./custom/data/asis/seaborn_heatmap_corr_result.png')
+        
+    # def corr_data_build(self,data,columns):
                           
 if __name__ == "__main__":       
     data_assis = StatDataAssis()

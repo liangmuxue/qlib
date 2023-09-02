@@ -58,6 +58,7 @@ class BatchDataset(Dataset):
             self.batch_data = aggregated     
         
         if self.mode=="analysis":
+            self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
             self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
             self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
             print("self.target_data shape:{}".format(self.target_data.shape))
@@ -126,7 +127,7 @@ class BatchDataset(Dataset):
             raise_range = (price_array[-1] - price_array[-5])/price_array[-5]*10
             target_info["raise_range"] = raise_range
             past_target_ori = scaler.inverse_transform(past_target)
-            # invoid inf
+            # avoid infinite
             mask_idx = np.where(past_target_ori<0.01)[0]
             past_target_ori[mask_idx] = 0.01
             past_target_slope = (past_target_ori[1:,:] - past_target_ori[:-1,:])/past_target_ori[:-1,:]*10

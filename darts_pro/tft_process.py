@@ -25,6 +25,7 @@ from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 
 from darts_pro.data_extension.batch_dataset import BatchDataset
+from darts_pro.data_extension.series_data_utils import StatDataAssis
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 import cus_utils.global_var as global_var
 from darts_pro.data_extension.custom_tcn_model import ClassifierTrainer
@@ -75,13 +76,29 @@ class TftDatafAnalysis():
         self,
         dataset: TFTSeriesDataset,
     ):
-        dataset.build_series_data(no_series_data=True)
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]     
+                
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            dataset.build_series_data(df_data_path,no_series_data=True)  
+        else:         
+            dataset.build_series_data(no_series_data=True)
+            if self.save_dataset_file:
+                df_data_path = self.pred_data_path + "/df_all.pkl"
+                with open(df_data_path, "wb") as fout:
+                    pickle.dump(dataset.df_all, fout)  
+                                
         global_var.set_value("dataset", dataset)  
         if self.type.startswith("data_pca"):
             self.data_pca(dataset)
         if self.type.startswith("data_lstm"):
             self.data_lstm(dataset)
-                                        
+        if self.type.startswith("data_corr"):
+            self.data_corr(dataset)
+                                                    
     def data_pca(
         self,
         dataset: TFTSeriesDataset,
@@ -114,4 +131,20 @@ class TftDatafAnalysis():
         valid_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[10000,12000])
         trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=len(col_list))
         trainer.training()
+        
+    def data_corr(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        """对数据进行相关性分析"""
+        
+        data_assis = StatDataAssis()
+        batch_file_path = self.kwargs["batch_file_path"]
+        batch_file = "{}/valid_batch.pickel".format(batch_file_path)   
+        col_list = dataset.col_def["col_list"] + ["label"]
+        # col_list.remove("label_ori")
+        # col_list.remove("REV5_ORI")
+        train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
+        data_assis.data_corr_analysis(train_ds)
+        
                 
