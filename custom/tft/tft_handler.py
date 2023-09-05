@@ -157,6 +157,9 @@ class TftDataHandler(DataHandlerLP):
             if use("MA"):
                 fields += ["Mean($close, %d)/$close" % d for d in windows]
                 names += ["MA%d" % d for d in windows]
+            if use("MASCOPE"):
+                fields += ["((Mean($close,{})/$close)/Ref(Mean($close, {})/$close,1)-1)*100".format(d,d) for d in windows]
+                names += ["MASCOPE%d" % d for d in windows]                
             if use("STD"):
                 fields += ["Std($close, %d)/$close" % d for d in windows]
                 names += ["STD%d" % d for d in windows]

@@ -413,7 +413,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         output_combine = [output_item[:,:,0,0] for output_item in output]
         output_combine = torch.stack(output_combine,dim=2).cpu().numpy()
         output_inverse = self.get_inverse_data(output_combine,target_info=target_info,scaler=scaler)
-        past_target_inverse = self.get_inverse_data(past_target.cpu().numpy(),target_info=target_info,scaler=scaler)
+        whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
+        target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,scaler,target_info),optimizers_idx=-1)
         (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
@@ -463,7 +464,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
         self.val_metric_show(output,future_target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
-                             target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+                             target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
                             last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         
         # 累加结果集，后续统计   
@@ -503,9 +504,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 最近数值处于比较高的点
         rev_boole = rev_boole & ((rev_cov_max-rev_cov_recent[:,-1])<=(recent_threhold/100))
         # print("total size:{},import_index_bool size:{},rev_boole size:{}".format(import_index_bool.shape[0],np.sum(import_index_bool),np.sum(rev_boole)))
-        import_index_bool = import_index_bool # & rev_boole        
+        import_index_bool = import_index_bool & rev_boole        
         rtn_index = np.where(import_index_bool)[0]
-        rtn_index = rtn_index[0:2]
+        # rtn_index = rtn_index[0:2]
         
         val_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
                             future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
@@ -578,7 +579,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
         
-    def compute_real_class_acc(self,label_threhold=0.5,target_info=None,output_inverse=None,vr_class=None,tar_class=None,target_vr_class=None):
+    def compute_real_class_acc(self,label_threhold=3,target_info=None,output_inverse=None,vr_class=None,tar_class=None,target_vr_class=None):
         """计算涨跌幅分类准确度"""
         
         target_data = np.array([item["label_array"][self.input_chunk_length-1:] for item in target_info])
@@ -591,9 +592,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
                  
         # 整体需要有上涨幅度
         slope_out_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
+        slope_out_compute = np.sum(output_label_inverse,axis=-1)
         output_import_index_bool = slope_out_compute>label_threhold
         # 最后一段上涨
-        output_import_index_bool = output_import_index_bool & ((output_label_inverse[:,-1] - output_label_inverse[:,-2])>0)
+        # output_import_index_bool = output_import_index_bool & ((output_label_inverse[:,-1] - output_label_inverse[:,-2])>0)
         # 辅助指标判断
         second_index_bool = (output_second_inverse[:,-1] - output_second_inverse[:,0]) > 0.5
         # 整体上升幅度与振幅差值较小
@@ -601,9 +603,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         second_min = np.min(output_second_inverse,axis=-1)        
         second_index_bool = second_index_bool & (((output_second_inverse[:,-1] - output_second_inverse[:,0])/(second_max - second_min))>0.5)
         # 最后一个值大于0
-        second_index_bool = second_index_bool & (output_second_inverse[:,-1]>0)
+        # second_index_bool = second_index_bool & (output_second_inverse[:,-1]>0)
         # 最后一段上升
-        second_index_bool = second_index_bool & (output_second_inverse[:,-1]>output_second_inverse[:,-2])        
+        # second_index_bool = second_index_bool & (output_second_inverse[:,-1]>output_second_inverse[:,-2])        
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 使用knn分类模式判别
@@ -612,7 +614,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # print("begin end")
         # import_index_bool = predicted_labels==3
         # 综合判别
-        import_index_bool = output_import_index_bool
+        import_index_bool = output_import_index_bool & second_index_bool
         
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
@@ -991,7 +993,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                         
         return last_batch_index,last_batch_imp_index,item_codes
                                 
-    def val_metric_show(self,output,target,price_class,target_vr_class,output_inverse=None,
+    def val_metric_show(self,output,target,price_class,target_vr_class,output_inverse=None,target_inverse=None,
                         vr_class=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
         
         if import_price_result is None or import_price_result.shape[0]==0:
@@ -1034,6 +1036,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 pred_data = output_inverse[s_index]
                 pred_center_data = pred_data[:,0]
                 pred_second_data = pred_data[:,1]
+                target_item = target_inverse[s_index]
                 # pred_third_data = pred_data[:,2]
                 # 可以从全局变量中，通过索引获得实际价格
                 df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
@@ -1047,13 +1050,14 @@ class _TFTCusModule(PLMixedCovariatesModule):
                     viz = viz_result_fail   
                 else:
                     viz = viz_result_nor  
-                self.draw_row(pred_center_data, pred_second_data, df_target=df_target, ts=ts, names=names,viz=viz,win=win)
+                self.draw_row(pred_center_data, pred_second_data, df_target=df_target, ts=ts,target_item=target_item, names=names,viz=viz,win=win)
                       
-    def draw_row(self,pred_center_data,pred_second_data,df_target=None,ts=None,names=None,viz=None,win="win"):
+    def draw_row(self,pred_center_data,pred_second_data,df_target=None,target_item=None,ts=None,names=None,viz=None,win="win"):
         """draw one line"""
         
         # 补充画出前面的label数据
         target_combine_sample = df_target["label"].values
+        target_combine_sample = target_item[:,0]
         pad_data = np.array([0 for i in range(self.input_chunk_length)])
         pred_center_data = np.concatenate((pad_data,pred_center_data),axis=-1)
         pred_second_data = np.concatenate((pad_data,pred_second_data),axis=-1)

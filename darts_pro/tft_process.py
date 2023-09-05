@@ -98,6 +98,8 @@ class TftDatafAnalysis():
             self.data_lstm(dataset)
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)
+        if self.type.startswith("data_linear_reg"):
+            self.data_linear_reg(dataset)            
                                                     
     def data_pca(
         self,
@@ -140,11 +142,34 @@ class TftDatafAnalysis():
         
         data_assis = StatDataAssis()
         batch_file_path = self.kwargs["batch_file_path"]
-        batch_file = "{}/valid_batch.pickel".format(batch_file_path)   
+        batch_file = "{}/train_batch.pickel".format(batch_file_path)   
         col_list = dataset.col_def["col_list"] + ["label"]
         # col_list.remove("label_ori")
         # col_list.remove("REV5_ORI")
         train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
         data_assis.data_corr_analysis(train_ds)
+
+    def data_linear_reg(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        """线性回归任务"""
         
+        batch_file_path = self.kwargs["batch_file_path"]
+        batch_file = "{}/train_batch.pickel".format(batch_file_path)
+        col_list = ['MASCOPE5','OBV5','RSI5']
+        col_list = ['MASCOPE5']
+        target_col = ['PRICE_SCOPE']
+        
+        mode = "analysis_reg"
+        mode = "analysis"
+        input_index = [1,2]
+        # train_ds = BatchDataset(batch_file,target_col=target_col,fit_names=input_index,mode=mode,range_num=[0,10000])
+        # valid_ds = BatchDataset(batch_file,target_col=target_col,fit_names=input_index,mode=mode,range_num=[10000,12000])
+        train_ds = BatchDataset(batch_file,target_col=target_col,fit_names=col_list,mode=mode,range_num=[0,1000])
+        valid_ds = BatchDataset(batch_file,target_col=target_col,fit_names=col_list,mode=mode,range_num=[1000,1200])
+                
+        trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=len(col_list))
+        trainer.reg_training(input_index=input_index,load_model=False)
+                
                 

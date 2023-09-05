@@ -13,10 +13,11 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 class BatchDataset(Dataset):
-    def __init__(self,filepath=None,fit_names=None,mode="process",range_num=None):
+    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None):
         
         self.mode = mode
         self.filepath = filepath
+        self.target_col = target_col
         self.fit_names = fit_names      
         self.range_num = range_num        
         
@@ -61,6 +62,10 @@ class BatchDataset(Dataset):
             self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
             self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
             self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
+            self.analysis_data = self.get_df_data(target_col,target_info=aggregated[-1][range_num[0]:range_num[1]])
+        if self.mode=="analysis_reg":
+            self.target_data = aggregated[-2][range_num[0]:range_num[1]]
+            self.scalers = aggregated[5][range_num[0]:range_num[1]]
             print("self.target_data shape:{}".format(self.target_data.shape))
     
     def build_pca_data(self):
@@ -137,12 +142,23 @@ class BatchDataset(Dataset):
             target_info["target_range_scaler"] = target_range_scaler
             return past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info
         if self.mode=="analysis":
-            return self.target_data[index],self.target_class[index]
-            
+            return self.target_data[index],np.sum(self.analysis_data[index][:,0])
+        if self.mode=="analysis_reg":
+            scaler = self.scalers[index]
+            x = self.target_data[index]
+            x_inverse = scaler.inverse_transform(x)
+            x_inverse_conv = x_inverse[:,self.fit_names[0]:self.fit_names[1]]
+            y_inverse = x_inverse[:,0]
+            # x_conv = x[:,self.fit_names[0]:self.fit_names[1]]
+            x_conv = MinMaxScaler().fit_transform(x_inverse_conv)
+            # y_inverse = MinMaxScaler().fit_transform(y_inverse)
+            y = np.sum(y_inverse)
+            return x_conv,y
+                    
     def __len__(self):
         if self.mode=="process":
             return self.batch_data[0].shape[0]  
-        if self.mode=="analysis":
+        if self.mode.startswith("analysis"):
             return self.range_num[1] - self.range_num[0]
             
     
