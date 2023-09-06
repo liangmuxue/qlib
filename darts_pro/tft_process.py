@@ -98,6 +98,8 @@ class TftDatafAnalysis():
             self.data_lstm(dataset)
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)
+        if self.type.startswith("data_linear_reg"):
+            self.data_linear_reg(dataset)            
                                                     
     def data_pca(
         self,
@@ -140,11 +142,42 @@ class TftDatafAnalysis():
         
         data_assis = StatDataAssis()
         batch_file_path = self.kwargs["batch_file_path"]
-        batch_file = "{}/valid_batch.pickel".format(batch_file_path)   
+        batch_file = "{}/train_batch.pickel".format(batch_file_path)   
         col_list = dataset.col_def["col_list"] + ["label"]
         # col_list.remove("label_ori")
         # col_list.remove("REV5_ORI")
         train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
         data_assis.data_corr_analysis(train_ds)
+
+    def data_linear_reg(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        """线性回归任务"""
         
+        batch_file_path = self.kwargs["batch_file_path"]
+        batch_file = "{}/train_batch.pickel".format(batch_file_path)
+        col_list = ['MASCOPE5','OBV5','RSI5']
+        col_list = ['MASCOPE5','RSI5']
+        target_col = ['PRICE_SCOPE']
+        
+        base_size = 10000
+        mode = "analysis_reg_ota"
+        # mode = "analysis_reg"
+        if mode=="analysis_reg_ota":
+            input_index = [1,3]
+            input_dim = input_index[1] - input_index[0] 
+            fit_names = input_index
+            file_name = "reg_conv.pth"
+        if mode=="analysis_reg":
+            fit_names = col_list
+            input_dim = len(col_list)
+            file_name = "reg.pth"
+        range_num_train = [0,base_size]
+        range_num_valid = [base_size,int(base_size*1.2)]
+        train_ds = BatchDataset(batch_file,target_col=target_col,fit_names=fit_names,mode=mode,range_num=range_num_train)
+        valid_ds = BatchDataset(batch_file,target_col=target_col,fit_names=fit_names,mode=mode,range_num=range_num_valid)
+        trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=input_dim)
+        trainer.reg_training(load_model=False,file_name=file_name)
+                
                 

@@ -15,7 +15,7 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','PRICE_SCOPE','RESI10','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5']                 
+              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5']                 
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -53,7 +53,7 @@ task:
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'data_corr'
+            type: 'data_linear_reg'
             n_epochs : 100
             save_dataset_file: True
             load_dataset_file: &load_dataset_file True

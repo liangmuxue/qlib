@@ -296,7 +296,7 @@ class StatDataAssis():
         # sns.heatmap(df_corr, vmax=1, vmin=-1, center=0)
         fit_names = ds_data.fit_names
         size = ds_data.batch_data[0].shape[0]
-        analysis_columns = ["label_ori","RSI5"]
+        analysis_columns = ["PRICE_SCOPE","MASCOPE5","OBV5","RSI5","MACD"]
         df_combine = None
         for i in range(size):
             df_item = pd.DataFrame(ds_data.target_data[i],columns=fit_names)
@@ -313,7 +313,7 @@ class StatDataAssis():
                 df_combine = df_corr
             else:
                 df_combine = pd.concat([df_combine,df_corr])
-        print("corr value:{}".format(df_combine[analysis_columns[-1]].mean()))
+        print("corr value:{}".format(df_combine.mean()))
         # plt.savefig('./custom/data/asis/seaborn_heatmap_corr_result.png')
         
     # def corr_data_build(self,data,columns):

@@ -95,7 +95,7 @@ class TargetDataReg(nn.Module):
         self.input_dim = input_dim
         self.seq_len = seq_len
         self.fc1 = nn.Linear(input_dim*seq_len, hidden_dim)  # notice input shape
-        self.fc2 = nn.Linear(hidden_dim,1)        
+        self.fc2 = nn.Linear(hidden_dim,output_dim)        
     
     def forward(self, x):
         x = x.reshape((-1, self.input_dim * self.seq_len))
@@ -114,10 +114,11 @@ class TargetDataReg(nn.Module):
         
 class ClassifierTrainer():  
       
-    def __init__(self,train_ds,valid_ds,input_dim=2):
+    def __init__(self,train_ds,valid_ds,input_dim=2,work_path="custom/data/asis"):
         self.train_ds = train_ds
         self.valid_ds = valid_ds
         self.input_dim = input_dim
+        self.work_path = work_path
 
     def create_loaders(self,train_ds, valid_ds, bs=512, jobs=0):
         train_dl = DataLoader(train_ds, bs, shuffle=True, num_workers=jobs)
@@ -185,4 +186,76 @@ class ClassifierTrainer():
                 if trials >= patience:
                     print(f'Early stopping on epoch {epoch}')
                     break    
+
+
+    def reg_training(self,load_model=False,file_name=None):
         
+        input_dim = self.input_dim
+        seq_len = 5
+        output_dim = 1
+        hidden_dim = 64
+        
+        lr = 0.0005
+        n_epochs = 1000
+        train_dl, valid_dl = self.create_loaders(self.train_ds, self.valid_ds,bs=512,jobs=6)
+        iterations_per_epoch = len(train_dl)
+        best_acc = 0
+        patience, trials = 1000, 0
+        
+        save_path = "{}/{}".format(self.work_path,file_name)
+        if load_model:
+            model = torch.load(save_path)
+        else:
+            model = TargetDataReg(input_dim, seq_len, output_dim,hidden_dim)
+        model = model.cuda()
+        criterion = nn.MSELoss()
+        opt = torch.optim.RMSprop(model.parameters(), lr=lr)
+        sched = CyclicLR(opt, cosine(t_max=iterations_per_epoch * 2, eta_min=lr/100))
+        
+        print('Start model training')
+        
+        for epoch in range(1, n_epochs + 1):
+            
+            for i, (x_batch, y_batch) in enumerate(train_dl):
+                x_batch = x_batch.float()
+                y_batch = y_batch.float()
+                model.train()
+                x_batch = x_batch.cuda()
+                y_batch = y_batch.cuda()
+                sched.step()
+                opt.zero_grad()
+                out = model(x_batch)
+                loss = criterion(out, y_batch)
+                loss.backward()
+                opt.step()
+            
+            model.eval()
+            correct, total = 0, 0
+            for x_val, y_val in valid_dl:
+                x_val, y_val = [t.cuda() for t in (x_val, y_val)]
+                x_val = x_val.float()
+                y_val = y_val.float()
+                out = model(x_val)
+                # preds = F.log_softmax(out, dim=1).argmax(dim=1)
+                # total += y_val.size(0)
+                loss = criterion(out, y_val)
+                # correct += (preds == y_val).sum().item()
+            
+            acc = 0 # correct / total
+        
+            if epoch % 5 == 0:
+                print(f'Epoch: {epoch:3d}. Loss: {loss.item():.4f}. Acc.: {acc:2.2%}')
+            
+            if epoch % 100 == 0:
+                torch.save(model,save_path)
+                
+            if acc > best_acc:
+                trials = 0
+                best_acc = acc
+                torch.save(model.state_dict(), 'best.pth')
+                print(f'Epoch {epoch} best model saved with accuracy: {best_acc:2.2%}')
+            else:
+                trials += 1
+                if trials >= patience:
+                    print(f'Early stopping on epoch {epoch}')
+                    break    
