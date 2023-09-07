@@ -114,10 +114,11 @@ class TargetDataReg(nn.Module):
         
 class ClassifierTrainer():  
       
-    def __init__(self,train_ds,valid_ds,input_dim=2):
+    def __init__(self,train_ds,valid_ds,input_dim=2,work_path="custom/data/asis"):
         self.train_ds = train_ds
         self.valid_ds = valid_ds
         self.input_dim = input_dim
+        self.work_path = work_path
 
     def create_loaders(self,train_ds, valid_ds, bs=512, jobs=0):
         train_dl = DataLoader(train_ds, bs, shuffle=True, num_workers=jobs)
@@ -187,22 +188,26 @@ class ClassifierTrainer():
                     break    
 
 
-    def reg_training(self):
+    def reg_training(self,load_model=False,file_name=None):
         
-        input_dim = self.input_dim  
+        input_dim = self.input_dim
         seq_len = 5
         output_dim = 1
         hidden_dim = 64
         
         lr = 0.0005
         n_epochs = 1000
-        train_dl, valid_dl = self.create_loaders(self.train_ds, self.valid_ds)
+        train_dl, valid_dl = self.create_loaders(self.train_ds, self.valid_ds,bs=512,jobs=6)
         iterations_per_epoch = len(train_dl)
         best_acc = 0
         patience, trials = 1000, 0
         
-        # model = LSTMClassifier(input_dim, hidden_dim, layer_dim, output_dim)
         model = TargetDataReg(input_dim, seq_len, output_dim,hidden_dim)
+        save_path = "{}/{}".format(self.work_path,file_name)
+        if load_model:
+            model = torch.load(save_path)
+        else:
+            model = TargetDataReg(input_dim, seq_len, output_dim,hidden_dim)
         model = model.cuda()
         criterion = nn.MSELoss()
         opt = torch.optim.RMSprop(model.parameters(), lr=lr)
@@ -215,8 +220,8 @@ class ClassifierTrainer():
             for i, (x_batch, y_batch) in enumerate(train_dl):
                 x_batch = x_batch.float()
                 model.train()
-                x_batch = x_batch.cuda()
-                y_batch = y_batch.cuda()
+                x_batch = x_batch.cuda().float()
+                y_batch = y_batch.cuda().float()
                 sched.step()
                 opt.zero_grad()
                 out = model(x_batch)
@@ -233,13 +238,18 @@ class ClassifierTrainer():
                 val_loss = criterion(out, y_val)
                 # preds = F.log_softmax(out, dim=1).argmax(dim=1)
                 # total += y_val.size(0)
+                y_val = y_val.float()
+                out = model(x_val)
                 # correct += (preds == y_val).sum().item()
             
             acc = 0 # correct / total
         
             if epoch % 5 == 0:
-                print(f'Epoch: {epoch:3d}. Loss: {loss.item():.4f}. val loss.: {val_loss:4f}')
-        
+                print(f'Epoch: {epoch:3d}. val_loss: {val_loss.item():.4f}. Acc.: {acc:2.2%}')
+            
+            if epoch % 100 == 0:
+                torch.save(model,save_path)
+                
             if acc > best_acc:
                 trials = 0
                 best_acc = acc
@@ -249,4 +259,4 @@ class ClassifierTrainer():
                 trials += 1
                 if trials >= patience:
                     print(f'Early stopping on epoch {epoch}')
-                    break            
+                    break    

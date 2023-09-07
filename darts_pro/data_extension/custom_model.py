@@ -1173,6 +1173,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         mode="train",
         past_split=None,
         filter_conv_index=0,
+        no_dynamic_data=False,
         **kwargs,
     ):
         """重载darts相关类"""
@@ -1223,6 +1224,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.monitor = monitor
         self.past_split = past_split
         self.filter_conv_index = filter_conv_index
+        self.no_dynamic_data = no_dynamic_data
     
     def _build_vriable_metas(self,tensors,static_covariates,seq=0):   
         
@@ -1810,7 +1812,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5][0],batch_item[6],batch_item[7],batch_item[8]) 
             batch.append(rtn_item) 
             # 训练阶段做增强
-            if self.trainer.state.stage==RunningStage.TRAINING:
+            if self.trainer.state.stage==RunningStage.TRAINING and not self.no_dynamic_data:
                 for i in range(3):
                     b_rebuild = self.dynamic_build_training_data(batch_item)
                     # 不符合要求则不增强

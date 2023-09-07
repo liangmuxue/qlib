@@ -61,9 +61,29 @@ class BatchDataset(Dataset):
         if self.mode.startswith("analysis"):
             self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
             self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
+        if self.mode=="analysis_reg":
+            self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
+            self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
             self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
             self.analysis_data = self.get_df_data(target_col,target_info=aggregated[-1][range_num[0]:range_num[1]])
             print("self.target_data shape:{}".format(self.target_data.shape))
+        if self.mode=="analysis_reg_ota":               
+            self.target_data = aggregated[-2][range_num[0]:range_num[1]]
+            target_inverse_data = []
+            for i in range(range_num[1]-range_num[0]):
+                scaler = aggregated[5][i]
+                target_data = aggregated[-2][i]
+                inverse_data = scaler.inverse_transform(target_data)
+                target_inverse_data.append(inverse_data)
+            target_inverse_data = np.stack(target_inverse_data)   
+            # x_conv = target_inverse_data[:,:,self.fit_names[0]:self.fit_names[1]]
+            y = np.expand_dims(np.sum(target_inverse_data[:,:,0],axis=1),axis=-1)
+            x_conv_transform = target_inverse_data[:,:,self.fit_names[0]:self.fit_names[1]]
+            shape_ori = x_conv_transform.shape
+            x_conv_transform = x_conv_transform.reshape((shape_ori[0]*shape_ori[1], shape_ori[2]))
+            self.x_conv_transform = MinMaxScaler().fit_transform(x_conv_transform).reshape(shape_ori)
+            self.y_transform = MinMaxScaler().fit_transform(y)
+            print("self.target_data shape:{}".format(self.target_data.shape))           
     
     def build_pca_data(self):
         """create pca data,using target data and relation data"""
@@ -143,7 +163,9 @@ class BatchDataset(Dataset):
         if self.mode=="analysis_reg":
             y = np.sum(self.analysis_data[index],axis=0)
             return self.target_data[index],y
-                    
+        if self.mode=="analysis_reg_ota":
+            return self.x_conv_transform[index],self.y_transform[index]           
+                
     def __len__(self):
         if self.mode=="process":
             return self.batch_data[0].shape[0]  

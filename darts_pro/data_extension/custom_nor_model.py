@@ -137,6 +137,7 @@ class TFTAsisModel(TFTExtModel):
         loss_number=3,
         monitor=None,
         mode="train",
+        no_dynamic_data=True,
         past_split=None,
         filter_conv_index=0,
         **kwargs,
@@ -144,7 +145,7 @@ class TFTAsisModel(TFTExtModel):
         
         super().__init__(input_chunk_length,output_chunk_length,hidden_size,lstm_layers,num_attention_heads,
                          full_attention,feed_forward,dropout,hidden_continuous_size,categorical_embedding_sizes,add_relative_index,
-                         loss_fn,likelihood,norm_type,use_weighted_loss_func,loss_number,monitor,past_split=past_split,**kwargs)
+                         loss_fn,likelihood,norm_type,use_weighted_loss_func,loss_number,monitor,past_split=past_split,no_dynamic_data=no_dynamic_data,**kwargs)
     
     def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
         """重载创建模型方法，使用自定义模型"""

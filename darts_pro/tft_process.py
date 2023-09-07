@@ -160,10 +160,24 @@ class TftDatafAnalysis():
         col_list = ['MASCOPE5','OBV5','RSI5']
         col_list = ['MASCOPE5','RSI5']
         target_col = ['PRICE_SCOPE']
-        
-        train_ds = BatchDataset(batch_file,target_col=target_col,fit_names=col_list,mode="analysis_reg",range_num=[0,10000])
-        valid_ds = BatchDataset(batch_file,target_col=target_col,fit_names=col_list,mode="analysis_reg",range_num=[1000,12000])
-        trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=len(col_list))
-        trainer.reg_training()
+
+        base_size = 10000
+        mode = "analysis_reg_ota"
+        # mode = "analysis_reg"
+        if mode=="analysis_reg_ota":
+            input_index = [1,4]
+            input_dim = input_index[1] - input_index[0] 
+            fit_names = input_index
+            file_name = "reg_conv.pth"
+        if mode=="analysis_reg":
+            fit_names = col_list
+            input_dim = len(col_list)
+            file_name = "reg.pth"
+        range_num_train = [0,base_size]
+        range_num_valid = [base_size,int(base_size*1.2)]
+        train_ds = BatchDataset(batch_file,target_col=target_col,fit_names=fit_names,mode=mode,range_num=range_num_train)
+        valid_ds = BatchDataset(batch_file,target_col=target_col,fit_names=fit_names,mode=mode,range_num=range_num_valid)
+        trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=input_dim)
+        trainer.reg_training(load_model=False,file_name=file_name)
                 
                 
