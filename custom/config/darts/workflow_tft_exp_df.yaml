@@ -79,7 +79,7 @@ task:
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,2],[0,2],[1,2],[2,3]]
+               past_split: [[0,2],[1,2],[2,3]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -111,7 +111,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['PRICE_SCOPE','MASCOPE5','OBV5','RSI5']
+                target_column: ['MASCOPE5','OBV5','RSI5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['RSI5','MACD','RESI5']  

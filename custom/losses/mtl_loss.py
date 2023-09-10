@@ -106,61 +106,34 @@ class UncertaintyLoss(nn.Module):
     def forward(self, input_ori: Tensor, target_ori: Tensor,optimizers_idx=0,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
-        (input,slope_data,tar_class) = input_ori
-        (target,target_class,target_info) = target_ori
+        (input,vr_class,tar_class) = input_ori
+        (target,target_class,target_info,y_transform) = target_ori
         # slope_target = (target[:,-1] - target[:,0])/target[:,0]
-        raise_range = torch.Tensor(np.array([ts["raise_range"] for ts in target_info])).to(self.device)
-        raise_range = raise_range.unsqueeze(-1)
-        first_input = input[0][:,:,0]
-        first_label = target[:,:,0]
-        second_input = input[1][:,:,0]
-        second_label = target[:,:,1]     
-        # third_input = input[2][:,:,0]
-        # third_label = target[:,:,2]          
-        # 如果是似然估计下的数据，需要取中间值
-        # 相关系数损失
-        corr_loss = torch.tensor(0).to(self.device)
+        corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         # 指标分类
         ce_loss = torch.tensor(0).to(self.device) 
-        # 第二指标计算
-        mse_loss = torch.tensor(0).to(self.device)    
-        # 第二指标分类 
-        value_diff_loss = torch.tensor(0).to(self.device) # self.ccc_loss_comp(third_input,third_label)  
-        # value_diff_loss = 0.0
-        mean_threhold = torch.tensor(0).to(self.device)
-        # if slope_out.max()>1:
-        #     max_item = slope_out.max(dim=1)[0]
-        #     print("slope_out weight >1 cnt:{}".format(torch.sum(max_item>1)))
-        # 使用不确定性损失模式进行累加
-        # loss_sum += 1/3 / (self.sigma[0] ** 2) * ce_loss + torch.log(1 + self.sigma[0] ** 2)
-        # loss_sum += 1/2 / (self.sigma[1] ** 2) * value_range_loss + torch.log(1 + self.sigma[1] ** 2)
-        # loss_sum += 1/2 / (self.sigma[2] ** 2) * corr_loss + torch.log(1 + self.sigma[2] ** 2)
-        # loss_sum += 1/2 / (self.sigma[3] ** 2) * mse_loss + torch.log(1 + self.sigma[3] ** 2)
-
-        # 不同阶段使用不同的损失函数组合
-        if optimizers_idx==0:
-            corr_loss = self.ccc_loss_comp(first_input, first_label)
-            loss_sum = corr_loss
-        if optimizers_idx==1:
-            mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            loss_sum = mse_loss
-        if optimizers_idx==2:
+        value_diff_loss = torch.tensor(0).to(self.device)         
+        # 相关系数损失,多个目标
+        for i in range(len(input)):
+            if optimizers_idx==i or optimizers_idx==-1:
+                input_item = input[i][:,:,0]
+                label_item = target[:,:,i]                
+                corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)
+                loss_sum = corr_loss_combine[i]
+        # 二次目标损失部分
+        if optimizers_idx==len(input) or optimizers_idx==-1:
             # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
-            ce_loss = self.vr_loss(slope_data, raise_range)
-            loss_sum = ce_loss      
-        if optimizers_idx==3:
-            # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
-            value_diff_loss = self.tar_loss(tar_class, raise_range)
-            loss_sum = value_diff_loss                     
-        # 验证推理阶段使用全部损失
-        if optimizers_idx==-1:   
-            corr_loss = self.ccc_loss_comp(first_input, first_label)
-            mse_loss = self.ccc_loss_comp(second_input, second_label) 
-            ce_loss = self.vr_loss(slope_data, raise_range)
-            value_diff_loss = self.tar_loss(tar_class, target_class[:,0])
-            loss_sum = corr_loss + mse_loss + ce_loss + value_diff_loss                     
+            ce_loss = self.vr_loss(vr_class, y_transform)
+            loss_sum = ce_loss
+        # if optimizers_idx==len(input)+1 or optimizers_idx==-1:
+        #     # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
+        #     value_diff_loss = self.tar_loss(tar_class, raise_range)
+        #     loss_sum = value_diff_loss
+        # 验证阶段，全部累加
+        if optimizers_idx==-1:
+            loss_sum = torch.sum(corr_loss_combine) + ce_loss + value_diff_loss
         
-        return loss_sum,[mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold]
+        return loss_sum,[corr_loss_combine,ce_loss,value_diff_loss]
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):
         

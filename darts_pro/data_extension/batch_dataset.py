@@ -153,7 +153,7 @@ class BatchDataset(Dataset):
             mask_idx = np.where(past_target_ori<0.01)[0]
             past_target_ori[mask_idx] = 0.01
             past_target_slope = (past_target_ori[1:,:] - past_target_ori[:-1,:])/past_target_ori[:-1,:]*10
-            # 生成目标缩放器，用于后续反归一化
+            # 生成目标缩放器，用于后续归一化
             target_range_scaler = MinMaxScaler()
             target_range_scaler.fit(past_target_slope)
             target_info["target_range_scaler"] = target_range_scaler

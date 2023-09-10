@@ -192,7 +192,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         vr_range_num = len(CLASS_SIMPLE_VALUES.keys())     
         vr_range_num = 1  
         # 序列分类层，包括目标分类和输出分类
-        self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length-1,vr_range_num,device=device)        
+        self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)        
         self.classify_tar_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)  
         if use_weighted_loss_func and not isinstance(model.criterion,UncertaintyLoss):
             self.criterion = UncertaintyLoss(device=device) 
@@ -228,29 +228,17 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 # 模拟数据
                 out = torch.ones([batch_size,self.output_chunk_length,1,1]).to(self.device)
             out_total.append(out)    
-        # 如果只有一个目标，则输出端模拟第二个用于数量对齐
-        # if len(out_total)==1:
-        #     fake_out = torch.ones(out_total[0].shape).to(self.device)
-        #     out_total.append(fake_out)
         
         out_for_class = torch.cat(out_total,dim=2)[:,:,:,0] 
-        output_slope_data = []
-        for i in range(out_for_class.shape[0]):
-            scaler_sample = scaler[i]
-            if self.trainer.state.stage==RunningStage.TRAINING:
-                output_item = out_for_class[i].detach().cpu().numpy()
-            else:
-                output_item = out_for_class[i].cpu().numpy()
-            output_inverse = scaler_sample.inverse_transform(output_item)
-            ouput_slope = (output_inverse[1:,:] - output_inverse[:-1,:])/output_inverse[:-1,:]*10
-            # 利用预存的scaler做归一化
-            target_range_scaler = target_info[i]["target_range_scaler"]
-            ouput_slope = target_range_scaler.transform(ouput_slope)
-            output_slope_data.append(ouput_slope)
-        output_slope_data = torch.Tensor(np.stack(output_slope_data)).to(self.device)
-        #  根据预测数据进行分类
-        vr_class = self.classify_vr_layer(output_slope_data)
-        tar_class = self.classify_tar_layer(future_target)
+        if self.trainer.state.stage==RunningStage.TRAINING:
+            out_for_class = out_for_class.detach().cpu().numpy()
+        else:
+            out_for_class = out_for_class.cpu().numpy()
+        
+        x_conv_transform = self.build_reg_data(out_for_class,target_info,scaler)
+        # 根据预测数据进行分类
+        vr_class = self.classify_vr_layer(x_conv_transform)
+        tar_class = torch.ones(vr_class.shape).to(self.device) # self.classify_tar_layer(x_conv_transform)
         return out_total,vr_class,tar_class
  
     def _construct_classify_layer(self, input_dim, seq_len,output_dim,hidden_dim=64,device=None):
@@ -324,33 +312,46 @@ class _TFTCusModule(PLMixedCovariatesModule):
         target_class = target_class[:,:,0]     
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
-            self.criterion.epoch = self.epochs_trained           
+            self.criterion.epoch = self.epochs_trained      
         for i in range(len(self.past_split)+1):
+            y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,scaler,optimizer_idx=i,target_info=target_info)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,scaler,target_info),optimizers_idx=i)
+            # 目标损失计算前，进行批量归一化
+            if i==len(self.past_split):
+                raise_range_batch = np.expand_dims(np.array([ts["raise_range"] for ts in target_info]),axis=-1)
+                y_transform = MinMaxScaler().fit_transform(raise_range_batch)   
+                y_transform = torch.Tensor(y_transform).to(self.device)              
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform),optimizers_idx=i)
             self.log("train_loss", loss, batch_size=train_batch[0].shape[0], prog_bar=True)
             # self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)
             self.loss_data.append(detail_loss)
             # 手动更新参数
             opt = self.trainer.optimizers[i]
-            # 如果已冻结则不执行更新
             opt.zero_grad()
             self.manual_backward(loss)
+            # 如果已冻结则不执行更新
             if self.freeze_mode[i]==1:
-                opt.step()  
+                opt.step()
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return loss,detail_loss
 
+    def build_reg_data(self,output,target_info,scaler):
+        output_inverse = self.get_inverse_data(output,target_info=target_info,scaler=scaler)
+        shape_ori = output_inverse.shape
+        x_conv_transform = output_inverse.reshape((shape_ori[0]*shape_ori[1], shape_ori[2]))
+        x_conv_transform = MinMaxScaler().fit_transform(x_conv_transform).reshape(shape_ori)
+        return torch.Tensor(x_conv_transform).to(self.device)
+        
     def on_train_epoch_start(self):
         self.loss_data = []
            
     def on_train_epoch_end(self):
         
-        mse_loss = torch.stack([item[0] for item in self.loss_data]).sum()
-        value_diff_loss = torch.stack([item[1] for item in self.loss_data]).sum()
-        corr_loss = torch.stack([item[2] for item in self.loss_data]).sum()
-        ce_loss = torch.stack([item[3] for item in self.loss_data]).sum()
+        # mse_loss = torch.stack([item[0] for item in self.loss_data]).sum()
+        # value_diff_loss = torch.stack([item[1] for item in self.loss_data]).sum()
+        # corr_loss = torch.stack([item[2] for item in self.loss_data]).sum()
+        # ce_loss = torch.stack([item[3] for item in self.loss_data]).sum()
         self.custom_histogram_adder()
         # self.trainer.save_checkpoint("example.ckpt")
         # self.log("train_value_diff_loss", value_diff_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -384,19 +385,23 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
         
         # 动态冻结网络参数
-        corr_loss = self.trainer.callback_metrics["val_corr_loss"]
-        mse_loss = self.trainer.callback_metrics["val_mse_loss"]
-        if corr_loss<0.59:
-            self.freeze_apply(mode=0)
-        if mse_loss<0.66:
-            self.freeze_apply(mode=1)
+        corr_loss_combine = []
+        for i in range(len(self.sub_models)):
+            corr_loss = self.trainer.callback_metrics["val_corr_loss_{}".format(i)]
+            if i==0 and corr_loss<0.66:
+                self.freeze_apply(mode=i)
+            if i==1 and corr_loss<0.66:
+                self.freeze_apply(mode=i)      
+            if i==2 and corr_loss<0.68:
+                self.freeze_apply(mode=i)                            
             
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
         # 只关注重点部分
         val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
-        return self.validation_step_real(val_batch, batch_idx)
+        loss,output = self.validation_step_real(val_batch, batch_idx)
+        return loss
                                  
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
@@ -405,6 +410,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 收集目标数据用于分类
         scaler,target_class,future_target,target_info = val_batch[5:]  
         (output,vr_class,tar_class) = self(input_batch,future_target,scaler,target_info=target_info,optimizer_idx=-1)
+        raise_range_batch = np.expand_dims(np.array([ts["raise_range"] for ts in target_info]),axis=-1)
+        y_transform = MinMaxScaler().fit_transform(raise_range_batch)       
+        y_transform = torch.Tensor(y_transform).to(self.device)  
+              
         past_target = val_batch[0]
         past_covariate = val_batch[1]
         target_class = target_class[:,:,0]
@@ -416,13 +425,13 @@ class _TFTCusModule(PLMixedCovariatesModule):
         whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
         target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,scaler,target_info),optimizers_idx=-1)
-        (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
+        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,y_transform),optimizers_idx=-1)
+        (corr_loss_combine,ce_loss,value_diff_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_corr_loss", corr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_mse_loss", mse_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        for i in range(len(corr_loss_combine)):
+            self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
         # last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
@@ -463,9 +472,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # print("import_vr_acc:{},import_recall:{},import_price_acc:{},import_price_nag:{},count:{}".
         #     format(import_vr_acc,import_recall,import_price_acc,import_price_nag,import_index.shape[0]))
         past_target = val_batch[0]
-        self.val_metric_show(output,future_target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
-                             target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                            last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+        # self.val_metric_show(output,future_target,price_class,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
+        #                      target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+        #                     last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         
         # 累加结果集，后续统计   
         if self.import_price_result is None:
@@ -479,7 +488,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
         # self._calculate_metrics(output, target, self.val_metrics)
             
-        return loss
+        return loss,output
  
     def filter_batch_by_condition(self,val_batch,filter_conv_index=0,rev_threhold=3,recent_threhold=3):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
@@ -704,25 +713,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         (output_value,vr_class,tar_class) = output
         output_value = [output_value_item.squeeze(dim=-1) for output_value_item in output_value]
-        (target_real,target_class,scaler,target_info) = target
-        future_target_list = []
-        target_slope_list = []
-        for t in target_info:
-            future_target_list.append(t["future_target"])
-            target_slope_list.append(t["last_raise_range"])                       
-        future_target = torch.Tensor(future_target_list).to(self.device)
-        slope_target = torch.Tensor(target_slope_list).to(self.device)
         output_combine = (output_value,vr_class,tar_class)
         
-        if self.likelihood:
-            # 把似然估计损失叠加到自定义多任务损失里
-            loss_like = self.likelihood.compute_loss(output_value, target_real)
-            if self.criterion is None:
-                return loss_like
-            mtl_loss = self.criterion(output_combine, target_real,outer_loss=loss_like)
-            return mtl_loss
-        else:
-            return self.criterion(output_combine, (target_real,target_class,target_info),optimizers_idx=optimizers_idx)
+        return self.criterion(output_combine, target,optimizers_idx=optimizers_idx)
 
     def custom_histogram_adder(self):
         # iterating through all parameters

@@ -113,6 +113,9 @@ class _TFTModuleAsis(_TFTCusModule):
         self.train_part_fout.close()
         self.valid_fout.close()
         
+    def on_validation_epoch_end(self):
+        print("pass")
+            
 class TFTAsisModel(TFTExtModel):
     
     def __init__(
@@ -265,16 +268,18 @@ class _TFTModuleBatch(_TFTCusModule):
         self.lr_freq = {"interval":"epoch","frequency":1}
         
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
-        """use to export data"""
+        """重载原方法，直接使用已经加工好的数据"""
+        
         loss,detail_loss = self.training_step_real(train_batch, batch_idx) 
         # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         return loss
 
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
-        
-        return self.validation_step_real(val_batch, batch_idx)    
-
+        loss,detail_loss = self.validation_step_real(val_batch, batch_idx)  
+        return loss,detail_loss   
+    
+            
 class TFTBatchModel(TFTExtModel):
     
     def __init__(
@@ -365,7 +370,6 @@ class TFTBatchModel(TFTExtModel):
         
         # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
         self.output_dim = (1,1)
-        
         
         # 根据拆分的过去协变量，生成多个配置
         variables_meta_array = []
