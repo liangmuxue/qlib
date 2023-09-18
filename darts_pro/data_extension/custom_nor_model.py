@@ -140,7 +140,7 @@ class TFTAsisModel(TFTExtModel):
         loss_number=3,
         monitor=None,
         mode="train",
-        no_dynamic_data=True,
+        no_dynamic_data=False,
         past_split=None,
         filter_conv_index=0,
         **kwargs,
@@ -267,16 +267,62 @@ class _TFTModuleBatch(_TFTCusModule):
                                     device=device,**kwargs)  
         self.lr_freq = {"interval":"epoch","frequency":1}
         
+        self.train_filepath = "custom/data/asis/train_output_batch.pickel"
+        self.valid_filepath = "custom/data/asis/valid_output_batch.pickel"
+        
+    
+    def on_train_start(self): 
+        super().on_train_start()
+        self.train_output_flag = True
+    def on_validation_start(self): 
+        super().on_validation_start()
+        self.valid_output_flag = True
+                
+    def on_train_epoch_start(self):  
+        super().on_train_epoch_start()
+        if self.train_output_flag:
+            self.train_fout = open(self.train_filepath, "wb")
+    def on_train_epoch_end(self):  
+        super().on_train_epoch_start()
+        if self.train_output_flag:
+            self.train_output_flag = False
+            self.train_fout.close()
+    def on_validation_epoch_start(self):  
+        super().on_validation_epoch_start()
+        if self.valid_output_flag:
+            self.valid_fout = open(self.valid_filepath, "wb")     
+    def on_validation_epoch_end(self):  
+        super().on_validation_epoch_end()
+        if self.valid_output_flag:
+            self.valid_output_flag = False
+            self.valid_fout.close()          
+                              
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """重载原方法，直接使用已经加工好的数据"""
         
-        loss,detail_loss = self.training_step_real(train_batch, batch_idx) 
+        loss,detail_loss,output = self.training_step_real(train_batch, batch_idx) 
+        if self.train_output_flag:
+            output = [output_item.detach().cpu().numpy() for output_item in output]
+            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
+            data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
+                             future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
+                             target.cpu().detach().numpy(),target_info]                
+            output_combine = (output,data)
+            pickle.dump(output_combine,self.train_fout)  
         # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         return loss
 
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
-        loss,detail_loss = self.validation_step_real(val_batch, batch_idx)  
+        loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)  
+        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
+            output = [output_item.cpu().numpy() for output_item in output]
+            val_batch = self.filter_batch_by_condition(val_batch,filter_conv_index=self.filter_conv_index)
+            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch 
+            data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
+                             future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
+            output_combine = (output,data)
+            pickle.dump(output_combine,self.valid_fout)         
         return loss,detail_loss   
     
             

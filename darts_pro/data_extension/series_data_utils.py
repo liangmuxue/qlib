@@ -12,6 +12,8 @@ from tslearn.preprocessing import TimeSeriesScalerMinMax, \
     TimeSeriesScalerMeanVariance
 from tslearn.neighbors import KNeighborsTimeSeriesClassifier, \
     KNeighborsTimeSeries
+from dtw import dtw
+
 import cus_utils.global_var as global_var    
 from tft.class_define import CLASS_LAST_VALUES,get_simple_class,get_complex_class
 from cus_utils.tensor_viz import TensorViz
@@ -242,7 +244,7 @@ class StatDataAssis():
             model_path = "{}/knn_clf.model".format(self.filepath)
             joblib.dump(knn_clf, model_path)        
         return predicted_labels,X_test_ori,y_test
-
+    
     def fit_pred_data(self,output):
         model_path = "{}/knn_clf.model".format(self.filepath)
         knn_clf = joblib.load(model_path)
@@ -286,9 +288,7 @@ class StatDataAssis():
             predicted_labels[index] = i
         return predicted_labels,X,y
 
-    def data_corr_analysis(self,ds_data):
-        dataset = global_var.get_value("dataset")
-        df_all = dataset.df_all
+    def data_corr_analysis(self,ds_data,analysis_columns = ["PRICE_SCOPE","MASCOPE5","OBV5","RSI5","MACD"]):
         # df_expirement = df_all[["label","CLOSE"]]
         # df_expirement = df_expirement.iloc[:3000]
         # df_corr = df_expirement.corr(method="spearman")
@@ -296,7 +296,6 @@ class StatDataAssis():
         # sns.heatmap(df_corr, vmax=1, vmin=-1, center=0)
         fit_names = ds_data.fit_names
         size = ds_data.batch_data[0].shape[0]
-        analysis_columns = ["PRICE_SCOPE","MASCOPE5","OBV5","RSI5","MACD"]
         df_combine = None
         for i in range(size):
             df_item = pd.DataFrame(ds_data.target_data[i],columns=fit_names)
@@ -315,8 +314,60 @@ class StatDataAssis():
                 df_combine = pd.concat([df_combine,df_corr])
         print("corr value:{}".format(df_combine.mean()))
         # plt.savefig('./custom/data/asis/seaborn_heatmap_corr_result.png')
-        
-    # def corr_data_build(self,data,columns):
+    
+    def output_corr_analysis(self,ds_data,analysis_columns=None,fit_names=None,target_col=None,diff_columns=None):
+        size = ds_data.output_data.shape[0]
+        df_combine = None
+        df_combine_fits = None
+        df_combine_diff = None
+        viz = TensorViz(env="data_analysis")
+        index = 0
+        for i in range(size):
+            combine_data = np.concatenate((ds_data.target_data[i],ds_data.output_data[i]),axis=-1)
+            tar_data = pd.DataFrame(combine_data,columns=analysis_columns)
+            df_corr = tar_data.corr(method="spearman").iloc[[0]]
+            if df_combine is None:
+                df_combine = df_corr
+            else:
+                df_combine = pd.concat([df_combine,df_corr])
+                
+            df_item = ds_data.analysis_data[i]
+            df_item = pd.DataFrame(df_item,columns=fit_names)
+            df_corr_fit = df_item.corr(method="spearman").iloc[[0]]            
+            if df_combine_fits is None:
+                df_combine_fits = df_corr_fit
+            else:
+                df_combine_fits = pd.concat([df_combine_fits,df_corr_fit])  
+
+            # 比较差分数据
+            df_diff_data = tar_data[diff_columns].diff()
+            df_diff_data = pd.concat([df_item[target_col],df_diff_data],axis=1)
+            df_corr_diff = df_diff_data.corr(method="spearman").iloc[[0]]
+            if df_combine_diff is None:
+                df_combine_diff = df_corr_diff
+            else:
+                df_combine_diff = pd.concat([df_combine_diff,df_corr_diff]) 
+                                        
+            # 合并显示预测和实际数据
+            target_value = df_item[target_col].values
+            # 只查看涨幅达标的数据
+            if ((target_value[-1,0] - target_value[0,0])/target_value[0,0]*100)>5:
+                tar_data_rm = tar_data[tar_data.columns[1:]]
+                df_analysis = pd.concat([tar_data_rm,df_item],axis=1)
+                self.show_ana_data(df_analysis,index=index,viz=viz)         
+                index += 1             
+        print("corr output value:{}".format(df_combine.mean()))
+        print("corr diff value:{}".format(df_combine_diff.mean()))
+        print("corr target value:{}".format(df_combine_fits.mean()))       
+
+    def show_ana_data(self,df_data,index=0,viz=None):
+        if index>8:
+            return
+        title = "tar_view_{}".format(index)
+        win = "win_analysis_{}".format(index)
+        view_data = df_data.values
+        names = df_data.columns
+        viz.viz_matrix_var(view_data,win=win,title=title,names=names)    
                           
 if __name__ == "__main__":       
     data_assis = StatDataAssis()

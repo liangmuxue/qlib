@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market test_500
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -54,7 +54,7 @@ task:
             n_jobs: 20
             log_every_n_steps: 50
             type: 'fit_batch'
-            n_epochs : 100
+            n_epochs : 200
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis'
@@ -111,7 +111,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['MASCOPE5','OBV5','RSI5']
+                target_column: ['CLOSE','OBV5','RSI5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['RSI5','MACD','RESI5']  

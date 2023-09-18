@@ -13,6 +13,8 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 class BatchDataset(Dataset):
+    """二次训练数据集"""
+    
     def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None):
         
         self.mode = mode
@@ -28,7 +30,40 @@ class BatchDataset(Dataset):
                     batch_data.append(pickle.load(fin))
                 except EOFError:
                     break            
-            
+                
+        aggregated = self.create_aggregated_data(batch_data)    
+        
+        if self.mode=="process":
+            self.batch_data = aggregated 
+        if self.mode.startswith("analysis"):
+            self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
+            self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
+            self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
+        if self.mode=="analysis_reg":
+            self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
+            self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
+            self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
+            self.analysis_data = self.get_df_data(target_col,target_info=aggregated[-1][range_num[0]:range_num[1]])
+            print("self.target_data shape:{}".format(self.target_data.shape))
+        if self.mode=="analysis_reg_ota":               
+            self.target_data = aggregated[-2][range_num[0]:range_num[1]]
+            target_inverse_data = []
+            for i in range(range_num[1]-range_num[0]):
+                scaler = aggregated[5][i]
+                target_data = aggregated[-2][i]
+                inverse_data = scaler.inverse_transform(target_data)
+                target_inverse_data.append(inverse_data)
+            target_inverse_data = np.stack(target_inverse_data)   
+            # x_conv = target_inverse_data[:,:,self.fit_names[0]:self.fit_names[1]]
+            y = np.expand_dims(np.sum(target_inverse_data[:,:,0],axis=1),axis=-1)
+            x_conv_transform = target_inverse_data[:,:,self.fit_names[0]:self.fit_names[1]]
+            shape_ori = x_conv_transform.shape
+            x_conv_transform = x_conv_transform.reshape((shape_ori[0]*shape_ori[1], shape_ori[2]))
+            self.x_conv_transform = MinMaxScaler().fit_transform(x_conv_transform).reshape(shape_ori)
+            self.y_transform = MinMaxScaler().fit_transform(y)
+            print("self.target_data shape:{}".format(self.target_data.shape))           
+
+    def create_aggregated_data(self,batch_data):
         first_sample = batch_data[0]
         aggregated = []
         for i in range(len(first_sample)):
@@ -54,37 +89,8 @@ class BatchDataset(Dataset):
                 aggregated.append(d_list)       
             elif elem is None:
                 aggregated.append(None)  
+        return aggregated
                 
-        if self.mode=="process":
-            self.batch_data = aggregated     
-        
-        if self.mode.startswith("analysis"):
-            self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
-            self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
-        if self.mode=="analysis_reg":
-            self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
-            self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
-            self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
-            self.analysis_data = self.get_df_data(target_col,target_info=aggregated[-1][range_num[0]:range_num[1]])
-            print("self.target_data shape:{}".format(self.target_data.shape))
-        if self.mode=="analysis_reg_ota":               
-            self.target_data = aggregated[-2][range_num[0]:range_num[1]]
-            target_inverse_data = []
-            for i in range(range_num[1]-range_num[0]):
-                scaler = aggregated[5][i]
-                target_data = aggregated[-2][i]
-                inverse_data = scaler.inverse_transform(target_data)
-                target_inverse_data.append(inverse_data)
-            target_inverse_data = np.stack(target_inverse_data)   
-            # x_conv = target_inverse_data[:,:,self.fit_names[0]:self.fit_names[1]]
-            y = np.expand_dims(np.sum(target_inverse_data[:,:,0],axis=1),axis=-1)
-            x_conv_transform = target_inverse_data[:,:,self.fit_names[0]:self.fit_names[1]]
-            shape_ori = x_conv_transform.shape
-            x_conv_transform = x_conv_transform.reshape((shape_ori[0]*shape_ori[1], shape_ori[2]))
-            self.x_conv_transform = MinMaxScaler().fit_transform(x_conv_transform).reshape(shape_ori)
-            self.y_transform = MinMaxScaler().fit_transform(y)
-            print("self.target_data shape:{}".format(self.target_data.shape))           
-    
     def build_pca_data(self):
         """create pca data,using target data and relation data"""
         
@@ -173,4 +179,56 @@ class BatchDataset(Dataset):
             return self.range_num[1] - self.range_num[0]
             
     
+class BatchOutputDataset(BatchDataset):    
+    
+    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None):
+        
+        self.mode = mode
+        self.filepath = filepath
+        self.target_col = target_col
+        self.fit_names = fit_names      
+        self.range_num = range_num        
+
+        output_batch_data = []
+        target_batch_data = []
+        with open(filepath, "rb") as fin:
+            while True:
+                try:
+                    data = pickle.load(fin)
+                    output_batch_data.append(data[0])
+                    target_batch_data.append(data[1])
+                except EOFError:
+                    break  
+                        
+        # 训练数据 
+        aggregated = self.create_aggregated_data(target_batch_data)       
+          
+        # 输出数据    
+        output_combine = []    
+        for item in output_batch_data:
+            out_item = np.stack([conv for conv in item],axis=2)[:,:,:,0,0]
+            output_combine.append(out_item)
+        output = np.concatenate(output_combine,axis=0)
+        output_inverse_data = []
+        target_inverse_data = []
+        for index in range(output.shape[0]):
+            output_item = output[index]
+            scaler = aggregated[5][index]            
+            output_inverse = scaler.inverse_transform(output_item)      
+            output_inverse_data.append(output_inverse)
+            # target_data = aggregated[-2][index]
+            # inverse_data = scaler.inverse_transform(target_data)
+            # target_inverse_data.append(inverse_data)      
+        output_inverse_data = np.stack(output_inverse_data)[range_num[0]:range_num[1]]
+        # target_inverse_data = np.stack(target_inverse_data)
+        
+        # 目标数据
+        target_data = self.get_df_data(target_col,target_info=aggregated[-1][range_num[0]:range_num[1]])
+        analysis_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
+        
+        if self.mode=="analysis_output":               
+            self.output_data = output_inverse_data
+            self.target_data = target_data  
+            self.analysis_data = analysis_data  
+                
     

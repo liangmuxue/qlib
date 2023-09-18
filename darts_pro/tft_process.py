@@ -24,7 +24,7 @@ from darts.metrics import mape
 from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 
-from darts_pro.data_extension.batch_dataset import BatchDataset
+from darts_pro.data_extension.batch_dataset import BatchDataset,BatchOutputDataset
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 import cus_utils.global_var as global_var
@@ -98,9 +98,11 @@ class TftDatafAnalysis():
             self.data_lstm(dataset)
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)
+        if self.type.startswith("output_corr"):
+            self.output_corr(dataset)               
         if self.type.startswith("data_linear_reg"):
             self.data_linear_reg(dataset)            
-                                                    
+
     def data_pca(
         self,
         dataset: TFTSeriesDataset,
@@ -144,11 +146,32 @@ class TftDatafAnalysis():
         batch_file_path = self.kwargs["batch_file_path"]
         batch_file = "{}/train_batch.pickel".format(batch_file_path)   
         col_list = dataset.col_def["col_list"] + ["label"]
+        analysis_columns = ["CLOSE","MASCOPE5","OBV5","RSI5","MACD",'KDJ_K','KDJ_D','KDJ_J','CCI5','RESI5']
+        analysis_columns = ['CLOSE','REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5',
+              'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5',
+              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5'] 
         # col_list.remove("label_ori")
         # col_list.remove("REV5_ORI")
         train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
-        data_assis.data_corr_analysis(train_ds)
+        data_assis.data_corr_analysis(train_ds,analysis_columns=analysis_columns)
 
+    def output_corr(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        """对output数据进行相关性分析"""
+        
+        data_assis = StatDataAssis()
+        batch_file_path = self.kwargs["batch_file_path"]
+        batch_file = "{}/train_output_batch.pickel".format(batch_file_path)   
+        col_list = dataset.col_def["col_list"] + ["label"]
+        target_col = ['CLOSE']
+        analysis_columns = ["CLOSE","CLOSE_OUTPUT","OBV5_OUTPUT","RSI5_OUTPUT"]
+        fit_names = ["CLOSE","OBV5","RSI5"]
+        diff_columns = ["RSI5_OUTPUT"]
+        train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=[0,1000])
+        data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
+        
     def data_linear_reg(
         self,
         dataset: TFTSeriesDataset,
@@ -179,5 +202,5 @@ class TftDatafAnalysis():
         valid_ds = BatchDataset(batch_file,target_col=target_col,fit_names=fit_names,mode=mode,range_num=range_num_valid)
         trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=input_dim)
         trainer.reg_training(load_model=False,file_name=file_name)
-                
+               
                 
