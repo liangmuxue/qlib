@@ -164,7 +164,8 @@ class TFTDataset(DatasetH):
         # 计算涨跌幅度
         data["label_range"] = data.groupby(group_column)["label"].rolling(window=2).apply(rl_apply).reset_index(0,drop=True)         
         # 生成KDJ指标
-        self.compute_kdj(data)         
+        self.compute_kdj(data)    
+        self.compute_atr(data)     
         # 使用指定字段
         columns = self.get_seq_columns() + ["label","datetime_number"]
         columns = list(set(columns))
@@ -175,18 +176,41 @@ class TFTDataset(DatasetH):
         return data
 
     def compute_kdj(self,df):
-        window_size = 9
+        """KDJ指标计算"""
         
+        window_size = 9
         low_list=df['LOW'].rolling(window=window_size).min()
         low_list.fillna(value=df['LOW'].expanding().min(), inplace=True)
         high_list = df['HIGH'].rolling(window=window_size).max()
         high_list.fillna(value=df['HIGH'].expanding().max(), inplace=True)
         rsv = (df['CLOSE'] - low_list) / (high_list - low_list) * 100
-        df['KDJ_K'] = rsv.ewm(com=2).mean()  
-        df['KDJ_D'] = df['KDJ_K'].ewm(com=2).mean()
+        df['KDJ_K'] = rsv.ewm(com=2,adjust=False).mean()  
+        df['KDJ_D'] = df['KDJ_K'].ewm(com=2,adjust=False).mean()
         df['KDJ_J'] = 3 * df['KDJ_K'] - 2 * df['KDJ_D']
-
-            
+    
+    def compute_atr(self,df):
+        """平均真实范围指标计算"""
+        
+        def wwma(values, n):
+            """
+             J. Welles Wilder's EMA 
+            """
+            return values.ewm(alpha=1/n, adjust=False).mean()
+        
+        def atr(df, n=5):
+            data = df.copy()
+            high = data['HIGH']
+            low = data['LOW']
+            close = data['CLOSE']
+            data['tr0'] = abs(high - low)
+            data['tr1'] = abs(high - close.shift())
+            data['tr2'] = abs(low - close.shift())
+            tr = data[['tr0', 'tr1', 'tr2']].max(axis=1)
+            atr = wwma(tr, n)
+            return atr
+        
+        df['ATR5'] = atr(df)
+           
     def filter_extremum_data(self,data,columns=[]):
         """清除极值数据"""
         

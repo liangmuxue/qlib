@@ -1,10 +1,10 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_500
+market: &market test_2000
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
-    init_data: False
+    init_data: True
     start_time: 2008-01-01
     end_time: 2023-12-31
     fit_start_time: 2008-01-01
@@ -16,8 +16,8 @@ data_handler_config: &data_handler_config
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
               col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5',
-              'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5',
-              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5']                 
+              'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS',
+              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5']                 
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -55,11 +55,11 @@ task:
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'output_corr'
+            type: 'data_corr'
             n_epochs : 100
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis'
+            load_dataset_file: &load_dataset_file False
+            batch_file_path: 'custom/data/asis/QTLU_2000'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  

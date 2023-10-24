@@ -3,7 +3,10 @@ from datetime import date
 import sys, os
 import numpy as np
 import cv2
-
+import matplotlib.pyplot as plt
+from scipy.misc import electrocardiogram
+from scipy.signal import find_peaks
+    
 def test_pd_ser():
     
     dict_data1 = {
@@ -288,11 +291,37 @@ def test_build_datetime():
     df = pd.DataFrame({'forecast_date':pd.date_range(begin_date, end_date)})    
     df['dayofweek'] = df['forecast_date'].dt.dayofweek
     print(df)
-    
+
+def test_scipy_peak():
+    x = electrocardiogram()[2000:4000]
+    peaks, _ = find_peaks(x, height=0,distance=150)
+    plt.plot(x)
+    plt.plot(peaks, x[peaks], "x")
+    plt.plot(np.zeros_like(x), "--", color="gray")
+    plt.show()
+
+def test_peak_combine():
+    file_dir = "/home/qdata/project/qlib/custom/data/asis/view_data"  
+    filenames = os.listdir(file_dir)
+    for file in filenames:
+        whole_file = file_dir + "/" + file
+        view_data = np.load(whole_file)[:,1]
+        peaks, _ = find_peaks(view_data, height=1.02,distance=5)
+        if len(peaks)<2:
+            continue
+        plt.plot(view_data)
+        plt.plot(peaks, view_data[peaks], "x")
+        base_axis = np.zeros_like(view_data)
+        base_axis = base_axis + 0.95
+        plt.plot(base_axis, "--", color="gray")
+        plt.show()        
+           
 if __name__ == "__main__":
+    # test_scipy_peak()
+    test_peak_combine()
     # test_pd_index()
     # test_pd_timeser()
-    test_shift()
+    # test_shift()
     # test_join()
     # test_merge()
     # test_columns()

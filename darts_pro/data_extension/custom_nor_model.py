@@ -1,3 +1,5 @@
+import os
+
 from darts.models import RNNModel, ExponentialSmoothing, BlockRNNModel
 from darts.models.forecasting.block_rnn_model import _BlockRNNModule
 from darts.utils.data.training_dataset import TrainingDataset
@@ -18,6 +20,8 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
+import tsaug
+
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
@@ -25,6 +29,7 @@ from torch.utils.data import DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
 from cus_utils.encoder_cus import StockNormalizer
+from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute,slope_classify_compute_batch
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -52,6 +57,7 @@ class _TFTModuleAsis(_TFTCusModule):
         use_weighted_loss_func=False,
         past_split=None,
         filter_conv_index=0,
+        batch_file_path=None,
         loss_number=3,
         device="cpu",
         **kwargs,
@@ -62,9 +68,11 @@ class _TFTModuleAsis(_TFTCusModule):
                                     device=device,**kwargs)  
         self.train_data = []
         self.valid_data = []
-        self.train_filepath = "custom/data/asis/train_batch.pickel"
-        self.train_part_filepath = "custom/data/asis/train_part_batch.pickel"
-        self.valid_filepath = "custom/data/asis/valid_batch.pickel"
+        if not os.path.exists(batch_file_path):
+            os.makedirs(batch_file_path)         
+        self.train_filepath = "{}/train_batch.pickel".format(batch_file_path)
+        self.train_part_filepath = "{}/train_part_batch.pickel".format(batch_file_path)
+        self.valid_filepath = "{}/valid_batch.pickel".format(batch_file_path)
         
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """use to export data"""
@@ -75,7 +83,7 @@ class _TFTModuleAsis(_TFTCusModule):
                          future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
                          target.cpu().detach().numpy(),target_info]            
         part_data = [target_class.cpu().detach().numpy(),target_info]
-        print("dump train,target shape:{}".format(past_target.shape))
+        # print("dump train,target shape:{}".format(past_target.shape))
         self.total_target_cnt += past_target.shape[0]            
         pickle.dump(data,self.train_fout) 
         pickle.dump(part_data,self.train_part_fout) 
@@ -142,6 +150,7 @@ class TFTAsisModel(TFTExtModel):
         mode="train",
         no_dynamic_data=False,
         past_split=None,
+        batch_file_path=None,
         filter_conv_index=0,
         **kwargs,
     ):
@@ -149,7 +158,8 @@ class TFTAsisModel(TFTExtModel):
         super().__init__(input_chunk_length,output_chunk_length,hidden_size,lstm_layers,num_attention_heads,
                          full_attention,feed_forward,dropout,hidden_continuous_size,categorical_embedding_sizes,add_relative_index,
                          loss_fn,likelihood,norm_type,use_weighted_loss_func,loss_number,monitor,past_split=past_split,no_dynamic_data=no_dynamic_data,**kwargs)
-    
+        self.batch_file_path = batch_file_path
+        
     def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
         """重载创建模型方法，使用自定义模型"""
         
@@ -232,11 +242,15 @@ class TFTAsisModel(TFTExtModel):
             loss_number=self.loss_number,
             past_split=self.past_split,
             filter_conv_index=self.filter_conv_index,
+            batch_file_path=self.batch_file_path,
             device=self.device,
             **self.pl_module_params,
         )    
 
-
+    # def dynamic_build_training_data(self,item,rev_threhold=1):
+    #     """重载原方法，返回空，不进行增强"""
+    #     return None
+    
 class _TFTModuleBatch(_TFTCusModule):
     def __init__(
         self,
@@ -257,6 +271,7 @@ class _TFTModuleBatch(_TFTCusModule):
         past_split=None,
         filter_conv_index=0,
         loss_number=3,
+        batch_file_path=None,
         device="cpu",
         **kwargs,
     ):
@@ -267,8 +282,8 @@ class _TFTModuleBatch(_TFTCusModule):
                                     device=device,**kwargs)  
         self.lr_freq = {"interval":"epoch","frequency":1}
         
-        self.train_filepath = "custom/data/asis/train_output_batch.pickel"
-        self.valid_filepath = "custom/data/asis/valid_output_batch.pickel"
+        self.train_filepath = "{}/train_output_batch.pickel".format(batch_file_path)
+        self.valid_filepath = "{}/valid_output_batch.pickel".format(batch_file_path)
         
     
     def on_train_start(self): 
@@ -458,14 +473,58 @@ class TFTBatchModel(TFTExtModel):
             past_split=self.past_split,
             filter_conv_index=self.filter_conv_index,
             device=self.device,
+            batch_file_path=self.batch_file_path,
             **self.pl_module_params,
         )   
                
-    def _batch_collate_filter(self,batch: List[Tuple]) -> Tuple:
+    def _batch_collate_filter(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
         """
+
+        # batch = []
+        # max_cnt = 0
+        # adj_max_cnt = 0
+        # aug_repeat_size = 10
+        # last_raise_range = []
+        #
+        # def data_process(batch,batch_item,target_class,max_cnt=0,adj_max_cnt=0):
+        #     # 训练部分数据增强
+        #     rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5],batch_item[6],batch_item[7],batch_item[8]) 
+        #     batch.append(rtn_item) 
+        #     # 训练阶段做增强
+        #     if self.trainer.state.stage==RunningStage.TRAINING and not self.no_dynamic_data:
+        #         for i in range(3):
+        #             b_rebuild = self.dynamic_build_training_data(batch_item)
+        #             # 不符合要求则不增强
+        #             if b_rebuild is None:
+        #                 continue
+        #             adj_max_cnt += 1
+        #             batch.append(b_rebuild)   
+        #     return max_cnt,adj_max_cnt
+        # # 过滤不符合条件的记录
+        # for b in ori_batch:
+        #     if self.mode=="train":
+        #         future_target = b[-2]
+        #         target_class = b[-3]
+        #     else:
+        #         future_target = b[-1]
+        #     # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
+        #     if not np.all(future_target == future_target[0]):
+        #         # 非训练部分，不需要数据增强，直接转换返回
+        #         if not self.model.training:
+        #             if self.mode=="predict":
+        #                 batch.append(b)
+        #             else:
+        #                 # 验证集也使用增强数据
+        #                 # max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
+        #                 rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8])                        
+        #                 batch.append(rtn_item)
+        #         else:
+        #             max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
+        # last_raise_range = np.array(last_raise_range)
         
+        batch = ori_batch 
         aggregated = []
         first_sample = batch[0]
         for i in range(len(first_sample)):
@@ -488,5 +547,79 @@ class TFTBatchModel(TFTExtModel):
         return tuple(aggregated)
         
 
+    def dynamic_build_training_data(self,item,rev_threhold=1):
+        """使用数据增强，调整训练数据"""
+        
+        past_covariate = item[1]
+        future_past_covariate = item[5][1]
+        past_target = item[0]
+        future_target = item[-2]
+        target_info = item[-1]
+        scaler = item[5][0]
+        last_target_class = item[-3][1][0]
+        rev_data = past_covariate[:,0]
+        
+        # 重点关注价格指数,对价格涨幅达标的数据进行增强
+        p_taraget_class = compute_price_class(target_info["price_array"][self.input_chunk_length:])
+        if p_taraget_class in [0,1]:
+            return None
+        
+        target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        target_unscale = scaler.inverse_transform(target[0,:,:])
+        # focus_target = target_unscale[self.input_chunk_length:]  
+        # target_slope = (focus_target[1:] - focus_target[:-1])/focus_target[:-1]*100
+
+        # 与近期高点比较，不能差太多
+        # label_array = target_info["label_array"]
+        # recent_data = label_array[:self.input_chunk_length]
+        # recent_max = recent_data.max()
+        # if (recent_max-recent_data[-1])/recent_max>2/100:
+        #     return None
+        
+        # # 关注动量指标比较剧烈的
+        # rev_cov_recent = rev_data[-5:]
+        # # 近期均值大于阈值1
+        # rev_bool = np.mean(rev_cov_recent)>rev_threhold
+        # # 最近数值处于最高点
+        # rev_cov_max = np.max(rev_data)
+        # rev_bool = rev_bool & ((rev_cov_max-rev_cov_recent[-1])<=0.01)        
+        # if not rev_bool:
+        #     return None
+              
+        # 关注最后一段下跌的
+        # if last_target_class==1 and np.random.randint(0,20)!=1:
+        #     return None
+        
+        # 把past和future重新组合，统一增强
+        covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
+        if np.random.randint(0,2)==1:
+            # 量化方式调整
+            X_aug, Y_aug = tsaug.Quantize(n_levels=10).augment(covariate, target)
+        else:
+            # 降低时间分辨率的方式调整
+            X_aug, Y_aug = tsaug.Pool(size=2).augment(covariate, target)
+        past_covariate = X_aug[0,:self.input_chunk_length,:] 
+        future_target = Y_aug[0,self.input_chunk_length:,:]
+        past_target = Y_aug[0,:self.input_chunk_length,:]
+        rtn_item = (past_target,past_covariate,item[2],item[3],item[4],item[5][0],item[6],future_target,item[8])
+        
+        # if np.random.randint(0,900)==1:
+        #     # 可视化增强的数据
+        #     index = np.random.randint(0,12)
+        #     win = "win_{}".format(index)
+        #     target_title = "code_{}".format(target_info["item_rank_code"])
+        #     names = ["label","price"]
+        #     price_array = np.expand_dims(target_info["price_array"],axis=-1)
+        #     view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
+        #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
+        return rtn_item
+            
+        # 重点关注前期走势比较平的
+        # slope = slope_classify_compute(focus_target,threhold=2)
+        # if slope!=SLOPE_SHAPE_SMOOTH:
+        #     return None
+        
+        # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
                
         

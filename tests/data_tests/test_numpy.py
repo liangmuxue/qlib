@@ -6,6 +6,7 @@ from torchvision.transforms import *
 import cv2
 from torch import nn
 from sklearn.metrics import precision_recall_curve
+import datetime
 
 def test_nozero():
     L = np.arange(18).reshape((2, 3, 3))
@@ -35,7 +36,25 @@ def test_argwhere():
     # print("S is:",S)
     print("out is:", out)
     
-    
+def test_copy():    
+    ori_data = np.ones([1920,1080,3])
+    for i in range(100):
+        dt = datetime.datetime.now() 
+        print("copy begin:{},shape:{}".format(dt,ori_data.shape))
+        tar_data = np.copy(ori_data)
+        rel_dt = datetime.datetime.now() - dt
+        print("copy end:{},shape:{}".format(rel_dt,tar_data.shape))
+
+def test_copy_torch():    
+    ori_data = np.ones([1920,1080,3])
+    for i in range(100):
+        dt = datetime.datetime.now() 
+        print("copy begin:{},shape:{}".format(dt,ori_data.shape))
+        torch_data = torch.from_numpy(ori_data)
+        tar_data = torch_data.clone().numpy()
+        rel_dt = datetime.datetime.now() - dt
+        print("copy end:{},shape:{}".format(rel_dt,tar_data.shape))
+            
 def test_condition():
     Z = np.zeros((6, 6, 3), dtype=int)
     s0 = np.array([1, 0, 18])
@@ -81,8 +100,8 @@ def test_index():
     # print("x is:", x)   
     # print("y is:", y)  
     
-    list = ['label','KDJ_K','KDJ_D','KDJ_J','OBV5','RSI5'] 
-    print(list[4:6])
+    list = ['MA5','QTLU5','CCI5','OBV5','CNTD5']  
+    print(list[3:5])
 
     
 def test_index2(): 
@@ -479,7 +498,9 @@ if __name__ == "__main__":
     # test_split_compute()
     # test_variable()
     # test_index()
-    test_compute()
+    # test_copy()
+    test_copy_torch()
+    # test_compute()
     # test_temp()
     # test_pd_ser()
     # test_torch_vision()

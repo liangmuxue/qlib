@@ -37,6 +37,18 @@ class MseLoss(_Loss):
             mse_loss = torch.sum(loss_arr_pun)
         return mse_loss  
 
+class PartLoss(_Loss):
+    """自定义损失，只衡量部分数据"""
+    
+    __constants__ = ['reduction']
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        loss = torch.abs(target[:,-1] - input[:,-1])
+        return torch.mean(loss)
+    
 class LastClassifyLoss(nn.BCEWithLogitsLoss):
     """自定义二分类损失，计算最后一段预测上升还是下降的准确性"""
     
@@ -96,8 +108,9 @@ class UncertaintyLoss(nn.Module):
         self.mse_weight = mse_weight.to(device)
         self.last_classify_loss = ScopeLoss(reduction=mse_reduction,device=device)
         # self.vr_loss = nn.CrossEntropyLoss(weight=vr_loss_weight)
+        self.part_loss = PartLoss()
         self.vr_loss = nn.MSELoss()
-        self.mse_loss = MseLoss(reduction=mse_reduction,device=device)
+        self.mse_loss = nn.MSELoss() # MseLoss(reduction=mse_reduction,device=device)
         self.tar_loss = nn.MSELoss()
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
         # 设置损失函数的组合模式
@@ -117,14 +130,19 @@ class UncertaintyLoss(nn.Module):
         for i in range(len(input)):
             if optimizers_idx==i or optimizers_idx==-1:
                 input_item = input[i][:,:,0]
-                label_item = target[:,:,i]                
-                corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)
+                label_item = target[:,:,i]            
+                if i==1:
+                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)   
+                elif i==2:
+                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)   
+                else: 
+                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)
                 loss_sum = corr_loss_combine[i]
         # 二次目标损失部分
-        if optimizers_idx==len(input) or optimizers_idx==-1:
-            # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
-            ce_loss = self.vr_loss(vr_class, y_transform)
-            loss_sum = ce_loss
+        # if optimizers_idx==len(input) or optimizers_idx==-1:
+        #     # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
+        #     ce_loss = self.vr_loss(vr_class, y_transform)
+        #     loss_sum = ce_loss
         # if optimizers_idx==len(input)+1 or optimizers_idx==-1:
         #     # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
         #     value_diff_loss = self.tar_loss(tar_class, raise_range)

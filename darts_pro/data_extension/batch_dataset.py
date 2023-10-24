@@ -62,7 +62,7 @@ class BatchDataset(Dataset):
             self.x_conv_transform = MinMaxScaler().fit_transform(x_conv_transform).reshape(shape_ori)
             self.y_transform = MinMaxScaler().fit_transform(y)
             print("self.target_data shape:{}".format(self.target_data.shape))           
-
+    
     def create_aggregated_data(self,batch_data):
         first_sample = batch_data[0]
         aggregated = []
@@ -90,7 +90,20 @@ class BatchDataset(Dataset):
             elif elem is None:
                 aggregated.append(None)  
         return aggregated
-                
+    
+    def build_origin_target_data(self):
+        """生成原数据"""
+        
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = self.batch_data 
+        target_class = target_class[:,:,0]
+        last_target_vr_class = target_class[:,1]
+        whole_target = np.concatenate((past_target,target),axis=1)
+        target_inverse = [scaler[i].inverse_transform(whole_target[i]) for i in range(len(scaler))]     
+        target_inverse = np.stack(target_inverse)
+        price_range = [ts["price_array"] for ts in target_info]
+        price_range = np.stack(price_range)
+        return target_inverse,price_range,target_class[:,0]
+                    
     def build_pca_data(self):
         """create pca data,using target data and relation data"""
         
@@ -181,7 +194,7 @@ class BatchDataset(Dataset):
     
 class BatchOutputDataset(BatchDataset):    
     
-    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None):
+    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=[0,10000]):
         
         self.mode = mode
         self.filepath = filepath
@@ -191,6 +204,8 @@ class BatchOutputDataset(BatchDataset):
 
         output_batch_data = []
         target_batch_data = []
+        
+        # 文件中已经包含了输出数据和目标数据
         with open(filepath, "rb") as fin:
             while True:
                 try:
@@ -220,15 +235,18 @@ class BatchOutputDataset(BatchDataset):
             # inverse_data = scaler.inverse_transform(target_data)
             # target_inverse_data.append(inverse_data)      
         output_inverse_data = np.stack(output_inverse_data)[range_num[0]:range_num[1]]
-        # target_inverse_data = np.stack(target_inverse_data)
         
         # 目标数据
-        target_data = self.get_df_data(target_col,target_info=aggregated[-1][range_num[0]:range_num[1]])
-        analysis_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
+        self.target_data = aggregated 
+        self.output_data = output_inverse_data
         
-        if self.mode=="analysis_output":               
-            self.output_data = output_inverse_data
-            self.target_data = target_data  
-            self.analysis_data = analysis_data  
-                
+    def __getitem__(self, index):
+        
+        batch_data = [item[index] for item in self.target_data]
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = batch_data
+        # 反归一化取得实际目标数据
+        # whole_target = np.concatenate((past_target,target),axis=0)
+        target_inverse = scaler.inverse_transform(target)  
+        return target_inverse
+    
     

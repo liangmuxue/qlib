@@ -1,7 +1,7 @@
 from qlib.contrib.data.handler import DataHandlerLP,check_transform_proc,_DEFAULT_LEARN_PROCESSORS
 from qlib.data.dataset.loader import QlibDataLoader
 from qlib.data.ops import Mad
-from .factor_ext import build_rsi_factor_str
+from .factor_ext import build_rsi_factor_str,build_rvi_factor_str,build_aos_factor_str
 
 class TftDataHandler(DataHandlerLP):
     """负责从底层取得原始数据"""
@@ -104,7 +104,10 @@ class TftDataHandler(DataHandlerLP):
                 "(Less($open, $close)-$low)/($high-$low+1e-12)",
                 "(2*$close-$high-$low)/$open",
                 "(2*$close-$high-$low)/($high-$low+1e-12)",
-                "100*((EMA($close, 12) - EMA($close, 26))/$close - EMA((EMA($close, 12) - EMA($close, 26))/$close, 9)/$close)"
+                "100*((EMA($close, 12) - EMA($close, 26))/$close - EMA((EMA($close, 12) - EMA($close, 26))/$close, 9)/$close)",
+                "$close/Ref($close,5)*100",
+                build_rvi_factor_str(),
+                build_aos_factor_str(),
             ]
             names += [
                 "KMID",
@@ -117,6 +120,9 @@ class TftDataHandler(DataHandlerLP):
                 "KSFT",
                 "KSFT2",
                 "MACD",
+                "MOMENTUM", # 动量指数
+                "RVI", # 相对活力指数
+                "AOS", # 加速振荡器
             ]
         if "price" in config:
             windows = config["price"].get("windows", range(5))
@@ -181,6 +187,9 @@ class TftDataHandler(DataHandlerLP):
             if use("QTLU"):
                 fields += ["Quantile($close, %d, 0.8)/$close" % d for d in windows]
                 names += ["QTLU%d" % d for d in windows]
+            if use("QTLUMA"):
+                fields += ["Mean(Quantile($close, %d, 0.8)/$close,%d)" % (d,d) for d in windows]
+                names += ["QTLUMA%d" % d for d in windows]                
             if use("QTLD"):
                 fields += ["Quantile($close, %d, 0.2)/$close" % d for d in windows]
                 names += ["QTLD%d" % d for d in windows]

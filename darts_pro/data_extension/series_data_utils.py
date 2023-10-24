@@ -303,8 +303,8 @@ class StatDataAssis():
             for col in analysis_columns:
                 values = df_item[col].values
                 slope_values = slope_compute(np.expand_dims(values,axis=-1))[:,0]
-                # tar_data.append(values)
-                tar_data.append(slope_values)
+                tar_data.append(values)
+                # tar_data.append(slope_values)
             tar_data = np.stack(tar_data,axis=-1)
             tar_data = pd.DataFrame(tar_data,columns=analysis_columns)
             df_corr = tar_data.corr(method="spearman").iloc[[0]]
@@ -316,23 +316,27 @@ class StatDataAssis():
         # plt.savefig('./custom/data/asis/seaborn_heatmap_corr_result.png')
     
     def output_corr_analysis(self,ds_data,analysis_columns=None,fit_names=None,target_col=None,diff_columns=None):
-        size = ds_data.output_data.shape[0]
+        size = len(ds_data)
         df_combine = None
         df_combine_fits = None
         df_combine_diff = None
         viz = TensorViz(env="data_analysis")
+        viz_fail = TensorViz(env="data_analysis_neg")
+        col_index = analysis_columns.index(target_col[0])
         index = 0
         for i in range(size):
-            combine_data = np.concatenate((ds_data.target_data[i],ds_data.output_data[i]),axis=-1)
+            target_item = ds_data.__getitem__(i)
+            # 合并目标数据与输出数据，以进行相关性比较
+            combine_data = np.concatenate((target_item[:,col_index:col_index+1],ds_data.output_data[i]),axis=-1)
             tar_data = pd.DataFrame(combine_data,columns=analysis_columns)
             df_corr = tar_data.corr(method="spearman").iloc[[0]]
             if df_combine is None:
                 df_combine = df_corr
             else:
                 df_combine = pd.concat([df_combine,df_corr])
-                
-            df_item = ds_data.analysis_data[i]
-            df_item = pd.DataFrame(df_item,columns=fit_names)
+            
+            # 直接在目标数据间比较
+            df_item = pd.DataFrame(target_item,columns=fit_names)
             df_corr_fit = df_item.corr(method="spearman").iloc[[0]]            
             if df_combine_fits is None:
                 df_combine_fits = df_corr_fit
@@ -350,18 +354,23 @@ class StatDataAssis():
                                         
             # 合并显示预测和实际数据
             target_value = df_item[target_col].values
-            # 只查看涨幅达标的数据
+            # 查看涨幅或跌幅达标的数据
             if ((target_value[-1,0] - target_value[0,0])/target_value[0,0]*100)>5:
                 tar_data_rm = tar_data[tar_data.columns[1:]]
                 df_analysis = pd.concat([tar_data_rm,df_item],axis=1)
                 self.show_ana_data(df_analysis,index=index,viz=viz)         
-                index += 1             
+                index += 1        
+            if ((target_value[-1,0] - target_value[0,0])/target_value[0,0]*100)<-5:
+                tar_data_rm = tar_data[tar_data.columns[1:]]
+                df_analysis = pd.concat([tar_data_rm,df_item],axis=1)
+                self.show_ana_data(df_analysis,index=index,viz=viz_fail)         
+                index += 1                        
         print("corr output value:{}".format(df_combine.mean()))
         print("corr diff value:{}".format(df_combine_diff.mean()))
         print("corr target value:{}".format(df_combine_fits.mean()))       
 
     def show_ana_data(self,df_data,index=0,viz=None):
-        if index>8:
+        if index>18:
             return
         title = "tar_view_{}".format(index)
         win = "win_analysis_{}".format(index)

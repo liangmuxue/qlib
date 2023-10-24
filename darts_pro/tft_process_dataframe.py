@@ -186,7 +186,8 @@ class TftDataframeModel():
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]      
-          
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
             train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(df_data_path)   
@@ -414,6 +415,7 @@ class TftDataframeModel():
                     save_checkpoints=True,
                     past_split=past_split,
                     filter_conv_index=filter_conv_index,
+                    batch_file_path=self.batch_file_path,
                     work_dir=self.optargs["work_dir"],
                     lr_scheduler_cls=scheduler,
                     lr_scheduler_kwargs=scheduler_config,

@@ -50,11 +50,11 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                                 &(df_all["instrument_rank"]==code)]["label_ori"].values
             label_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label"].values           
-            macd_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
-                                &(df_all["instrument_rank"]==code)]["MACD"].values      
-            kdj_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
-                                &(df_all["instrument_rank"]==code)]["KDJ_K"].values                                                                                    
-            self.ass_data[code] = (instrument,label_array,price_array,macd_array,kdj_array)
+            focus1_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["CCI5"].values      
+            focus2_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["MACD"].values                                                                                    
+            self.ass_data[code] = (instrument,label_array,price_array,focus1_array,focus2_array)
             
     def __getitem__(
         self, idx
@@ -123,13 +123,13 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         instrument = self.ass_data[code][0]
         label_array = self.ass_data[code][1][past_start:future_end]
         price_array = self.ass_data[code][2][past_start:future_end]
-        macd_array = self.ass_data[code][3][past_start:future_end]
-        kdj_array = self.ass_data[code][4][past_start:future_end]
+        focus1_array = self.ass_data[code][3][past_start:future_end]
+        focus2_array = self.ass_data[code][4][past_start:future_end]
         # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
-                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"label_array":label_array,"macd_array":macd_array,
-                       "kdj_array":kdj_array,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
+                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"label_array":label_array,"focus1_array":focus1_array,
+                       "focus2_array":focus2_array,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates
         covariate = None
@@ -233,9 +233,9 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         label_array = target_info["label_array"][self.input_chunk_length:]
         price_array = target_info["price_array"][self.input_chunk_length:]
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
-        raise_range = (price_array[-1] - price_array[0])/price_array[0]*10
+        raise_range = (price_array[-1] - price_array[0])/price_array[0]*100
         # 添加最后一段的走势分类
-        last_raise_range = (label_array[-1] - label_array[-2])/label_array[-2]*10
+        last_raise_range = (label_array[-1] - label_array[-2])/label_array[-2]*100
         # 先计算涨跌幅度分类，再进行归一化
         p_target_class = get_simple_class(raise_range)
         p_last_target_class = get_simple_class(last_raise_range,range_value=CLASS_LAST_VALUES)
@@ -244,6 +244,9 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         
         scaler = MinMaxScaler()
         target_info["future_target"] = future_target_ori[:,0]
+        # 如果目标数据全都一样，会引发corr计算的NAN，在这里微调
+        if np.sum(future_target_ori[:,2]==future_target_ori[0,2])==future_target_ori.shape[0]:
+            future_target_ori[0,2] = future_target_ori[0,2] + 0.01
         if self.transform_inner:
             # 因子归一化
             past_covariate = MinMaxScaler().fit_transform(past_covariate)

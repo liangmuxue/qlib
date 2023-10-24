@@ -24,9 +24,13 @@ from darts.metrics import mape
 from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 
+from cus_utils.common_compute import compute_price_class,compute_price_class_batch
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchOutputDataset
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from darts_pro.tft_series_dataset import TFTSeriesDataset
+from darts_pro.data_extension.custom_nor_model import TFTAsisModel,TFTBatchModel
+from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
+
 import cus_utils.global_var as global_var
 from darts_pro.data_extension.custom_tcn_model import ClassifierTrainer
 
@@ -102,7 +106,10 @@ class TftDatafAnalysis():
             self.output_corr(dataset)               
         if self.type.startswith("data_linear_reg"):
             self.data_linear_reg(dataset)            
-
+        if self.type.startswith("batch_data_ana"):
+            self.batch_data_ana(dataset) 
+        if self.type.startswith("batch_ot_data_ana"):
+            self.batch_ot_data_ana(dataset)             
     def data_pca(
         self,
         dataset: TFTSeriesDataset,
@@ -146,10 +153,10 @@ class TftDatafAnalysis():
         batch_file_path = self.kwargs["batch_file_path"]
         batch_file = "{}/train_batch.pickel".format(batch_file_path)   
         col_list = dataset.col_def["col_list"] + ["label"]
-        analysis_columns = ["CLOSE","MASCOPE5","OBV5","RSI5","MACD",'KDJ_K','KDJ_D','KDJ_J','CCI5','RESI5']
-        analysis_columns = ['CLOSE','REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5',
-              'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5',
-              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5'] 
+        analysis_columns = ["OBV5","CLOSE","MASCOPE5","OBV5","RSI5","MACD",'KDJ_K','KDJ_D','KDJ_J','CCI5','RESI5']
+        analysis_columns = ['label_ori','label_ori','MOMENTUM','RVI','OBV5','RSI5','CCI5','MA5','label','REV5','REV5_ORI','MACD','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5',
+              'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','IMAX5',"ATR5","AOS",
+              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5'] 
         # col_list.remove("label_ori")
         # col_list.remove("REV5_ORI")
         train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
@@ -163,13 +170,15 @@ class TftDatafAnalysis():
         
         data_assis = StatDataAssis()
         batch_file_path = self.kwargs["batch_file_path"]
-        batch_file = "{}/train_output_batch.pickel".format(batch_file_path)   
+        batch_file = "{}/valid_output_batch.pickel".format(batch_file_path)   
         col_list = dataset.col_def["col_list"] + ["label"]
-        target_col = ['CLOSE']
-        analysis_columns = ["CLOSE","CLOSE_OUTPUT","OBV5_OUTPUT","RSI5_OUTPUT"]
-        fit_names = ["CLOSE","OBV5","RSI5"]
-        diff_columns = ["RSI5_OUTPUT"]
-        train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=[0,1000])
+        # 重点比较的输出
+        target_col = ['MACD']
+        # 分析的列，第一个是实际目标列，后面的是输出列
+        analysis_columns = ["MACD","macd_output","obv_output","cci_output"]
+        fit_names = ["MACD","OBV5","CCI5"]
+        diff_columns = ["cci_output"]
+        train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=[0,100])
         data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
         
     def data_linear_reg(
@@ -203,4 +212,65 @@ class TftDatafAnalysis():
         trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=input_dim)
         trainer.reg_training(load_model=False,file_name=file_name)
                
-                
+    def batch_data_ana(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        
+        type = "train"
+        # type = "valid"
+        
+        ds = BatchDataset(
+            filepath = "{}/{}_batch.pickel".format(self.batch_file_path,type),mode="process"
+        )   
+        target,price_array,target_class = ds.build_origin_target_data()
+        
+        target_data = target[:,25:,:]
+        raise_bool = ((target_data[:,-1,:] - target_data[:,0,:])/np.abs(target_data[:,0,:])*100)>0
+        raise_index = [np.where(raise_bool[:,i])[0] for i in range(3)]
+        
+        price_target_array = price_array[:,25:]
+        p_target_class = compute_price_class_batch(price_target_array,mode="first_last")[0]
+        import_price_index = np.where(p_target_class==CLASS_SIMPLE_VALUE_MAX)[0]
+        print("import_price_index cnt:",import_price_index.shape[0])
+        print("total cnt:",len(price_array))
+        for i in range(3):
+            match_index = np.intersect1d(raise_index[i],import_price_index)
+            print("match cnt:{}".format(match_index.shape[0]))
+        
+        print("raise cnt:",[ri.shape[0] for ri in raise_index])
+        
+        
+    def batch_ot_data_ana(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        
+        
+        batch_file = "{}/valid_output_batch.pickel".format(self.kwargs["batch_file_path"])  
+        ds = BatchOutputDataset(
+            filepath = batch_file,mode="process"
+        )   
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info)  = ds.target_data
+        price_array = np.array([ts["price_array"] for ts in target_info])
+        output = ds.output_data
+        
+        raise_bool = ((output[:,-1,:] - output[:,0,:])/np.abs(output[:,0,:])*100)>3
+        raise_index = [np.where(raise_bool[:,i])[0] for i in range(3)]
+        
+        price_target_array = price_array[:,25:]
+        p_target_class = compute_price_class_batch(price_target_array,mode="first_last")[0]
+        import_price_index = np.where(p_target_class==CLASS_SIMPLE_VALUE_MAX)[0]
+        
+        for i in range(3):
+            match_index = np.intersect1d(raise_index[i],import_price_index)
+            print("match cnt:{}".format(match_index.shape[0]))
+        
+        print("raise cnt:",[ri.shape[0] for ri in raise_index])
+        print("import_price_index cnt:",import_price_index.shape[0])
+        
