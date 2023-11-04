@@ -187,6 +187,9 @@ class TftDataHandler(DataHandlerLP):
             if use("QTLU"):
                 fields += ["Quantile($close, %d, 0.8)/$close" % d for d in windows]
                 names += ["QTLU%d" % d for d in windows]
+            if use("HIGH_QTLU"):
+                fields += ["Quantile($high, %d, 0.8)/$high" % d for d in windows]
+                names += ["HIGH_QTLU%d" % d for d in windows]               
             if use("QTLUMA"):
                 fields += ["Mean(Quantile($close, %d, 0.8)/$close,%d)" % (d,d) for d in windows]
                 names += ["QTLUMA%d" % d for d in windows]                
@@ -196,6 +199,9 @@ class TftDataHandler(DataHandlerLP):
             if use("RANK"):
                 fields += ["Rank($close, %d)" % d for d in windows]
                 names += ["RANK%d" % d for d in windows]
+            if use("RANKMA"):
+                fields += ["Mean(Rank($close, %d),%d)" % (d, d) for d in windows]
+                names += ["RANKMA%d" % d for d in windows]                
             if use("RSV"):
                 fields += ["($close-Min($low, %d))/(Max($high, %d)-Min($low, %d)+1e-12)" % (d, d, d) for d in windows]
                 names += ["RSV%d" % d for d in windows]
@@ -220,6 +226,12 @@ class TftDataHandler(DataHandlerLP):
             if use("CNTN"):
                 fields += ["Mean($close<Ref($close, 1), %d)" % d for d in windows]
                 names += ["CNTN%d" % d for d in windows]
+            if use("KURT"):
+                fields += ["Kurt($close, %d)" % d for d in windows]
+                names += ["KURT%d" % d for d in windows]           
+            if use("SKEW"):
+                fields += ["Skew($close, %d)" % d for d in windows]
+                names += ["SKEW%d" % d for d in windows]                          
             if use("CNTD"):
                 fields += ["Mean($close>Ref($close, 1), %d)-Mean($close<Ref($close, 1), %d)" % (d, d) for d in windows]
                 names += ["CNTD%d" % d for d in windows]
@@ -229,6 +241,12 @@ class TftDataHandler(DataHandlerLP):
                     for d in windows
                 ]
                 names += ["SUMP%d" % d for d in windows]
+            if use("SUMPMA"):
+                fields += [
+                    "Mean(Sum(Greater($close-Ref($close, 1), 0), %d)/(Sum(Abs($close-Ref($close, 1)), %d)+1e-12),%d)" % (d, d,d)
+                    for d in windows
+                ]
+                names += ["SUMPMA%d" % d for d in windows]                
             if use("SUMN"):
                 fields += [
                     "Sum(Greater(Ref($close, 1)-$close, 0), %d)/(Sum(Abs($close-Ref($close, 1)), %d)+1e-12)" % (d, d)

@@ -46,7 +46,9 @@ class PartLoss(_Loss):
         super().__init__()
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        loss = torch.abs(target[:,-1] - input[:,-1])
+        input_item_range = (input[:,-1] - input[:,-2])/input[:,-2]
+        target_item_range = (target[:,-1] - target[:,-2])/target[:,-2]
+        loss = torch.abs(input_item_range - target_item_range)
         return torch.mean(loss)
     
 class LastClassifyLoss(nn.BCEWithLogitsLoss):
@@ -132,11 +134,11 @@ class UncertaintyLoss(nn.Module):
                 input_item = input[i][:,:,0]
                 label_item = target[:,:,i]            
                 if i==1:
-                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)   
+                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
                 elif i==2:
-                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)   
+                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
                 else: 
-                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)
+                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)
                 loss_sum = corr_loss_combine[i]
         # 二次目标损失部分
         # if optimizers_idx==len(input) or optimizers_idx==-1:
@@ -180,6 +182,11 @@ class UncertaintyLoss(nn.Module):
         ccc = numerator/denominator
         ccc_loss = 1 - ccc
         return ccc_loss
+
+    def ccc(self,x,y):
+        sxy = torch.sum((x - x.mean())*(y - y.mean()))/x.shape[0]
+        rhoc = 2*sxy / (torch.var(x) + torch.var(y) + (x.mean() - y.mean())**2)
+        return rhoc
     
     def compute_dtw_loss(self,input,target):
         input_real = torch.unsqueeze(input,-1)

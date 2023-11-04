@@ -392,9 +392,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
             corr_loss = self.trainer.callback_metrics["val_corr_loss_{}".format(i)]
             if i==0 and corr_loss<0.05:
                 self.freeze_apply(mode=i)
-            if i==1 and corr_loss<0.1:
+            if i==1 and corr_loss<0.05:
                 self.freeze_apply(mode=i)      
-            if i==2 and corr_loss<0.1:
+            if i==2 and corr_loss<0.05:
                 self.freeze_apply(mode=i)                            
             
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
@@ -432,7 +432,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
@@ -494,6 +494,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         cci_cov = np.array([item["focus1_array"][:self.input_chunk_length] for item in target_info])
         # 当前记录大于100并且前一条记录明显小于100
         rev_boole = (cci_cov[:,-1]>100) & (cci_cov[:,-2]<50)
+        # rev_boole = (cci_cov[:,-1]>100)
         # print("total size:{},import_index_bool size:{},rev_boole size:{}".format(import_index_bool.shape[0],np.sum(import_index_bool),np.sum(rev_boole)))
         import_index_bool = rev_boole        
         rtn_index = np.where(import_index_bool)[0]
@@ -588,36 +589,44 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # slope_out_compute = np.sum(output_label_inverse,axis=-1)
         first_index_bool = range_compute>10
         first_his_tar = target_inverse[:,:self.input_chunk_length,0]
-        # macd数值在1以上
-        first_index_bool = first_index_bool & (np.min(output_label_inverse,axis=1)>1)
+        # macd数值在0以上
+        first_index_bool = first_index_bool & (np.mean(output_label_inverse,axis=1)>0)
         # macd历史均值在0以上
-        first_index_bool = first_index_bool & (np.mean(first_his_tar,axis=1)>0)
+        # first_index_bool = first_index_bool & (np.mean(first_his_tar,axis=1)>0)
         # 接近或超过前期高点
         # first_max = np.max(first_his_tar,axis=1)
         # first_index_bool = first_index_bool & (((output_label_inverse[:,-1]-first_max)>0) | ((np.abs(output_label_inverse[:,-1]-first_max))/first_max<0.2))
         
         # 辅助指标判断
         second_his_tar = target_inverse[:,:self.input_chunk_length,1]
-        second_index_bool = (output_second_inverse[:,-1]  - output_second_inverse[:,0])>0.3
-        # 最后一个值高于之前的最大值
-        second_index_bool = second_index_bool & (output_second_inverse[:,-1] - np.max(second_his_tar,axis=1)>-0.3)
-        # 最后一个值大于固定值
-        # second_index_bool = second_index_bool & (output_second_inverse[:,-1]>0.5)
+        # 上涨趋势
+        # peak_list = [find_peaks(second_his_tar[i], height=2,distance=5)[0] for i in range(second_his_tar.shape[0])]
+        # peak_data_list = [second_his_tar[i,peak_list[i]] for i in range(second_his_tar.shape[0])]
+        # peak_data_list = np.array([peak_data_item[-1] for peak_data_item in peak_data_list])
+        # # 结束值超过最近一个波峰
+        # second_index_bool = ((output_second_inverse[:,-1]-peak_data_list)/peak_data_list*100>1) 
+        # 超过一定的涨幅
+        second_index_bool = (((output_second_inverse[:,-1]-output_second_inverse[:,0])/output_second_inverse[:,0]*100)>5)
+        # 整体上升幅度与振幅差值较小
+        second_max = np.max(output_second_inverse,axis=-1)
+        second_min = np.min(output_second_inverse,axis=-1)  
+        second_index_bool = second_index_bool & (((output_second_inverse[:,-1] - output_second_inverse[:,0])/(second_max - second_min))>0.5)
         
         # qtlu指标下降趋势
         third_his_tar = target_inverse[:,:self.input_chunk_length,2]
         # 不能超过前期高点
         third_index_bool = (output_third_inverse[:,-1] - np.max(third_his_tar,axis=1)<0)
-        # 历史峰值大于阈值的需要超过2个
-        peak_list = [find_peaks(third_his_tar[i], height=1.00,distance=5)[0].shape[0] for i in range(third_his_tar.shape[0])]
-        peak_list = np.array(peak_list)
-        third_index_bool = third_index_bool & (peak_list>3)
-        # 前期高点达到1.1,则确认
-        third_index_bool = third_index_bool | (np.max(third_his_tar,axis=1)>1.1)
-                
-        # # 整体上升幅度与振幅差值较小
-        # third_max = np.max(output_third_inverse,axis=-1)
-        # third_min = np.min(output_third_inverse,axis=-1)        
+        # 历史峰值计算
+        peak_list = [find_peaks(third_his_tar[i], height=0.5,distance=5)[0] for i in range(third_his_tar.shape[0])]
+        peak_data_list = [third_his_tar[i,peak_list[i]] for i in range(third_his_tar.shape[0])]
+        peak_data_list = np.array([peak_data_item[-1] for peak_data_item in peak_data_list])
+        # 不超过最近峰值
+        third_index_bool = third_index_bool & (output_third_inverse[:,-1]<peak_data_list)
+        # 不能超过前期低点太多
+        third_index_bool = (output_third_inverse[:,-1] - np.min(third_his_tar,axis=1)) < 0.015
+        third_index_bool = third_index_bool & ((output_third_inverse[:,0] - np.min(third_his_tar,axis=1)) < 0.02)        
+        # 涨幅小或者下跌
+        third_index_bool = third_index_bool & ((output_third_inverse[:,-1] - output_third_inverse[:,0]) < 0.01)  
         # 最后一段上涨
         # third_index_bool = third_index_bool & ((output_third_inverse[:,-1] - output_third_inverse[:,-2])>0)        
         # third_index_bool = third_index_bool & (((output_third_inverse[:,-1] - output_third_inverse[:,0])/(third_max - third_min))>0.5)
@@ -661,7 +670,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         for i,imp_idx in enumerate(import_index):
             ts = target_info[imp_idx]
             price_array = ts["price_array"][self.input_chunk_length:]
-            p_taraget_class = compute_price_class(price_array,mode="first_last")
+            p_taraget_class = compute_price_class(price_array,mode="fast")
             import_price_result.append([imp_idx,ts["item_rank_code"],p_taraget_class])
         import_price_result = np.array(import_price_result)        
         price_class = np.array(price_class)
@@ -1004,7 +1013,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
         names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
-        names = ["price","macd_output","macd","aos_output","aos","qtlu_output","qtlu"]          
+        names = ["price","macd_output","macd","rank_output","rank","qtlu_output","qtlu"]          
         result = []
         
         # viz_result_suc.remove_env()
@@ -1057,7 +1066,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
     def draw_row(self,pred_center_data,pred_second_data,pred_third_data,target_item=None,ts=None,names=None,viz=None,win="win"):
         """draw one line"""
         
-        # names = ["qtlu_output","qtlu"]
+        # names = ["rank_output","rank","qtlu_output","qtlu"]
         
         price_array = ts["price_array"]
         # 补充画出前面的label数据
@@ -1078,7 +1087,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         view_data = np.concatenate((view_data,second_target),axis=1)  
         view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
         view_data = np.concatenate((view_data,third_target),axis=1)  
-        # view_data = view_data[:,5:]
+        # view_data = view_data[:,3:]
         # np.save("custom/data/asis/view_data/{}.npy".format(win),view_data)
         # view_data = np.concatenate((view_data[:,0:1],view_data[:,5:]),axis=1)
         x_range = np.array([i for i in range(ts["start"],ts["end"])])
@@ -1689,9 +1698,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
         scaler = item[5][0]
         last_target_class = item[-3][1][0]
         rev_data = past_covariate[:,0]
-        # 重点关注价格指数,只对价格涨幅达标的数据进行增强
+        # 重点关注价格指数,只对价格下跌目标进行增强
         p_taraget_class = compute_price_class(target_info["price_array"][self.input_chunk_length:])
-        if p_taraget_class in [0,1]:
+        if p_taraget_class in [1,2]:
             return None
         
         target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
@@ -1769,7 +1778,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             batch.append(rtn_item) 
             # 训练阶段做增强
             if self.trainer.state.stage==RunningStage.TRAINING and not self.no_dynamic_data:
-                for i in range(2):
+                for i in range(3):
                     b_rebuild = self.dynamic_build_training_data(batch_item)
                     # 不符合要求则不增强
                     if b_rebuild is None:

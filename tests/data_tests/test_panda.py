@@ -317,8 +317,8 @@ def test_peak_combine():
         plt.show()        
            
 if __name__ == "__main__":
-    # test_scipy_peak()
-    test_peak_combine()
+    test_scipy_peak()
+    # test_peak_combine()
     # test_pd_index()
     # test_pd_timeser()
     # test_shift()

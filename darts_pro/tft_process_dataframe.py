@@ -264,7 +264,7 @@ class TftDataframeModel():
             
         if load_weight:
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
-            self.model = TFTBatchModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
+            self.model = TFTBatchModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=True)
             self.model.batch_size = self.batch_size     
             self.model.mode = "train"
             self.model.model.monitor = monitor
