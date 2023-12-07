@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_2000
+market: &market test_500_2
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -60,7 +60,7 @@ task:
             n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/QTLU_2000_202010'
+            batch_file_path: 'custom/data/asis/QTLU_500_202010'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  

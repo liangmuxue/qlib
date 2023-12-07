@@ -229,13 +229,18 @@ def target_scale(target_ori,range=0.1):
     result = (target - min_value + 0.01)/_range
     return result
 
-def comp_max_and_rate(np_arr):
+def comp_max_and_rate(np_arr,threhold=-1):
     """计算最大值类别以及置信度"""
     
     arr = torch.tensor(np_arr)
     pred_class = F.softmax(arr,dim=-1)
     pred_class = torch.max(pred_class,dim=-1)    
-    return pred_class[1].item(),pred_class[0].item()
+    if threhold!=-1:
+        rtn = torch.where(pred_class[0]>threhold)[0]
+    else:
+        rtn = pred_class[1]
+    rtn = rtn.numpy()
+    return rtn
 
 if __name__ == "__main__":
     # test_normal_vis()

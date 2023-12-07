@@ -485,8 +485,22 @@ def test_compute():
     print(matrix_2d_ordered)
     result = np.subtract(matrix_2d_ordered.transpose(1,0),vector_1d).transpose(1,0)
     print(result)
+
+def test_mask():
+    img1 = cv2.imread('/home/liang/test/rose.png')
+    img2 = cv2.cvtColor(img1, code = cv2.COLOR_BGR2HSV)
+    lower_blue = np.array([110, 50, 50]) 
+    upper_blue = np.array([130, 255, 255])
+    mask = cv2.inRange(img2, lower_blue, upper_blue)
+    res = cv2.bitwise_and(img1, img1, mask=mask)
+    cv2.imshow('orange',img1)
+    cv2.imshow('hsv', res)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
                
 if __name__ == "__main__":
+    test_mask()
     # test_argwhere()
     # test_condition3()
     # test_condi_remove()
@@ -499,7 +513,7 @@ if __name__ == "__main__":
     # test_variable()
     # test_index()
     # test_copy()
-    test_copy_torch()
+    # test_copy_torch()
     # test_compute()
     # test_temp()
     # test_pd_ser()

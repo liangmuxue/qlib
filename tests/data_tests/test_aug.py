@@ -35,7 +35,8 @@ def test_tsaug():
     X = np.array([[[1,2],[2,3],[3,4]]])
     Y = np.array([[1,2,3]])
     X_aug, Y_aug = tsaug.AddNoise(scale=0.01).augment(X, Y)
-    X_aug, Y_aug = tsaug.Quantize(n_levels=20).augment(X, Y)
+    X_aug, Y_aug = tsaug.Quantize(n_levels=10).augment(X, Y)
+    X_aug, Y_aug = tsaug.Pool(size=2).augment(X, Y)
     plot(X_aug, Y_aug);    
    
 if __name__ == "__main__":
