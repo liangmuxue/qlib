@@ -188,11 +188,11 @@ class UncertaintyLoss(nn.Module):
                 input_item = input[i][:,:,0]
                 label_item = target[:,:,i]            
                 if i==1:
-                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)   
+                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
                 elif i==2:
-                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)   
+                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
                 else: 
-                    corr_loss_combine[i] = self.mse_loss(input_item, label_item)
+                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)
                 loss_sum = corr_loss_combine[i]
         # 二次目标损失部分
         if optimizers_idx==len(input):

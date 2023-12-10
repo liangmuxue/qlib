@@ -176,9 +176,9 @@ class TftDatafAnalysis():
         # 重点比较的输出
         target_col = ['MACD']
         # 分析的列，第一个是实际目标列，后面的是输出列
-        analysis_columns = ["MACD","macd_output","obv_output","cci_output"]
-        fit_names = ["MACD","OBV5","CCI5"]
-        diff_columns = ["cci_output"]
+        analysis_columns = ["MACD","MACD_output","RANKMA5_output","QTLU_output"]
+        fit_names = ["MACD","RANKMA5","QTLU"]
+        diff_columns = ["QTLU_output"]
         train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=[0,100])
         data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
         

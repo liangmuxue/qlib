@@ -80,7 +80,13 @@ class BatchDataset(Dataset):
                         s_list.append(item)
                 aggregated.append(s_list)
             elif isinstance(elem, StockNormalizer):
-                aggregated.append([sample[i] for sample in batch_data])                
+                aggregated.append([sample[i] for sample in batch_data])    
+            elif isinstance(elem, tuple):
+                t_list = []
+                for sample in batch_data:
+                    for item in sample[i]:
+                        t_list.append(item)
+                aggregated.append(t_list)                      
             elif isinstance(elem, Dict):
                 d_list = []
                 for sample in batch_data:
@@ -162,11 +168,12 @@ class BatchDataset(Dataset):
         
         if self.mode=="process":
             batch_data = [item[index] for item in self.batch_data]
-            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = batch_data
+            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = batch_data
             # 生成价位幅度目标 
             price_array = target_info["price_array"]
             raise_range = (price_array[-1] - price_array[-5])/price_array[-5]*10
             target_info["raise_range"] = raise_range
+            scaler,_ = scaler_tuple
             past_target_ori = scaler.inverse_transform(past_target)
             # avoid infinite
             mask_idx = np.where(past_target_ori<0.01)[0]
@@ -176,7 +183,7 @@ class BatchDataset(Dataset):
             target_range_scaler = MinMaxScaler()
             target_range_scaler.fit(past_target_slope)
             target_info["target_range_scaler"] = target_range_scaler
-            return past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info
+            return past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info
         if self.mode=="analysis":
             return self.target_data[index],self.target_class[index]
         if self.mode=="analysis_reg":
@@ -247,6 +254,6 @@ class BatchOutputDataset(BatchDataset):
         # 反归一化取得实际目标数据
         # whole_target = np.concatenate((past_target,target),axis=0)
         target_inverse = scaler.inverse_transform(target)  
-        return target_inverse
+        return target_inverse,target_class[0]
     
     

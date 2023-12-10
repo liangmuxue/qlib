@@ -78,19 +78,98 @@ class _TFTModuleAsis(_TFTCusModule):
         """use to export data"""
         
         train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
-        data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
-                         future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-                         target.cpu().detach().numpy(),target_info]            
-        part_data = [target_class.cpu().detach().numpy(),target_info]
-        # print("dump train,target shape:{}".format(past_target.shape))
-        self.total_target_cnt += past_target.shape[0]            
-        pickle.dump(data,self.train_fout) 
-        pickle.dump(part_data,self.train_part_fout) 
+        # 过滤后，进行数据增强
+        train_batch = self.dynamic_build_training_data(train_batch).transpose(1,0)     
+        pickle.dump(train_batch,self.train_fout) 
         # print("len(self.train_data):{}".format(len(self.train_data)))
         fake_loss = torch.ones(1,requires_grad=True).to(self.device)
         return fake_loss
 
+    def dynamic_build_training_data(self,data_batch,rev_threhold=1):
+        """使用数据增强，调整训练数据"""
+        
+        (past_targets,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple
+           ,target_classes,targets,target_infos) = data_batch
+        rtn_batch = []
+        for i in range(past_targets.shape[0]):
+            past_covariate = past_covariates[i].cpu().numpy()
+            future_past_covariate = scaler_tuple[i][1]
+            scaler = scaler_tuple[i][0]
+            past_target = past_targets[i].cpu().numpy()
+            future_target = targets[i].cpu().numpy()
+            target_info = target_infos[i]
+            target_class = target_classes[i].cpu().numpy()
+            # 重点关注价格指数,只对价格达到上涨幅度的目标进行增强
+            p_taraget_class = target_class[0]
+            if not p_taraget_class in [3]:
+                rtn_item = (past_target,past_covariate,historic_future_covariates[i].cpu().numpy(),future_covariates[i].cpu().numpy(),
+                            static_covariates[i].cpu().numpy(),(scaler,future_past_covariate),target_class,future_target,target_info)
+                rtn_batch.append(rtn_item)                
+                continue
+            
+            for j in range(3):
+                target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+                target_unscale = scaler.inverse_transform(target[0,:,:])
+                # focus_target = target_unscale[self.input_chunk_length:]  
+                # target_slope = (focus_target[1:] - focus_target[:-1])/focus_target[:-1]*100
+        
+                # 与近期高点比较，不能差太多
+                # label_array = target_info["label_array"]
+                # recent_data = label_array[:self.input_chunk_length]
+                # recent_max = recent_data.max()
+                # if (recent_max-recent_data[-1])/recent_max>2/100:
+                #     return None
+                
+                # # 关注动量指标比较剧烈的
+                # rev_cov_recent = rev_data[-5:]
+                # # 近期均值大于阈值1
+                # rev_bool = np.mean(rev_cov_recent)>rev_threhold
+                # # 最近数值处于最高点
+                # rev_cov_max = np.max(rev_data)
+                # rev_bool = rev_bool & ((rev_cov_max-rev_cov_recent[-1])<=0.01)        
+                # if not rev_bool:
+                #     return None
+                      
+                # 关注最后一段下跌的
+                # if last_target_class==1 and np.random.randint(0,20)!=1:
+                #     return None
+                
+                # 把past和future重新组合，统一增强
+                covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
+                if np.random.randint(0,2)==1:
+                    # 量化方式调整
+                    X_aug, Y_aug = tsaug.Quantize(n_levels=10).augment(covariate, target)
+                else:
+                    # 降低时间分辨率的方式调整
+                    X_aug, Y_aug = tsaug.Pool(size=2).augment(covariate, target)
+                past_covariate = X_aug[0,:self.input_chunk_length,:] 
+                future_target = Y_aug[0,self.input_chunk_length:,:]
+                past_target = Y_aug[0,:self.input_chunk_length,:]
+                rtn_item = (past_target,past_covariate,historic_future_covariates[i].cpu().numpy(),future_covariates[i].cpu().numpy(),
+                            static_covariates[i].cpu().numpy(),(scaler,future_past_covariate),target_class,future_target,target_info)
+                rtn_batch.append(rtn_item)
+        
+        # if np.random.randint(0,900)==1:
+        #     # 可视化增强的数据
+        #     index = np.random.randint(0,12)
+        #     win = "win_{}".format(index)
+        #     target_title = "code_{}".format(target_info["item_rank_code"])
+        #     names = ["label","price"]
+        #     price_array = np.expand_dims(target_info["price_array"],axis=-1)
+        #     view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
+        #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
+        
+        rtn_batch = np.array(rtn_batch)
+        return rtn_batch
+            
+        # 重点关注前期走势比较平的
+        # slope = slope_classify_compute(focus_target,threhold=2)
+        # if slope!=SLOPE_SHAPE_SMOOTH:
+        #     return None
+        
+        # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
+        # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
+        
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -246,10 +325,6 @@ class TFTAsisModel(TFTExtModel):
             device=self.device,
             **self.pl_module_params,
         )    
-
-    # def dynamic_build_training_data(self,item,rev_threhold=1):
-    #     """重载原方法，返回空，不进行增强"""
-    #     return None
     
 class _TFTModuleBatch(_TFTCusModule):
     def __init__(
@@ -482,61 +557,25 @@ class TFTBatchModel(TFTExtModel):
         重载方法，调整数据处理模式
         """
 
-        # batch = []
-        # max_cnt = 0
-        # adj_max_cnt = 0
-        # aug_repeat_size = 10
-        # last_raise_range = []
-        #
-        # def data_process(batch,batch_item,target_class,max_cnt=0,adj_max_cnt=0):
-        #     # 训练部分数据增强
-        #     rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5],batch_item[6],batch_item[7],batch_item[8]) 
-        #     batch.append(rtn_item) 
-        #     # 训练阶段做增强
-        #     if self.trainer.state.stage==RunningStage.TRAINING and not self.no_dynamic_data:
-        #         for i in range(3):
-        #             b_rebuild = self.dynamic_build_training_data(batch_item)
-        #             # 不符合要求则不增强
-        #             if b_rebuild is None:
-        #                 continue
-        #             adj_max_cnt += 1
-        #             batch.append(b_rebuild)   
-        #     return max_cnt,adj_max_cnt
-        # # 过滤不符合条件的记录
-        # for b in ori_batch:
-        #     if self.mode=="train":
-        #         future_target = b[-2]
-        #         target_class = b[-3]
-        #     else:
-        #         future_target = b[-1]
-        #     # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
-        #     if not np.all(future_target == future_target[0]):
-        #         # 非训练部分，不需要数据增强，直接转换返回
-        #         if not self.model.training:
-        #             if self.mode=="predict":
-        #                 batch.append(b)
-        #             else:
-        #                 # 验证集也使用增强数据
-        #                 # max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
-        #                 rtn_item = (b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8])                        
-        #                 batch.append(rtn_item)
-        #         else:
-        #             max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
-        # last_raise_range = np.array(last_raise_range)
-        
         batch = ori_batch 
         aggregated = []
         first_sample = batch[0]
         for i in range(len(first_sample)):
             elem = first_sample[i]
             if isinstance(elem, np.ndarray):
-                sample_list = [sample[i] for sample in batch]
-                aggregated.append(
-                    torch.from_numpy(np.stack(sample_list, axis=0))
-                )
+                if elem.dtype.hasobject:
+                    sample_list = [sample[i] for sample in batch]
+                    aggregated.append(
+                        sample_list
+                    )                   
+                else:
+                    sample_list = [sample[i] for sample in batch]
+                    aggregated.append(
+                        torch.from_numpy(np.stack(sample_list, axis=0))
+                    )  
             elif isinstance(elem, MinMaxScaler):
                 aggregated.append([sample[i] for sample in batch])
-            elif isinstance(elem, StockNormalizer):
+            elif isinstance(elem, tuple):
                 aggregated.append([sample[i] for sample in batch])                
             elif isinstance(elem, Dict):
                 aggregated.append([sample[i] for sample in batch])                

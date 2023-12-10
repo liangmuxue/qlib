@@ -322,10 +322,11 @@ class StatDataAssis():
         df_combine_diff = None
         viz = TensorViz(env="data_analysis")
         viz_fail = TensorViz(env="data_analysis_neg")
+        viz_normal = TensorViz(env="data_analysis_normal")
         col_index = analysis_columns.index(target_col[0])
         index = 0
         for i in range(size):
-            target_item = ds_data.__getitem__(i)
+            target_item,target_class = ds_data.__getitem__(i)
             # 合并目标数据与输出数据，以进行相关性比较
             combine_data = np.concatenate((target_item[:,col_index:col_index+1],ds_data.output_data[i]),axis=-1)
             tar_data = pd.DataFrame(combine_data,columns=analysis_columns)
@@ -355,16 +356,16 @@ class StatDataAssis():
             # 合并显示预测和实际数据
             target_value = df_item[target_col].values
             # 查看涨幅或跌幅达标的数据
-            if ((target_value[-1,0] - target_value[0,0])/target_value[0,0]*100)>5:
-                tar_data_rm = tar_data[tar_data.columns[1:]]
-                df_analysis = pd.concat([tar_data_rm,df_item],axis=1)
-                self.show_ana_data(df_analysis,index=index,viz=viz)         
-                index += 1        
-            if ((target_value[-1,0] - target_value[0,0])/target_value[0,0]*100)<-5:
-                tar_data_rm = tar_data[tar_data.columns[1:]]
-                df_analysis = pd.concat([tar_data_rm,df_item],axis=1)
-                self.show_ana_data(df_analysis,index=index,viz=viz_fail)         
-                index += 1                        
+            tar_data_rm = tar_data[tar_data.columns[1:]]
+            df_analysis = pd.concat([tar_data_rm,df_item],axis=1)            
+            if target_class==3:
+                viz_real = viz
+            elif target_class==0:
+                viz_real = viz_fail   
+            else:
+                viz_real = viz_normal   
+            index += 1
+            self.show_ana_data(df_analysis,index=index,viz=viz_real)                       
         print("corr output value:{}".format(df_combine.mean()))
         print("corr diff value:{}".format(df_combine_diff.mean()))
         print("corr target value:{}".format(df_combine_fits.mean()))       
