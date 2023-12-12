@@ -117,7 +117,7 @@ task:
                 target_column: ['MACD','RANKMA5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','CORR5','KLOW2','KLEN','REV5'] 
+                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','CORR5','KLOW2','KLEN','MASCOPE5'] 
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 

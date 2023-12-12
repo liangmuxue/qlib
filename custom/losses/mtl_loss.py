@@ -190,18 +190,18 @@ class UncertaintyLoss(nn.Module):
                 if i==1:
                     corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
                 elif i==2:
-                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
+                    corr_loss_combine[i] = self.compute_dtw_loss(input_item, label_item)   
                 else: 
                     corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)
                 loss_sum = corr_loss_combine[i]
         # 二次目标损失部分
-        if optimizers_idx==len(input):
-            # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
-            ce_loss = self.rankloss(vr_class, target_class[:,0])
-            loss_sum = ce_loss
+        # if optimizers_idx==len(input):
+        #     # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
+        #     ce_loss = self.rankloss(vr_class, target_class[:,0])
+        #     loss_sum = ce_loss
         # 验证阶段，全部累加
         if optimizers_idx==-1:
-            ce_loss = nn.CrossEntropyLoss()(vr_class, target_class[:,0])
+            # ce_loss = nn.CrossEntropyLoss()(vr_class, target_class[:,0])
             loss_sum = torch.sum(corr_loss_combine) + ce_loss + value_diff_loss
         
         return loss_sum,[corr_loss_combine,ce_loss,value_diff_loss]

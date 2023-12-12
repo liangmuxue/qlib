@@ -91,6 +91,7 @@ class _TFTModuleAsis(_TFTCusModule):
         (past_targets,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple
            ,target_classes,targets,target_infos) = data_batch
         rtn_batch = []
+        import_cnt = 0
         for i in range(past_targets.shape[0]):
             past_covariate = past_covariates[i].cpu().numpy()
             future_past_covariate = scaler_tuple[i][1]
@@ -108,31 +109,9 @@ class _TFTModuleAsis(_TFTCusModule):
                 continue
             
             for j in range(3):
+                import_cnt += 1
                 target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
                 target_unscale = scaler.inverse_transform(target[0,:,:])
-                # focus_target = target_unscale[self.input_chunk_length:]  
-                # target_slope = (focus_target[1:] - focus_target[:-1])/focus_target[:-1]*100
-        
-                # 与近期高点比较，不能差太多
-                # label_array = target_info["label_array"]
-                # recent_data = label_array[:self.input_chunk_length]
-                # recent_max = recent_data.max()
-                # if (recent_max-recent_data[-1])/recent_max>2/100:
-                #     return None
-                
-                # # 关注动量指标比较剧烈的
-                # rev_cov_recent = rev_data[-5:]
-                # # 近期均值大于阈值1
-                # rev_bool = np.mean(rev_cov_recent)>rev_threhold
-                # # 最近数值处于最高点
-                # rev_cov_max = np.max(rev_data)
-                # rev_bool = rev_bool & ((rev_cov_max-rev_cov_recent[-1])<=0.01)        
-                # if not rev_bool:
-                #     return None
-                      
-                # 关注最后一段下跌的
-                # if last_target_class==1 and np.random.randint(0,20)!=1:
-                #     return None
                 
                 # 把past和future重新组合，统一增强
                 covariate = np.expand_dims(np.concatenate((past_covariate,future_past_covariate),axis=0),axis=0)
@@ -158,8 +137,9 @@ class _TFTModuleAsis(_TFTCusModule):
         #     price_array = np.expand_dims(target_info["price_array"],axis=-1)
         #     view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
         #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
-        
-        rtn_batch = np.array(rtn_batch)
+
+        print("import cnt:{}/total cnt:{}".format(import_cnt,len(rtn_batch)))        
+        rtn_batch = np.array(rtn_batch,dtype=object)
         return rtn_batch
             
         # 重点关注前期走势比较平的
@@ -652,13 +632,6 @@ class TFTBatchModel(TFTExtModel):
         #     view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
         #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
         return rtn_item
-            
-        # 重点关注前期走势比较平的
-        # slope = slope_classify_compute(focus_target,threhold=2)
-        # if slope!=SLOPE_SHAPE_SMOOTH:
-        #     return None
-        
-        # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
-        # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
+
                
         

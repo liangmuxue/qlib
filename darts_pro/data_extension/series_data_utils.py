@@ -6,16 +6,10 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import joblib
 from sklearn.metrics import accuracy_score
-import sklearn.neighbors
-from tslearn.generators import random_walk_blobs
-from tslearn.preprocessing import TimeSeriesScalerMinMax, \
-    TimeSeriesScalerMeanVariance
-from tslearn.neighbors import KNeighborsTimeSeriesClassifier, \
-    KNeighborsTimeSeries
-from dtw import dtw
+from tslearn.preprocessing import TimeSeriesScalerMinMax
+from tslearn.neighbors import KNeighborsTimeSeriesClassifier
 
-import cus_utils.global_var as global_var    
-from tft.class_define import CLASS_LAST_VALUES,get_simple_class,get_complex_class
+from tft.class_define import CLASS_SIMPLE_VALUE_MAX,get_simple_class,get_complex_class
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import slope_compute
 from cus_utils.log_util import AppLogger
@@ -370,15 +364,75 @@ class StatDataAssis():
         print("corr diff value:{}".format(df_combine_diff.mean()))
         print("corr target value:{}".format(df_combine_fits.mean()))       
 
+    def output_target_viz(self,ds_data,fit_names):
+        size = len(ds_data)
+        viz = TensorViz(env="data_analysis_valid")
+        viz_fail = TensorViz(env="data_analysis_valid_neg")
+        viz_normal = TensorViz(env="data_analysis_valid_normal")
+        index = 0
+        tar_import = []
+        tar_normal = []
+        tar_neg = []
+        pad_data = [0 for i in range(25)]
+        pad_data = np.array([pad_data,pad_data,pad_data]).transpose(1,0)
+        names = ["MACD","RANKMA5","QTLU","MACD_output","RANKMA5_output","QTLU_output"]
+        names = ["RANKMA5","RANKMA5_output","QTLU","QTLU_output"]
+        for i in range(200):
+            target_item,target_class,output_inverse,target_info = ds_data.__getitem__(i)
+            output_total = np.concatenate((pad_data,output_inverse),axis=0)  
+            view_data = np.concatenate((target_item,output_total),axis=1)      
+            view_data = np.stack((view_data[:,1],view_data[:,4],view_data[:,2],view_data[:,5]),axis=1)      
+            target_title = "item_{} ,price class:{}".format(index,target_class.item())
+            win = "index_{}".format(index)                   
+            # 查看涨幅或跌幅达标的数据
+            if target_class==3:
+                tar_import.append(target_item)
+                viz.viz_matrix_var(view_data,win=win,title=target_title,names=names)                 
+            elif target_class==0:
+                tar_neg.append(target_item)
+                viz_fail.viz_matrix_var(view_data,win=win,title=target_title,names=names)
+            else:
+                tar_normal.append(target_item)
+            index += 1
+
+        # df_normal = pd.DataFrame(np.array(tar_normal),columns=fit_names)
+        # self.show_ana_data(df_normal,index=index,viz=viz_normal) 
+        # df_neg = pd.DataFrame(np.array(tar_neg),columns=fit_names)
+        # self.show_ana_data(df_neg,index=index,viz=viz_fail)   
+                
     def show_ana_data(self,df_data,index=0,viz=None):
-        if index>18:
-            return
+        # if index>18:
+        #     return
         title = "tar_view_{}".format(index)
         win = "win_analysis_{}".format(index)
         view_data = df_data.values
         names = df_data.columns
         viz.viz_matrix_var(view_data,win=win,title=title,names=names)    
-                          
+
+    def batch_data_ana(self,ds):
+        fit_names = ["MACD","RANKMA5","QTLU"]
+        
+        # 取得所有完整周期的目标数据
+        whole_target_inverse,price_array,target_class = ds.build_origin_target_data()
+        target_data = whole_target_inverse[:,25:,:]
+        price_target_array = price_array[:,25:]
+        p_target_class = target_class 
+        import_price_index = np.where(p_target_class==CLASS_SIMPLE_VALUE_MAX)[0]
+        print("import_price_index cnt:",import_price_index.shape[0])
+        print("total cnt:",len(price_array))
+        # 对每个独立指标，查看上涨占比
+        for i in range(3):
+            if i==0:
+                measure_bool = ((target_data[:,-1,i] - target_data[:,0,i])/np.abs(target_data[:,0,i])*100)>0
+            elif i==1:
+                measure_bool = ((target_data[:,-1,i] - target_data[:,0,i])/np.abs(target_data[:,0,i])*100)>5
+            else:
+                measure_bool = ((target_data[:,-1,i] - target_data[:,0,i])/np.abs(target_data[:,0,i])*100)<0
+            measure_index = np.where(measure_bool)[0]
+            match_index = np.intersect1d(measure_index,import_price_index)
+            print("{},match cnt:{}".format(fit_names[i],match_index.shape[0]))
+            print("{}，measure cnt:{}".format(fit_names[i],measure_index.shape[0]))
+            
 if __name__ == "__main__":       
     data_assis = StatDataAssis()
     # data_assis.view_data()

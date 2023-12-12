@@ -172,6 +172,7 @@ class TftDatafAnalysis():
         data_assis = StatDataAssis()
         batch_file_path = self.kwargs["batch_file_path"]
         batch_file = "{}/valid_output_batch.pickel".format(batch_file_path)   
+        # batch_file = "{}/train_output_batch.pickel".format(batch_file_path)  
         col_list = dataset.col_def["col_list"] + ["label"]
         # 重点比较的输出
         target_col = ['MACD']
@@ -179,8 +180,11 @@ class TftDatafAnalysis():
         analysis_columns = ["MACD","MACD_output","RANKMA5_output","QTLU_output"]
         fit_names = ["MACD","RANKMA5","QTLU"]
         diff_columns = ["QTLU_output"]
-        train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=[0,100])
-        data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
+        range_num = None
+        # range_num = [0,1000]
+        train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=range_num)
+        # data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
+        data_assis.output_target_viz(train_ds,fit_names=fit_names)
         
     def data_linear_reg(
         self,
@@ -224,34 +228,18 @@ class TftDatafAnalysis():
         self.save_dataset_file = self.kwargs["save_dataset_file"]      
         
         type = "train"
-        # type = "valid"
+        type = "valid"
         
         ds = BatchDataset(
             filepath = "{}/{}_batch.pickel".format(self.batch_file_path,type),mode="process"
         )   
-        target,price_array,target_class = ds.build_origin_target_data()
-        
-        target_data = target[:,25:,:]
-        raise_bool = ((target_data[:,-1,:] - target_data[:,0,:])/np.abs(target_data[:,0,:])*100)>0
-        raise_index = [np.where(raise_bool[:,i])[0] for i in range(3)]
-        
-        price_target_array = price_array[:,25:]
-        p_target_class = compute_price_class_batch(price_target_array,mode="first_last")[0]
-        import_price_index = np.where(p_target_class==CLASS_SIMPLE_VALUE_MAX)[0]
-        print("import_price_index cnt:",import_price_index.shape[0])
-        print("total cnt:",len(price_array))
-        for i in range(3):
-            match_index = np.intersect1d(raise_index[i],import_price_index)
-            print("match cnt:{}".format(match_index.shape[0]))
-        
-        print("raise cnt:",[ri.shape[0] for ri in raise_index])
-        
+        data_assis = StatDataAssis()
+        data_assis.batch_data_ana(ds)
         
     def batch_ot_data_ana(
         self,
         dataset: TFTSeriesDataset,
     ):
-        
         
         batch_file = "{}/valid_output_batch.pickel".format(self.kwargs["batch_file_path"])  
         ds = BatchOutputDataset(

@@ -229,10 +229,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         out_for_class = torch.cat(out_total,dim=2)[:,:,:,0] 
         
-        focus_data = self.build_focus_data(out_for_class,past_target,target_info=target_info,scalers=scaler)
+        # focus_data = self.build_focus_data(out_for_class,past_target,target_info=target_info,scalers=scaler)
         # 根据预测数据进行二次分析
-        focus_data = torch.nn.functional.normalize(focus_data,dim=0) 
-        vr_class = self.classify_vr_layer(focus_data)
+        # focus_data = torch.nn.functional.normalize(focus_data,dim=0) 
+        vr_class = torch.ones([batch_size,4]).to(self.device) # self.classify_vr_layer(focus_data)
         tar_class = torch.ones(vr_class.shape).to(self.device) # self.classify_tar_layer(x_conv_transform)
         return out_total,vr_class,tar_class
  
@@ -311,7 +311,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             self.criterion.epoch = self.epochs_trained   
         total_loss = torch.tensor(0.0).to(self.device)
         ce_loss = None
-        for i in range(len(self.past_split)+1):
+        for i in range(len(self.past_split)):
             y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=train_batch[0],optimizer_idx=i,target_info=target_info)
             # 目标损失计算前，进行批量归一化处理
@@ -334,8 +334,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 opt.step()
                 self.lr_schedulers()[i].step()
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("lr1",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
+        # self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("lr0",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss,detail_loss,output
@@ -452,19 +452,14 @@ class _TFTCusModule(PLMixedCovariatesModule):
         loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,y_transform),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,value_diff_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
-        # last_batch_index,last_batch_imp_index,item_codes = self.build_last_batch_index(vr_class_certainlys,target_vr_class,target_info=target_info)
         # 涨跌幅度类别的准确率
-        # vr_acc,import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,sec_acc, \
-        #     sec_recall,sec_price_acc,sec_price_nag,import_index,sec_index,last_section_acc,import_last_section_acc = self.compute_vr_class_acc(
-        #     vr_class_certainlys, target_vr_class,target_info=target_info,last_vr_class_certainlys=last_vr_class_certainlys,
-        #     last_target_vr_class=last_target_vr_class,output_inverse=torch.Tensor(output_inverse).to(self.device))  
         import_vr_acc,import_recall,import_price_acc,import_price_nag,price_class,import_price_result, \
                 class_acc,imp_class_acc_cnt,imp_class_acc,output_class_acc,output_imp_class_acc_cnt,output_imp_class_acc \
              = self.compute_real_class_acc(output_inverse=output_inverse,vr_class=vr_class.cpu().numpy(),tar_class=tar_class.cpu().numpy(),
@@ -474,13 +469,13 @@ class _TFTCusModule(PLMixedCovariatesModule):
             self.total_imp_cnt = total_imp_cnt
         else:
             self.total_imp_cnt += total_imp_cnt
-
+        
         past_target = val_batch[0]
         self.val_metric_show(output,future_target,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
                              target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
                             last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
         
-        # 累加结果集，后续统计   
+        # # 累加结果集，后续统计   
         if self.import_price_result is None:
             self.import_price_result = import_price_result    
         else:
@@ -525,7 +520,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         data_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
                             future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
-                            np.array(scaler_tuple)[rtn_index],target_class[rtn_index,:,:],
+                            np.array(scaler_tuple,dtype=object)[rtn_index],target_class[rtn_index,:,:],
                             target[rtn_index,:,:],np.array(target_info)[rtn_index].tolist()]
         return data_batch_filter
     
@@ -633,7 +628,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 整体上升幅度与振幅差值较小
         second_max = np.max(output_second_inverse,axis=-1)
         second_min = np.min(output_second_inverse,axis=-1)  
-        second_index_bool = second_index_bool & (((output_second_inverse[:,-1] - output_second_inverse[:,0])/(second_max - second_min))>0.5)
+        second_index_bool = second_index_bool & (((output_second_inverse[:,-1] - output_second_inverse[:,0])/(second_max - second_min))>0.3)
         
         # qtlu指标下降趋势
         third_his_tar = target_inverse[:,:self.input_chunk_length,2]
@@ -649,7 +644,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         third_index_bool = (output_third_inverse[:,-1] - np.min(third_his_tar,axis=1)) < 0.015
         third_index_bool = third_index_bool & ((output_third_inverse[:,0] - np.min(third_his_tar,axis=1)) < 0.02)        
         # 涨幅小或者下跌
-        third_index_bool = third_index_bool & ((output_third_inverse[:,-1] - output_third_inverse[:,0]) < 0.01)  
+        third_index_bool = ((output_third_inverse[:,-1] - output_third_inverse[:,0]) < 0.01)  
         # 最后一段上涨
         # third_index_bool = third_index_bool & ((output_third_inverse[:,-1] - output_third_inverse[:,-2])>0)        
         # third_index_bool = third_index_bool & (((output_third_inverse[:,-1] - output_third_inverse[:,0])/(third_max - third_min))>0.5)
@@ -663,7 +658,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # import_index_bool = predicted_labels==3
         
         # 综合判别
-        import_index_bool = first_index_bool & second_index_bool & third_index_bool
+        import_index_bool = second_index_bool & third_index_bool
         
         # import_index_bool = np.ones(output_label_inverse.shape[0])>0
         # 可信度检验，预测值不能偏离太多
@@ -1719,47 +1714,6 @@ class TFTExtModel(MixedCovariatesTorchModel):
         """
         
         batch = ori_batch
-        # max_cnt = 0
-        # adj_max_cnt = 0
-        # aug_repeat_size = 10
-        # last_raise_range = []
-        #
-        # def data_process(batch,batch_item,target_class,max_cnt=0,adj_max_cnt=0):
-        #     # 训练部分数据增强
-        #     rtn_item = (batch_item[0],batch_item[1],batch_item[2],batch_item[3],batch_item[4],batch_item[5],batch_item[6],batch_item[7],batch_item[8]) 
-        #     batch.append(rtn_item) 
-        #     # 训练阶段做增强
-        #     # if self.trainer.state.stage==RunningStage.TRAINING and not self.no_dynamic_data:
-        #     #     for i in range(3):
-        #     #         b_rebuild = self.dynamic_build_training_data(batch_item)
-        #     #         # 不符合要求则不增强
-        #     #         if b_rebuild is None:
-        #     #             continue
-        #     #         adj_max_cnt += 1
-        #     #         batch.append(b_rebuild)   
-        #     return max_cnt,adj_max_cnt
-        # # 过滤不符合条件的记录
-        # for b in ori_batch:
-        #     if self.mode=="train":
-        #         future_target = b[-2]
-        #         target_class = b[-3]
-        #     else:
-        #         future_target = b[-1]
-        #     # 如果每天的target数值都相同，则会出现loss的NAN，需要过滤掉
-        #     if not np.all(future_target == future_target[0]):
-        #         # 非训练部分，不需要数据增强，直接转换返回
-        #         if not self.model.training:
-        #             if self.mode=="predict":
-        #                 batch.append(b)
-        #             else:
-        #                 batch.append(b)
-        #         else:
-        #             max_cnt,adj_max_cnt = data_process(batch,b,target_class,max_cnt=max_cnt,adj_max_cnt=adj_max_cnt)
-        # last_raise_range = np.array(last_raise_range)
-        # ori_rate = max_cnt/len(ori_batch)
-        # after_rate = adj_max_cnt/len(batch)
-        # print("img data cnt/rate:{}/{},after cnt/rate:{}/{}".format(max_cnt,ori_rate,len(batch),after_rate))
-        # print("last_raise_range:{}/{}",np.unique(np.array(last_raise_range), return_counts=True))
         aggregated = []
         first_sample = ori_batch[0]
         for i in range(len(first_sample)):

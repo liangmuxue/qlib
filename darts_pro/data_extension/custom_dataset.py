@@ -245,8 +245,9 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         scaler = MinMaxScaler()
         target_info["future_target"] = future_target_ori[:,0]
         # 如果目标数据全都一样，会引发corr计算的NAN，在这里微调
-        if np.sum(future_target_ori[:,2]==future_target_ori[0,2])==future_target_ori.shape[0]:
-            future_target_ori[0,2] = future_target_ori[0,2] + 0.01
+        for i in range(future_target_ori.shape[1]):
+            if np.sum(future_target_ori[:,i]==future_target_ori[0,i])==future_target_ori.shape[0]:
+                future_target_ori[0,i] = future_target_ori[0,i] + 0.01
         if self.transform_inner:
             # 因子归一化
             past_covariate = MinMaxScaler().fit_transform(past_covariate)
