@@ -314,7 +314,6 @@ class _TFTCusModule(PLMixedCovariatesModule):
         for i in range(len(self.past_split)):
             y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=train_batch[0],optimizer_idx=i,target_info=target_info)
-            # 目标损失计算前，进行批量归一化处理
             if i==len(self.past_split):
                 raise_range_batch = np.expand_dims(np.array([ts["raise_range"] for ts in target_info]),axis=-1)
                 # y_transform = MinMaxScaler().fit_transform(raise_range_batch)   
@@ -473,7 +472,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         past_target = val_batch[0]
         self.val_metric_show(output,future_target,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
                              target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                            last_target_vr_class=last_target_vr_class,batch_idx=batch_idx)
+                            batch_idx=batch_idx)
         
         # # 累加结果集，后续统计   
         if self.import_price_result is None:
@@ -588,9 +587,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 pred_center_data = scaler_sample._fitted_params[0].inverse_transform(output_item)     
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
-        
-    def compute_real_class_acc(self,label_threhold=5,target_info=None,output_inverse=None,vr_class=None,tar_class=None,target_vr_class=None,target_inverse=None):
-        """计算涨跌幅分类准确度"""
+    
+    def build_import_index(self,output_inverse=None,target_inverse=None):  
+        """生成涨幅达标的预测数据下标"""
         
         output_label_inverse = output_inverse[:,:,0] 
         # output_second_inverse = output_inverse[:,:,1]
@@ -664,12 +663,14 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 可信度检验，预测值不能偏离太多
         # import_index_bool = import_index_bool & ((output_inverse[:,0] - recent_data[:,-1])/recent_data[:,-1]<0.1)
         import_index = np.where(import_index_bool)[0]
-        # import_index = comp_max_and_rate(vr_class,threhold=0.27)
-        # import_index = np.argsort(-vr_class,axis=0)[:10,0]
-
-        # 使用分类判断
-        # import_index = (vr_class==CLASS_SIMPLE_VALUE_MAX)
         
+        third_rank = np.mean(output_third_inverse,axis=1)
+        import_index = np.argsort(-third_rank,axis=0)[:10,0]
+        
+        return import_index        
+
+    def collect_result(self,import_index,target_vr_class=None,target_info=None): 
+          
         # 重点类别的准确率
         import_acc_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
         import_price_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
@@ -727,6 +728,16 @@ class _TFTCusModule(PLMixedCovariatesModule):
             import_price_result = None
         else:
             import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","result"])     
+        
+        return import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result
+    
+               
+    def compute_real_class_acc(self,label_threhold=5,target_info=None,output_inverse=None,vr_class=None,tar_class=None,target_vr_class=None,target_inverse=None):
+        """计算涨跌幅分类准确度"""
+        
+        # 使用分类判断
+        import_index = self.build_import_index(output_inverse, target_inverse)
+        import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result = self.collect_result(import_index, target_vr_class, target_info)
         
         # 分类准确率计算，分别计算实际目标分类，以及预测目标分类
         class_acc,imp_class_acc_cnt,imp_class_acc = self.classify_compute(tar_class, target_vr_class)
@@ -1024,7 +1035,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         return last_batch_index,last_batch_imp_index,item_codes
                                 
     def val_metric_show(self,output,target,target_vr_class,output_inverse=None,target_inverse=None,
-                        vr_class=None,past_covariate=None,target_info=None,import_price_result=None,last_target_vr_class=None,batch_idx=0):
+                        vr_class=None,past_covariate=None,target_info=None,import_price_result=None,batch_idx=0):
         
         if import_price_result is None or import_price_result.shape[0]==0:
             return
@@ -1064,7 +1075,10 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 r_index += 1
                 total_index += 1
                 s_index = row["imp_index"]
-                ts = target_info[s_index]
+                try:
+                    ts = target_info[s_index]
+                except Exception as e:
+                    print("ggg")
                 pred_data = output_inverse[s_index]
                 pred_center_data = pred_data[:,0]
                 pred_second_data = pred_data[:,1]
@@ -1087,7 +1101,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
     def draw_row(self,pred_center_data,pred_second_data,pred_third_data,target_item=None,ts=None,names=None,viz=None,win="win"):
         """draw one line"""
         
-        # names = ["rank_output","rank","qtlu_output","qtlu"]
+        names = ['PRICE','MACD','RANKMA5','QTLUMA5']
         
         price_array = ts["price_array"]
         # 补充画出前面的label数据
@@ -1102,13 +1116,13 @@ class _TFTCusModule(PLMixedCovariatesModule):
         second_target = np.expand_dims(second_target,axis=-1)  
         third_target = target_item[:,2] 
         third_target = np.expand_dims(third_target,axis=-1)    
-        view_data = np.concatenate((view_data,np.expand_dims(pred_first_data,axis=-1)),axis=1)           
         view_data = np.concatenate((view_data,first_target),axis=1) 
+        view_data = np.concatenate((view_data,second_target),axis=1)
+        view_data = np.concatenate((view_data,third_target),axis=1)
+        view_data = np.concatenate((view_data,np.expand_dims(pred_first_data,axis=-1)),axis=1)           
         view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
-        view_data = np.concatenate((view_data,second_target),axis=1)  
         view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
-        view_data = np.concatenate((view_data,third_target),axis=1)  
-        # view_data = view_data[:,3:]
+        view_data = view_data[:,:4]
         # np.save("custom/data/asis/view_data/{}.npy".format(win),view_data)
         # view_data = np.concatenate((view_data[:,0:1],view_data[:,5:]),axis=1)
         x_range = np.array([i for i in range(ts["start"],ts["end"])])

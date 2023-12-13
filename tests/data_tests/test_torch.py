@@ -34,9 +34,19 @@ def test_softmax():
     print(output)
     index = torch.argmax(output, dim=-1)
     print(index)
-          
+    
+def test_sort():
+    t = torch.rand((20,6)) # 20 bbox [x, y, w, h, confidence, class]
+    print(t)
+    
+    _, indices = torch.sort(t, descending=True, dim=0)
+    # print(indices)
+    b, idx_unsort = torch.sort(indices, dim=0)
+    print(idx_unsort)
+             
 if __name__ == "__main__":
-    test_tensor()    
+    # test_tensor()    
+    test_sort()
     # test_embedding()
     # test_zip()
     # test_softmax()

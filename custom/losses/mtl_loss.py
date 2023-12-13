@@ -190,7 +190,7 @@ class UncertaintyLoss(nn.Module):
                 if i==1:
                     corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
                 elif i==2:
-                    corr_loss_combine[i] = self.compute_dtw_loss(input_item, label_item)   
+                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
                 else: 
                     corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)
                 loss_sum = corr_loss_combine[i]
