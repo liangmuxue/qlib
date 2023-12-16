@@ -56,7 +56,7 @@ task:
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'output_corr'
+            type: 'batch_data_ana'
             n_epochs : 100
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False

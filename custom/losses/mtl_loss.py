@@ -17,13 +17,8 @@ mse_scope_weight = torch.tensor(np.array([1,2,3,4]))
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 
-distance = distances.CosineSimilarity()
+distance = distances.LpDistance()
 reducer = reducers.ThresholdReducer(low=0)
-loss_func = losses.TripletMarginLoss(margin=0.2, distance=distance, reducer=reducer)
-mining_func = miners.TripletMarginMiner(
-    margin=0.2, distance=distance, type_of_triplets="semihard"
-)
-
 
 
 def listMLE(y_pred, y_true, eps=1e-9, padded_value_indicator=-1):
@@ -132,16 +127,20 @@ class RankLoss(_Loss):
     
     __constants__ = ['reduction']
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean',device=None) -> None:
+    def __init__(self, margin=1,size_average=None, reduce=None, reduction: str = 'mean',device=None) -> None:
         super(RankLoss, self).__init__(size_average=size_average, reduce=reduce, reduction=reduction)
         self.device = device
         self.reduction = reduction
-
+        
+        self.loss_func = losses.TripletMarginLoss(margin=margin, distance=distance, reducer=reducer)
+        self.mining_func = miners.TripletMarginMiner(
+            margin=margin, distance=distance, type_of_triplets="semihard"
+        )
     def forward(self, embeddings: Tensor, labels: Tensor) -> Tensor:
         """使用度量学习，用Triplet Loss比较排序损失"""
         
-        indices_tuple = mining_func(embeddings, labels)
-        loss = loss_func(embeddings, labels, indices_tuple)        
+        indices_tuple = self.mining_func(embeddings, labels)
+        loss = self.loss_func(embeddings, labels, indices_tuple)        
         return loss 
                    
 class UncertaintyLoss(nn.Module):
@@ -168,16 +167,16 @@ class UncertaintyLoss(nn.Module):
         self.mse_loss = nn.MSELoss() # MseLoss(reduction=mse_reduction,device=device)
         self.tar_loss = nn.MSELoss()
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
-        self.rankloss = RankLoss(reduction='mean')
+        self.rankloss = RankLoss(reduction='mean',margin=1)
         # 设置损失函数的组合模式
         self.loss_mode = 0
 
     def forward(self, input_ori: Tensor, target_ori: Tensor,optimizers_idx=0,epoch=0):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
-        (input,vr_class,tar_class) = input_ori
+        (input,vr_combine_class,vr_classes) = input_ori
         (target,target_class,target_info,y_transform) = target_ori
-        # slope_target = (target[:,-1] - target[:,0])/target[:,0]
+        label_class = target_class[:,0]
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         # 指标分类
         ce_loss = torch.tensor(0.0).to(self.device) 
@@ -186,13 +185,16 @@ class UncertaintyLoss(nn.Module):
         for i in range(len(input)):
             if optimizers_idx==i or optimizers_idx==-1:
                 input_item = input[i][:,:,0]
-                label_item = target[:,:,i]            
+                target_item = target[:,:,i]    
+                target_item_mean = torch.mean(target_item,-1)
+                label_item = torch.Tensor(np.array([target_info[j]["raise_range"] for j in range(len(target_info))])).to(self.device)
+                vr_item_class = vr_classes[i]     
                 if i==1:
-                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
+                    corr_loss_combine[i] = self.rankloss(vr_item_class, label_item)   
                 elif i==2:
-                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)   
+                    corr_loss_combine[i] = self.rankloss(vr_item_class, target_item_mean)   
                 else: 
-                    corr_loss_combine[i] = self.ccc_loss_comp(input_item, label_item)
+                    corr_loss_combine[i] = self.rankloss(vr_item_class, label_item)
                 loss_sum = corr_loss_combine[i]
         # 二次目标损失部分
         # if optimizers_idx==len(input):

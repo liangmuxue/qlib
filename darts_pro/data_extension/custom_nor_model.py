@@ -411,7 +411,9 @@ class _TFTModuleBatch(_TFTCusModule):
     
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
-
+        
+        return super().validation_step_real(val_batch[:-1], batch_idx)
+        
         input_batch = self._process_input_batch(val_batch[:5])
         # 收集目标数据用于分类
         scaler_tuple,target_class,future_target,target_info,rank_targets = val_batch[5:]  
@@ -464,17 +466,17 @@ class _TFTModuleBatch(_TFTCusModule):
         return loss,detail_loss,output
       
     
-    def build_import_index(self,output_inverse=None,target_inverse=None):  
-        """重载父类方法，生成涨幅达标的预测数据下标"""
-        
-        output_label_inverse = output_inverse[:,:,0] 
-        output_second_inverse = output_inverse[:,:,1]
-        output_third_inverse = output_inverse[:,:,2]
-                 
-        third_rank = np.mean(output_third_inverse,axis=1)
-        import_index = np.argsort(third_rank,axis=0)[:10]
-        
-        return import_index    
+    # def build_import_index(self,output_inverse=None,target_inverse=None):  
+    #     """重载父类方法，生成涨幅达标的预测数据下标"""
+    #
+    #     output_label_inverse = output_inverse[:,:,0] 
+    #     output_second_inverse = output_inverse[:,:,1]
+    #     output_third_inverse = output_inverse[:,:,2]
+    #
+    #     third_rank = np.mean(output_third_inverse,axis=1)
+    #     import_index = np.argsort(third_rank,axis=0)[:10]
+    #
+    #     return import_index    
         
     def _process_input_batch(
         self, input_batch
