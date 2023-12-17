@@ -4,12 +4,13 @@ import torch.nn.functional as F
 import torch
 import torchmetrics
 from torch import Tensor
+from torch.nn import TripletMarginWithDistanceLoss
 import numpy as np
 from tslearn.metrics import SoftDTWLossPyTorch
 
 from cus_utils.common_compute import normalization
 from cus_utils.encoder_cus import transform_slope_value
-from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class_weight
+from tft.class_define import CLASS_SIMPLE_VALUE_SEC,CLASS_SIMPLE_VALUE_MAX,get_simple_class_weight
 
 mse_weight = torch.tensor(np.array([1,2,3,4,5]))  
 mse_scope_weight = torch.tensor(np.array([1,2,3,4]))  
@@ -20,39 +21,6 @@ from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 distance = distances.LpDistance()
 reducer = reducers.ThresholdReducer(low=0)
 
-
-def listMLE(y_pred, y_true, eps=1e-9, padded_value_indicator=-1):
-    """
-    ListMLE loss introduced in "Listwise Approach to Learning to Rank - Theory and Algorithm".
-    :param y_pred: predictions from the model, shape [batch_size, slate_length]
-    :param y_true: ground truth labels, shape [batch_size, slate_length]
-    :param eps: epsilon value, used for numerical stability
-    :param padded_value_indicator: an indicator of the y_true index containing a padded item, e.g. -1
-    :return: loss value, a torch.Tensor
-    """
-    # shuffle for randomised tie resolution
-    random_indices = torch.randperm(y_pred.shape[-1])
-    y_pred_shuffled = y_pred[:, random_indices]
-    y_true_shuffled = y_true[:, random_indices]
-
-    y_true_sorted, indices = y_true_shuffled.sort(descending=True, dim=-1)
-
-    mask = y_true_sorted == padded_value_indicator
-
-    preds_sorted_by_true = torch.gather(y_pred_shuffled, dim=1, index=indices)
-    preds_sorted_by_true[mask] = float("-inf")
-
-    max_pred_values, _ = preds_sorted_by_true.max(dim=1, keepdim=True)
-
-    preds_sorted_by_true_minus_max = preds_sorted_by_true - max_pred_values
-
-    cumsums = torch.cumsum(preds_sorted_by_true_minus_max.exp().flip(dims=[1]), dim=1).flip(dims=[1])
-
-    observation_loss = torch.log(cumsums + eps) - preds_sorted_by_true_minus_max
-
-    observation_loss[mask] = 0.0
-
-    return torch.mean(torch.sum(observation_loss, dim=1))
 
 class MseLoss(_Loss):
     """自定义mse损失，用于设置类别权重"""
@@ -77,37 +45,6 @@ class MseLoss(_Loss):
             mse_loss = torch.sum(loss_arr_pun)
         return mse_loss  
 
-class PartLoss(_Loss):
-    """自定义损失，只衡量部分数据"""
-    
-    __constants__ = ['reduction']
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        input_item_range = (input[:,-1] - input[:,-2])/input[:,-2]
-        target_item_range = (target[:,-1] - target[:,-2])/target[:,-2]
-        loss = torch.abs(input_item_range - target_item_range)
-        return torch.mean(loss)
-    
-class LastClassifyLoss(nn.BCEWithLogitsLoss):
-    """自定义二分类损失，计算最后一段预测上升还是下降的准确性"""
-    
-    __constants__ = ['reduction']
-
-    def __init__(self, weight=None, size_average=None, reduce=None, reduction: str = 'mean',device=None) -> None:
-        super(LastClassifyLoss, self).__init__(size_average=size_average, reduce=reduce, reduction=reduction)
-        self.device = device
-        self.weight = weight
-
-    def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        last_sec_slop = (input[:,-1] - input[:,-2])/input[:,-2]
-        last_sec_out = normalization(last_sec_slop,mode="torch",avoid_zero=False)
-        last_sec_tar_bool = ((target[:,-1] - target[:,-2])>0).type(torch.float64)
-        loss = super().forward(last_sec_out,last_sec_tar_bool)
-        return loss  
-
 class BatchScopeLoss(_Loss):
     """批量数据的涨跌幅度衡量"""
     
@@ -122,27 +59,50 @@ class BatchScopeLoss(_Loss):
         loss = self.corr_loss_comp(slope_input,slope_target)
         return loss 
 
-class RankLoss(_Loss):
-    """自定义排序损失函数"""
+class TripletLoss(_Loss):
+    """自定义三元组损失函数"""
     
     __constants__ = ['reduction']
 
-    def __init__(self, margin=1,size_average=None, reduce=None, reduction: str = 'mean',device=None) -> None:
-        super(RankLoss, self).__init__(size_average=size_average, reduce=reduce, reduction=reduction)
+    def __init__(self, hard_margin=1.5,semi_margin=1.2,dis_func=None,reduction: str = 'mean',device=None) -> None:
+        super(TripletLoss, self).__init__(reduction=reduction)
+        
         self.device = device
         self.reduction = reduction
+        self.hard_triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=dis_func,margin=hard_margin)      
+        self.semi_triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=dis_func,margin=semi_margin)  
+                      
+    def forward(self, output: Tensor, target: Tensor,labels=None) -> Tensor:
+        """使用度量学习，用Triplet Loss比较排序损失,使用实际的目标值作为锚点(Anchor)"""
         
-        self.loss_func = losses.TripletMarginLoss(margin=margin, distance=distance, reducer=reducer)
-        self.mining_func = miners.TripletMarginMiner(
-            margin=margin, distance=distance, type_of_triplets="semihard"
-        )
-    def forward(self, embeddings: Tensor, labels: Tensor) -> Tensor:
-        """使用度量学习，用Triplet Loss比较排序损失"""
-        
-        indices_tuple = self.mining_func(embeddings, labels)
-        loss = self.loss_func(embeddings, labels, indices_tuple)        
-        return loss 
-                   
+        import_index = torch.where(labels==CLASS_SIMPLE_VALUE_MAX)[0]
+        imp_sec_index = torch.where(labels==CLASS_SIMPLE_VALUE_SEC)[0]
+        fail_index = torch.where(labels==0)[0]
+        fail_sec_index = torch.where(labels==1)[0]
+        # 把三元组数据分别遍为3组，(3,0) (3,1) (2,0),并分别计算三元组损失
+        loss_total = 0.0
+        for i in range(3):
+            if i==0:
+                pos_index,neg_index = self.combine_index(import_index, fail_index)
+            if i==1:
+                pos_index,neg_index = self.combine_index(import_index, fail_sec_index)       
+            if i==2:
+                pos_index,neg_index = self.combine_index(imp_sec_index, fail_index)        
+            pos_data = torch.index_select(output, 0, pos_index)       
+            neg_data = torch.index_select(output, 0, neg_index)      
+            anchor_data = torch.index_select(target, 0, pos_index)  
+            # 不同等级之间的距离使用不同的margin   
+            if i==0:     
+                loss_item = self.hard_triplet_loss(anchor_data,pos_data,neg_data)
+            else:
+                loss_item = self.semi_triplet_loss(anchor_data,pos_data,neg_data)
+            loss_total += loss_item
+        return loss_total 
+    
+    def combine_index(self,pos_index,nag_index):
+        size = pos_index.shape[0] if pos_index.shape[0]<nag_index.shape[0] else nag_index.shape[0]
+        return pos_index[:size],nag_index[:size]
+                  
 class UncertaintyLoss(nn.Module):
     """不确定损失,包括mse，corr以及分类交叉熵损失等"""
 
@@ -162,12 +122,11 @@ class UncertaintyLoss(nn.Module):
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
         self.mse_weight = mse_weight.to(device)
         self.batch_scope_loss = BatchScopeLoss(reduction=mse_reduction,device=device)
-        self.part_loss = PartLoss()
         self.vr_loss = nn.MSELoss()
         self.mse_loss = nn.MSELoss() # MseLoss(reduction=mse_reduction,device=device)
-        self.tar_loss = nn.MSELoss()
+        self.triplet_loss = TripletLoss(dis_func=self.ccc_loss_comp,device=device)
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
-        self.rankloss = RankLoss(reduction='mean',margin=1)
+        self.rankloss = TripletLoss(reduction='mean')
         # 设置损失函数的组合模式
         self.loss_mode = 0
 
@@ -186,15 +145,17 @@ class UncertaintyLoss(nn.Module):
             if optimizers_idx==i or optimizers_idx==-1:
                 input_item = input[i][:,:,0]
                 target_item = target[:,:,i]    
-                target_item_mean = torch.mean(target_item,-1)
                 label_item = torch.Tensor(np.array([target_info[j]["raise_range"] for j in range(len(target_info))])).to(self.device)
                 vr_item_class = vr_classes[i]     
                 if i==1:
-                    corr_loss_combine[i] = self.rankloss(vr_item_class, label_item)   
+                    corr_loss_combine[i] = self.triplet_loss(input_item, target_item,label_class)   
+                    corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
                 elif i==2:
-                    corr_loss_combine[i] = self.rankloss(vr_item_class, target_item_mean)   
+                    corr_loss_combine[i] = self.triplet_loss(input_item, target_item,label_class)   
+                    corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
                 else: 
-                    corr_loss_combine[i] = self.rankloss(vr_item_class, label_item)
+                    corr_loss_combine[i] = self.triplet_loss(input_item, target_item,label_class)
+                    corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
                 loss_sum = corr_loss_combine[i]
         # 二次目标损失部分
         # if optimizers_idx==len(input):

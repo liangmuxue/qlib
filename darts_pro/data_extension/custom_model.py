@@ -666,7 +666,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         total_mean = np.mean(output_inverse,1)
         total_index = np.argsort(total_mean,axis=0)
         import_index = total_index[:50,1]
-        import_index = np.intersect1d(total_index[:100,0],total_index[:100,1])
+        # import_index = np.intersect1d(total_index[:100,0],total_index[:100,1])
         # import_index = np.intersect1d(import_index,total_index[200:,2])
         return import_index        
 
