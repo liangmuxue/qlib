@@ -72,7 +72,7 @@ class TripletLoss(_Loss):
         self.hard_triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=dis_func,margin=hard_margin)      
         self.semi_triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=dis_func,margin=semi_margin)  
                       
-    def forward(self, output: Tensor, target: Tensor,labels=None) -> Tensor:
+    def forward(self, output: Tensor, target: Tensor,labels=None,labels_value=None) -> Tensor:
         """使用度量学习，用Triplet Loss比较排序损失,使用实际的目标值作为锚点(Anchor)"""
         
         import_index = torch.where(labels==CLASS_SIMPLE_VALUE_MAX)[0]
@@ -90,7 +90,7 @@ class TripletLoss(_Loss):
                 pos_index,neg_index = self.combine_index(imp_sec_index, fail_index)        
             pos_data = torch.index_select(output, 0, pos_index)       
             neg_data = torch.index_select(output, 0, neg_index)      
-            anchor_data = torch.index_select(target, 0, pos_index)  
+            anchor_data = torch.index_select(labels_value, 0, pos_index)  
             # 不同等级之间的距离使用不同的margin   
             if i==0:     
                 loss_item = self.hard_triplet_loss(anchor_data,pos_data,neg_data)
@@ -124,7 +124,8 @@ class UncertaintyLoss(nn.Module):
         self.batch_scope_loss = BatchScopeLoss(reduction=mse_reduction,device=device)
         self.vr_loss = nn.MSELoss()
         self.mse_loss = nn.MSELoss() # MseLoss(reduction=mse_reduction,device=device)
-        self.triplet_loss = TripletLoss(dis_func=self.ccc_loss_comp,device=device)
+        
+        self.triplet_loss = TripletLoss(dis_func=self.abs_dis,device=device)
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
         self.rankloss = TripletLoss(reduction='mean')
         # 设置损失函数的组合模式
@@ -146,16 +147,17 @@ class UncertaintyLoss(nn.Module):
                 input_item = input[i][:,:,0]
                 target_item = target[:,:,i]    
                 label_item = torch.Tensor(np.array([target_info[j]["raise_range"] for j in range(len(target_info))])).to(self.device)
-                vr_item_class = vr_classes[i]     
+                label_item = normalization(label_item,mode="torch")
+                vr_item_class = vr_classes[i][:,0] 
                 if i==1:
-                    corr_loss_combine[i] = self.triplet_loss(input_item, target_item,label_class)   
-                    corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
+                    corr_loss_combine[i] = self.triplet_loss(vr_item_class, target_item,labels=label_class,labels_value=label_item)   
+                    # corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
                 elif i==2:
-                    corr_loss_combine[i] = self.triplet_loss(input_item, target_item,label_class)   
-                    corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
+                    corr_loss_combine[i] = self.triplet_loss(vr_item_class, target_item,labels=label_class,labels_value=label_item)   
+                    # corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
                 else: 
-                    corr_loss_combine[i] = self.triplet_loss(input_item, target_item,label_class)
-                    corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
+                    corr_loss_combine[i] = self.triplet_loss(vr_item_class, target_item,labels=label_class,labels_value=label_item)   
+                    # corr_loss_combine[i] += self.ccc_loss_comp(input_item,target_item)
                 loss_sum = corr_loss_combine[i]
         # 二次目标损失部分
         # if optimizers_idx==len(input):
@@ -168,6 +170,9 @@ class UncertaintyLoss(nn.Module):
             loss_sum = torch.sum(corr_loss_combine) + ce_loss + value_diff_loss
         
         return loss_sum,[corr_loss_combine,ce_loss,value_diff_loss]
+
+    def abs_dis(self,x1, x2):
+        return torch.abs(x1 - x2)      
     
     def corr_loss_comp(self, input: Tensor, target: Tensor):
         

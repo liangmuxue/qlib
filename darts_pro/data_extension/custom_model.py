@@ -176,8 +176,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         model_list = []
         classify_vr_layers = []
         # 涨跌幅度分类
-        vr_range_num = len(CLASS_SIMPLE_VALUES.keys())     
-        # vr_range_num = 1 
+        vr_range_num = 1 
         for i in range(len(past_split)):
             # 拆分过去协变量,形成不同的网络配置，给到不同的model
             model =  _TFTModule(output_dim,variables_meta_array[i],num_static_components,hidden_size,lstm_layers,num_attention_heads,
@@ -191,8 +190,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.sub_models = nn.ModuleList(model_list) 
         self.vr_layers = nn.ModuleList(classify_vr_layers) 
         # 序列分类层，包括目标分类和输出分类
-        self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)        
-        self.classify_tar_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,vr_range_num,device=device)  
+        self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,len(CLASS_SIMPLE_VALUES.keys()) ,device=device)        
+        self.classify_tar_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,len(CLASS_SIMPLE_VALUES.keys()) ,device=device)  
         # 使用不确定多重损失函数
         if use_weighted_loss_func and not isinstance(model.criterion,UncertaintyLoss):
             self.criterion = UncertaintyLoss(device=device) 
@@ -231,7 +230,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             else:
                 # 模拟数据
                 out = torch.ones([batch_size,self.output_chunk_length,1,1]).to(self.device)
-                out_class = torch.ones([batch_size,len(CLASS_SIMPLE_VALUES.keys())]).to(self.device)
+                out_class = torch.ones([batch_size,1]).to(self.device)
             out_total.append(out)    
             out_class_total.append(out_class)
         
@@ -665,7 +664,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # 综合判别
         total_mean = np.mean(output_inverse,1)
         total_index = np.argsort(total_mean,axis=0)
-        import_index = total_index[:50,1]
+        import_index = total_index[:100,0]
         # import_index = np.intersect1d(total_index[:100,0],total_index[:100,1])
         # import_index = np.intersect1d(import_index,total_index[200:,2])
         return import_index        
