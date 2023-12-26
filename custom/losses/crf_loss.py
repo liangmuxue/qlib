@@ -8,9 +8,10 @@ class CrfLoss(MultiHorizonMetric):
     """使用CRF模型进行loss计算
     """
 
-    def __init__(self, num_classes,**kwargs):
+    def __init__(self, num_classes,device=None,**kwargs):
         super().__init__(**kwargs)
         self.num_classes = num_classes
+        # self.device = device
         self.crf = CRF(num_labels=num_classes)
 
     def loss(self, inputs, targets):
@@ -19,8 +20,9 @@ class CrfLoss(MultiHorizonMetric):
             inputs 输入,shape为(batch_size,pred_size,output_size)
             targets 标签,shape为(batch_size,pred_size)
         """
-              
-        loss = self.crf(inputs, targets) 
+        
+        mask = (torch.ones(targets.shape)>0).to(self.device)      
+        loss = self.crf(inputs, targets,mask) 
         loss = -1 * loss
         return loss
     

@@ -109,7 +109,10 @@ class TftDatafAnalysis():
         if self.type.startswith("batch_data_ana"):
             self.batch_data_ana(dataset) 
         if self.type.startswith("batch_ot_data_ana"):
-            self.batch_ot_data_ana(dataset)             
+            self.batch_ot_data_ana(dataset)         
+        if self.type.startswith("clustering_output"):
+            self.clustering_output(dataset)                  
+               
     def data_pca(
         self,
         dataset: TFTSeriesDataset,
@@ -262,4 +265,22 @@ class TftDatafAnalysis():
         
         print("raise cnt:",[ri.shape[0] for ri in raise_index])
         print("import_price_index cnt:",import_price_index.shape[0])
+        
+    def clustering_output(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        
+        batch_file_path = self.kwargs["batch_file_path"]
+        batch_file = "{}/valid_output_batch.pickel".format(batch_file_path)   
+        
+        ds = BatchOutputDataset(batch_file,mode="process",range_num=None) 
+        data_assis = StatDataAssis()
+        data_assis.clustering_output(ds)
+                
         

@@ -1,5 +1,6 @@
 import torch 
 import torch.nn as nn
+import numpy as np
 
 def test_tensor():
     a = torch.randn(1, requires_grad=True).cuda()
@@ -43,10 +44,82 @@ def test_sort():
     # print(indices)
     b, idx_unsort = torch.sort(indices, dim=0)
     print(idx_unsort)
-             
+
+def test_pairwise():
+    a = torch.tensor([[5.0, 3, 0, 4],[1, 6, 2, 3]])
+    b = torch.einsum('ij,kj->ikj', a, a).std(dim=2)
+    print(b)    
+
+def ccc_distance_torch(x,y):
+    from torchmetrics.regression import ConcordanceCorrCoef
+    x = x.squeeze().transpose(1,0)
+    y = y.squeeze().transpose(1,0)
+    concordance = ConcordanceCorrCoef(num_outputs=x.shape[1]).to("cuda:0")
+    return 1 - concordance(x, y)
+        
+def ccc_distance(input_ori,target_ori):
+    if len(input_ori.shape)==1:
+        input_with_dims = input_ori.unsqueeze(0)
+    else:
+        input_with_dims = input_ori
+    if len(target_ori.shape)==1:
+        target_with_dims = target_ori.unsqueeze(0)    
+    else:
+        target_with_dims = target_ori                    
+    input = input_with_dims.flatten()
+    target = target_with_dims.flatten()
+    corr_tensor = torch.stack([input,target],dim=0)
+    cor = torch.corrcoef(corr_tensor)[0][1]
+    var_true = torch.var(target)
+    var_pred = torch.var(input)
+    sd_true = torch.std(target)
+    sd_pred = torch.std(input)
+    numerator = 2*cor*sd_true*sd_pred
+    mse_part = MseLoss().forward(input_with_dims,target_with_dims)
+    denominator = var_true + var_pred + mse_part
+    ccc = numerator/denominator
+    ccc_loss = 1 - ccc
+    return ccc_loss  
+
+class MseLoss():
+    """自定义mse损失，用于设置类别权重"""
+    
+    __constants__ = ['reduction']
+
+    def __init__(self, reduction: str = 'mean',device=None) -> None:
+        self.reduction= reduction
+        self.device = device
+
+    def forward(self, input, target):
+        loss_arr = (input - target) ** 2
+        loss_arr = torch.mean(loss_arr,dim=1)
+        # if self.reduction=="mean":
+        #     mse_loss = torch.mean(loss_arr,dim=1)
+        # else:
+        #     mse_loss = torch.sum(loss_arr,dim=1)
+        return loss_arr 
+    
+def test_kmeans():
+    from projects.kmeans_pytorch import kmeans, kmeans_predict
+    data_size, dims, num_clusters = 100000, 2, 4
+    x = np.random.randn(data_size, dims) / 6
+    x = torch.from_numpy(x)  
+    device = torch.device('cuda:0')  
+    # k-means
+    cluster_ids_x, cluster_centers = kmeans(
+        X=x, num_clusters=num_clusters, distance='soft_dtw',device=device, 
+        gamma_for_soft_dtw=0.0001,dist_func=ccc_distance_torch,iter_limit=100
+    )    
+    # cluster_ids_x, cluster_centers = kmeans(
+    #     X=x, num_clusters=num_clusters, distance='soft_dtw',device=device, gamma_for_soft_dtw=0.0001,dist_func=None
+    # )        
+    print(cluster_centers)
+      
 if __name__ == "__main__":
     # test_tensor()    
-    test_sort()
+    # test_sort()
+    test_kmeans()
+    # test_pairwise()
     # test_embedding()
     # test_zip()
     # test_softmax()

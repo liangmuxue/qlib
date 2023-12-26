@@ -6,7 +6,9 @@ from torchvision.transforms import *
 import cv2
 from torch import nn
 from sklearn.metrics import precision_recall_curve
+from sklearn.metrics.pairwise import pairwise_distances
 import datetime
+from tslearn.generators import random_walks
 
 def test_nozero():
     L = np.arange(18).reshape((2, 3, 3))
@@ -428,24 +430,9 @@ def concordance_correlation_coefficient(y_true, y_pred,
 def concordance_correlation_coefficient_torch(y_true, y_pred,
                        sample_weight=None,
                        multioutput='uniform_average'):
-    
-    corr_tensor = torch.stack((y_pred,y_true),dim=0)
-    cor = torch.corrcoef(corr_tensor)[0][1]
-    
-    mean_true = torch.mean(y_true)
-    mean_pred = torch.mean(y_pred)
-    
-    var_true = torch.var(y_true)
-    var_pred = torch.var(y_pred)
-    
-    sd_true = torch.std(y_true)
-    sd_pred = torch.std(y_pred)
-    
-    numerator = 2*cor*sd_true*sd_pred
-    
-    denominator=var_true+var_pred+(mean_true-mean_pred)**2
-
-    return numerator/denominator
+    from torchmetrics.regression import ConcordanceCorrCoef
+    concordance = ConcordanceCorrCoef(num_outputs=1)
+    return concordance(y_true, y_pred) 
 
 def test_ccc():
     n_samples=1000
@@ -453,7 +440,7 @@ def test_ccc():
     y_pred = y_true + 1
     y_true = np.array([-1.8430, -2.9625, -2.1838, -1.8075, -1.8022])
     y_pred = np.array([0.2252, 0.2269, 0.2403, 0.2496, 0.2595])    
-    y_pred = np.array([-1.8, -1.9625, -2.1838, -1.8075, -1.8022])   
+    y_pred = np.array([-1.8, -2.9625, -2.1838, -1.8075, -1.8022])   
     c = concordance_correlation_coefficient(y_true,y_pred)  
     c_torch = concordance_correlation_coefficient_torch(torch.tensor(y_true),torch.tensor(y_pred))    
     print("c is:{},and c_torch:{}".format(c,c_torch))
@@ -498,9 +485,28 @@ def test_mask():
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-               
+def test_pair_compute():
+    sample_n_gram_list = [['scratch', 'scratch', 'scratch', 'scratch', 'scratch'],
+                          ['scratch', 'scratch', 'scratch', 'scratch', 'smell/sniff'],
+                          ['scratch', 'scratch', 'scratch', 'sit', 'stand']]    
+    def corr_loss_comp(input, target):
+        return np.mean(input-target)   
+        
+    uniques = np.unique(sample_n_gram_list)
+    X = np.searchsorted(uniques, sample_n_gram_list)
+    distance_matrix = pairwise_distances(X, metric=corr_loss_comp)    
+    print(distance_matrix)
+
+def test_clustering():
+    from tslearn.clustering import TimeSeriesKMeans
+    X = random_walks(n_ts=50, sz=32, d=2)
+    km = TimeSeriesKMeans(n_clusters=3, metric="euclidean", max_iter=5,
+                      random_state=0).fit(X)
+    print(km.cluster_centers_)     
+          
 if __name__ == "__main__":
-    test_mask()
+    # test_mask()
+    # test_pair_compute()
     # test_argwhere()
     # test_condition3()
     # test_condi_remove()
@@ -534,6 +540,7 @@ if __name__ == "__main__":
     # test_pd_index()
     # test_norm()
     # test_ccc()
+    test_clustering()
     # test_pr()
     # test_scaler()
     

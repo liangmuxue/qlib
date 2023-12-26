@@ -30,6 +30,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute,slope_classify_compute_batch
+from tft.class_define import CLASS_SIMPLE_VALUES
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -162,7 +163,7 @@ class _TFTModuleAsis(_TFTCusModule):
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
                          future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]
         print("dump valid,batch:{},target shape:{}".format(batch_idx,past_target.shape))
-        pickle.dump(data,self.valid_fout) 
+        # pickle.dump(data,self.valid_fout) 
         fake_loss = torch.ones(1).to(self.device)
         self.log("val_loss", fake_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         return fake_loss     
@@ -373,9 +374,9 @@ class _TFTModuleBatch(_TFTCusModule):
         (past_target,past_covariates, historic_future_covariates,future_covariates,
          static_covariates,scaler,target_class,target,target_info,rank_targets) = train_batch    
          
-        # 使用排序目标替换原数据
+        # 使用排序目标替换原数据--Cancel
         train_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
-                               static_covariates,scaler,target_class,rank_targets[0],target_info)
+                               static_covariates,scaler,target_class,target,target_info)
                                
         loss,detail_loss,output = self.training_step_real(train_batch_convert, batch_idx) 
         if self.train_output_flag:
@@ -614,7 +615,7 @@ class TFTBatchModel(TFTExtModel):
             )
         
         # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
-        self.output_dim = (1,1)
+        self.output_dim = self.define_output_dim()
         
         # 根据拆分的过去协变量，生成多个配置
         variables_meta_array = []
@@ -693,7 +694,7 @@ class TFTBatchModel(TFTExtModel):
             elif isinstance(elem, TimeSeries):
                 aggregated.append([sample[i] for sample in batch])
         
-        # 修改目标值，改为排序号
+        # 添加排序号的目标
         future_target = aggregated[-2]
         _,indices = torch.sort(future_target,0)
         _, idx_unsort = torch.sort(indices, dim=0)

@@ -64,7 +64,7 @@ task:
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
-               base_lr: 5e-4
+               base_lr: 1e-4
                max_lr: 1.5e-3     
                cycle_momentum: False
                step_size_up: 3000
@@ -77,8 +77,8 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'TRIPLET_Label_2000_202010'
-               load_weight: True
+               model_name: 'TRIPLET_TAR_CCCMSE_2000_202010'
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

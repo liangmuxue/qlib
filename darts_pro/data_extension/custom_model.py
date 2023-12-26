@@ -32,19 +32,17 @@ from .series_data_utils import StatDataAssis
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer,unverse_transform_slope_value
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import compute_price_class,normalization,slope_classify_compute,comp_max_and_rate
+from cus_utils.common_compute import compute_price_class,normalization,pairwise_compare,comp_max_and_rate
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
 from darts_pro.data_extension.custom_tcn_model import LSTMReg,TargetDataReg
+from losses.mtl_loss import TripletLoss,UncertaintyLoss
 
 import torchmetrics
 from torchmetrics import MeanSquaredError
 from sklearn.preprocessing import MinMaxScaler
 import tsaug
-from losses.mtl_loss import UncertaintyLoss,MseLoss
-from cus_utils.process import raise_if_not
-from fastai.torch_core import requires_grad
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -106,45 +104,7 @@ def _build_forecast_series(
         static_covariates=input_series.static_covariates,
         hierarchy=input_series.hierarchy,
     ),None,vr_mean_class)
- 
-class ClasssifyLayer(nn.Module):  
     
-    def __init__(self, layer_num,input_dim, output_dim,device=None):
-        """使用全连接进行分类数值输出
-          Params
-            layer_num： 层数
-            input_dim： 序列长度
-            output_dim： 类别数
-        """
-        super().__init__()
-         
-        layers = []
-        layer_mul_params = []
-        self.device = device
-        # 每层分别进行全连接
-        for i in range(layer_num):
-            layers.append(nn.Linear(input_dim, output_dim).to(self.device))
-            layer_mul_params.append(torch.rand(1, requires_grad=True).to(self.device))
-        # 统一把各层进行串接
-        self.combine_layer = nn.Sequential(*layers)
-        self.layer_mul_params = layer_mul_params
-        
-    def forward(self, input):
-        
-        combine_ouput = 0
-        for i in range(len(input)):
-            input_item = input[i][:,:,0,0]
-            line_layer = self.combine_layer[i]
-            layer_mul_param = self.layer_mul_params[i]
-            output_item = line_layer(input_item)
-            # 把各层的全连接数据进行统一的线性变换(相加)
-            if i==0:
-                combine_ouput = layer_mul_param * output_item
-            else:
-                combine_ouput = combine_ouput + layer_mul_param * output_item
-                
-        return combine_ouput
-                
 class _TFTCusModule(PLMixedCovariatesModule):
     def __init__(
         self,
@@ -173,6 +133,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         self.past_split = past_split
         self.filter_conv_index = filter_conv_index
         self.variables_meta_array = variables_meta_array
+        self.output_dim = output_dim
         model_list = []
         classify_vr_layers = []
         # 涨跌幅度分类
@@ -226,10 +187,11 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
                 out = m(x_in_item)
                 vr_layer = self.vr_layers[i]
-                out_class = vr_layer(out[:,:,0,0])
+                # out_class = vr_layer(out[:,:,:,0])
+                out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
                 # 模拟数据
-                out = torch.ones([batch_size,self.output_chunk_length,1,1]).to(self.device)
+                out = torch.ones([batch_size,self.output_chunk_length,self.output_dim[0],1]).to(self.device)
                 out_class = torch.ones([batch_size,1]).to(self.device)
             out_total.append(out)    
             out_class_total.append(out_class)
@@ -326,8 +288,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 y_transform = raise_range_batch
                 y_transform = torch.Tensor(y_transform).to(self.device)              
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform),optimizers_idx=i)
-            if i==len(self.past_split):
-                ce_loss = detail_loss[1]
+            corr_acc_combine = detail_loss[-1]
             self.loss_data.append(detail_loss)
             total_loss += loss
             # 手动更新参数
@@ -339,6 +300,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 opt.step()
                 self.lr_schedulers()[i].step()
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # for i in range(3):
+        #     self.log("train acc_{}".format(i), corr_acc_combine[i], batch_size=train_batch[0].shape[0], prog_bar=True)        
         # self.log("train_ce_loss", ce_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("lr0",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
         # 手动维护global_step变量  
@@ -455,7 +418,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,y_transform),optimizers_idx=-1)
-        (corr_loss_combine,ce_loss,value_diff_loss) = detail_loss
+        (corr_loss_combine,ce_loss,corr_acc_combine) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
@@ -466,8 +429,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         
         # 涨跌幅度类别的准确率
         vr_class_sf = [self.build_vr_class_cer(vc).cpu().numpy() for vc in vr_class_list]
+        self.metric_data(output_combine,future_target.cpu().numpy(),target_vr_class)
         import_price_result = self.compute_real_class_acc(output_inverse=output_inverse,target_vr_class=target_vr_class,
-                    vr_class_list=vr_class_sf,target_info=target_info,target_inverse=target_inverse)   
+                    output_data=output_combine,target_info=target_info,target_inverse=target_inverse)   
         total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
         if self.total_imp_cnt==0:
             self.total_imp_cnt = total_imp_cnt
@@ -490,7 +454,8 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
                 self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
         
-        # self.log("output_class_acc", output_class_acc, batch_size=val_batch[0].shape[0], prog_bar=True)
+        for i in range(3):
+            self.log("triplet acc_{}".format(i), corr_acc_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("output_imp_class_acc_cnt", output_imp_class_acc_cnt, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("output_imp_class_acc", output_imp_class_acc, batch_size=val_batch[0].shape[0], prog_bar=True)
         
@@ -593,7 +558,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
             pred_inverse.append(pred_center_data)
         return np.stack(pred_inverse)
     
-    def build_import_index(self,output_inverse=None,target_inverse=None,vr_class_list=None):  
+    def build_import_index(self,output_inverse=None,target_inverse=None,output_data=None):  
         """生成涨幅达标的预测数据下标"""
         
         output_label_inverse = output_inverse[:,:,0] 
@@ -607,12 +572,12 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # import_index = np.where(combine_bool)[0]
         
         # 价格指标整体需要有上涨幅度
-        range_compute = (output_label_inverse[:,-1]  - output_label_inverse[:,0])/np.abs(output_label_inverse[:,0])*100
+        range_compute = (output_inverse[:,-1,:]  - output_inverse[:,0,:])/np.abs(output_inverse[:,0,:])*100
         # slope_out_compute = np.sum(output_label_inverse,axis=-1)
         first_index_bool = range_compute>10
         first_his_tar = target_inverse[:,:self.input_chunk_length,0]
         # macd数值在0以上
-        first_index_bool = first_index_bool & (np.mean(output_label_inverse,axis=1)>0)
+        first_index_bool = (np.mean(output_label_inverse,axis=1)>0)
         # macd历史均值在0以上
         # first_index_bool = first_index_bool & (np.mean(first_his_tar,axis=1)>0)
         # 接近或超过前期高点
@@ -662,13 +627,42 @@ class _TFTCusModule(PLMixedCovariatesModule):
         # import_index_bool = predicted_labels==3
         
         # 综合判别
-        total_mean = np.mean(output_inverse,1)
-        total_index = np.argsort(total_mean,axis=0)
-        import_index = total_index[:100,0]
-        # import_index = np.intersect1d(total_index[:100,0],total_index[:100,1])
-        # import_index = np.intersect1d(import_index,total_index[200:,2])
+        second_index = np.argsort(-range_compute[:,1],axis=0)
+        second_index = second_index[:100]
+        second_index = np.where(range_compute[:,1]>0)
+        third_index = np.argsort(range_compute[:,2],axis=0)
+        third_index = third_index[:100]
+        third_index = np.where(range_compute[:,2]<0)
+        import_index = third_index 
+        import_index = np.intersect1d(third_index,second_index)
+        
+        clu_data = global_var.get_value("imp_clu_data")
+        clu_imp_idx = []
+        # 通过计算与目标值的距离比较，来决定是否入选
+        # for j in range(clu_data.shape[-1]):
+        #     # 分别对4个类别进行距离查询，取均值进行比较 
+        #     distance_all = []
+        #     for i in range(clu_data.shape[0]):
+        #         distance_item = self.compare_with_clu(output_data[:,:,j],clu_data[i,:,:,j])
+        #         distance_all.append(distance_item)
+        #     distance_all = torch.stack(distance_all)
+        #     sort_ret = torch.argsort(distance_all,dim=0)[0]
+        #     imp_index = (sort_ret==CLASS_SIMPLE_VALUE_MAX)  
+        #     clu_imp_idx.append(imp_index)
+        # clu_imp_idx = torch.stack(clu_imp_idx).cpu().numpy()
+        # second_bool = clu_imp_idx[1]
+        # third_bool = clu_imp_idx[2]
+        # import_bool = second_bool & third_bool
+        # import_index = np.where(import_bool)[0]
         return import_index        
-
+    
+    def compare_with_clu(self,output_data,target_data):
+        
+        comp_data = pairwise_compare(torch.Tensor(target_data).to(self.device),torch.Tensor(output_data).to(self.device),
+                                     distance_func=self.criterion.ccc_distance)
+        distance_mean = torch.mean(comp_data,dim=0)
+        return distance_mean
+    
     def collect_result(self,import_index,target_vr_class=None,target_info=None): 
           
         # 重点类别的准确率
@@ -692,7 +686,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         for i,imp_idx in enumerate(import_index):
             ts = target_info[imp_idx]
             price_array = ts["price_array"][self.input_chunk_length:]
-            p_taraget_class = compute_price_class(price_array,mode="fast")
+            p_taraget_class = compute_price_class(price_array,mode="first_last")
             import_price_result.append([imp_idx,ts["item_rank_code"],p_taraget_class])
         import_price_result = np.array(import_price_result)        
         price_class = np.array(price_class)
@@ -732,26 +726,31 @@ class _TFTCusModule(PLMixedCovariatesModule):
         return import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result
     
                
-    def compute_real_class_acc(self,target_info=None,output_inverse=None,vr_class_list=None,target_vr_class=None,target_inverse=None):
+    def compute_real_class_acc(self,target_info=None,output_inverse=None,output_data=None,target_vr_class=None,target_inverse=None):
         """计算涨跌幅分类准确度"""
         
-        # 使用分类判断
+        # 使用分类判断s
         import_index = self.build_import_index(output_inverse=output_inverse,
-                             target_inverse=target_inverse,vr_class_list=vr_class_list)
+                             target_inverse=target_inverse,output_data=output_data)
         import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result = \
             self.collect_result(import_index, target_vr_class, target_info)
         
         return import_price_result
     
-    def classify_compute(self,vr_class_list,target_class):
-        pred_class = np.argmax(vr_class_list,axis=-1)
-        class_acc = np.sum(pred_class==target_class)/target_class.shape[0]
-        imp_class_index = np.where(pred_class==CLASS_SIMPLE_VALUE_MAX)[0]
-        if imp_class_index.shape[0]==0:
-            return 0,0,0
-        imp_class_acc_cnt = np.sum(target_class[imp_class_index]==CLASS_SIMPLE_VALUE_MAX)
-        imp_class_acc = imp_class_acc_cnt/imp_class_index.shape[0]
-        return class_acc,imp_class_acc_cnt,imp_class_acc
+    def metric_data(self,output,target,target_class):
+        """数据准确性检验"""
+        
+        import_index = np.where(target_class==CLASS_SIMPLE_VALUE_MAX)[0]
+        neg_index = np.where(target_class==0)[0]
+        output_data = output[import_index]
+        anchor_data = target[import_index]
+        neg_data = target[neg_index]
+        size = neg_data.shape[0] if neg_data.shape[0]<output_data.shape[0] else output_data.shape[0]
+        
+        # for i in range(3):
+        #     loss_comp = UncertaintyLoss().corr_loss_comp(torch.Tensor(output_data[:,:,i]), torch.Tensor(anchor_data[:,:,i]))
+        #     loss_neg_comp = UncertaintyLoss().corr_loss_comp(torch.Tensor(output_data[:size,:,i]), torch.Tensor(neg_data[:size,:,i]))
+        #     print("loss_comp_{}:{},loss_neg_comp:{}".format(i,loss_comp,loss_neg_comp))
             
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
@@ -1074,10 +1073,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
                 r_index += 1
                 total_index += 1
                 s_index = row["imp_index"]
-                try:
-                    ts = target_info[s_index]
-                except Exception as e:
-                    print("ggg")
+                ts = target_info[s_index]
                 pred_data = output_inverse[s_index]
                 pred_center_data = pred_data[:,0]
                 pred_second_data = pred_data[:,1]
@@ -1100,7 +1096,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
     def draw_row(self,pred_center_data,pred_second_data,pred_third_data,target_item=None,ts=None,names=None,viz=None,win="win"):
         """draw one line"""
         
-        names = ['PRICE','MACD','RANKMA5','QTLUMA5']
+        names = ['RANKMA5','QTLUMA5','RANKMA5_OUTPUT','QTLUMA5_OUTPUT']
         
         price_array = ts["price_array"]
         # 补充画出前面的label数据
@@ -1121,9 +1117,9 @@ class _TFTCusModule(PLMixedCovariatesModule):
         view_data = np.concatenate((view_data,np.expand_dims(pred_first_data,axis=-1)),axis=1)           
         view_data = np.concatenate((view_data,np.expand_dims(pred_second_data,axis=-1)),axis=1)    
         view_data = np.concatenate((view_data,np.expand_dims(pred_third_data,axis=-1)),axis=1)    
-        view_data = view_data[:,:4]
+        view_data = view_data[:,1:]
         # np.save("custom/data/asis/view_data/{}.npy".format(win),view_data)
-        # view_data = np.concatenate((view_data[:,0:1],view_data[:,5:]),axis=1)
+        view_data = np.concatenate((view_data[:,2:3],view_data[:,3:4],view_data[:,5:6],view_data[:,6:7]),axis=1)
         x_range = np.array([i for i in range(ts["start"],ts["end"])])
         if self.monitor is not None:
             instrument = self.monitor.get_group_code_by_rank(ts["item_rank_code"])
@@ -1131,7 +1127,7 @@ class _TFTCusModule(PLMixedCovariatesModule):
         else:
             instrument = ts["instrument"]
             datetime_range = x_range
-        price_class_item = compute_price_class(price_array[self.input_chunk_length:],mode="fast")
+        price_class_item = compute_price_class(price_array[self.input_chunk_length:],mode="first_last")
         # result.append({"instrument":instrument,"datetime":df_target["datetime"].dt.strftime('%Y%m%d').values[0]})
         target_title = "time range:{}/{} code:{},price class:{}".format(
             ts["future_start"],ts["future_end"],instrument,price_class_item)
@@ -1381,7 +1377,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             )
         
         # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
-        self.output_dim = (1,1)
+        self.output_dim = self.define_output_dim()
         
         
         # 根据拆分的过去协变量，生成多个配置
@@ -1405,9 +1401,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
         )
 
         self.categorical_embedding_sizes = categorical_embedding_sizes
-        
+        output_dim = [len(CLASS_SIMPLE_VALUES.keys()),1]
         return _TFTCusModule(
-            output_dim=self.output_dim,
+            output_dim=output_dim,
             variables_meta_array=variables_meta_array,
             num_static_components=n_static_components,
             hidden_size=self.hidden_size,
@@ -1749,7 +1745,12 @@ class TFTExtModel(MixedCovariatesTorchModel):
             elif isinstance(elem, TimeSeries):
                 aggregated.append([sample[i] for sample in batch])
         return tuple(aggregated)
-                                                             
+    
+    def define_output_dim(self):
+        # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
+        output_dim = (1,1)    
+        return output_dim    
+                                                          
     @staticmethod
     def _supports_static_covariates() -> bool:
         return True         

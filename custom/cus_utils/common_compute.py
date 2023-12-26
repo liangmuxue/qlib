@@ -242,6 +242,35 @@ def comp_max_and_rate(np_arr,threhold=-1):
     rtn = rtn.numpy()
     return rtn
 
+def adjude_seq_eps(seq_data:torch.Tensor,eps=1e-5):
+    """调整序列值，避免序列中的所有值均相同"""
+    
+    result = []
+    for i in range(seq_data.shape[0]):
+        item = seq_data[i]
+        if torch.unique(item).shape[0]==1:
+            item[0] = item[0] + eps
+        result.append(item)
+    
+    return torch.stack(result)    
+
+def apply_along_axis(function, axis, x,y):
+    return torch.stack([
+        function(x_i,y) for x_i in torch.unbind(x, dim=axis)
+        ], dim=axis)
+    
+def pairwise_compare(m,n,distance_func=None):
+    """根据自定义距离函数，进行m比n"""
+    
+    result_list = []
+    index = 1
+    for item in m:
+        v = apply_along_axis(distance_func, 0, n,item)
+        result_list.append(v)
+        print("apply:",index)
+        index+=1
+    return torch.stack(result_list).squeeze(-1)
+    
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 5)

@@ -3,8 +3,10 @@ from typing import Dict
 import torch
 import pandas as pd
 import numpy as np
+import random
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.cluster import KMeans
 from cus_utils.encoder_cus import StockNormalizer   
 from sktime.transformations.panel.pca import PCATransformer
 from darts_pro.data_extension.series_data_utils import StatDataAssis
@@ -32,6 +34,11 @@ class BatchDataset(Dataset):
                     break            
                 
         aggregated = self.create_aggregated_data(batch_data)    
+        # 清除不合规数据
+        aggregated = self.clear_inf_data(aggregated)
+        # 生成采样数据，用于后续度量比对
+        imp_clu_data = self.cluster_compare_data(aggregated)
+        global_var.set_value("imp_clu_data",imp_clu_data)
         
         if self.mode=="process":
             self.batch_data = aggregated 
@@ -102,6 +109,50 @@ class BatchDataset(Dataset):
             elif elem is None:
                 aggregated.append(None)  
         return aggregated
+    
+    def clear_inf_data(self,agg_data):
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = agg_data
+        keep_idx = []
+        for i in range(target.shape[0]):
+            t_item = target[i]
+            # 如果目标序列值都是一个，则排除
+            if np.unique(t_item[:,0]).shape[0]==1 or np.unique(t_item[:,1]).shape[0]==1 or np.unique(t_item[:,2]).shape[0]==1:
+                # print("need ignore:{}".format(i))
+                pass
+            else:
+                keep_idx.append(i)
+        keep_idx = np.array(keep_idx)
+        
+        past_target = past_target[keep_idx]  
+        past_covariates = past_covariates[keep_idx] 
+        historic_future_covariates = historic_future_covariates[keep_idx]
+        future_covariates = future_covariates[keep_idx]  
+        static_covariates = static_covariates[keep_idx] 
+        target_class = target_class[keep_idx]
+        target = target[keep_idx]
+        scaler_tuple = [scaler_tuple[i] for i in keep_idx]
+        target_info = [target_info[i] for i in keep_idx]
+        
+        return (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info)
+        
+    def cluster_compare_data(self,aggregated_data,sampler_cnt=10):
+        """对目标进行聚类，选取具有代表性的数据"""
+        
+        target_class = np.array([item[0] for item in aggregated_data[-3]])[:,0]
+        future_target = aggregated_data[-2]
+        results = []
+        for i in range(4):
+            imp_index = np.where((target_class==i))[0]
+            s_indexes = np.random.choice(imp_index, sampler_cnt)
+            t = np.stack(future_target[s_indexes].tolist())
+            results.append(t)
+        return np.stack(results)
+        # kclusters = 10
+        # center_list = []
+        # for i in range(3):
+        #     kmeans = KMeans(n_clusters=kclusters, random_state=12).fit(future_target[i])        
+        #     center_list.append(kmeans.cluster_centers_)
+        # return np.stack(center_list)
     
     def build_origin_target_data(self):
         """生成原数据"""
@@ -229,8 +280,7 @@ class BatchOutputDataset(BatchDataset):
                     break  
                         
         # 训练数据 
-        aggregated = self.create_aggregated_data(target_batch_data)       
-          
+        aggregated = self.create_aggregated_data(target_batch_data)    
         # 输出数据    
         output_combine = []    
         for item in output_batch_data:
@@ -256,7 +306,8 @@ class BatchOutputDataset(BatchDataset):
             self.range_num = [0,output_inverse_data.shape[0]]    
         # 目标数据
         self.target_data = aggregated 
-        self.output_data = output_inverse_data
+        self.output_inverse_data = output_inverse_data
+        self.output_data = output
         
     def __getitem__(self, index):
         
@@ -265,7 +316,7 @@ class BatchOutputDataset(BatchDataset):
         # 反归一化取得实际目标数据
         whole_target = np.concatenate((past_target,target),axis=0)
         target_inverse = scaler_tuple[0].inverse_transform(whole_target)  
-        output_inverse = self.output_data[index]
+        output_inverse = self.output_inverse_data[index]
         return target_inverse,target_class[0],output_inverse,target_info
     
     

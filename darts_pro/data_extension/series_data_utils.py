@@ -8,11 +8,18 @@ import joblib
 from sklearn.metrics import accuracy_score
 from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.neighbors import KNeighborsTimeSeriesClassifier
+import torch
 
-from tft.class_define import CLASS_SIMPLE_VALUE_MAX,get_simple_class,get_complex_class
+from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,get_complex_class
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import slope_compute
 from cus_utils.log_util import AppLogger
+from losses.mtl_loss import UncertaintyLoss
+from projects.kmeans_pytorch import kmeans, kmeans_predict
+from tslearn.clustering import TimeSeriesKMeans
+from sklearn.cluster import DBSCAN,KMeans
+from sklearn.metrics import pairwise_distances
+from sklearn.neighbors import KNeighborsClassifier
 
 logger = AppLogger()
 
@@ -432,7 +439,49 @@ class StatDataAssis():
             match_index = np.intersect1d(measure_index,import_price_index)
             print("{},match cnt:{}".format(fit_names[i],match_index.shape[0]))
             print("{}，measure cnt:{}".format(fit_names[i],measure_index.shape[0]))
+
+    def clustering_output(self,ds_data):
+        """对输出按照目标类别进行聚类"""
+        
+        loss_unity = UncertaintyLoss()
+        viz = TensorViz(env="data_analysis")
+        index = 0
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = ds_data.target_data
+        target_class = target_class[:,0,0]
+        output_data = ds_data.output_data
+        device_str = 'cuda:0'
+        device = torch.device(device_str)
+        num_clusters = len(CLASS_SIMPLE_VALUES.keys())
+        # 按照不同的指标分别聚类
+        for i in range(output_data.shape[-1]):
+            output = output_data[:,:,i]
+            # pair_dis = pairwise_distances(output,metric=loss_unity.ccc_distance_torch,n_jobs=6)
+            db = DBSCAN(eps=0.6, metric=loss_unity.ccc_distance_torch, min_samples=50,n_jobs=4).fit(output)  
+            print("cluster_centers_{}:{},{}".format(i,db.core_sample_indices_,db.core_sample_indices_.shape))     
+            # total_acc_cnt = np.sum(db.labels_==target_class)   
+            # total_acc = total_acc_cnt/target_class.shape[0]
+            # import_index = np.where(db.labels_==CLASS_SIMPLE_VALUE_MAX)[0]
+            # import_acc_cnt = np.sum(target_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
+            # import_acc = import_acc_cnt/import_index.shape[0]
+            # print("acc_{},total_acc:{},import_acc:{}".format(i,total_acc,import_acc)) 
             
+    def knn_clustering(self,ds_data):
+        loss_unity = UncertaintyLoss()
+        viz = TensorViz(env="data_analysis")
+        index = 0
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = ds_data.target_data
+        target_class = target_class[:,0,0]
+        output_data = ds_data.output_data
+        device_str = 'cuda:0'
+        device = torch.device(device_str)
+        num_clusters = len(CLASS_SIMPLE_VALUES.keys())
+        # 按照不同的指标分别聚类
+        for i in range(output_data.shape[-1]):
+            neigh = KNeighborslClassifier(n_neighbors = 4)
+            output = output_data[:,:,i]
+            kmeans = KMeans(n_clusters = 4,random_state = 0).fit(output)    
+                   
+       
 if __name__ == "__main__":       
     data_assis = StatDataAssis()
     # data_assis.view_data()
