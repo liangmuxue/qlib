@@ -229,7 +229,7 @@ class BatchDataset(Dataset):
             # 生成价位幅度目标 
             price_array = target_info["price_array"]
             raise_range = (price_array[-1] - price_array[-5])/price_array[-5]*10
-            target_info["raise_range"] = raise_range
+            # target_info["raise_range"] = raise_range
             scaler,_ = scaler_tuple
             past_target_ori = scaler.inverse_transform(past_target)
             # avoid infinite

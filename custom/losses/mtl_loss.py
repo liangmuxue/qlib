@@ -7,13 +7,17 @@ from torch import Tensor
 from torch.nn import TripletMarginWithDistanceLoss
 import numpy as np
 import random
+import math
+from functools import reduce
 from tslearn.metrics import SoftDTWLossPyTorch
 import itertools
-from cus_utils.common_compute import normalization,adjude_seq_eps
+from cus_utils.common_compute import normalization,batch_normalization,adjude_seq_eps,compute_price_range,intersect1d
 from cus_utils.encoder_cus import transform_slope_value
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_SEC,CLASS_SIMPLE_VALUE_MAX,get_simple_class_weight
 from numba.cuda.cudadrv import ndarray
-
+from losses.triplet_loss import TripletTargetLoss
+from losses.triplet_miner import TripletTargetMiner
+from losses.multi_similarity_loss import MultiSimilarityLoss
 
 mse_weight = torch.tensor(np.array([1,2,3,4,5]))  
 mse_scope_weight = torch.tensor(np.array([1,2,3,4]))  
@@ -22,89 +26,45 @@ from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 from torchmetrics.regression import ConcordanceCorrCoef
 
-distance = distances.LpDistance()
-reducer = reducers.ThresholdReducer(low=0)
+class MinerLoss(_Loss):
+    """具备挖掘功能的损失函数"""
 
-
-class NPairLoss(_Loss):
-
-    def __init__(self, l2_reg=1,dis_func=None):
-        super(NPairLoss, self).__init__()
-        self.l2_reg = l2_reg
+    def __init__(self,pos_margin=0.1,neg_margin=0.3,dis_func=None):
+        super(MinerLoss, self).__init__()
+        self.pos_margin = pos_margin
+        self.neg_margin = neg_margin
         self.dis_func = dis_func
 
-    def forward(self, embeddings, target):
-        n_pairs, n_negatives = self.get_n_pairs(target)
+    def forward(self, output, target,labels):
+        dist_data = self.dis_func(output, target)
+        target_index = self.hard_sample_minering(dist_data, labels)
+        return torch.mean(dist_data[target_index])
 
-        if embeddings.is_cuda:
-            n_pairs = n_pairs.cuda()
-            n_negatives = n_negatives.cuda()
-
-        anchors = embeddings[n_pairs[:, 0]]    # (n, embedding_size)
-        positives = embeddings[n_pairs[:, 1]]  # (n, embedding_size)
-        negatives = embeddings[n_negatives]    # (n, n-1, embedding_size)
-
-        losses = self.n_pair_loss(anchors, positives, negatives) \
-            + self.l2_reg * self.dis_func(anchors, positives)
-
-        return losses.sum()
-
-    @staticmethod
-    def get_n_pairs(labels):
-        """
-        Get index of n-pairs and n-negatives
-        :param labels: label vector of mini-batch
-        :return: A tuple of n_pairs (n, 2)
-                        and n_negatives (n, n-1)
-        """
-        labels = labels.cpu().data.numpy()
-        n_pairs = []
-
-        for label in set(labels):
-            label_mask = (labels == label)
-            label_indices = np.where(label_mask)[0]
-            if len(label_indices) < 2:
-                continue
-            anchor, positive = np.random.choice(label_indices, 2, replace=False)
-            n_pairs.append([anchor, positive])
-
-        n_pairs = np.array(n_pairs)
-
-        n_negatives = []
-        for i in range(len(n_pairs)):
-            negative = np.concatenate([n_pairs[:i, 1], n_pairs[i+1:, 1]])
-            n_negatives.append(negative)
-
-        n_negatives = np.array(n_negatives)
-
-        return torch.LongTensor(n_pairs), torch.LongTensor(n_negatives)
-
-    @staticmethod
-    def n_pair_loss(anchors, positives, negatives):
-        """
-        Calculates N-Pair loss
-        :param anchors: A torch.Tensor, (n, embedding_size)
-        :param positives: A torch.Tensor, (n, embedding_size)
-        :param negatives: A torch.Tensor, (n, n-1, embedding_size)
-        :return: A scalar
-        """
-        anchors = torch.unsqueeze(anchors, dim=1)  # (n, 1, embedding_size)
-        positives = torch.unsqueeze(positives, dim=1)  # (n, 1, embedding_size)
-
-        x = torch.matmul(anchors, (negatives - positives).transpose(1, 2))  # (n, 1, n-1)
-        x = torch.sum(torch.exp(x), 2)  # (n, 1)
-        loss = torch.mean(torch.log(1+x))
-        return loss
-
-    @staticmethod
-    def l2_loss(anchors, positives):
-        """
-        Calculates L2 norm regularization loss
-        :param anchors: A torch.Tensor, (n, embedding_size)
-        :param positives: A torch.Tensor, (n, embedding_size)
-        :return: A scalar
-        """
-        return torch.sum(anchors ** 2 + positives ** 2) / anchors.shape[0]
+    def hard_sample_minering(self,dist_data,labels):
+        """挖掘困难样本"""
+        
+        import_index = torch.where(labels==CLASS_SIMPLE_VALUE_MAX)[0]
+        fail_index = torch.where(labels==0)[0]
+        fail_sec_index = torch.where(labels==1)[0]
+        
+        def miner_pair(index_tar,type=1):
+            dist_tar = dist_data[index_tar]
+            if type==1:
+                # 对于涨幅达标样本，要求输出尽量靠近
+                miner_data_idx = torch.where(dist_tar>self.pos_margin)[0]
+            else:
+                # 对于负面样本，要求输出尽量不在正样本中
+                miner_data_idx = torch.where(dist_tar>self.neg_margin)[0]
+            dist_index = index_tar[miner_data_idx]
+            return dist_index
+        
+        # 针对不同类别的数据，分别挖掘出困难样本
+        import_data_index = miner_pair(import_index)  
+        neg_data_index = miner_pair(fail_index)
+        sec_neg_data_index = miner_pair(fail_sec_index) 
+        # 合并
+        target_index = intersect1d(import_data_index,neg_data_index)
+        target_index = intersect1d(target_index,sec_neg_data_index)
     
 class TripletLoss(_Loss):
     """自定义三元组损失函数"""
@@ -112,7 +72,7 @@ class TripletLoss(_Loss):
     __constants__ = ['reduction']
 
     def __init__(self, hard_margin=0.6,semi_margin=0.4,dis_func=None,anchor_target=False,mode=1,
-                 reduction: str = 'mean',device=None,caller=None) -> None:
+                 reduction: str = 'mean',device=None,type_of_triplets="semihard") -> None:
         super(TripletLoss, self).__init__(reduction=reduction)
         
         self.device = device if device is not None else "cpu"
@@ -124,6 +84,7 @@ class TripletLoss(_Loss):
         self.semi_triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=dis_func,margin=semi_margin)
         self.dis_func = dis_func  
         self.mode = mode
+        self.type_of_triplets = type_of_triplets
                       
     def forward(self, output: Tensor, target: Tensor,labels=None,labels_value=None) -> Tensor:
         """使用度量学习，用Triplet Loss比较排序损失,使用实际的目标值作为锚点(Anchor)"""
@@ -132,60 +93,141 @@ class TripletLoss(_Loss):
         imp_sec_index = torch.where(labels==CLASS_SIMPLE_VALUE_SEC)[0]
         fail_index = torch.where(labels==0)[0]
         fail_sec_index = torch.where(labels==1)[0]
-        other_index = torch.where(labels!=CLASS_SIMPLE_VALUE_MAX)[0]
         # 把三元组数据分别遍为3组，(3,0) (3,1) (2,0),并分别计算三元组损失
         loss_total = 0.0
         acc_total = 0
+        # 使用与目标的距离值进行挖掘
+        dist_data = self.dis_func(output,target)
         for i in range(4):
             if i==0:
-                a_idx,p_idx,n_idx = self.minering_index(import_index, fail_index)
+                index_pair = (import_index, fail_index)
             if i==1:
-                a_idx,p_idx,n_idx = self.minering_index(import_index, fail_sec_index)       
+                index_pair = (import_index, fail_sec_index)
             if i==2:
-                a_idx,p_idx,n_idx = self.minering_index(imp_sec_index, fail_index)     
+                index_pair = (imp_sec_index, fail_index)
             if i==3:
-                a_idx,p_idx,n_idx = self.minering_index(fail_index, import_index)                    
-            pos_data = torch.index_select(output, 0, p_idx)    
-            # 根据配置决定是否使用目标值作为锚定标的   
-            if self.anchor_target:
-                anchor_data = torch.index_select(target, 0, a_idx)  
-                neg_data = torch.index_select(target, 0, n_idx)   
+                index_pair = (fail_index, import_index)
+            if self.anchor_target:   
+                # 使用与目标的距离值进行挖掘
+                a_idx,p_idx,n_idx = self.minering_index_pair_by_target_value(index_pair[0], index_pair[1],dist_data=dist_data,margin=self.semi_margin)   
             else:
-                anchor_data = torch.index_select(output, 0, a_idx)
-                neg_data = torch.index_select(output, 0, n_idx)   
-            # 可以在不同等级之间的距离使用不同的margin   
-            if i==0 or i==3:
-                loss_item = self.hard_triplet_loss(anchor_data,pos_data,neg_data)
+                a_idx,p_idx,n_idx = self.minering_index_pair(index_pair[0], index_pair[1],output=output,target=target,margin=self.semi_margin)     
+            # 需要保证批次内的可学习样本大于1
+            if a_idx.shape[0]>1:
+                pos_data = torch.index_select(output, 0, p_idx)    
+                # 根据配置决定是否使用目标值作为锚定标的   
+                if self.anchor_target:
+                    anchor_data = torch.index_select(target, 0, a_idx)  
+                    neg_data = torch.index_select(output, 0, n_idx)   
+                else:
+                    anchor_data = torch.index_select(output, 0, a_idx)
+                    neg_data = torch.index_select(output, 0, n_idx)   
+                # 可以在不同等级之间的距离使用不同的margin   
+                if i==0 or i==3:
+                    loss_item = self.hard_triplet_loss(anchor_data,pos_data,neg_data)
+                else:
+                    loss_item = self.semi_triplet_loss(anchor_data,pos_data,neg_data)
+                # 计算准确率
+                p_dis = self.dis_func(anchor_data,pos_data)
+                n_dis = self.dis_func(anchor_data,neg_data)
+                if i==0:
+                    acc = torch.sum((n_dis - p_dis - self.hard_margin)>0)/p_dis.shape[0]
+                else:
+                    acc = torch.sum((n_dis - p_dis - self.semi_margin)>0)/p_dis.shape[0]
+                loss_total += loss_item
+                acc_total += acc
             else:
-                loss_item = self.semi_triplet_loss(anchor_data,pos_data,neg_data)
-            # 计算准确率
-            p_dis = self.dis_func(anchor_data,pos_data)
-            n_dis = self.dis_func(anchor_data,neg_data)
-            if i==0:
-                acc = torch.sum((n_dis - p_dis - self.hard_margin)>0)/p_dis.shape[0]
-            else:
-                acc = torch.sum((n_dis - p_dis - self.semi_margin)>0)/p_dis.shape[0]
-            loss_total += loss_item
-            # # 不同目标值，使用不同的挖掘数据指标
-            # if self.mode==1 and i!=3:
-            #     # 对于前两个目标值，不使用反向指标
-            #     loss_total += loss_item
-            # if self.mode==2 and i==3:
-            #     # 对于第三个目标值,只使用反向指标
-            #     loss_total += loss_item                
-            acc_total += acc
+                print("no find semihard")
+                acc_total += 1
         acc = acc_total/4
         return loss_total,acc 
-    
+
+    def minering_index_pair(self,pos_index,nag_index,output=None,target=None,max_iter_time=1000,margin=0.3):
+        """生成positive和negitive数据的配对索引"""
+        
+        size = pos_index.shape[0] if pos_index.shape[0]<nag_index.shape[0] else nag_index.shape[0]
+        target_size = size * max_iter_time
+        
+        # 根据参数增加到原来的n倍，然后随机打乱顺序
+        p_index = pos_index.repeat(1,math.ceil(target_size/pos_index.shape[0])).squeeze()
+        p_idx = torch.randperm(p_index.shape[0])
+        p_index = p_index[p_idx]
+        n_index = nag_index.repeat(1,math.ceil(target_size/nag_index.shape[0])).squeeze()
+        n_idx = torch.randperm(n_index.shape[0])
+        n_index = n_index[n_idx]
+        # 取较小的size进行对齐
+        p_index = p_index[:target_size].to(self.device)
+        n_index = n_index[:target_size].to(self.device)
+        a_index = p_index[torch.randperm(p_index.shape[0])]
+        
+        # 根据配置决定是否使用同一个pos作为anchor锚点
+        if self.anchor_target:
+            anchor_data = target[a_index] 
+        else:
+            anchor_data = output[a_index] 
+        pos_data = output[p_index] 
+        neg_data = output[n_index] 
+        # 根据距离进行筛选
+        ap_dist = self.dis_func(anchor_data,pos_data)
+        an_dist = self.dis_func(anchor_data,neg_data)
+        triplet_margin = (an_dist - ap_dist)         
+        threshold_condition = triplet_margin <= margin
+        if self.type_of_triplets == "hard":
+            threshold_condition &= triplet_margin <= 0
+        elif self.type_of_triplets == "semihard":
+            threshold_condition &= triplet_margin > 0             
+        return (
+            a_index[threshold_condition],
+            p_index[threshold_condition],
+            n_index[threshold_condition],
+        ) 
+
+    def minering_index_pair_by_target_value(self,pos_index,nag_index,max_iter_time=2000,dist_data=None,margin=0.3):
+        """根据目标值，生成positive和negitive数据的配对索引"""
+        
+        size = pos_index.shape[0] if pos_index.shape[0]<nag_index.shape[0] else nag_index.shape[0]
+        target_size = size * max_iter_time
+        
+        # 根据参数增加到原来的n倍，然后随机打乱顺序
+        p_index = pos_index.repeat(1,math.ceil(target_size/pos_index.shape[0])).squeeze()
+        p_idx = torch.randperm(p_index.shape[0])
+        p_index = p_index[p_idx]
+        n_index = nag_index.repeat(1,math.ceil(target_size/nag_index.shape[0])).squeeze()
+        n_idx = torch.randperm(n_index.shape[0])
+        n_index = n_index[n_idx]
+        # 取较小的size进行对齐
+        p_index = p_index[:target_size].to(self.device)
+        n_index = n_index[:target_size].to(self.device)
+        a_index = p_index
+        # 锚定目标距离，进行挖掘
+        ap_dist = dist_data[p_index] 
+        an_dist = dist_data[n_index] 
+        triplet_margin = (an_dist - ap_dist)         
+        threshold_condition = triplet_margin <= margin
+        if self.type_of_triplets == "hard":
+            threshold_condition &= triplet_margin <= 0
+        elif self.type_of_triplets == "semihard":
+            threshold_condition &= triplet_margin > 0        
+        return (
+            p_index[threshold_condition],
+            p_index[threshold_condition],
+            n_index[threshold_condition],
+        )                 
+           
     def minering_index(self,pos_index,nag_index):
         """生成三元组数据，两两配对positive数据，然后配对到anchors和negitive数据"""
         
         pos_miner = list(itertools.permutations(pos_index.cpu().numpy().tolist(), 2))
         size = nag_index.shape[0]
-        pos_miner = random.sample(pos_miner, size)
-        a_idx = torch.Tensor(np.array([item[0] for item in pos_miner[:size]])).long().to(self.device)
-        p_idx = torch.Tensor(np.array([item[1] for item in pos_miner[:size]])).long().to(self.device)
-        n_idx = nag_index[:size]
+        pos_miner = random.sample(pos_miner, 10*size)
+        a_idx = list(set([item[0] for item in pos_miner]))
+        a_idx = torch.Tensor(np.array(a_idx)).long().to(self.device)
+        p_idx = [item[1] for item in pos_miner[:size]]
+        p_idx = torch.Tensor(np.array(p_idx)).long().to(self.device)
+        real_size = min(size,p_idx.shape[0],a_idx.shape[0])
+        p_idx = p_idx[:real_size]
+        a_idx = a_idx[:real_size]
+        n_idx = nag_index[:real_size]
         return a_idx,p_idx,n_idx
 
     def combine_index(self,pos_index,nag_index):
@@ -214,12 +256,15 @@ class UncertaintyLoss(nn.Module):
         self.mse_weight = mse_weight.to(device)
         self.vr_loss = nn.MSELoss()
         
-        self.triplet_loss_combine = [TripletLoss(dis_func=self.ccc_distance_torch,anchor_target=True,hard_margin=0.5,semi_margin=0.3,device=device),
-                                     TripletLoss(dis_func=self.ccc_distance_torch,anchor_target=True,hard_margin=0.5,semi_margin=0.3,device=device),
-                                     TripletLoss(dis_func=self.mse_dis,anchor_target=True,hard_margin=0.5,semi_margin=0.3,device=device,mode=2)]
-        self.n_paire_loss = NPairLoss(dis_func=self.pearson_dis)
+        self.triplet_loss_combine = [TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=False,hard_margin=0.3,semi_margin=0.3,device=device),
+                                     TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=False,hard_margin=0.4,semi_margin=0.4,device=device),
+                                     TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=False,hard_margin=0.4,semi_margin=0.4,device=device)]
+        self.miner_loss_combine = [MinerLoss(pos_margin=0.1,neg_margin=0.3,dis_func=self.ccc_distance_torch),
+                                   MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch),
+                                   MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch)]
+        
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
-        self.rankloss = TripletLoss(reduction='mean')
+        self.rankloss = TripletLoss(reduction='mean',dis_func=self.mse_dis,anchor_target=True,device=device)
         # 设置损失函数的组合模式
         self.loss_mode = 0
 
@@ -231,42 +276,59 @@ class UncertaintyLoss(nn.Module):
         label_class = target_class[:,0]
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         corr_acc_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
+        triplet_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         # 指标分类
         ce_loss = torch.tensor(0.0).to(self.device) 
-        value_diff_loss = torch.tensor(0).to(self.device)         
+        value_diff_loss = torch.tensor(0).to(self.device)        
+        label_item = torch.Tensor(np.array([target_info[j]["raise_range"] for j in range(len(target_info))])).to(self.device)
+        label_item = normalization(label_item,mode="torch")     
+        price_array = torch.Tensor(np.array([target_info[j]["price_array"] for j in range(len(target_info))])).to(self.device)    
+        price_range_arr = compute_price_range(price_array)/10
+        price_range_arr = price_range_arr[:,-5:]
         # 相关系数损失,多个目标
         for i in range(len(input)):
             if optimizers_idx==i or optimizers_idx==-1:
                 input_item = input[i]
+                input_item_norm = torch.softmax(input_item.squeeze(),dim=1)
                 target_item = target[:,:,i]    
-                label_item = torch.Tensor(np.array([target_info[j]["raise_range"] for j in range(len(target_info))])).to(self.device)
-                label_item = normalization(label_item,mode="torch")
                 vr_item_class = vr_classes[i][:,0] 
-                if i==1:
-                    corr_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
-                                                                    target_item,labels=label_class,labels_value=label_item)   
-                    # corr_loss_combine[i] += self.ccc_loss_comp(input_item.squeeze(),target_item)
-                elif i==2:
-                    corr_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
-                                                                    target_item,labels=label_class,labels_value=label_item) 
-                    # corr_loss_combine[i] = self.n_paire_loss(input_item.squeeze(),label_class)
-                else: 
-                    corr_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
-                                                                    target_item,labels=label_class,labels_value=label_item)   
-                    # corr_loss_combine[i] = self.n_paire_loss(input_item.squeeze(),label_class)
-                # corr_loss_combine[i] += self.mse_loss(input_item.squeeze(),target_item)
-                loss_sum = corr_loss_combine[i]
+                corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
+                # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
+                #                                     dist_func=None,target=target_item,margin=0.3)                        
+                # if i==1:
+                #     # corr_loss_combine[i] += self.ccc_loss_comp(input_item.squeeze(),target_item)
+                #
+                #     # triplet_loss_combine[i] += self.ms_loss(input_item_norm,label_class,dist_func=self.ccc_distance_torch)                 
+                #     # triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
+                #     #                                                 target_item,labels=label_class,labels_value=label_item)                       
+                # elif i==2:
+                #     # corr_loss_combine[i] = self.ccc_loss_comp(input_item.squeeze(),target_item)
+                #     # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
+                #     #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)   
+                #     # triplet_loss_combine[i] += self.ms_loss(input_item_norm,label_class,dist_func=self.ccc_distance_torch)                       
+                #     # triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
+                #     #                                                 target_item,labels=label_class,labels_value=label_item)      
+                # else: 
+                #     # corr_loss_combine[i] = self.ccc_loss_comp(input_item.squeeze(),target_item)
+                #     # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
+                #     #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.2)      
+                #     # triplet_loss_combine[i] += self.ms_loss(input_item_norm,label_class,dist_func=self.ccc_distance_torch)            
+                #     # triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
+                #     #                                                 target_item,labels=label_class,labels_value=label_item)      
+                loss_sum = corr_loss_combine[i] + triplet_loss_combine[i]
         # 二次目标损失部分
-        # if optimizers_idx==len(input):
-        #     # value_diff_loss = self.compute_dtw_loss(third_input,third_label) 
-        #     ce_loss = self.rankloss(vr_class, target_class[:,0])
-        #     loss_sum = ce_loss
+        if optimizers_idx==len(input):
+            # ce_loss,acc = self.rankloss(vr_combine_class, price_range_arr,label_class)
+            # ce_loss = self.triplet_online(vr_combine_class, label_class,target=price_range_arr)
+            loss_sum = ce_loss
         # 验证阶段，全部累加
         if optimizers_idx==-1:
-            # ce_loss = nn.CrossEntropyLoss()(vr_class, target_class[:,0])
-            loss_sum = torch.sum(corr_loss_combine) + ce_loss + value_diff_loss
+            # ce_loss,acc = self.rankloss(vr_combine_class, price_range_arr,label_class)
+            # ce_loss = self.triplet_online(vr_combine_class, label_class,target=price_range_arr)
+            loss_sum = torch.sum(corr_loss_combine+triplet_loss_combine) + ce_loss + value_diff_loss
             
-        return loss_sum,[corr_loss_combine,ce_loss,corr_acc_combine]
+        return loss_sum,[corr_loss_combine,triplet_loss_combine,corr_acc_combine]
+
 
     def mse_loss(self,x1, x2):
         return torch.mean(self.mse_dis(x1,x2))
@@ -355,4 +417,26 @@ class UncertaintyLoss(nn.Module):
         target_real = torch.unsqueeze(target,-1)
         loss = self.dtw_loss(input_real, target_real).mean()       
         return loss
-  
+    
+    def cos_loss(self,output,target):
+        return 1 - torch.matmul(output, torch.t(target))
+        
+    def triplet_online(self,embeddings,labels,target=None,dist_func=None,margin=0.3):
+        """在线triplet挖掘及损失计算"""
+        
+        if dist_func is None:
+            dist_func = distances.LpDistance(p=2)
+        miner = TripletTargetMiner(type_of_triplets="semihard",distance=dist_func,margin=margin)
+        loss_func = TripletTargetLoss(margin=margin,distance=dist_func)        
+        hard_pairs = miner(embeddings, labels,ref_target=target)
+        loss = loss_func(embeddings, labels, hard_pairs,ref_target=target)      
+        # acc = torch.sum((n_dis - p_dis - self.semi_margin)>0)/p_dis.shape[0] 
+        return loss 
+        
+    def ms_loss(self,embeddings,labels,target=None,dist_func=None,margin=0.3):
+        """在线triplet挖掘及损失计算"""
+        
+        criterion = MultiSimilarityLoss(distance_func=dist_func)
+        loss = criterion(embeddings,labels)
+        return loss         
+        

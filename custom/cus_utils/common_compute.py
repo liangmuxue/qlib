@@ -117,13 +117,18 @@ def enhance_data(ori_data,mode="smote",bins=None):
     amplitude = np.squeeze(amplitude,axis=1)     
     return amplitude,y_res
 
-def normalization(data,res=0.001,mode="numpy",avoid_zero=True):
+def normalization(data,res=1e-5,mode="numpy",avoid_zero=True):
     if mode=="numpy":
         rtn = (data - np.min(data,axis=0) + res)/(np.max(data,axis=0)-np.min(data,axis=0) + res) 
     else:
-        rtn = (data - torch.min(data,dim=0)[0] + res)/(torch.max(data,dim=0)[0]-torch.min(data,dim=0)[0] + res) 
+        rtn = (data - torch.min(data,dim=0)[0])/(torch.max(data,dim=0)[0]-torch.min(data,dim=0)[0]) 
     if avoid_zero:
         rtn = rtn + res  
+    return rtn
+
+def batch_normalization(data,res=1e-5):
+    if isinstance(data, torch.Tensor):
+        rtn = (data - torch.min(data))/(torch.max(data)-torch.min(data) + res) 
     return rtn
 
 def price_range_normalization(data,res=0.001,mode="numpy",avoid_zero=True):
@@ -181,8 +186,8 @@ def compute_price_range(price_arr):
     
     if isinstance(price_arr, list):
         price_arr = np.array(price_arr)
-    price_arr_before = price_arr[:-1]
-    price_arr_after = price_arr[1:]   
+    price_arr_before = price_arr[:,:-1]
+    price_arr_after = price_arr[:,1:]   
     slope_range = (price_arr_after - price_arr_before)/price_arr_before*100
     return slope_range
 
@@ -270,7 +275,43 @@ def pairwise_compare(m,n,distance_func=None):
         print("apply:",index)
         index+=1
     return torch.stack(result_list).squeeze(-1)
+
+def pairwise_distances(metirx,distance_func=None,make_symmetric=False):
+    """根据自定义距离函数，生成配对距离矩阵"""
     
+    result_list = []
+    index = 1
+    size = metirx.shape[0]
+    for i in range(size):
+        # 滚动比较,忽略自比较数据
+        metirx_t = torch.cat([metirx[i:,:],metirx[:i,:]],dim=0)
+        v = distance_func(metirx,metirx_t)
+        result_list.append(v)
+        # if index%100==0:
+        #     print("apply:",index)
+        index+=1
+    dis_met = torch.stack(result_list)
+    result_list = []
+    # 构造为对角矩阵
+    for i in range(size):
+        roll_vector = torch.cat([dis_met[size-i:,i],dis_met[:size-i,i]],dim=0)
+        result_list.append(roll_vector)
+    dis_met = torch.stack(result_list)
+    # 对角线置零
+    dis_met[dis_met<1e-6] = 0
+    dis_met = torch.round(dis_met,decimals=5)
+    # 根据配置，决定个是否进行对称拷贝
+    if make_symmetric:
+        # 首先转换成上三角形，然后向下拷贝
+        dis_met = torch.triu(dis_met)
+        dis_met += dis_met.T - torch.diag(dis_met.diagonal())
+    return dis_met
+
+def intersect1d(tensor1, tensor2):
+    aux = torch.cat((tensor1, tensor2),dim=0)
+    aux = aux.sort()[0]
+    return aux[:-1][(aux[1:] == aux[:-1]).data]
+
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 5)

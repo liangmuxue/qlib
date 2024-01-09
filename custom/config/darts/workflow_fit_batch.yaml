@@ -52,7 +52,7 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 1024
+            batch_size: 512
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -67,7 +67,7 @@ task:
                base_lr: 1e-4
                max_lr: 1.5e-3     
                cycle_momentum: False
-               step_size_up: 3000
+               step_size_up: 5000
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -77,8 +77,8 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'TRIPLET_TAR_CCCMSE_2000_202010'
-               load_weight: False
+               model_name: 'MINER_SINGLE_2000_202010'
+               load_weight: True
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

@@ -114,11 +114,28 @@ def test_kmeans():
     #     X=x, num_clusters=num_clusters, distance='soft_dtw',device=device, gamma_for_soft_dtw=0.0001,dist_func=None
     # )        
     print(cluster_centers)
-      
+
+def test_repeat():      
+    x = torch.tensor([1, 2, 3])
+    x = x.repeat(1,3).squeeze()
+    print(x)
+    x = torch.arange(0, 10)
+    print(x)
+    b=torch.randperm(5)
+    print(b)
+
+def test_mul():
+    feats = torch.Tensor([[.1,.2,.9],[.1,.3,.8],[.1,.2,.9],[.1,.3,.8],[.1,.2,.9],[.1,.3,.8]])
+    print(feats.shape)
+    sim_mat = torch.matmul(feats, torch.t(feats))
+    print(sim_mat)
+  
 if __name__ == "__main__":
     # test_tensor()    
     # test_sort()
-    test_kmeans()
+    # test_kmeans()
+    # test_repeat()
+    test_mul()
     # test_pairwise()
     # test_embedding()
     # test_zip()

@@ -281,6 +281,6 @@ class TftDatafAnalysis():
         
         ds = BatchOutputDataset(batch_file,mode="process",range_num=None) 
         data_assis = StatDataAssis()
-        data_assis.clustering_output(ds)
+        data_assis.analysis_compare_output(ds)
                 
         

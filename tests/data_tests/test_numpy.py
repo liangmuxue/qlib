@@ -9,6 +9,12 @@ from sklearn.metrics import precision_recall_curve
 from sklearn.metrics.pairwise import pairwise_distances
 import datetime
 from tslearn.generators import random_walks
+from sklearn.cluster import DBSCAN
+from sklearn import metrics
+from sklearn.datasets import make_blobs
+from sklearn.preprocessing import StandardScaler
+import networkx as nx 
+import matplotlib.pyplot as plt
 
 def test_nozero():
     L = np.arange(18).reshape((2, 3, 3))
@@ -498,12 +504,97 @@ def test_pair_compute():
     print(distance_matrix)
 
 def test_clustering():
-    from tslearn.clustering import TimeSeriesKMeans
-    X = random_walks(n_ts=50, sz=32, d=2)
-    km = TimeSeriesKMeans(n_clusters=3, metric="euclidean", max_iter=5,
-                      random_state=0).fit(X)
-    print(km.cluster_centers_)     
-          
+    centers = [[1, 1], [-1, -1], [1, -1]]
+    X, labels_true = make_blobs(n_samples=750, centers=centers, cluster_std=0.4,
+                                random_state=0)
+    
+    X = StandardScaler().fit_transform(X)
+    
+    # #############################################################################
+    # Compute DBSCAN
+    db = DBSCAN(eps=0.3, min_samples=10).fit(X)
+    core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+    core_samples_mask[db.core_sample_indices_] = True
+    labels = db.labels_
+    
+    # Number of clusters in labels, ignoring noise if present.
+    n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+    n_noise_ = list(labels).count(-1)
+    
+    print('Estimated number of clusters: %d' % n_clusters_)
+    print('Estimated number of noise points: %d' % n_noise_)
+    print("Homogeneity: %0.3f" % metrics.homogeneity_score(labels_true, labels))
+    print("Completeness: %0.3f" % metrics.completeness_score(labels_true, labels))
+    print("V-measure: %0.3f" % metrics.v_measure_score(labels_true, labels))
+    print("Adjusted Rand Index: %0.3f"
+          % metrics.adjusted_rand_score(labels_true, labels))
+    print("Adjusted Mutual Information: %0.3f"
+          % metrics.adjusted_mutual_info_score(labels_true, labels))
+    print("Silhouette Coefficient: %0.3f"
+          % metrics.silhouette_score(X, labels))
+    
+    # #############################################################################
+    # Plot result
+    import matplotlib.pyplot as plt
+    
+    # Black removed and is used for noise instead.
+    unique_labels = set(labels)
+    colors = [plt.cm.Spectral(each)
+              for each in np.linspace(0, 1, len(unique_labels))]
+    for k, col in zip(unique_labels, colors):
+        if k == -1:
+            # Black used for noise.
+            col = [0, 0, 0, 1]
+    
+        class_member_mask = (labels == k)
+    
+        xy = X[class_member_mask & core_samples_mask]
+        plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
+                 markeredgecolor='k', markersize=14)
+    
+        xy = X[class_member_mask & ~core_samples_mask]
+        plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
+                 markeredgecolor='k', markersize=6)
+    
+    plt.title('Estimated number of clusters: %d' % n_clusters_)    
+    plt.savefig('./custom/data/results/cluster_result.png')
+
+def test_networkx():    
+    g = nx.Graph()
+    g.add_node("0")
+    g.add_node("2")
+    g.add_node("30")
+    # g.add_edge('1', '2')
+    # g.add_edge('2', '3')
+    # g.add_edge('1', '4')
+    # g.add_edge('2', '4')
+    fig, ax = plt.subplots()
+    nx.draw(g, ax=ax)
+    plt.show()    
+
+def test_matrix_view():
+    from sklearn.manifold import MDS
+    dist_matrix = np.array([[ 0.,0.71370845, 0.80903791, 0.82955157, 0.56964983, 0.,0.        ],
+     [ 0.71370845, 0.,0.99583115,  1,0.79563006, 0.71370845
+     , 0.71370845],
+     [ 0.80903791, 0.99583115, 0.,0.90029133, 0.81180111, 0.80903791
+     , 0.80903791],
+     [ 0.82955157 , 1.,0.90029133, 0.,0.97468433, 0.82955157
+     , 0.82955157],
+     [ 0.56964983, 0.79563006, 0.81180111, 0.97468433, 0.,0.56964983
+     , 0.56964983],
+     [ 0.,0.71370845, 0.80903791, 0.82955157, 0.56964983, 0.,0.        ],
+     [ 0.,0.71370845, 0.80903791, 0.82955157, 0.56964983, 0.,0.        ]]   ) 
+    dist_matrix = np.array([[ 0,1, 3, 6 ],
+                            [ 1, 0, 5,  8],
+                            [ 3, 5, 0,9],
+                            [ 6 , 8,9, 0]])
+    mds = MDS(n_components=2, dissimilarity='precomputed')
+    coords = mds.fit_transform(dist_matrix)
+    print(coords)
+    plt.plot(coords[:,0],coords[:,1],'o',color='b')
+    plt.show()  
+    
 if __name__ == "__main__":
     # test_mask()
     # test_pair_compute()
@@ -540,7 +631,9 @@ if __name__ == "__main__":
     # test_pd_index()
     # test_norm()
     # test_ccc()
-    test_clustering()
+    # test_clustering()
+    # test_networkx()
+    test_matrix_view()
     # test_pr()
     # test_scaler()
     

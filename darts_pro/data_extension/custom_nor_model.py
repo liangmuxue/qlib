@@ -29,6 +29,8 @@ from torch.utils.data import DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
 from cus_utils.encoder_cus import StockNormalizer
+from darts_pro.data_extension.custom_tcn_model import LSTMClassifier
+from darts_pro.data_extension.ts_transformer import TSTransformerEncoderClassiregressor
 from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute,slope_classify_compute_batch
 from tft.class_define import CLASS_SIMPLE_VALUES
 
@@ -103,7 +105,8 @@ class _TFTModuleAsis(_TFTCusModule):
             target_class = target_classes[i].cpu().numpy()
             # 重点关注价格指数,只对价格达到上涨幅度的目标进行增强
             p_taraget_class = target_class[0]
-            if not p_taraget_class in [3]:
+            # Do Not Aug
+            if not p_taraget_class in [3] or True:
                 rtn_item = (past_target,past_covariate,historic_future_covariates[i].cpu().numpy(),future_covariates[i].cpu().numpy(),
                             static_covariates[i].cpu().numpy(),(scaler,future_past_covariate),target_class,future_target,target_info)
                 rtn_batch.append(rtn_item)                
@@ -139,7 +142,7 @@ class _TFTModuleAsis(_TFTCusModule):
         #     view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
         #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
 
-        print("import cnt:{}/total cnt:{}".format(import_cnt,len(rtn_batch)))        
+        # print("import cnt:{}/total cnt:{}".format(import_cnt,len(rtn_batch)))        
         rtn_batch = np.array(rtn_batch,dtype=object)
         return rtn_batch
             
@@ -163,7 +166,7 @@ class _TFTModuleAsis(_TFTCusModule):
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
                          future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]
         print("dump valid,batch:{},target shape:{}".format(batch_idx,past_target.shape))
-        # pickle.dump(data,self.valid_fout) 
+        pickle.dump(data,self.valid_fout) 
         fake_loss = torch.ones(1).to(self.device)
         self.log("val_loss", fake_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         return fake_loss     
@@ -345,6 +348,9 @@ class _TFTModuleBatch(_TFTCusModule):
     def on_train_start(self): 
         super().on_train_start()
         self.train_output_flag = True
+        # 先训练一段时间，然后冻结第一阶段网络，只更新第二阶段网络
+        self.apply_params_freeze()
+                
     def on_validation_start(self): 
         super().on_validation_start()
         self.valid_output_flag = True
@@ -362,12 +368,23 @@ class _TFTModuleBatch(_TFTCusModule):
         super().on_validation_epoch_start()
         if self.valid_output_flag:
             self.valid_fout = open(self.valid_filepath, "wb")     
+            
     def on_validation_epoch_end(self):  
         super().on_validation_epoch_end()
         if self.valid_output_flag:
             self.valid_output_flag = False
             self.valid_fout.close()          
-                              
+        # 动态冻结网络参数
+        corr_loss_combine = []
+        self.apply_params_freeze()
+    
+    def apply_params_freeze(self):
+        # 先训练一段时间，然后冻结第一阶段网络，只更新第二阶段网络
+        if self.current_epoch>1000:
+            for i in range(len(self.sub_models)):
+                self.freeze_apply(mode=i)   
+            self.freeze_apply(mode=(len(self.sub_models)+1),flag=1)       
+                                           
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """重载原方法，直接使用已经加工好的数据"""
 
@@ -525,7 +542,20 @@ class _TFTModuleBatch(_TFTCusModule):
             )
             x_past_array.append(x_past)
         return x_past_array, future_covariates, static_covariates
-                
+
+    def _construct_classify_layer(self, input_dim,output_dim,device=None):
+        """分类特征值输出
+          Params
+            layer_num： 层数
+            input_dim： 序列长度
+            output_dim： 类别数
+        """
+        return super()._construct_classify_layer(input_dim, output_dim)
+        # len = self.input_chunk_length + self.output_chunk_length
+        # class_layer = TSTransformerEncoderClassiregressor(input_dim, num_classes=output_dim, max_len=len,device=device)
+        # class_layer = class_layer.cuda(device)
+        # return class_layer
+                    
 class TFTBatchModel(TFTExtModel):
     
     def __init__(

@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score
 from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.neighbors import KNeighborsTimeSeriesClassifier
 import torch
-
+import matplotlib.pyplot as plt
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,get_complex_class
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import slope_compute
@@ -18,8 +18,9 @@ from losses.mtl_loss import UncertaintyLoss
 from projects.kmeans_pytorch import kmeans, kmeans_predict
 from tslearn.clustering import TimeSeriesKMeans
 from sklearn.cluster import DBSCAN,KMeans
-from sklearn.metrics import pairwise_distances
+from cus_utils.common_compute import pairwise_distances
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.manifold import MDS
 
 logger = AppLogger()
 
@@ -464,7 +465,102 @@ class StatDataAssis():
             # import_acc_cnt = np.sum(target_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
             # import_acc = import_acc_cnt/import_index.shape[0]
             # print("acc_{},total_acc:{},import_acc:{}".format(i,total_acc,import_acc)) 
-            
+
+    def analysis_compare_output(self,ds_data):
+        """使用度量的方式，综合分析输出值与目标值"""
+        
+        viz = TensorViz(env="data_analysis")
+        index = 0
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = ds_data.target_data
+        target_class = target_class[:,0,0]
+        output_data = ds_data.output_data
+        device_str = 'cuda:0'
+        device_str = 'cpu'
+        device = torch.device(device_str)
+        loss_unity = UncertaintyLoss(device=device)
+        num_clusters = len(CLASS_SIMPLE_VALUES.keys())
+        import_index = np.where(target_class==3)[0]
+        neg_index = np.where(target_class==0)[0]
+        combine_index = np.where((target_class==3)|(target_class==0))[0]
+        labels = target_class[combine_index]
+        # 按照不同的指标分别聚类
+        for i in range(output_data.shape[-1]):
+            # if i==1:
+            #     continue
+            output = output_data[:,:,i]
+            output = output[combine_index]
+            target_single = target[:,:,i]
+            target_single = target_single[combine_index]
+            # 生成配对距离矩阵
+            # pair_dis = pairwise_distances(torch.Tensor(output).to(device),distance_func=loss_unity.ccc_distance_torch).cpu().numpy()
+            # db = DBSCAN(eps=0.1, metric='precomputed',min_samples=4,n_jobs=2).fit(pair_dis)  
+            # self.dbscan_results(db,pair_dis)
+            # print("go")
+            # total_acc_cnt = np.sum(db.labels_==target_class)   
+            # total_acc = total_acc_cnt/target_class.shape[0]
+            # import_index = np.where(db.labels_==CLASS_SIMPLE_VALUE_MAX)[0]
+            # import_target = np.where(target_class==CLASS_SIMPLE_VALUE_MAX)[0]
+            output_pair_dis = pairwise_distances(torch.Tensor(output).to(device),distance_func=loss_unity.ccc_distance_torch,
+                                        make_symmetric=True).cpu().numpy()         
+            self.matrix_results_viz(output_pair_dis,labels=labels,name="output_pn_{}".format(i))                               
+            # target_pair_dis = pairwise_distances(torch.Tensor(target_single).to(device),distance_func=loss_unity.ccc_distance_torch,
+            #                             make_symmetric=True).cpu().numpy()
+            # self.matrix_results_viz(target_pair_dis,labels=labels,name="target_pn_{}".format(i))    
+            # target_db = DBSCAN(eps=0.2, metric='precomputed',min_samples=4,n_jobs=2).fit(target_pair_dis)  
+            # self.dbscan_results(target_db,target_pair_dis,name="target")            
+            # import_acc = import_acc_cnt/import_index.shape[0]
+            # print("acc_{},total_acc:{},import_acc:{}".format(i,total_acc,import_acc)) 
+    
+    
+    def matrix_results_viz(self,dist_matrix,labels=None,name="target"):
+        mds = MDS(n_components=2, dissimilarity='precomputed')
+        coords = mds.fit_transform(dist_matrix)       
+        print("coords fit_transform ok") 
+        plt.figure(name)
+        if labels is None:
+            plt.scatter(coords[:,0],coords[:,1],marker='o')
+        else:
+            p_index = np.where(labels==3)[0]
+            n_index = np.where(labels==0)[0]
+            plt.scatter(coords[p_index,0],coords[p_index,1], marker='o',color="r")
+            plt.scatter(coords[n_index,0],coords[n_index,1], marker='x',color="b")
+        # plt.show()      
+        plt.savefig('./custom/data/results/{}_matrix_result.png'.format(name))  
+    
+    def dbscan_results(self,db,data,name="output"):
+        labels = db.labels_
+        core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+        core_samples_mask[db.core_sample_indices_] = True        
+        
+        # Number of clusters in labels, ignoring noise if present.
+        n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise_ = list(labels).count(-1)
+        
+        print('Estimated number of clusters: %d' % n_clusters_)
+        print('Estimated number of noise points: %d' % n_noise_)        
+        
+        # Black removed and is used for noise instead.
+        unique_labels = set(labels)
+        colors = [plt.cm.Spectral(each)
+                  for each in np.linspace(0, 1, len(unique_labels))]
+        for k, col in zip(unique_labels, colors):
+            if k == -1:
+                # Black used for noise.
+                col = [0, 0, 0, 1]
+        
+            class_member_mask = (labels == k)
+        
+            xy = data[class_member_mask & core_samples_mask]
+            plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
+                     markeredgecolor='k', markersize=14)
+        
+            xy = data[class_member_mask & ~core_samples_mask]
+            plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
+                     markeredgecolor='k', markersize=6)
+        
+        plt.title('Estimated number of clusters: %d' % n_clusters_)    
+        plt.savefig('./custom/data/results/{}_cluster_result.png'.format(name))
+                               
     def knn_clustering(self,ds_data):
         loss_unity = UncertaintyLoss()
         viz = TensorViz(env="data_analysis")
