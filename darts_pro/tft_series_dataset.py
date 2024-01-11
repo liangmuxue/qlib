@@ -261,21 +261,21 @@ class TFTSeriesDataset(TFTDataset):
         train_series = TimeSeries.from_group_dataframe(df_train,
                                                 time_col=time_column,
                                                  group_cols=group_column,# 会自动成为静态协变量
-                                                 freq='D',
+                                                 freq=1,
                                                  fill_missing_dates=True,
                                                  static_cols=static_columns,
                                                  value_cols=target_column)   
         val_series = TimeSeries.from_group_dataframe(df_val,
                                                 time_col=time_column,
                                                  group_cols=group_column,# 会自动成为静态协变量
-                                                 freq='D',
+                                                 freq=1,
                                                  fill_missing_dates=True,
                                                  static_cols=static_columns,
                                                  value_cols=target_column) 
         total_series = TimeSeries.from_group_dataframe(df_all,
                                                 time_col=time_column,
                                                  group_cols=group_column,# 会自动成为静态协变量
-                                                 freq='D',
+                                                 freq=1,
                                                  fill_missing_dates=True,
                                                  static_cols=static_columns,
                                                  value_cols=target_column)    
@@ -303,11 +303,11 @@ class TFTSeriesDataset(TFTDataset):
                 df_item = df_all[df_all[group_column]==group_col_val]
                 df_item_train = df_train[df_train[group_column]==group_col_val] 
                 covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
-                                                         freq='D',
+                                                         freq=1,
                                                          fill_missing_dates=True,
                                                          value_cols=column_names)  
                 train_covariates = TimeSeries.from_dataframe(df_item_train,time_col=time_column,
-                                                         freq='D',
+                                                         freq=1,
                                                          fill_missing_dates=True,
                                                          value_cols=column_names)       
                 if self.transform_inner:

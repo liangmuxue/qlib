@@ -114,12 +114,13 @@ class TripletLoss(_Loss):
                 a_idx,p_idx,n_idx = self.minering_index_pair(index_pair[0], index_pair[1],output=output,target=target,margin=self.semi_margin)     
             # 需要保证批次内的可学习样本大于1
             if a_idx.shape[0]>1:
-                pos_data = torch.index_select(output, 0, p_idx)    
                 # 根据配置决定是否使用目标值作为锚定标的   
                 if self.anchor_target:
-                    anchor_data = torch.index_select(target, 0, a_idx)  
-                    neg_data = torch.index_select(output, 0, n_idx)   
+                    pos_data = torch.index_select(output, 0, index_pair[0])  
+                    anchor_data = torch.index_select(target, 0, index_pair[0])  
+                    neg_data = torch.index_select(target, 0, index_pair[0])   
                 else:
+                    pos_data = torch.index_select(output, 0, p_idx)  
                     anchor_data = torch.index_select(output, 0, a_idx)
                     neg_data = torch.index_select(output, 0, n_idx)   
                 # 可以在不同等级之间的距离使用不同的margin   
@@ -209,7 +210,7 @@ class TripletLoss(_Loss):
         elif self.type_of_triplets == "semihard":
             threshold_condition &= triplet_margin > 0        
         return (
-            p_index[threshold_condition],
+            a_index[threshold_condition],
             p_index[threshold_condition],
             n_index[threshold_condition],
         )                 
@@ -256,9 +257,9 @@ class UncertaintyLoss(nn.Module):
         self.mse_weight = mse_weight.to(device)
         self.vr_loss = nn.MSELoss()
         
-        self.triplet_loss_combine = [TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=False,hard_margin=0.3,semi_margin=0.3,device=device),
-                                     TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=False,hard_margin=0.4,semi_margin=0.4,device=device),
-                                     TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=False,hard_margin=0.4,semi_margin=0.4,device=device)]
+        self.triplet_loss_combine = [TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=True,hard_margin=0.4,semi_margin=0.4,device=device),
+                                     TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=True,hard_margin=0.4,semi_margin=0.4,device=device),
+                                     TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=True,hard_margin=0.4,semi_margin=0.4,device=device)]
         self.miner_loss_combine = [MinerLoss(pos_margin=0.1,neg_margin=0.3,dis_func=self.ccc_distance_torch),
                                    MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch),
                                    MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch)]
@@ -293,8 +294,10 @@ class UncertaintyLoss(nn.Module):
                 target_item = target[:,:,i]    
                 vr_item_class = vr_classes[i][:,0] 
                 corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
+                triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
+                                                                    target_item,labels=label_class,labels_value=label_item)                    
                 # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
-                #                                     dist_func=None,target=target_item,margin=0.3)                        
+                #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                        
                 # if i==1:
                 #     # corr_loss_combine[i] += self.ccc_loss_comp(input_item.squeeze(),target_item)
                 #

@@ -20,8 +20,8 @@ class TripletTargetMiner(TripletMarginMiner):
             labels, ref_labels
         )
         # 使用自定义配对比较函数生成比较矩阵
-        # mat = pairwise_distances(embeddings,distance_func=self.distance)
-        mat = self.distance(embeddings, ref_emb)
+        mat = pairwise_distances(embeddings,distance_func=self.distance)
+        # mat = self.distance(embeddings, ref_emb)
         ap_dist = mat[anchor_idx, positive_idx]
         an_dist = mat[anchor_idx, negative_idx]
         triplet_margin = (

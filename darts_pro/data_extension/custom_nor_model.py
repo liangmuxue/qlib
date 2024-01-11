@@ -38,10 +38,11 @@ MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]
 
-from darts_pro.data_extension.custom_model import _TFTCusModule,TFTExtModel
+from darts_pro.data_extension.custom_model import TFTExtModel
+from darts_pro.data_extension.custom_module import _CusModule
 from darts_pro.data_extension.batch_dataset import BatchDataset
 
-class _TFTModuleAsis(_TFTCusModule):
+class _TFTModuleAsis(_CusModule):
     def __init__(
         self,
         output_dim: Tuple[int, int],
@@ -310,7 +311,7 @@ class TFTAsisModel(TFTExtModel):
             **self.pl_module_params,
         )    
     
-class _TFTModuleBatch(_TFTCusModule):
+class _TFTModuleBatch(_CusModule):
     def __init__(
         self,
         output_dim: Tuple[int, int],

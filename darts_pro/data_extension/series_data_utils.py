@@ -481,14 +481,14 @@ class StatDataAssis():
         num_clusters = len(CLASS_SIMPLE_VALUES.keys())
         import_index = np.where(target_class==3)[0]
         neg_index = np.where(target_class==0)[0]
-        combine_index = np.where((target_class==3)|(target_class==0))[0]
+        combine_index = np.where((target_class==3)|(target_class==0)|(target_class==1)|(target_class==2))[0]
         labels = target_class[combine_index]
         # 按照不同的指标分别聚类
         for i in range(output_data.shape[-1]):
             # if i==1:
             #     continue
             output = output_data[:,:,i]
-            output = output[combine_index]
+            # output = output[combine_index]
             target_single = target[:,:,i]
             target_single = target_single[combine_index]
             # 生成配对距离矩阵
@@ -513,7 +513,7 @@ class StatDataAssis():
     
     
     def matrix_results_viz(self,dist_matrix,labels=None,name="target"):
-        mds = MDS(n_components=2, dissimilarity='precomputed')
+        mds = MDS(n_components=4, dissimilarity='precomputed')
         coords = mds.fit_transform(dist_matrix)       
         print("coords fit_transform ok") 
         plt.figure(name)
@@ -521,9 +521,13 @@ class StatDataAssis():
             plt.scatter(coords[:,0],coords[:,1],marker='o')
         else:
             p_index = np.where(labels==3)[0]
+            p2_index = np.where(labels==2)[0]
             n_index = np.where(labels==0)[0]
+            n2_index = np.where(labels==1)[0]
             plt.scatter(coords[p_index,0],coords[p_index,1], marker='o',color="r")
-            plt.scatter(coords[n_index,0],coords[n_index,1], marker='x',color="b")
+            plt.scatter(coords[p2_index,0],coords[p2_index,1], marker='o',color="b")
+            plt.scatter(coords[n_index,0],coords[n_index,1], marker='x',color="k")
+            plt.scatter(coords[n2_index,0],coords[n2_index,1], marker='x',color="y")
         # plt.show()      
         plt.savefig('./custom/data/results/{}_matrix_result.png'.format(name))  
     
