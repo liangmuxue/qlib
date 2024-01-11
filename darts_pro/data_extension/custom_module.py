@@ -99,6 +99,7 @@ class _CusModule(BaseMixModule):
         loss_number=3,
         device="cpu",
         train_sample=None,
+        model_type="tft",
         **kwargs,
     ):
         super().__init__(
@@ -121,6 +122,7 @@ class _CusModule(BaseMixModule):
         loss_number=loss_number,
         device=device,
         train_sample=train_sample,
+        model_type=model_type,
         **kwargs)
         
  

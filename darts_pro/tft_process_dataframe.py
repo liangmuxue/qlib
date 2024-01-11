@@ -286,58 +286,13 @@ class TftDataframeModel():
         optimizer_kwargs = self.kwargs["optimizer_kwargs"]
         
         scheduler = torch.optim.lr_scheduler.CyclicLR
-        # # 使用余弦退火的学习率方式
-        # scheduler = CosineAnnealingLR
-        # scheduler_config = {
-        #     "T_max": 5, 
-        #     "eta_min": 0,
-        # }        
-        # scheduler = MultiStepLR
-        # scheduler = StepLR
-        # scheduler_config = {
-        #     "gamma": 0.3, 
-        #     # "milestones": [1,2,3,4,5,7,9,11,15,18,20],
-        #     "step_size": 1
-        # }       
-        # scheduler_config = {
-        #     "gamma": 0.8, 
-        #     # "milestones": [10, 20,30,60,70, 80,90,100],
-        #     "step_size": 10
-        # }            
-        # scheduler = CosineAnnealingWarmRestarts
-        # scheduler_config = {
-        #     "T_0": 3,
-        #     "T_mult": 3
-        # }     
-        
-        quantiles = [
-            0.01,
-            0.05,
-            0.1,
-            0.15,
-            0.2,
-            0.25,
-            0.3,
-            0.4,
-            0.5,
-            0.6,
-            0.7,
-            0.75,
-            0.8,
-            0.85,
-            0.9,
-            0.95,
-            0.99,
-        ]     
-        # metric_collection = MetricCollection(
-        #     # [PearsonCorrCoef()]
-        # )               
         categorical_embedding_sizes = {"dayofweek": 5,dataset.get_group_rank_column(): emb_size}
         # categorical_embedding_sizes = None    
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
         past_split = self.optargs["past_split"] 
         filter_conv_index = self.optargs["filter_conv_index"] 
         model_name = self.optargs["model_name"]
+        model_type = self.optargs["model_type"]
         if not use_model_name:
             model_name = None
         
@@ -384,6 +339,7 @@ class TftDataframeModel():
                     lr_scheduler_kwargs=scheduler_config,
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
+                    model_type=model_type,
                     pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
@@ -421,6 +377,7 @@ class TftDataframeModel():
                     lr_scheduler_kwargs=scheduler_config,
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
+                    model_type=model_type,
                     pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )                
@@ -458,6 +415,7 @@ class TftDataframeModel():
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     batch_file_path=self.batch_file_path,
+                    model_type=model_type,
                     pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )            

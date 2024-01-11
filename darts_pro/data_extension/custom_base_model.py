@@ -39,6 +39,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         loss_number=3,
         device="cpu",
         train_sample=None,
+        model_type='tft',
         **kwargs
     ):
         # 模拟初始化，实际未使用
@@ -57,7 +58,7 @@ class BaseMixModule(PLMixedCovariatesModule):
             model =  self.create_real_model(output_dim, variables_meta_array[i], num_static_components, 
                                             hidden_size, lstm_layers, num_attention_heads, full_attention, 
                                             feed_forward, hidden_continuous_size, categorical_embedding_sizes, 
-                                            dropout, add_relative_index, norm_type,model_type="tft",**kwargs)
+                                            dropout, add_relative_index, norm_type,model_type=model_type,**kwargs)
             # mse损失计算                
             model.mean_squared_error = MeanSquaredError().to(device)
             model_list.append(model)
@@ -109,20 +110,22 @@ class BaseMixModule(PLMixedCovariatesModule):
                 historic_future_covariates,
                 future_covariates,
                 static_covariates,
+                (scaler,future_past_covariate),
+                target_class,
                 future_target,
-            ) = self.train_sample            
-            # target, past covariates, historic future covariates
+                target_info
+            ) = self.train_sample      
+                  
+            past_target_shape = len(variables_meta["input"]["past_target"])
+            past_covariates_shape = len(variables_meta["input"]["past_covariate"])
+            historic_future_covariates_shape = len(variables_meta["input"]["historic_future_covariate"])
             input_dim = (
-                past_target.shape[1]
-                + (past_covariates.shape[1] if past_covariates is not None else 0)
-                + (
-                    historic_future_covariates.shape[1]
-                    if historic_future_covariates is not None
-                    else 0
-                )
+                past_target_shape
+                + past_covariates_shape
+                + historic_future_covariates_shape
             )
     
-            output_dim = future_target.shape[1]
+            output_dim = output_dim[0]
     
             future_cov_dim = (
                 future_covariates.shape[1] if future_covariates is not None else 0
@@ -135,33 +138,22 @@ class BaseMixModule(PLMixedCovariatesModule):
     
             nr_params = 1 if self.likelihood is None else self.likelihood.num_parameters
     
-            past_cov_dim = input_dim - output_dim - future_cov_dim
-            if past_cov_dim and self.temporal_width_past >= past_cov_dim:
-                print(
-                    f"number of `past_covariates` features is <= `temporal_width_past`, leading to feature expansion."
-                    f"number of covariates: {past_cov_dim}, `temporal_width_past={self.temporal_width_past}`."
-                )
-            if future_cov_dim and self.temporal_width_future >= future_cov_dim:
-                print(
-                    f"number of `future_covariates` features is <= `temporal_width_future`, leading to feature expansion."
-                    f"number of covariates: {future_cov_dim}, `temporal_width_future={self.temporal_width_future}`."
-                )            
             return _TideModule(
                 input_dim=input_dim,
                 output_dim=output_dim,
                 future_cov_dim=future_cov_dim,
                 static_cov_dim=static_cov_dim,
                 nr_params=nr_params,
-                num_encoder_layers=self.num_encoder_layers,
-                num_decoder_layers=self.num_decoder_layers,
-                decoder_output_dim=self.decoder_output_dim,
-                hidden_size=self.hidden_size,
-                temporal_width_past=self.temporal_width_past,
-                temporal_width_future=self.temporal_width_future,
-                temporal_decoder_hidden=self.temporal_decoder_hidden,
-                use_layer_norm=self.use_layer_norm,
-                dropout=self.dropout,
-                **self.pl_module_params,
+                num_encoder_layers=1,
+                num_decoder_layers=1,
+                decoder_output_dim=16,
+                hidden_size=hidden_size,
+                temporal_width_past=4,
+                temporal_width_future=4,
+                temporal_decoder_hidden=32,
+                use_layer_norm=False,
+                dropout=dropout,
+                **kwargs,
             )        
         
         

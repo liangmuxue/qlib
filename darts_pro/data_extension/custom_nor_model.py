@@ -333,12 +333,13 @@ class _TFTModuleBatch(_CusModule):
         loss_number=3,
         batch_file_path=None,
         device="cpu",
+        train_sample=None,
         **kwargs,
     ):
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
-                                    use_weighted_loss_func=use_weighted_loss_func,
+                                    use_weighted_loss_func=use_weighted_loss_func,train_sample=train_sample,
                                     device=device,**kwargs)  
         self.lr_freq = {"interval":"epoch","frequency":1}
         
@@ -690,6 +691,8 @@ class TFTBatchModel(TFTExtModel):
             filter_conv_index=self.filter_conv_index,
             device=self.device,
             batch_file_path=self.batch_file_path,
+            model_type=self.model_type,
+            train_sample=self.train_sample,
             **self.pl_module_params,
         )   
                

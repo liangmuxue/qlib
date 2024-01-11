@@ -91,12 +91,15 @@ class TFTExtModel(MixedCovariatesTorchModel):
         past_split=None,
         filter_conv_index=0,
         no_dynamic_data=False,
+        model_type="tft",
         **kwargs,
     ):
         """重载darts相关类"""
         
         self.mode = mode
         model_kwargs = {key: val for key, val in self.model_params.items()}
+        del model_kwargs["model_type"]
+        
         if "devices" in model_kwargs["pl_trainer_kwargs"]:
             self.device = "cuda:" + str(model_kwargs["pl_trainer_kwargs"]["devices"][0])
         else:
@@ -142,6 +145,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.past_split = past_split
         self.filter_conv_index = filter_conv_index
         self.no_dynamic_data = no_dynamic_data
+        self.model_type = model_type
     
     def _build_vriable_metas(self,tensors,static_covariates,seq=0):   
         
@@ -343,6 +347,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             filter_conv_index=self.filter_conv_index,
             device=self.device,
             train_sample=train_sample,
+            model_type=self.model_type,
             **self.pl_module_params,
         )      
 

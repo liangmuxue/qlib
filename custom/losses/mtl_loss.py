@@ -293,7 +293,7 @@ class UncertaintyLoss(nn.Module):
                 input_item_norm = torch.softmax(input_item.squeeze(),dim=1)
                 target_item = target[:,:,i]    
                 vr_item_class = vr_classes[i][:,0] 
-                corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
+                # corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
                 triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
                                                                     target_item,labels=label_class,labels_value=label_item)                    
                 # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
