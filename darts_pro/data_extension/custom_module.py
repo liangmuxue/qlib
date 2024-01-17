@@ -38,8 +38,6 @@ viz_result_nor = TensorViz(env="train_result_nor")
 viz_input_aug = TensorViz(env="data_train_aug")
 viz_target = TensorViz(env="data_target")
 
-hide_target = True
-
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
      input_series: TimeSeries,
@@ -147,8 +145,8 @@ class _CusModule(BaseMixModule):
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
                 out = m(x_in_item)
                 vr_layer = self.vr_layers[i]
-                # out_class = vr_layer(out[:,:,:,0])
-                out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
+                out_class = vr_layer(out[:,:,0,0])
+                # out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
                 # 模拟数据
                 out = torch.ones([batch_size,self.output_chunk_length,self.output_dim[0],1]).to(self.device)
@@ -168,7 +166,7 @@ class _CusModule(BaseMixModule):
         tar_class = torch.ones(vr_class.shape).to(self.device) # self.classify_tar_layer(x_conv_transform)
         return out_total,vr_class,out_class_total
  
-    def _construct_classify_layer(self, input_dim, output_dim=5,hidden_dim=64,device=None):
+    def _construct_classify_layer(self, input_dim, output_dim=4,hidden_dim=64,device=None):
         """使用全连接进行分类数值输出
           Params
             layer_num： 层数
@@ -176,52 +174,10 @@ class _CusModule(BaseMixModule):
             output_dim： 类别数
         """
         
-        seq_len = self.output_chunk_length
-        class_layer = nn.Linear(seq_len,output_dim)
+        class_layer = nn.Linear(input_dim,output_dim)
         class_layer = class_layer.cuda(device)
         return class_layer
 
-    def _process_input_batch(
-        self, input_batch
-    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        """重载方法，以适应数据结构变化"""
-        (
-            past_target,
-            past_covariates,
-            historic_future_covariates,
-            future_covariates,
-            static_covariates,
-        ) = input_batch
-        dim_variable = 2
-
-        # 生成多组过去协变量，用于不同子模型匹配
-        x_past_array = []
-        for i,p_index in enumerate(self.past_split):
-            past_conv_index = self.past_split[i]
-            past_covariates_item = past_covariates[:,:,past_conv_index[0]:past_conv_index[1]]
-            # 修改协变量生成模式，只取自相关目标作为协变量
-            if hide_target:
-                conv_defs = [
-                            past_target[:,:,i:i+1],
-                            past_covariates_item,
-                            historic_future_covariates,
-                    ]
-            else:
-                conv_defs = [
-                            past_target,
-                            past_covariates_item,
-                            historic_future_covariates,
-                    ]              
-            x_past = torch.cat(
-                [
-                    tensor
-                    for tensor in conv_defs if tensor is not None
-                ],
-                dim=dim_variable,
-            )
-            x_past_array.append(x_past)
-        return x_past_array, future_covariates, static_covariates
-               
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """performs the training step"""
         
@@ -248,8 +204,8 @@ class _CusModule(BaseMixModule):
             y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=train_batch[0],optimizer_idx=i,target_info=target_info)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform),optimizers_idx=i)
-            (corr_loss_combine,triplet_loss_combine,corr_acc_combine) = detail_loss 
-            # self.log("triplet_loss_combine_{}".format(i), triplet_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            (corr_loss_combine,triplet_loss_combine,classify_loss_combine) = detail_loss 
+            # self.log("train_class_loss_{}".format(i), classify_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.loss_data.append(detail_loss)
             total_loss += loss
             # 手动更新参数
@@ -328,10 +284,10 @@ class _CusModule(BaseMixModule):
                 else:
                     cnt = cnt_values[0,1]
                 rate = cnt/total_cnt
-                print("cnt:{} with score:{},total_cnt:{},rate:{}".format(cnt,i,total_cnt,rate))
-                # self.log("score_{} rate".format(i), rate, prog_bar=True) 
-        #     self.log("total cnt", total_cnt, prog_bar=True)  
-        # self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
+                # print("cnt:{} with score:{},total_cnt:{},rate:{}".format(cnt,i,total_cnt,rate))
+                self.log("score_{} rate".format(i), rate, prog_bar=True) 
+            self.log("total cnt", total_cnt, prog_bar=True)  
+        self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
         
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
@@ -366,12 +322,13 @@ class _CusModule(BaseMixModule):
         target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,y_transform),optimizers_idx=-1)
-        (corr_loss_combine,triplet_loss_combine,corr_acc_combine) = detail_loss
+        (corr_loss_combine,triplet_loss_combine,classify_loss_combine) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_triplet_loss_{}".format(i), triplet_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("classify_loss_{}".format(i), classify_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_acc_{}".format(i), corr_acc_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -381,7 +338,7 @@ class _CusModule(BaseMixModule):
         vr_class_sf = [self.build_vr_class_cer(vc).cpu().numpy() for vc in vr_class_list]
         self.metric_data(output_combine,future_target.cpu().numpy(),target_vr_class)
         import_price_result = self.compute_real_class_acc(output_inverse=output_inverse,target_vr_class=target_vr_class,
-                    vr_class=vr_class,output_data=output_combine,target_info=target_info,target_inverse=target_inverse)   
+                    vr_class=vr_class_sf,output_data=output_combine,target_info=target_info,target_inverse=target_inverse)   
         total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
         if self.total_imp_cnt==0:
             self.total_imp_cnt = total_imp_cnt
@@ -411,37 +368,6 @@ class _CusModule(BaseMixModule):
         
         return loss,detail_loss,output
  
-    def filter_batch_by_condition(self,data_batch,filter_conv_index=0,rev_threhold=3,recent_threhold=3):
-        """按照已知指标，对结果集的重点关注部分进行初步筛选"""
-        
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = data_batch    
-        
-        recent_data = np.array([item["label_array"][:self.input_chunk_length] for item in target_info])
-        # 与近期高点比较，不能差太多
-        recent_max = np.max(recent_data,axis=1)
-        import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
-        # 当前价格不能处于下降趋势
-        # less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
-        # import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
-        
-        # 通过指标筛选(配置参数里指定哪种指标)
-        # rev_cov = np.array([item["focus2_array"][:self.input_chunk_length] for item in target_info])
-        
-        # 使用cci指标，突破100后进入筛选池
-        cci_cov = np.array([item["focus1_array"][:self.input_chunk_length] for item in target_info])
-        # 当前记录大于100并且前一条记录明显小于100
-        rev_boole = (cci_cov[:,-1]>100) & (cci_cov[:,-2]<50)
-        # rev_boole = (cci_cov[:,-1]>100)
-        # print("total size:{},import_index_bool size:{},rev_boole size:{}".format(import_index_bool.shape[0],np.sum(import_index_bool),np.sum(rev_boole)))
-        import_index_bool = rev_boole        
-        rtn_index = np.where(import_index_bool)[0]
-        # rtn_index = rtn_index[0:2]
-        
-        data_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
-                            future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
-                            np.array(scaler_tuple,dtype=object)[rtn_index],target_class[rtn_index,:,:],
-                            target[rtn_index,:,:],np.array(target_info)[rtn_index].tolist()]
-        return data_batch_filter
     
     def build_vr_class_cer(self,vr_class):
         vr_class_cer = F.softmax(vr_class,dim=-1)
@@ -570,6 +496,7 @@ class _CusModule(BaseMixModule):
         import_index_bool = third_index_bool & second_index_bool
         import_index = np.where(import_index_bool)[0]
         
+        import_index = np.where((vr_class[0]>=2) & (vr_class[1]>=2))[0]
         # 直接使用分类
         # third_index_bool = (third_class==CLASS_SIMPLE_VALUE_MAX)
         # 使用knn分类模式判别
@@ -1028,7 +955,7 @@ class _CusModule(BaseMixModule):
                     viz = viz_result_fail   
                 else:
                     viz = viz_result_nor  
-                self.draw_row(pred_center_data, pred_second_data, pred_third_data,ts=ts,target_item=target_item, names=names,viz=viz,win=win)
+                # self.draw_row(pred_center_data, pred_second_data, pred_third_data,ts=ts,target_item=target_item, names=names,viz=viz,win=win)
                       
     def draw_row(self,pred_center_data,pred_second_data,pred_third_data,target_item=None,ts=None,names=None,viz=None,win="win"):
         """draw one line"""

@@ -104,10 +104,13 @@ class TftDataHandler(DataHandlerLP):
                 "(Less($open, $close)-$low)/($high-$low+1e-12)",
                 "(2*$close-$high-$low)/$open",
                 "(2*$close-$high-$low)/($high-$low+1e-12)",
-                "100*((EMA($close, 12) - EMA($close, 26))/$close - EMA((EMA($close, 12) - EMA($close, 26))/$close, 9)/$close)",
+                "EMA($close, 12) - EMA($close, 26)",
+                "EMA((EMA($close, 12) - EMA($close, 26)), 9)",
+                "2*(EMA($close, 12) - EMA($close, 26)-EMA((EMA($close, 12) - EMA($close, 26)), 9))",
                 "$close/Ref($close,5)*100",
                 build_rvi_factor_str(),
                 build_aos_factor_str(),
+                "$high - EMA($close, 12)",
             ]
             names += [
                 "KMID",
@@ -119,10 +122,13 @@ class TftDataHandler(DataHandlerLP):
                 "KLOW2",
                 "KSFT",
                 "KSFT2",
+                "DIFF",
+                "DEA",
                 "MACD",
                 "MOMENTUM", # 动量指数
                 "RVI", # 相对活力指数
                 "AOS", # 加速振荡器
+                "BULLS", # 牛市力度指数
             ]
         if "price" in config:
             windows = config["price"].get("windows", range(5))

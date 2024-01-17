@@ -51,10 +51,12 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
             label_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label"].values           
             focus1_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
-                                &(df_all["instrument_rank"]==code)]["CCI5"].values      
+                                &(df_all["instrument_rank"]==code)]["KDJ_K"].values      
             focus2_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
-                                &(df_all["instrument_rank"]==code)]["MACD"].values                                                                                    
-            self.ass_data[code] = (instrument,label_array,price_array,focus1_array,focus2_array)
+                                &(df_all["instrument_rank"]==code)]["KDJ_D"].values      
+            focus3_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["KDJ_J"].values                                                                                                                     
+            self.ass_data[code] = (instrument,label_array,price_array,focus1_array,focus2_array,focus3_array)
             
     def __getitem__(
         self, idx
@@ -125,11 +127,13 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         price_array = self.ass_data[code][2][past_start:future_end]
         focus1_array = self.ass_data[code][3][past_start:future_end]
         focus2_array = self.ass_data[code][4][past_start:future_end]
+        focus3_array = self.ass_data[code][5][past_start:future_end]
         # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
-                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"label_array":label_array,"focus1_array":focus1_array,
-                       "focus2_array":focus2_array,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
+                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"label_array":label_array,
+                       "focus1_array":focus1_array,"focus2_array":focus2_array,"focus3_array":focus3_array,
+                       "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates
         covariate = None

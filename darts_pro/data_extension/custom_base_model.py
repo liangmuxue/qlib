@@ -15,6 +15,9 @@ from darts.models.forecasting.tft_model import _TFTModule
 from darts.models.forecasting.tide_model import _TideModule
 from losses.mtl_loss import TripletLoss,UncertaintyLoss
 from .series_data_utils import StatDataAssis
+from tft.class_define import CLASS_SIMPLE_VALUES
+
+hide_target = True
 
 class BaseMixModule(PLMixedCovariatesModule):
 
@@ -52,7 +55,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         model_list = []
         classify_vr_layers = []
         # 涨跌幅度分类
-        vr_range_num = 1 
+        vr_range_num = len(CLASS_SIMPLE_VALUES.keys()) 
         for i in range(len(past_split)):
             # 拆分过去协变量,形成不同的网络配置，给到不同的model
             model =  self.create_real_model(output_dim, variables_meta_array[i], num_static_components, 
@@ -62,7 +65,7 @@ class BaseMixModule(PLMixedCovariatesModule):
             # mse损失计算                
             model.mean_squared_error = MeanSquaredError().to(device)
             model_list.append(model)
-            vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length)  
+            vr_layer = self._construct_classify_layer(self.output_chunk_length,vr_range_num)  
             classify_vr_layers.append(vr_layer)
         self.sub_models = nn.ModuleList(model_list) 
         self.vr_layers = nn.ModuleList(classify_vr_layers) 
@@ -156,5 +159,44 @@ class BaseMixModule(PLMixedCovariatesModule):
                 **kwargs,
             )        
         
-        
+    def _process_input_batch(
+        self, input_batch
+    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """重载方法，以适应数据结构变化"""
+        (
+            past_target,
+            past_covariates,
+            historic_future_covariates,
+            future_covariates,
+            static_covariates,
+        ) = input_batch
+        dim_variable = 2
+
+        # 生成多组过去协变量，用于不同子模型匹配
+        x_past_array = []
+        for i,p_index in enumerate(self.past_split):
+            past_conv_index = self.past_split[i]
+            past_covariates_item = past_covariates[:,:,past_conv_index[0]:past_conv_index[1]]
+            # 修改协变量生成模式，只取自相关目标作为协变量
+            if hide_target:
+                conv_defs = [
+                            past_target[:,:,i:i+1],
+                            past_covariates_item,
+                            historic_future_covariates,
+                    ]
+            else:
+                conv_defs = [
+                            past_target,
+                            past_covariates_item,
+                            historic_future_covariates,
+                    ]              
+            x_past = torch.cat(
+                [
+                    tensor
+                    for tensor in conv_defs if tensor is not None
+                ],
+                dim=dim_variable,
+            )
+            x_past_array.append(x_past)
+        return x_past_array, future_covariates, static_covariates        
         

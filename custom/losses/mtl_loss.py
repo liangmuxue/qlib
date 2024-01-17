@@ -255,7 +255,7 @@ class UncertaintyLoss(nn.Module):
         vr_loss_weight = get_simple_class_weight()
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
         self.mse_weight = mse_weight.to(device)
-        self.vr_loss = nn.MSELoss()
+        self.vr_losses = [nn.CrossEntropyLoss(),nn.CrossEntropyLoss(),nn.CrossEntropyLoss()]
         
         self.triplet_loss_combine = [TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=True,hard_margin=0.4,semi_margin=0.4,device=device),
                                      TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=True,hard_margin=0.4,semi_margin=0.4,device=device),
@@ -278,6 +278,7 @@ class UncertaintyLoss(nn.Module):
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         corr_acc_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         triplet_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
+        classify_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         # 指标分类
         ce_loss = torch.tensor(0.0).to(self.device) 
         value_diff_loss = torch.tensor(0).to(self.device)        
@@ -292,8 +293,11 @@ class UncertaintyLoss(nn.Module):
                 input_item = input[i]
                 input_item_norm = torch.softmax(input_item.squeeze(),dim=1)
                 target_item = target[:,:,i]    
-                vr_item_class = vr_classes[i][:,0] 
-                # corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
+                vr_item_class = vr_classes[i]
+                classify_loss_combine[i] += self.vr_losses[i](vr_item_class,label_class)
+                corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
+                # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
+                #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                     
                 triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
                                                                     target_item,labels=label_class,labels_value=label_item)                    
                 # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
@@ -318,7 +322,7 @@ class UncertaintyLoss(nn.Module):
                 #     # triplet_loss_combine[i] += self.ms_loss(input_item_norm,label_class,dist_func=self.ccc_distance_torch)            
                 #     # triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
                 #     #                                                 target_item,labels=label_class,labels_value=label_item)      
-                loss_sum = corr_loss_combine[i] + triplet_loss_combine[i]
+                loss_sum = corr_loss_combine[i] + triplet_loss_combine[i] + classify_loss_combine[i]
         # 二次目标损失部分
         if optimizers_idx==len(input):
             # ce_loss,acc = self.rankloss(vr_combine_class, price_range_arr,label_class)
@@ -330,7 +334,7 @@ class UncertaintyLoss(nn.Module):
             # ce_loss = self.triplet_online(vr_combine_class, label_class,target=price_range_arr)
             loss_sum = torch.sum(corr_loss_combine+triplet_loss_combine) + ce_loss + value_diff_loss
             
-        return loss_sum,[corr_loss_combine,triplet_loss_combine,corr_acc_combine]
+        return loss_sum,[corr_loss_combine,triplet_loss_combine,classify_loss_combine]
 
 
     def mse_loss(self,x1, x2):

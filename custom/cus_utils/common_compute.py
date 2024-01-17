@@ -276,20 +276,36 @@ def pairwise_compare(m,n,distance_func=None):
         index+=1
     return torch.stack(result_list).squeeze(-1)
 
-def pairwise_distances(metirx,distance_func=None,make_symmetric=False):
+def pairwise_distances(metirx,distance_func=None,make_symmetric=False,reduction="mean"):
     """根据自定义距离函数，生成配对距离矩阵"""
     
     result_list = []
     index = 1
     size = metirx.shape[0]
     for i in range(size):
-        # 滚动比较,忽略自比较数据
-        metirx_t = torch.cat([metirx[i:,:],metirx[:i,:]],dim=0)
-        v = distance_func(metirx,metirx_t)
-        result_list.append(v)
-        # if index%100==0:
-        #     print("apply:",index)
-        index+=1
+        # 如果超过2维，则分别计算
+        if len(metirx.shape)==3:
+            v_array = []
+            for j in range(metirx.shape[2]):
+                metirx_t = torch.cat([metirx[i:,:,j],metirx[:i,:,j]],dim=0)
+                v = distance_func(metirx[:,:,j],metirx_t)
+                v_array.append(v)
+            v_array = torch.stack(v_array)
+            if reduction=="mean":
+                v = torch.mean(v_array,dim=0)
+            if reduction=="max":
+                v = torch.max(v_array,dim=0)[0]          
+            if reduction=="min":
+                v = torch.min(v_array,dim=0)[0]                     
+            result_list.append(v)
+        else:       
+            # 滚动比较,忽略自比较数据
+            metirx_t = torch.cat([metirx[i:,:],metirx[:i,:]],dim=0)
+            v = distance_func(metirx,metirx_t)
+            result_list.append(v)
+            # if index%100==0:
+            #     print("apply:",index)
+            index+=1
     dis_met = torch.stack(result_list)
     result_list = []
     # 构造为对角矩阵

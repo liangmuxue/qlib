@@ -617,7 +617,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 "previously trained on. Trained on tuples of length {}, received tuples of length {}.".format(
                     len(self.train_sample), len(train_sample)
                 ),
-            )
+            )          
             same_dims = tuple(
                 s.shape[1] if (s is not None and isinstance(s, np.ndarray)) else None for s in train_sample
             ) == tuple(s.shape[1] if (s is not None and isinstance(s, np.ndarray)) else None for s in self.train_sample)
@@ -700,7 +700,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             input_chunk_length=self.input_chunk_length,
             output_chunk_length=self.output_chunk_length,
             max_samples_per_ts=max_samples_per_ts,
-            use_static_covariates=self._supports_static_covariates(),
+            use_static_covariates=True,
             mode=mode
         )
 
@@ -719,7 +719,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             n=n,
             input_chunk_length=self.input_chunk_length,
             output_chunk_length=self.output_chunk_length,
-            use_static_covariates=self._supports_static_covariates(),
+            use_static_covariates=True,
         )
         
     def _verify_inference_dataset_type(self, inference_dataset: InferenceDataset):

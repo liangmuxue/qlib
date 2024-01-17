@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_500_2
+market: &market test_2000
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -15,10 +15,10 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','RSQR5',
+              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','RSQR5',
               'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','QTLUMA5',
-              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5']                                
+              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA']                                
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -60,7 +60,7 @@ task:
             n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/QTLU_500_202010'
+            batch_file_path: 'custom/data/asis/KDJ_2000_202010'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,6 +77,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
+               model_type: 'tide'
                model_name: 'test9_tft_all_exp'
                load_weight: False
                wave_period : &wave_period 30

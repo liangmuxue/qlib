@@ -81,12 +81,16 @@ class _TFTModuleAsis(_CusModule):
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """use to export data"""
         
-        train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
-        # 过滤后，进行数据增强
-        train_batch = self.dynamic_build_training_data(train_batch).transpose(1,0)     
-        pickle.dump(train_batch,self.train_fout) 
-        # print("len(self.train_data):{}".format(len(self.train_data)))
         fake_loss = torch.ones(1,requires_grad=True).to(self.device)
+        train_batch = self.filter_batch_by_condition(train_batch,filter_conv_index=self.filter_conv_index)
+        if train_batch is None:
+            return fake_loss
+        # 过滤后，进行数据增强
+        # train_batch = self.dynamic_build_training_data(train_batch).transpose(1,0)     
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
+        data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
+                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]        
+        pickle.dump(data,self.train_fout) 
         return fake_loss
 
     def dynamic_build_training_data(self,data_batch,rev_threhold=1):
@@ -154,21 +158,100 @@ class _TFTModuleAsis(_CusModule):
         
         # target = np.expand_dims(np.concatenate((past_target,future_target),axis=0),axis=0)
         # target_unscale = self.model.get_inverse_data(target[:,:,0],target_info=target_info,single_way=True).transpose(1,0)
+
+    def filter_batch_by_condition(self,data_batch,filter_conv_index=0,rev_threhold=3,recent_threhold=3):
+        """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = data_batch    
+        
+        recent_data = np.array([item["label_array"][:self.input_chunk_length] for item in target_info])
+        # 与近期高点比较，不能差太多
+        recent_max = np.max(recent_data,axis=1)
+        import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
+        # 当前价格不能处于下降趋势
+        # less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
+        # import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
+        
+        # 通过指标筛选(配置参数里指定哪种指标)
+        # rev_cov = np.array([item["focus2_array"][:self.input_chunk_length] for item in target_info])
+        
+        # 使用cci指标，突破100后进入筛选池
+        # cci_cov = np.array([item["focus1_array"][:self.input_chunk_length] for item in target_info])
+        # # 当前记录大于100并且前一条记录明显小于100
+        # import_index_bool = (cci_cov[:,-1]>100) & (cci_cov[:,-2]<50)
+
+        # 使用bulls指标
+        # bulls_cov = np.array([item["focus2_array"][self.input_chunk_length-5:self.input_chunk_length] for item in target_info])
+        # # 需要近期的牛市力度一直处于上方
+        # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
+        
+        # import_index_bool = self.create_signal_macd(target_info)       
+        import_index_bool = self.create_signal_kdj(target_info)    
+        if np.sum(import_index_bool)==0:
+            return None
+        print("total size:{},import_index_bool size:{}".format(past_target.shape[0],np.sum(import_index_bool)))
+        rtn_index = np.where(import_index_bool)[0]
+        
+        data_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
+                            future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
+                            np.array(scaler_tuple,dtype=object)[rtn_index],target_class[rtn_index,:,:],
+                            target[rtn_index,:,:],np.array(target_info)[rtn_index].tolist()]
+        return data_batch_filter
+    
+    def create_signal_macd(self,target_info):
+        """macd指标判断"""
+        
+        diff_cov = np.array([item["focus1_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        dea_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        macd_cov = np.array([item["focus3_array"][self.input_chunk_length-5:self.input_chunk_length] for item in target_info])
+        # 规则为金叉，即diff快线向上突破dea慢线
+        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)==8) & (np.sum(diff_cov[:,-2:]>=dea_cov[:,-2:],axis=1)==2)
+        return index_bool
+
+    def create_signal_rsi(self,target_info):
+        """rsi指标判断"""
+        
+        rsi5_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        rsi20_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        # 规则为金叉，即rsi快线向上突破rsi慢线
+        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)==8) & (np.sum(rsi5_cov[:,-2:]>=rsi20_cov[:,-2:],axis=1)==2)
+        return index_bool
+
+    def create_signal_kdj(self,target_info):
+        """kdj指标判断"""
+        
+        k_cov = np.array([item["focus1_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        d_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        j_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        # 规则为金叉，即k线向上突破j线
+        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)==8) & (np.sum(d_cov[:,-2:]>=d_cov[:,-2:],axis=1)==2)
+        # 突破的时候d线也是向上的
+        j_slope = j_cov[:,1:] - j_cov[:,:-1]
+        index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)
+        # index_bool = index_bool & (np.sum(j_cov[:,:-2]<=d_cov[:,:-2],axis=1)==8) & (np.sum(j_cov[:,-2:]>=d_cov[:,-2:],axis=1)==2)
+        # 还需要满足K和D值小于一定阈值
+        index_bool = index_bool & (np.sum(k_cov[:,:-2]<20,axis=1)>=8) & (np.sum(d_cov[:,:-2]<30,axis=1)>=8)
+        # 还需要满足J线小于阈值
+        # index_bool = index_bool & (np.sum(j_cov[:,:-2]<0,axis=1)>=8) & (np.sum(j_cov[:,-2:]>0,axis=1)>=1)
+        return index_bool
+                   
     def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
         # SANITY CHECKING模式下，不进行处理
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
             return            
+        fake_loss = torch.ones(1).to(self.device)
         # 只关注重点部分
         val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
+        if val_batch is None:
+            return fake_loss  
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch 
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
                          future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]
         print("dump valid,batch:{},target shape:{}".format(batch_idx,past_target.shape))
         pickle.dump(data,self.valid_fout) 
-        fake_loss = torch.ones(1).to(self.device)
+        
         self.log("val_loss", fake_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         return fake_loss     
      
@@ -265,7 +348,6 @@ class TFTAsisModel(TFTExtModel):
         # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
         self.output_dim = (1,1)
         
-        
         # 根据拆分的过去协变量，生成多个配置
         variables_meta_array = []
         for i in range(len(self.past_split)):
@@ -349,7 +431,7 @@ class _TFTModuleBatch(_CusModule):
     
     def on_train_start(self): 
         super().on_train_start()
-        self.train_output_flag = True
+        self.train_output_flag = False
         # 先训练一段时间，然后冻结第一阶段网络，只更新第二阶段网络
         self.apply_params_freeze()
                 
