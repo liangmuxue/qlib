@@ -10,6 +10,7 @@ from scipy.signal import find_peaks
 import numpy as np
 import pandas as pd
 import torch
+import pickle
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 import torch.nn.functional as F
@@ -21,7 +22,6 @@ import joblib
 from sklearn.preprocessing import MinMaxScaler
 
 from .series_data_utils import StatDataAssis
-from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer,unverse_transform_slope_value
 from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import compute_price_class,normalization,pairwise_compare,comp_max_and_rate
@@ -204,7 +204,7 @@ class _CusModule(BaseMixModule):
             y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=train_batch[0],optimizer_idx=i,target_info=target_info)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform),optimizers_idx=i)
-            (corr_loss_combine,triplet_loss_combine,classify_loss_combine) = detail_loss 
+            (corr_loss_combine,triplet_loss_combine,extend_value) = detail_loss 
             # self.log("train_class_loss_{}".format(i), classify_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.loss_data.append(detail_loss)
             total_loss += loss
@@ -289,11 +289,9 @@ class _CusModule(BaseMixModule):
             self.log("total cnt", total_cnt, prog_bar=True)  
         self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
         
-    def validation_step(self, val_batch_ori, batch_idx) -> torch.Tensor:
+    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
-        # 只关注重点部分
-        val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
         loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)
         return loss
                                  
@@ -322,13 +320,13 @@ class _CusModule(BaseMixModule):
         target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,y_transform),optimizers_idx=-1)
-        (corr_loss_combine,triplet_loss_combine,classify_loss_combine) = detail_loss
+        (corr_loss_combine,triplet_loss_combine,extend_value) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_triplet_loss_{}".format(i), triplet_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("classify_loss_{}".format(i), classify_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("classify_loss_{}".format(i), classify_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_acc_{}".format(i), corr_acc_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("value_diff_loss", value_diff_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -635,78 +633,6 @@ class _CusModule(BaseMixModule):
             if params.grad is not None:
                 self.logger.experiment.add_histogram(name + "_grad",params.grad,global_step)
         
-    def configure_optimizers(self):
-        optimizers = self.build_dynamic_optimizers()
-        
-        # 对应优化器，生成多个学习率
-        lr_schedulers = []
-        for i in range(len(self.past_split)+1):
-            lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
-            lr_sched_kws["optimizer"] = optimizers[i]
-            lr_monitor = lr_sched_kws.pop("monitor", None)
-            # # 分类层增加学习率
-            # if i==len(self.past_split):
-            #     lr_sched_kws["base_lr"] = lr_sched_kws["base_lr"] * 10
-            #     lr_sched_kws["max_lr"] = lr_sched_kws["max_lr"] * 10
-                
-            lr_scheduler = create_from_cls_and_kwargs(
-                self.lr_scheduler_cls, lr_sched_kws
-            )
-            lr_scheduler_config = {
-                "scheduler": lr_scheduler,
-                "interval": self.lr_freq["interval"],
-                "frequency": self.lr_freq["frequency"],              
-                "monitor": lr_monitor if lr_monitor is not None else "val_loss",
-            } 
-            lr_schedulers.append(lr_scheduler_config)  
-        lr_schedulers.append(lr_scheduler_config) 
-        return optimizers, lr_schedulers       
-
-    def build_dynamic_optimizers(self):
-        """生成多优化器配置"""
-
-        optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}
-        optimizers = []
-        # 针对不同子模型，分别生成优化器
-        for i in range(len(self.past_split)):
-            avalabel_params = list(map(id, self.sub_models[i].parameters()))
-            avalabel_params_vr = list(map(id, self.vr_layers[i].parameters()))
-            avalabel_params = avalabel_params + avalabel_params_vr
-            base_params = filter(lambda p: id(p) in avalabel_params, self.parameters())
-            # base_lr = self.lr_scheduler_kwargs["base_lr"] 
-            optimizer_kws["params"] = [
-                        {'params': base_params},
-                        # {'params': self.classify_vr_layer.parameters(), 'lr': base_lr*10}
-                        ]
-            optimizer = create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
-            optimizers.append(optimizer)
-            
-        # 单独定义分类损失优化器   
-        avalabel_params = list(map(id, self.classify_vr_layer.parameters()))
-        base_params = filter(lambda p: id(p) in avalabel_params, self.parameters())
-        optimizer_kws["params"] = [
-                    {'params': base_params},
-                    # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
-                    # {'params': self.classify_vr_layer.parameters()}
-                    ]
-        optimizer = create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)
-        optimizers.append(optimizer)
-        
-        avalabel_params = list(map(id, self.classify_tar_layer.parameters()))
-        base_params = filter(lambda p: id(p) in avalabel_params, self.parameters())
-        optimizer_kws["params"] = [
-                    {'params': base_params},
-                    # {'params': self.slope_layer.parameters(), 'lr': base_lr*10},
-                    # {'params': self.classify_vr_layer.parameters()}
-                    ]
-        optimizer = create_from_cls_and_kwargs(self.optimizer_cls, optimizer_kws)        
-        optimizers.append(optimizer)        
-        return optimizers
-
-    def freeze_apply(self,mode=0,flag=0):
-        """ 动态冻结指定参数"""
-         
-        self.freeze_mode[mode] = flag
 
     def predict_step(
         self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
@@ -1006,3 +932,250 @@ class _CusModule(BaseMixModule):
             group_col_val = series.static_covariates[group_column].values[0]
             scaler_map[group_col_val] = scalers[i]
         return scaler_map
+
+class _TFTModuleBatch(_CusModule):
+    def __init__(
+        self,
+        output_dim: Tuple[int, int],
+        variables_meta_array: Tuple[Dict[str, Dict[str, List[str]]],Dict[str, Dict[str, List[str]]]],
+        num_static_components: int,
+        hidden_size: Union[int, List[int]],
+        lstm_layers: int,
+        num_attention_heads: int,
+        full_attention: bool,
+        feed_forward: str,
+        hidden_continuous_size: int,
+        categorical_embedding_sizes: Dict[str, Tuple[int, int]],
+        dropout: float,
+        add_relative_index: bool,
+        norm_type: Union[str, nn.Module],
+        use_weighted_loss_func=False,
+        past_split=None,
+        filter_conv_index=0,
+        loss_number=3,
+        batch_file_path=None,
+        device="cpu",
+        train_sample=None,
+        **kwargs,
+    ):
+        super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
+                                    full_attention,feed_forward,hidden_continuous_size,
+                                    categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
+                                    use_weighted_loss_func=use_weighted_loss_func,train_sample=train_sample,
+                                    device=device,**kwargs)  
+        self.lr_freq = {"interval":"epoch","frequency":1}
+        
+        self.train_filepath = "{}/train_output_batch.pickel".format(batch_file_path)
+        self.valid_filepath = "{}/valid_output_batch.pickel".format(batch_file_path)
+        
+    
+    def on_train_start(self): 
+        super().on_train_start()
+        self.train_output_flag = False
+        # 先训练一段时间，然后冻结第一阶段网络，只更新第二阶段网络
+        self.apply_params_freeze()
+                
+    def on_validation_start(self): 
+        super().on_validation_start()
+        self.valid_output_flag = True
+                
+    def on_train_epoch_start(self):  
+        super().on_train_epoch_start()
+        if self.train_output_flag:
+            self.train_fout = open(self.train_filepath, "wb")
+    def on_train_epoch_end(self):  
+        super().on_train_epoch_start()
+        if self.train_output_flag:
+            self.train_output_flag = False
+            self.train_fout.close()
+    def on_validation_epoch_start(self):  
+        super().on_validation_epoch_start()
+        if self.valid_output_flag:
+            self.valid_fout = open(self.valid_filepath, "wb")     
+            
+    def on_validation_epoch_end(self):  
+        super().on_validation_epoch_end()
+        if self.valid_output_flag:
+            self.valid_output_flag = False
+            self.valid_fout.close()          
+        # 动态冻结网络参数
+        corr_loss_combine = []
+        self.apply_params_freeze()
+    
+    def apply_params_freeze(self):
+        # 先训练一段时间，然后冻结第一阶段网络，只更新第二阶段网络
+        if self.current_epoch>1000:
+            for i in range(len(self.sub_models)):
+                self.freeze_apply(mode=i)   
+            self.freeze_apply(mode=(len(self.sub_models)+1),flag=1)       
+                                           
+    def training_step(self, train_batch, batch_idx) -> torch.Tensor:
+        """重载原方法，直接使用已经加工好的数据"""
+
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler,target_class,target,target_info,rank_targets) = train_batch    
+         
+        # 使用排序目标替换原数据--Cancel
+        train_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
+                               static_covariates,scaler,target_class,target,target_info)
+                               
+        loss,detail_loss,output = self.training_step_real(train_batch_convert, batch_idx) 
+        if self.train_output_flag:
+            output = [output_item.detach().cpu().numpy() for output_item in output]
+            data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
+                             future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
+                             target.cpu().detach().numpy(),target_info]                
+            output_combine = (output,data)
+            pickle.dump(output_combine,self.train_fout)  
+        # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
+        return loss
+    
+    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
+        """训练验证部分"""
+        
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler,target_class,target,target_info,rank_targets) = val_batch    
+         
+        # 使用排序目标替换原数据
+        val_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
+                               static_covariates,scaler,target_class,target,target_info,rank_targets)
+                
+        loss,detail_loss,output = self.validation_step_real(val_batch_convert, batch_idx)  
+        
+        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
+            output = [output_item.cpu().numpy() for output_item in output]
+            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,rank_scalers) = val_batch 
+            data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
+                             future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
+            output_combine = (output,data)
+            pickle.dump(output_combine,self.valid_fout)         
+        return loss,detail_loss   
+    
+    def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
+        """训练验证部分"""
+        
+        return super().validation_step_real(val_batch[:-1], batch_idx)
+        
+        input_batch = self._process_input_batch(val_batch[:5])
+        # 收集目标数据用于分类
+        scaler_tuple,target_class,future_target,target_info,rank_targets = val_batch[5:]  
+        scaler = [s[0] for s in scaler_tuple]
+        # 使用排序号作为目标
+        (output,vr_class,tar_class) = self(input_batch,rank_targets[0],scaler,past_target=val_batch[0],target_info=target_info,optimizer_idx=-1)
+
+        past_target = val_batch[0]
+        target_class = target_class[:,:,0]
+        target_vr_class = target_class[:,0].cpu().numpy()
+        whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
+        target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
+        # 全部损失
+        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (rank_targets[0],target_class,target_info,None),optimizers_idx=-1)
+        (corr_loss_combine,ce_loss,value_diff_loss) = detail_loss
+        self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        for i in range(len(corr_loss_combine)):
+            self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+        
+        output_combine = [output_item[:,:,0,0] for output_item in output]
+        output_combine = torch.stack(output_combine,dim=2).cpu().numpy()        
+        # 涨跌幅度类别的准确率
+        import_index = self.build_import_index(output_combine, target_inverse)
+        import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result = \
+            self.collect_result(import_index, target_vr_class, target_info)
+        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        if self.total_imp_cnt==0:
+            self.total_imp_cnt = total_imp_cnt
+        else:
+            self.total_imp_cnt += total_imp_cnt
+        
+        past_target = val_batch[0]
+ 
+        # 可视化
+        self.val_metric_show(output,future_target,target_vr_class,output_inverse=output_combine,vr_class=vr_class,
+                             target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=None,
+                            batch_idx=batch_idx)
+               
+        # 累加结果集，后续统计   
+        if self.import_price_result is None:
+            self.import_price_result = import_price_result    
+        else:
+            if import_price_result is not None:
+                import_price_result_array = import_price_result.values
+                # 修改编号，避免重复
+                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
+                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
+                
+        return loss,detail_loss,output
+      
+    
+    # def build_import_index(self,output_inverse=None,target_inverse=None):  
+    #     """重载父类方法，生成涨幅达标的预测数据下标"""
+    #
+    #     output_label_inverse = output_inverse[:,:,0] 
+    #     output_second_inverse = output_inverse[:,:,1]
+    #     output_third_inverse = output_inverse[:,:,2]
+    #
+    #     third_rank = np.mean(output_third_inverse,axis=1)
+    #     import_index = np.argsort(third_rank,axis=0)[:10]
+    #
+    #     return import_index    
+        
+    def _process_input_batch(
+        self, input_batch
+    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """重载方法，把过去协变量数值转换为排序数值"""
+        (
+            past_target,
+            past_covariates,
+            historic_future_covariates,
+            future_covariates,
+            static_covariates,
+        ) = input_batch
+        
+        return super()._process_input_batch(input_batch)
+        
+        dim_variable = 2
+        # 生成多组过去协变量，用于不同子模型匹配
+        x_past_array = []
+        for i,p_index in enumerate(self.past_split):
+            past_conv_index = self.past_split[i]
+            past_covariates_item = past_covariates[:,:,past_conv_index[0]:past_conv_index[1]]
+            past_target_item = past_target[:,:,i]
+            # 协变量数值转换为排序号
+            _,indices = torch.sort(past_target_item,0)
+            _, idx_unsort = torch.sort(indices, dim=0)
+            
+            if self.trainer.state.stage==RunningStage.TRAINING:
+                idx_unsort = idx_unsort.cpu().numpy()
+            else:
+                idx_unsort = idx_unsort.cpu().numpy()
+            past_convert = torch.Tensor(MinMaxScaler().fit_transform(idx_unsort)).to(self.device)
+            past_convert = torch.unsqueeze(past_convert,-1)
+            # 修改协变量生成模式，只取自相关目标作为协变量
+            conv_defs = [
+                        past_convert,
+                        past_covariates_item,
+                        historic_future_covariates,
+                ]             
+            x_past = torch.cat(
+                [
+                    tensor
+                    for tensor in conv_defs if tensor is not None
+                ],
+                dim=dim_variable,
+            )
+            x_past_array.append(x_past)
+        return x_past_array, future_covariates, static_covariates
+
+    def _construct_classify_layer(self, input_dim,output_dim,device=None):
+        """分类特征值输出
+          Params
+            layer_num： 层数
+            input_dim： 序列长度
+            output_dim： 类别数
+        """
+        return super()._construct_classify_layer(input_dim, output_dim)
+        # len = self.input_chunk_length + self.output_chunk_length
+        # class_layer = TSTransformerEncoderClassiregressor(input_dim, num_classes=output_dim, max_len=len,device=device)
+        # class_layer = class_layer.cuda(device)
+        # return class_layer

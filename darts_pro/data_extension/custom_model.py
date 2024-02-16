@@ -112,19 +112,19 @@ class TFTExtModel(MixedCovariatesTorchModel):
             model_kwargs["likelihood"] = QuantileRegression()
             
         # 单独定制不确定损失
-        if self.use_weighted_loss_func:
-            # 定义损失函数种类数量
-            params = torch.ones(loss_number, requires_grad=True)
-            loss_sigma = torch.nn.Parameter(params)        
-            loss_fn = UncertaintyLoss(device=self.device,loss_sigma=loss_sigma)    
-            model_kwargs["loss_fn"] = loss_fn 
-            model_kwargs["likelihood"] = likelihood
-            self.loss_number = loss_number
+        # if self.use_weighted_loss_func:
+        #     # 定义损失函数种类数量
+        #     params = torch.ones(loss_number, requires_grad=True)
+        #     loss_fn = UncertaintyLoss(device=self.device)    
+        #     model_kwargs["loss_fn"] = loss_fn 
+        #     model_kwargs["likelihood"] = likelihood
+        #     self.loss_number = loss_number
             
         super().__init__(**self._extract_torch_model_params(**model_kwargs))
 
         # extract pytorch lightning module kwargs
         self.pl_module_params = self._extract_pl_module_params(**model_kwargs)
+        self.pl_module_params["batch_size"] = self.batch_size
             
         self.hidden_size = hidden_size
         self.lstm_layers = lstm_layers
@@ -146,7 +146,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.filter_conv_index = filter_conv_index
         self.no_dynamic_data = no_dynamic_data
         self.model_type = model_type
-    
+        self.loss_number = loss_number
+        
     def _build_vriable_metas(self,tensors,static_covariates,seq=0):   
         
         type_names = [

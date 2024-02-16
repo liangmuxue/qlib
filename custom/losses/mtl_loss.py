@@ -18,13 +18,12 @@ from numba.cuda.cudadrv import ndarray
 from losses.triplet_loss import TripletTargetLoss
 from losses.triplet_miner import TripletTargetMiner
 from losses.multi_similarity_loss import MultiSimilarityLoss
-
-mse_weight = torch.tensor(np.array([1,2,3,4,5]))  
-mse_scope_weight = torch.tensor(np.array([1,2,3,4]))  
+from losses.hsan_metirc_util import HsanLoss
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 from torchmetrics.regression import ConcordanceCorrCoef
+from networkx.algorithms import similarity
 
 class MinerLoss(_Loss):
     """具备挖掘功能的损失函数"""
@@ -240,9 +239,10 @@ class TripletLoss(_Loss):
 class UncertaintyLoss(nn.Module):
     """不确定损失,包括mse，corr以及分类交叉熵损失等"""
 
-    def __init__(self, mse_reduction="mean",device=None,loss_sigma=None):
+    def __init__(self, mse_reduction="mean",device=None,ref_model=None):
         super(UncertaintyLoss, self).__init__()
         
+        self.ref_model = ref_model
         self.mse_reduction = mse_reduction
         # self.sigma = loss_sigma
         # sig_params = torch.ones(4, requires_grad=True).to(device)
@@ -254,7 +254,6 @@ class UncertaintyLoss(nn.Module):
         # 涨跌幅分类损失中，需要设置不同分类权重
         vr_loss_weight = get_simple_class_weight()
         vr_loss_weight = torch.from_numpy(np.array(vr_loss_weight)).to(device)
-        self.mse_weight = mse_weight.to(device)
         self.vr_losses = [nn.CrossEntropyLoss(),nn.CrossEntropyLoss(),nn.CrossEntropyLoss()]
         
         self.triplet_loss_combine = [TripletLoss(dis_func=self.ccc_distance_torch,type_of_triplets="hard",anchor_target=True,hard_margin=0.4,semi_margin=0.4,device=device),
@@ -263,7 +262,11 @@ class UncertaintyLoss(nn.Module):
         self.miner_loss_combine = [MinerLoss(pos_margin=0.1,neg_margin=0.3,dis_func=self.ccc_distance_torch),
                                    MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch),
                                    MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch)]
-        
+        # HSAN聚类损失对象
+        args={}
+        # self.hsan_loss_combine = [HsanLoss(args=args,ref_model=ref_model,device=device),
+        #                            HsanLoss(args=args,ref_model=ref_model,device=device),
+        #                            HsanLoss(args=args,ref_model=ref_model,device=device)]        
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
         self.rankloss = TripletLoss(reduction='mean',dis_func=self.mse_dis,anchor_target=True,device=device)
         # 设置损失函数的组合模式
@@ -277,6 +280,7 @@ class UncertaintyLoss(nn.Module):
         label_class = target_class[:,0]
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         corr_acc_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
+        similarity_value = [None,None,None]
         triplet_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         classify_loss_combine = torch.Tensor(np.array([0 for i in range(len(input))])).to(self.device)
         # 指标分类
@@ -291,15 +295,13 @@ class UncertaintyLoss(nn.Module):
         for i in range(len(input)):
             if optimizers_idx==i or optimizers_idx==-1:
                 input_item = input[i]
-                input_item_norm = torch.softmax(input_item.squeeze(),dim=1)
                 target_item = target[:,:,i]    
                 vr_item_class = vr_classes[i]
-                classify_loss_combine[i] += self.vr_losses[i](vr_item_class,label_class)
-                corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
-                # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
-                #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                     
-                triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
-                                                                    target_item,labels=label_class,labels_value=label_item)                    
+                # classify_loss_combine[i] += self.vr_losses[i](vr_item_class,label_class)
+                # corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
+                triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
+                                                    dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                     
+                # triplet_loss_combine[i],similarity_value[i] = self.hsan_loss(input_item,index=i)                                                  
                 # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
                 #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                        
                 # if i==1:
@@ -334,7 +336,7 @@ class UncertaintyLoss(nn.Module):
             # ce_loss = self.triplet_online(vr_combine_class, label_class,target=price_range_arr)
             loss_sum = torch.sum(corr_loss_combine+triplet_loss_combine) + ce_loss + value_diff_loss
             
-        return loss_sum,[corr_loss_combine,triplet_loss_combine,classify_loss_combine]
+        return loss_sum,[corr_loss_combine,triplet_loss_combine,similarity_value[i]]
 
 
     def mse_loss(self,x1, x2):
@@ -445,5 +447,14 @@ class UncertaintyLoss(nn.Module):
         
         criterion = MultiSimilarityLoss(distance_func=dist_func)
         loss = criterion(embeddings,labels)
-        return loss         
+        return loss  
+    
+    def hsan_loss(self,output,index=0):    
+        """HSAN模式的损失计算"""   
+        
+        Z1, Z2, E1, E2 = output
+        loss,S = self.hsan_loss_combine[index](Z1, Z2, E1, E2)
+        # 同时返回综合相似度数值后续使用
+        return loss,S
+        
         

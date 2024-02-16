@@ -394,14 +394,9 @@ class TftDataframeModel():
                     add_relative_index=False,
                     add_encoders=None,
                     categorical_embedding_sizes=categorical_embedding_sizes,
-                    # likelihood=QuantileRegression(
-                    #     quantiles=quantiles
-                    # ), 
                     likelihood=None,
-                    # loss_fn=torch.nn.MSELoss(),
                     use_weighted_loss_func=True,
                     loss_number=4,
-                    # torch_metrics=metric_collection,
                     random_state=42,
                     model_name=model_name,
                     force_reset=True,

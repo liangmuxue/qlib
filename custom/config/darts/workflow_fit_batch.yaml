@@ -77,9 +77,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MACD_COMBINE_2000_202010'
-               model_type: 'tide'
-               load_weight: True
+               model_name: 'MACD_HSAN_2000_202010'
+               model_type: 'hsan'
+               load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

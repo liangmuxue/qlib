@@ -1,18 +1,11 @@
 import os
 
-from darts.models import RNNModel, ExponentialSmoothing, BlockRNNModel
-from darts.models.forecasting.block_rnn_model import _BlockRNNModule
+from darts.models.forecasting.tide_model import _TideModule
 from darts.utils.data.training_dataset import TrainingDataset
 from darts.utils.likelihood_models import Likelihood, QuantileRegression
 from darts.utils.torch import random_method
 from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from darts.timeseries import TimeSeries
-from darts.utils.data.training_dataset import (
-    MixedCovariatesTrainingDataset
-)
-from darts.models.forecasting.tft_submodels import (
-    get_embedding_size,
-)
 from cus_utils.process import create_from_cls_and_kwargs
 
 import pickle
@@ -25,21 +18,17 @@ import tsaug
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
-from torch.utils.data import DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
-from cus_utils.encoder_cus import StockNormalizer
-from darts_pro.data_extension.custom_tcn_model import LSTMClassifier
-from darts_pro.data_extension.ts_transformer import TSTransformerEncoderClassiregressor
 from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute,slope_classify_compute_batch
-from tft.class_define import CLASS_SIMPLE_VALUES
-
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]
 
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.data_extension.custom_module import _CusModule
+from darts_pro.mam.hsan_module import HsanModule
+from darts_pro.mam.dink_module import DinkModule
 from darts_pro.data_extension.batch_dataset import BatchDataset
 
 class _TFTModuleAsis(_CusModule):
@@ -393,253 +382,6 @@ class TFTAsisModel(TFTExtModel):
             **self.pl_module_params,
         )    
     
-class _TFTModuleBatch(_CusModule):
-    def __init__(
-        self,
-        output_dim: Tuple[int, int],
-        variables_meta_array: Tuple[Dict[str, Dict[str, List[str]]],Dict[str, Dict[str, List[str]]]],
-        num_static_components: int,
-        hidden_size: Union[int, List[int]],
-        lstm_layers: int,
-        num_attention_heads: int,
-        full_attention: bool,
-        feed_forward: str,
-        hidden_continuous_size: int,
-        categorical_embedding_sizes: Dict[str, Tuple[int, int]],
-        dropout: float,
-        add_relative_index: bool,
-        norm_type: Union[str, nn.Module],
-        use_weighted_loss_func=False,
-        past_split=None,
-        filter_conv_index=0,
-        loss_number=3,
-        batch_file_path=None,
-        device="cpu",
-        train_sample=None,
-        **kwargs,
-    ):
-        super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
-                                    full_attention,feed_forward,hidden_continuous_size,
-                                    categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
-                                    use_weighted_loss_func=use_weighted_loss_func,train_sample=train_sample,
-                                    device=device,**kwargs)  
-        self.lr_freq = {"interval":"epoch","frequency":1}
-        
-        self.train_filepath = "{}/train_output_batch.pickel".format(batch_file_path)
-        self.valid_filepath = "{}/valid_output_batch.pickel".format(batch_file_path)
-        
-    
-    def on_train_start(self): 
-        super().on_train_start()
-        self.train_output_flag = False
-        # 先训练一段时间，然后冻结第一阶段网络，只更新第二阶段网络
-        self.apply_params_freeze()
-                
-    def on_validation_start(self): 
-        super().on_validation_start()
-        self.valid_output_flag = True
-                
-    def on_train_epoch_start(self):  
-        super().on_train_epoch_start()
-        if self.train_output_flag:
-            self.train_fout = open(self.train_filepath, "wb")
-    def on_train_epoch_end(self):  
-        super().on_train_epoch_start()
-        if self.train_output_flag:
-            self.train_output_flag = False
-            self.train_fout.close()
-    def on_validation_epoch_start(self):  
-        super().on_validation_epoch_start()
-        if self.valid_output_flag:
-            self.valid_fout = open(self.valid_filepath, "wb")     
-            
-    def on_validation_epoch_end(self):  
-        super().on_validation_epoch_end()
-        if self.valid_output_flag:
-            self.valid_output_flag = False
-            self.valid_fout.close()          
-        # 动态冻结网络参数
-        corr_loss_combine = []
-        self.apply_params_freeze()
-    
-    def apply_params_freeze(self):
-        # 先训练一段时间，然后冻结第一阶段网络，只更新第二阶段网络
-        if self.current_epoch>1000:
-            for i in range(len(self.sub_models)):
-                self.freeze_apply(mode=i)   
-            self.freeze_apply(mode=(len(self.sub_models)+1),flag=1)       
-                                           
-    def training_step(self, train_batch, batch_idx) -> torch.Tensor:
-        """重载原方法，直接使用已经加工好的数据"""
-
-        (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,rank_targets) = train_batch    
-         
-        # 使用排序目标替换原数据--Cancel
-        train_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
-                               static_covariates,scaler,target_class,target,target_info)
-                               
-        loss,detail_loss,output = self.training_step_real(train_batch_convert, batch_idx) 
-        if self.train_output_flag:
-            output = [output_item.detach().cpu().numpy() for output_item in output]
-            data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
-                             future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-                             target.cpu().detach().numpy(),target_info]                
-            output_combine = (output,data)
-            pickle.dump(output_combine,self.train_fout)  
-        # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
-        return loss
-    
-    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
-        """训练验证部分"""
-        
-        (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,rank_targets) = val_batch    
-         
-        # 使用排序目标替换原数据
-        val_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
-                               static_covariates,scaler,target_class,target,target_info,rank_targets)
-                
-        loss,detail_loss,output = self.validation_step_real(val_batch_convert, batch_idx)  
-        
-        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
-            output = [output_item.cpu().numpy() for output_item in output]
-            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,rank_scalers) = val_batch 
-            data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
-                             future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
-            output_combine = (output,data)
-            pickle.dump(output_combine,self.valid_fout)         
-        return loss,detail_loss   
-    
-    def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
-        """训练验证部分"""
-        
-        return super().validation_step_real(val_batch[:-1], batch_idx)
-        
-        input_batch = self._process_input_batch(val_batch[:5])
-        # 收集目标数据用于分类
-        scaler_tuple,target_class,future_target,target_info,rank_targets = val_batch[5:]  
-        scaler = [s[0] for s in scaler_tuple]
-        # 使用排序号作为目标
-        (output,vr_class,tar_class) = self(input_batch,rank_targets[0],scaler,past_target=val_batch[0],target_info=target_info,optimizer_idx=-1)
-
-        past_target = val_batch[0]
-        target_class = target_class[:,:,0]
-        target_vr_class = target_class[:,0].cpu().numpy()
-        whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
-        target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
-        # 全部损失
-        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (rank_targets[0],target_class,target_info,None),optimizers_idx=-1)
-        (corr_loss_combine,ce_loss,value_diff_loss) = detail_loss
-        self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        for i in range(len(corr_loss_combine)):
-            self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-        
-        output_combine = [output_item[:,:,0,0] for output_item in output]
-        output_combine = torch.stack(output_combine,dim=2).cpu().numpy()        
-        # 涨跌幅度类别的准确率
-        import_index = self.build_import_index(output_combine, target_inverse)
-        import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result = \
-            self.collect_result(import_index, target_vr_class, target_info)
-        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        if self.total_imp_cnt==0:
-            self.total_imp_cnt = total_imp_cnt
-        else:
-            self.total_imp_cnt += total_imp_cnt
-        
-        past_target = val_batch[0]
- 
-        # 可视化
-        self.val_metric_show(output,future_target,target_vr_class,output_inverse=output_combine,vr_class=vr_class,
-                             target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=None,
-                            batch_idx=batch_idx)
-               
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                # 修改编号，避免重复
-                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
-                
-        return loss,detail_loss,output
-      
-    
-    # def build_import_index(self,output_inverse=None,target_inverse=None):  
-    #     """重载父类方法，生成涨幅达标的预测数据下标"""
-    #
-    #     output_label_inverse = output_inverse[:,:,0] 
-    #     output_second_inverse = output_inverse[:,:,1]
-    #     output_third_inverse = output_inverse[:,:,2]
-    #
-    #     third_rank = np.mean(output_third_inverse,axis=1)
-    #     import_index = np.argsort(third_rank,axis=0)[:10]
-    #
-    #     return import_index    
-        
-    def _process_input_batch(
-        self, input_batch
-    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        """重载方法，把过去协变量数值转换为排序数值"""
-        (
-            past_target,
-            past_covariates,
-            historic_future_covariates,
-            future_covariates,
-            static_covariates,
-        ) = input_batch
-        
-        return super()._process_input_batch(input_batch)
-        
-        dim_variable = 2
-        # 生成多组过去协变量，用于不同子模型匹配
-        x_past_array = []
-        for i,p_index in enumerate(self.past_split):
-            past_conv_index = self.past_split[i]
-            past_covariates_item = past_covariates[:,:,past_conv_index[0]:past_conv_index[1]]
-            past_target_item = past_target[:,:,i]
-            # 协变量数值转换为排序号
-            _,indices = torch.sort(past_target_item,0)
-            _, idx_unsort = torch.sort(indices, dim=0)
-            
-            if self.trainer.state.stage==RunningStage.TRAINING:
-                idx_unsort = idx_unsort.cpu().numpy()
-            else:
-                idx_unsort = idx_unsort.cpu().numpy()
-            past_convert = torch.Tensor(MinMaxScaler().fit_transform(idx_unsort)).to(self.device)
-            past_convert = torch.unsqueeze(past_convert,-1)
-            # 修改协变量生成模式，只取自相关目标作为协变量
-            conv_defs = [
-                        past_convert,
-                        past_covariates_item,
-                        historic_future_covariates,
-                ]             
-            x_past = torch.cat(
-                [
-                    tensor
-                    for tensor in conv_defs if tensor is not None
-                ],
-                dim=dim_variable,
-            )
-            x_past_array.append(x_past)
-        return x_past_array, future_covariates, static_covariates
-
-    def _construct_classify_layer(self, input_dim,output_dim,device=None):
-        """分类特征值输出
-          Params
-            layer_num： 层数
-            input_dim： 序列长度
-            output_dim： 类别数
-        """
-        return super()._construct_classify_layer(input_dim, output_dim)
-        # len = self.input_chunk_length + self.output_chunk_length
-        # class_layer = TSTransformerEncoderClassiregressor(input_dim, num_classes=output_dim, max_len=len,device=device)
-        # class_layer = class_layer.cuda(device)
-        # return class_layer
-                    
 class TFTBatchModel(TFTExtModel):
     
     def __init__(
@@ -753,36 +495,88 @@ class TFTBatchModel(TFTExtModel):
 
         self.categorical_embedding_sizes = categorical_embedding_sizes
         
-        return _TFTModuleBatch(
-            output_dim=self.output_dim,
-            variables_meta_array=variables_meta_array,
-            num_static_components=n_static_components,
-            hidden_size=self.hidden_size,
-            lstm_layers=self.lstm_layers,
-            dropout=self.dropout,
-            num_attention_heads=self.num_attention_heads,
-            full_attention=self.full_attention,
-            feed_forward=self.feed_forward,
-            hidden_continuous_size=self.hidden_continuous_size,
-            categorical_embedding_sizes=self.categorical_embedding_sizes,
-            add_relative_index=self.add_relative_index,
-            norm_type=self.norm_type,
-            use_weighted_loss_func=self.use_weighted_loss_func,
-            loss_number=self.loss_number,
-            past_split=self.past_split,
-            filter_conv_index=self.filter_conv_index,
-            device=self.device,
-            batch_file_path=self.batch_file_path,
-            model_type=self.model_type,
-            train_sample=self.train_sample,
-            **self.pl_module_params,
-        )   
+        if self.model_type=="tft" or self.model_type=="tide":
+            model = _TFTModuleBatch(
+                output_dim=self.output_dim,
+                variables_meta_array=variables_meta_array,
+                num_static_components=n_static_components,
+                hidden_size=self.hidden_size,
+                lstm_layers=self.lstm_layers,
+                dropout=self.dropout,
+                num_attention_heads=self.num_attention_heads,
+                full_attention=self.full_attention,
+                feed_forward=self.feed_forward,
+                hidden_continuous_size=self.hidden_continuous_size,
+                categorical_embedding_sizes=self.categorical_embedding_sizes,
+                add_relative_index=self.add_relative_index,
+                norm_type=self.norm_type,
+                use_weighted_loss_func=self.use_weighted_loss_func,
+                loss_number=self.loss_number,
+                past_split=self.past_split,
+                filter_conv_index=self.filter_conv_index,
+                device=self.device,
+                batch_file_path=self.batch_file_path,
+                model_type=self.model_type,
+                train_sample=self.train_sample,
+                **self.pl_module_params,
+            )   
+        if self.model_type=="hsan":
+            model = HsanModule(
+                output_dim=self.output_dim,
+                variables_meta_array=variables_meta_array,
+                num_static_components=n_static_components,
+                hidden_size=self.hidden_size,
+                lstm_layers=self.lstm_layers,
+                dropout=self.dropout,
+                num_attention_heads=self.num_attention_heads,
+                full_attention=self.full_attention,
+                feed_forward=self.feed_forward,
+                hidden_continuous_size=self.hidden_continuous_size,
+                categorical_embedding_sizes=self.categorical_embedding_sizes,
+                add_relative_index=self.add_relative_index,
+                norm_type=self.norm_type,
+                use_weighted_loss_func=self.use_weighted_loss_func,
+                past_split=self.past_split,
+                filter_conv_index=self.filter_conv_index,
+                device=self.device,
+                batch_file_path=self.batch_file_path,
+                model_type=self.model_type,
+                train_sample=self.train_sample,
+                **self.pl_module_params,
+            )               
+        if self.model_type=="dink_ts":
+            model = DinkModule(
+                output_dim=self.output_dim,
+                variables_meta_array=variables_meta_array,
+                num_static_components=n_static_components,
+                hidden_size=self.hidden_size,
+                lstm_layers=self.lstm_layers,
+                dropout=self.dropout,
+                num_attention_heads=self.num_attention_heads,
+                full_attention=self.full_attention,
+                feed_forward=self.feed_forward,
+                hidden_continuous_size=self.hidden_continuous_size,
+                categorical_embedding_sizes=self.categorical_embedding_sizes,
+                add_relative_index=self.add_relative_index,
+                norm_type=self.norm_type,
+                use_weighted_loss_func=self.use_weighted_loss_func,
+                past_split=self.past_split,
+                filter_conv_index=self.filter_conv_index,
+                device=self.device,
+                batch_file_path=self.batch_file_path,
+                model_type=self.model_type,
+                train_sample=self.train_sample,
+                **self.pl_module_params,
+            )      
+        return model         
                
     def _batch_collate_filter(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
         """
-
+        if self.model_type=="hsan":
+            return super()._batch_collate_filter(ori_batch)
+        
         batch = ori_batch 
         aggregated = []
         first_sample = batch[0]
@@ -826,7 +620,6 @@ class TFTBatchModel(TFTExtModel):
         aggregated.append([idx_unsort,rank_scalers])
         return tuple(aggregated)
         
-
     def dynamic_build_training_data(self,item,rev_threhold=1):
         """使用数据增强，调整训练数据"""
         
@@ -895,4 +688,3 @@ class TFTBatchModel(TFTExtModel):
         return rtn_item
 
                
-        
