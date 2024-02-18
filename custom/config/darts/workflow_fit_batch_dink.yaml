@@ -52,7 +52,7 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 1024
+            batch_size: 512
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -77,13 +77,13 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'TIDE_DTMLOSS_2000_202010'
-               model_type: 'tide'
+               model_name: 'MACD_DINK_2000_202010'
+               model_type: 'dink_ts'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,3],[3,5],[5,7]]
+               past_split: [[0,10]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -118,7 +118,7 @@ task:
                 target_column: ['MACD','RANKMA5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','CORR5','KLOW2','KLEN','REV5'] 
+                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','CORR5','KLOW2','KLEN','REV5','MACD','RANKMA5','QTLUMA5'] 
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 

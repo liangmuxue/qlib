@@ -26,7 +26,7 @@ MixedCovariatesTrainTensorType = Tuple[
 ]
 
 from darts_pro.data_extension.custom_model import TFTExtModel
-from darts_pro.data_extension.custom_module import _CusModule
+from darts_pro.data_extension.custom_module import _CusModule,_TFTModuleBatch
 from darts_pro.mam.hsan_module import HsanModule
 from darts_pro.mam.dink_module import DinkModule
 from darts_pro.data_extension.batch_dataset import BatchDataset

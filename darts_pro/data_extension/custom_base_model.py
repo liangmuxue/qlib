@@ -14,11 +14,13 @@ from torchmetrics import MeanSquaredError
 from darts.models.forecasting.tft_model import _TFTModule
 from darts.models.forecasting.tide_model import _TideModule
 from losses.mtl_loss import TripletLoss,UncertaintyLoss
+from losses.clustering_loss import DistanceMetricLoss,ClusteringLoss
 from .series_data_utils import StatDataAssis
 from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.act_model.hsan_ext import HsanExt
 from darts_pro.act_model.dink_ts import DinkTsNet
 from cus_utils.process import create_from_cls_and_kwargs
+import cus_utils.global_var as global_var
 
 hide_target = True
 
@@ -87,8 +89,10 @@ class BaseMixModule(PLMixedCovariatesModule):
         self.automatic_optimization = False
         self.freeze_mode = torch.ones(len(past_split)+2).to(device)
      
-    def create_loss(self,model):
-        return UncertaintyLoss(device=self.device,ref_model=model) 
+    def create_loss(self,model,device="cpu"):
+        # return ClusteringLoss(device=device,ref_model=model) 
+        return DistanceMetricLoss(device=device,ref_model=model) 
+        # return UncertaintyLoss(device=self.device,ref_model=model) 
     
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -133,7 +137,6 @@ class BaseMixModule(PLMixedCovariatesModule):
                 + past_covariates_shape
                 + historic_future_covariates_shape
             )
-    
             output_dim = output_dim[0]
     
             future_cov_dim = (
@@ -243,7 +246,9 @@ class BaseMixModule(PLMixedCovariatesModule):
                 + historic_future_covariates_shape
             )
     
-            output_dim = output_dim[0]
+            # 不使用原设定的输出维度，而是以目标值数量作为实际维度
+            dataset = global_var.get_value("dataset")
+            output_dim = len(dataset.get_target_column())
     
             future_cov_dim = (
                 future_covariates.shape[1] if future_covariates is not None else 0
@@ -259,7 +264,7 @@ class BaseMixModule(PLMixedCovariatesModule):
             model = DinkTsNet(
                 # Tide Part
                 input_dim=input_dim,
-                output_dim=output_dim,
+                emb_output_dim=output_dim,
                 future_cov_dim=future_cov_dim,
                 static_cov_dim=static_cov_dim,
                 nr_params=nr_params,
@@ -275,7 +280,7 @@ class BaseMixModule(PLMixedCovariatesModule):
                 # Dink Part
                 n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
                 activation="prelu",
-                n_in=past_covariates_shape,
+                n_in=output_dim, # 使用嵌入模型的输出维度作为DinkNet模型的输入维度
                 n_out=150,
                 **kwargs,
             )   

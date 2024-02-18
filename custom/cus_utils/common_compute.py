@@ -270,9 +270,12 @@ def pairwise_compare(m,n,distance_func=None):
     result_list = []
     index = 1
     for item in m:
-        v = apply_along_axis(distance_func, 0, n,item)
+        # 把单条数据复制为和目标同样形状，进行批量比较
+        item_metric = item.unsqueeze(0)
+        item_metric = item_metric.repeat(n.shape[0],1)
+        v = distance_func(item_metric,n)
         result_list.append(v)
-        print("apply:",index)
+        # print("apply:",index)
         index+=1
     return torch.stack(result_list).squeeze(-1)
 

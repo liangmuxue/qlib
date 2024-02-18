@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market test_2000
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -15,10 +15,10 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','RSQR5',
+              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','RSQR5',
               'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','QTLUMA5',
-              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5']                                   
+              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA']                                
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -52,12 +52,12 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 1024
+            batch_size: 3072
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'fit_batch'
-            n_epochs : 300
+            type: 'build_data_asis'
+            n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/KDJ_2000_202010'
@@ -65,10 +65,10 @@ task:
             scheduler_config: 
                # gamma: 0.8  
                base_lr: 1e-4
-               max_lr: 1.5e-3     
+               max_lr: 1e-3     
                cycle_momentum: False
-               step_size_up: 5000
-               # T_max: 5
+               # step_size: 1   
+               # T_max: 5s
                # eta_min: 0.001
             optimizer_kwargs:
                lr: 0.001
@@ -77,13 +77,13 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'TIDE_DTMLOSS_2000_202010'
                model_type: 'tide'
+               model_name: 'test9_tft_all_exp'
                load_weight: False
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,3],[3,5],[5,7]]
+               past_split: [[0,10]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -95,7 +95,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2010-01-01, 2023-05-31]
-                valid: [2020-08-01, 2020-10-31]
+                valid: [2020-10-01, 2020-12-31]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
@@ -118,7 +118,7 @@ task:
                 target_column: ['MACD','RANKMA5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','CORR5','KLOW2','KLEN','REV5'] 
+                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','CORR5','KLOW2','KLEN','REV5','MACD','RANKMA5','QTLUMA5'] 
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 

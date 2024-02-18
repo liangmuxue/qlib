@@ -205,7 +205,7 @@ class _CusModule(BaseMixModule):
             (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=train_batch[0],optimizer_idx=i,target_info=target_info)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform),optimizers_idx=i)
             (corr_loss_combine,triplet_loss_combine,extend_value) = detail_loss 
-            # self.log("train_class_loss_{}".format(i), classify_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.loss_data.append(detail_loss)
             total_loss += loss
             # 手动更新参数
@@ -217,7 +217,7 @@ class _CusModule(BaseMixModule):
                 opt.step()
                 self.lr_schedulers()[i].step()
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("lr1",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
+        self.log("lr0",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss,detail_loss,output
@@ -325,7 +325,7 @@ class _CusModule(BaseMixModule):
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("val_triplet_loss_{}".format(i), triplet_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_triplet_loss_{}".format(i), triplet_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("classify_loss_{}".format(i), classify_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_acc_{}".format(i), corr_acc_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -967,7 +967,9 @@ class _TFTModuleBatch(_CusModule):
         
         self.train_filepath = "{}/train_output_batch.pickel".format(batch_file_path)
         self.valid_filepath = "{}/valid_output_batch.pickel".format(batch_file_path)
-        
+        # 使用具备梯度额参数作为聚类簇心，供聚类损失使用,形状为:类别数*预测时间步长
+        self.cluster_center = [torch.nn.Parameter(torch.rand(len(CLASS_SIMPLE_VALUES.keys()), 
+                                    kwargs["output_chunk_length"]).to(device)) for i in range(len(past_split))]
     
     def on_train_start(self): 
         super().on_train_start()
@@ -1108,17 +1110,14 @@ class _TFTModuleBatch(_CusModule):
         return loss,detail_loss,output
       
     
-    # def build_import_index(self,output_inverse=None,target_inverse=None):  
-    #     """重载父类方法，生成涨幅达标的预测数据下标"""
-    #
-    #     output_label_inverse = output_inverse[:,:,0] 
-    #     output_second_inverse = output_inverse[:,:,1]
-    #     output_third_inverse = output_inverse[:,:,2]
-    #
-    #     third_rank = np.mean(output_third_inverse,axis=1)
-    #     import_index = np.argsort(third_rank,axis=0)[:10]
-    #
-    #     return import_index    
+    def _compute_loss(self, output, target,optimizers_idx=0):
+        """重载父类方法"""
+        
+        (output_value,vr_class,tar_class) = output
+        output_value = [output_value_item.squeeze(dim=-1) for output_value_item in output_value]
+        output_combine = (output_value,vr_class,tar_class)
+        # 添加聚类簇心参数
+        return self.criterion(output_combine, target,cluster_centers=self.cluster_center,optimizers_idx=optimizers_idx)  
         
     def _process_input_batch(
         self, input_batch

@@ -272,7 +272,7 @@ class UncertaintyLoss(nn.Module):
         # 设置损失函数的组合模式
         self.loss_mode = 0
 
-    def forward(self, input_ori: Tensor, target_ori: Tensor,optimizers_idx=0,epoch=0):
+    def forward(self, input_ori: Tensor, target_ori: Tensor,optimizers_idx=0,epoch=0,cluster_centers=None):
         """使用MSE损失+相关系数损失，连接以后，使用不确定损失来调整参数"""
  
         (input,vr_combine_class,vr_classes) = input_ori
