@@ -203,9 +203,12 @@ class _CusModule(BaseMixModule):
         for i in range(len(self.past_split)):
             y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=train_batch[0],optimizer_idx=i,target_info=target_info)
+            self.output_postprocess(output,i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform),optimizers_idx=i)
-            (corr_loss_combine,triplet_loss_combine,extend_value) = detail_loss 
+            (corr_loss_combine,kl_loss,ce_loss) = detail_loss 
             self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_kl_loss_{}".format(i), kl_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.loss_data.append(detail_loss)
             total_loss += loss
             # 手动更新参数
@@ -217,11 +220,14 @@ class _CusModule(BaseMixModule):
                 opt.step()
                 self.lr_schedulers()[i].step()
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("lr0",self.trainer.optimizers[1].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
+        self.log("lr0",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss,detail_loss,output
-
+    
+    def output_postprocess(self,output,index):
+        pass
+        
     def build_focus_data(self,output_ori,past_target_ori,target_info=None,scalers=None):
         # 根据序列预测输出结果，整合并形成二次特征
 

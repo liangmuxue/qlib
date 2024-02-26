@@ -24,8 +24,9 @@ class Tide(nn.Module):
         temporal_width_future: int,
         use_layer_norm: bool,
         dropout: float,
-        input_chunk_length:25,
-        output_chunk_length:25,
+        input_chunk_length=25,
+        output_chunk_length=5,
+        outer_mode=0, 
     ):    
         
         super(Tide, self).__init__()
@@ -47,6 +48,7 @@ class Tide(nn.Module):
         self.temporal_width_future = temporal_width_future
         self.input_chunk_length = input_chunk_length
         self.output_chunk_length = output_chunk_length
+        self.outer_mode = outer_mode
         
         # past covariates handling: either feature projection, raw features, or no features
         self.past_cov_projection = None
@@ -94,7 +96,9 @@ class Tide(nn.Module):
             + historical_future_covariates_flat_dim
             + static_cov_dim
         )
-
+        # Set Attr For Outer Using
+        self.encoder_dim = encoder_dim
+        
         self.encoders = nn.Sequential(
             _ResidualBlock(
                 input_dim=encoder_dim,
@@ -114,7 +118,10 @@ class Tide(nn.Module):
                 for _ in range(num_encoder_layers - 1)
             ],
         )
-
+        
+        # 添加一个线性连接层，用于向外透露encode中间数据
+        self.z_layer = nn.Linear(hidden_size, hidden_size)
+        
         self.decoders = nn.Sequential(
             *[
                 _ResidualBlock(
@@ -214,9 +221,19 @@ class Tide(nn.Module):
         ]
         encoded = [t.flatten(start_dim=1) for t in encoded if t is not None]
         encoded = torch.cat(encoded, dim=1)
-
-        # encoder, decode, reshape
-        encoded = self.encoders(encoded)
+        # 保存原始数据用于后续使用
+        encoded_input_data = encoded.clone()
+        
+        # 增加分层结果返回的逻辑
+        enc_data = []
+        for i in range(len(self.encoders)):
+            encoded = self.encoders[i](encoded)    
+            enc_data.append(encoded)    
+            
+        # 添加中间数据层处理，用于模型协同
+        encoded = self.z_layer(encoded)
+        # 记录初始encode中间数据
+        encoded_z = encoded.clone()        
         decoded = self.decoders(encoded)
 
         # get view that is batch size x output chunk length x self.decoder_output_dim x nr params
@@ -245,6 +262,11 @@ class Tide(nn.Module):
         )  # skip.view(temporal_decoded.shape)
 
         y = y.view(-1, self.output_chunk_length, self.output_dim, self.nr_params)
-        return y
+        
+        if self.outer_mode==1:
+            # 同时返回原始数据和中间数据 
+            return y,encoded_z,enc_data,encoded_input_data
+        else:
+            return y
         
    

@@ -18,9 +18,8 @@ from losses.clustering_loss import DistanceMetricLoss,ClusteringLoss
 from .series_data_utils import StatDataAssis
 from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.act_model.hsan_ext import HsanExt
-from darts_pro.act_model.dink_ts import DinkTsNet
+from darts_pro.act_model.tide import Tide
 from cus_utils.process import create_from_cls_and_kwargs
-import cus_utils.global_var as global_var
 
 hide_target = True
 
@@ -90,9 +89,9 @@ class BaseMixModule(PLMixedCovariatesModule):
         self.freeze_mode = torch.ones(len(past_split)+2).to(device)
      
     def create_loss(self,model,device="cpu"):
-        # return ClusteringLoss(device=device,ref_model=model) 
-        return DistanceMetricLoss(device=device,ref_model=model) 
-        # return UncertaintyLoss(device=self.device,ref_model=model) 
+        return ClusteringLoss(device=device,ref_model=model) 
+        # return DistanceMetricLoss(device=device,ref_model=model) 
+        # return UncertaintyLoss(device=device,ref_model=model) 
     
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -149,15 +148,14 @@ class BaseMixModule(PLMixedCovariatesModule):
             )
     
             nr_params = 1
-    
-            model = _TideModule(
+            model = Tide(
                 input_dim=input_dim,
                 output_dim=output_dim,
                 future_cov_dim=future_cov_dim,
                 static_cov_dim=static_cov_dim,
                 nr_params=nr_params,
-                num_encoder_layers=1,
-                num_decoder_layers=1,
+                num_encoder_layers=3,
+                num_decoder_layers=3,
                 decoder_output_dim=16,
                 hidden_size=hidden_size,
                 temporal_width_past=4,
@@ -165,126 +163,10 @@ class BaseMixModule(PLMixedCovariatesModule):
                 temporal_decoder_hidden=32,
                 use_layer_norm=False,
                 dropout=dropout,
-                **kwargs,
+                input_chunk_length=kwargs["input_chunk_length"],
+                output_chunk_length=kwargs["output_chunk_length"],
             )        
 
-        if model_type == "hsan":  
-            (
-                past_target,
-                past_covariates,
-                historic_future_covariates,
-                future_covariates,
-                static_covariates,
-                (scaler,future_past_covariate),
-                target_class,
-                future_target,
-                target_info
-            ) = self.train_sample      
-                  
-            past_target_shape = len(variables_meta["input"]["past_target"])
-            past_covariates_shape = len(variables_meta["input"]["past_covariate"])
-            historic_future_covariates_shape = len(variables_meta["input"]["historic_future_covariate"])
-            input_dim = (
-                past_target_shape
-                + past_covariates_shape
-                + historic_future_covariates_shape
-            )
-    
-            output_dim = output_dim[0]
-    
-            future_cov_dim = (
-                future_covariates.shape[1] if future_covariates is not None else 0
-            )
-            static_cov_dim = (
-                static_covariates.shape[0] * static_covariates.shape[1]
-                if static_covariates is not None
-                else 0
-            )
-    
-            nr_params = 1
-    
-            model = HsanExt(
-                input_dim=input_dim,
-                output_dim=output_dim,
-                future_cov_dim=future_cov_dim,
-                static_cov_dim=static_cov_dim,
-                nr_params=nr_params,
-                num_encoder_layers=1,
-                num_decoder_layers=1,
-                decoder_output_dim=16,
-                hidden_size=hidden_size,
-                temporal_width_past=4,
-                temporal_width_future=4,
-                temporal_decoder_hidden=32,
-                use_layer_norm=False,
-                dropout=dropout,
-                hidden_dim=64,
-                n_num=self.batch_size,
-                device=device,
-                **kwargs,
-            )   
-
-        if model_type == "dink_ts":  
-            (
-                past_target,
-                past_covariates,
-                historic_future_covariates,
-                future_covariates,
-                static_covariates,
-                (scaler,future_past_covariate),
-                target_class,
-                future_target,
-                target_info
-            ) = self.train_sample      
-                  
-            past_target_shape = len(variables_meta["input"]["past_target"])
-            past_covariates_shape = len(variables_meta["input"]["past_covariate"])
-            historic_future_covariates_shape = len(variables_meta["input"]["historic_future_covariate"])
-            input_dim = (
-                past_target_shape
-                + past_covariates_shape
-                + historic_future_covariates_shape
-            )
-    
-            # 不使用原设定的输出维度，而是以目标值数量作为实际维度
-            dataset = global_var.get_value("dataset")
-            output_dim = len(dataset.get_target_column())
-    
-            future_cov_dim = (
-                future_covariates.shape[1] if future_covariates is not None else 0
-            )
-            static_cov_dim = (
-                static_covariates.shape[0] * static_covariates.shape[1]
-                if static_covariates is not None
-                else 0
-            )
-    
-            nr_params = 1
-    
-            model = DinkTsNet(
-                # Tide Part
-                input_dim=input_dim,
-                emb_output_dim=output_dim,
-                future_cov_dim=future_cov_dim,
-                static_cov_dim=static_cov_dim,
-                nr_params=nr_params,
-                num_encoder_layers=1,
-                num_decoder_layers=1,
-                decoder_output_dim=16,
-                hidden_size=hidden_size,
-                temporal_width_past=4,
-                temporal_width_future=4,
-                temporal_decoder_hidden=32,
-                use_layer_norm=False,
-                dropout=dropout,
-                # Dink Part
-                n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
-                activation="prelu",
-                n_in=output_dim, # 使用嵌入模型的输出维度作为DinkNet模型的输入维度
-                n_out=150,
-                **kwargs,
-            )   
-                       
         return model 
            
     def _process_input_batch(

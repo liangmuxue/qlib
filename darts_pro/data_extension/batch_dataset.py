@@ -116,11 +116,14 @@ class BatchDataset(Dataset):
         for i in range(target.shape[0]):
             t_item = target[i]
             # 如果目标序列值都是一个，则排除
-            if np.unique(t_item[:,0]).shape[0]==1 or np.unique(t_item[:,1]).shape[0]==1 or np.unique(t_item[:,2]).shape[0]==1:
-                # print("need ignore:{}".format(i))
-                pass
-            else:
-                keep_idx.append(i)
+            flag = True
+            for j in range(t_item.shape[1]):
+                if np.unique(t_item[:,j].shape[0]==1):
+                    flag = False
+                    break
+            if not flag:
+                continue
+            keep_idx.append(i)
         keep_idx = np.array(keep_idx)
         
         past_target = past_target[keep_idx]  

@@ -147,7 +147,7 @@ def test_group():
     x = np.array([[ 569 , 897],
      [ 570 , 898],
      [ 570 , 900],
-     [ 571 , 901],
+     [ 571 , 900],
      [ 571 , 905],
      [ 572  , 906]])
     # t = np.flatnonzero(x[1:,0] != x[:-1,0])+1
@@ -601,7 +601,7 @@ if __name__ == "__main__":
     # test_argwhere()
     # test_condition3()
     # test_condi_remove()
-    # test_group()
+    test_group()
     # test_corr()
     # test_corr_tensor()
     # test_slope()
@@ -633,7 +633,7 @@ if __name__ == "__main__":
     # test_ccc()
     # test_clustering()
     # test_networkx()
-    test_matrix_view()
+    # test_matrix_view()
     # test_pr()
     # test_scaler()
     

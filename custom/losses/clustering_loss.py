@@ -1,8 +1,13 @@
 import numpy as np
 import torch
 from torch.nn.modules.loss import _Loss
+import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss
 from cus_utils.common_compute import pairwise_distances,pairwise_compare
+
+def target_distribution(q):
+    weight = q**2 / q.sum(0)
+    return (weight.t() / weight.sum(1)).t()
 
 class ClusteringLoss(UncertaintyLoss):
     """基于聚类的损失函数"""
@@ -12,31 +17,42 @@ class ClusteringLoss(UncertaintyLoss):
         self.ref_model = ref_model
         self.device = device  
         
-    def forward(self, output_ori,target_ori,cluster_centers=None,optimizers_idx=0):
+    def forward(self, output_ori,target_ori,optimizers_idx=0):
         """套用dinknet中的聚类损失计算，使用具有梯度的聚类中心参数进行计算"""
 
         (output,vr_combine_class,vr_classes) = output_ori
         (target,target_class,target_info,y_transform) = target_ori
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         similarity_value = [None,None,None]
-        triplet_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        kl_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        ce_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         # 指标分类
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 相关系数损失,多个目标
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
-                cluster_center = cluster_centers[i]
-                output_item = output[i][:,:,0]
-                target_item = target[:,:,i]    
-                # 实现与聚类簇心的距离计算，以及损失计算
-                sample_center_distance = pairwise_compare(cluster_center,output_item,distance_func=self.ccc_distance_torch)
-                # 取每个类别距离的最小值，视为属于这个类别的点
-                sample_center_distance = torch.min(sample_center_distance,dim=0)[0]
-                center_distance = pairwise_compare(cluster_center,cluster_center,distance_func=self.ccc_distance_torch)
-                self.no_diag(center_distance, cluster_center.shape[0])
-                corr_loss_combine[i] = 10 * sample_center_distance.mean() - center_distance.mean()
-                loss_sum += corr_loss_combine[i] 
-        return loss_sum,[corr_loss_combine,triplet_loss_combine,similarity_value[i]]
+                target_item = target[:,:,i]
+                output_item,out_again = output[i] 
+                # 如果属于特征值阶段，则只比较特征距离
+                if out_again is None:
+                    x_bar, _, _, _ = output_item
+                    corr_loss_combine[i] += self.ccc_loss_comp(x_bar,target_item)
+                    loss_sum += corr_loss_combine[i] 
+                else:  
+                    # 全模式下，会有2次模型处理，得到2组数据
+                    output_item,out_again = output[i] 
+                    _, tmp_q, pred, _ = output_item
+                    tmp_q = tmp_q.data
+                    p = target_distribution(tmp_q)          
+                    x_bar, q, pred, _ =  out_again         
+                    # 实现损失计算
+                    corr_loss_combine[i] += self.ccc_loss_comp(x_bar,target_item)
+                    # DNN结果与聚类簇心的KL散度计算
+                    kl_loss[i] += F.kl_div(q.log(), p, reduction='batchmean')
+                    # GCN结果与聚类簇心的KL散度计算
+                    ce_loss[i] += F.kl_div(pred.log(), p, reduction='batchmean')
+                    loss_sum = loss_sum + corr_loss_combine[i] + kl_loss[i] + 0.1 * ce_loss[i]
+        return loss_sum,[corr_loss_combine,kl_loss,ce_loss]
             
     @staticmethod
     def no_diag(x, n):
@@ -62,7 +78,7 @@ class DistanceMetricLoss(UncertaintyLoss):
         # 相关系数损失,多个目标
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
-                output_item = output[i]
+                output_item = output[i][:,:,0]
                 target_item = target[:,:,i]    
                 # 分别计算输出值与目标值的距离矩阵
                 mat_output = pairwise_distances(output_item,distance_func=self.ccc_distance_torch)

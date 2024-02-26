@@ -2,7 +2,8 @@ import torch
 import torch.nn.functional as F
 
 import numpy as np
-
+import scipy.sparse as sp
+from scipy.sparse import csr_matrix
 from imblearn.over_sampling import SMOTE, ADASYN, BorderlineSMOTE,KMeansSMOTE
 from collections import Counter
 from sklearn.preprocessing import MinMaxScaler
@@ -117,11 +118,26 @@ def enhance_data(ori_data,mode="smote",bins=None):
     amplitude = np.squeeze(amplitude,axis=1)     
     return amplitude,y_res
 
-def normalization(data,res=1e-5,mode="numpy",avoid_zero=True):
+def normalization(data,res=1e-5,mode="numpy",avoid_zero=True,axis=0):
     if mode=="numpy":
-        rtn = (data - np.min(data,axis=0) + res)/(np.max(data,axis=0)-np.min(data,axis=0) + res) 
+        if len(data.shape)==1:
+            sub = data - np.min(data) 
+            max_min = np.max(data)-np.min(data) + res
+            rtn = sub/max_min     
+        else:   
+            sub = data.transpose(1,0) - np.min(data,axis=axis)
+            rtn = sub/(np.max(data,axis=axis)-np.min(data,axis=axis) + res) 
+            rtn = rtn.transpose(1,0)
     else:
-        rtn = (data - torch.min(data,dim=0)[0])/(torch.max(data,dim=0)[0]-torch.min(data,dim=0)[0]) 
+        if len(data.shape)==1:
+            sub = data - torch.min(data) 
+            max_min = torch.max(data)-torch.min(data) + res
+            rtn = sub/max_min
+        else:
+            sub = data.transpose(1,0) - torch.min(data,dim=axis)
+            max_min = torch.max(data,dim=axis)-torch.min(data,dim=axis) + res
+            rtn = sub/max_min
+            rtn = rtn.transpose(1,0)
     if avoid_zero:
         rtn = rtn + res  
     return rtn
@@ -330,6 +346,43 @@ def intersect1d(tensor1, tensor2):
     aux = torch.cat((tensor1, tensor2),dim=0)
     aux = aux.sort()[0]
     return aux[:-1][(aux[1:] == aux[:-1]).data]
+
+
+def build_symmetric_adj(arr,distance_func=None,device=None):
+    """根据原始数据，生成symmetric邻接矩阵以及拉普拉斯矩阵"""
+    
+    # 使用配对比较方式，生成距离矩阵
+    if not isinstance(arr, torch.Tensor):
+        arr = torch.Tensor(arr).to(device)
+    adj_matrix = pairwise_distances(arr,distance_func=distance_func)
+    # 转换为稀疏矩阵
+    adj_matrix = csr_matrix(adj_matrix.cpu().numpy())
+    # 对称性变换
+    adj_matrix = adj_matrix + adj_matrix.T.multiply(adj_matrix.T > adj_matrix) - adj_matrix.multiply(adj_matrix.T > adj_matrix)
+    # 与度矩阵结合
+    adj_matrix = adj_matrix + sp.eye(adj_matrix.shape[0])
+    # 归一化并生成拉普拉斯矩阵
+    adj_matrix = matirx_normalize(adj_matrix)
+    adj_matrix = sparse_mx_to_torch_sparse_tensor(adj_matrix)
+    return adj_matrix
+
+def matirx_normalize(mx):
+    """Row-normalize sparse matrix"""
+    rowsum = np.array(mx.sum(1))
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.
+    r_mat_inv = sp.diags(r_inv)
+    mx = r_mat_inv.dot(mx)
+    return mx
+
+def sparse_mx_to_torch_sparse_tensor(sparse_mx):
+    """Convert a scipy sparse matrix to a torch sparse tensor."""
+    sparse_mx = sparse_mx.tocoo().astype(np.float32)
+    indices = torch.from_numpy(
+        np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
+    values = torch.from_numpy(sparse_mx.data)
+    shape = torch.Size(sparse_mx.shape)
+    return torch.sparse.FloatTensor(indices, values, shape)
 
 if __name__ == "__main__":
     # test_normal_vis()

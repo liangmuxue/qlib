@@ -28,7 +28,7 @@ MixedCovariatesTrainTensorType = Tuple[
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.data_extension.custom_module import _CusModule,_TFTModuleBatch
 from darts_pro.mam.hsan_module import HsanModule
-from darts_pro.mam.dink_module import DinkModule
+from darts_pro.mam.sdcn_module import SdcnModule
 from darts_pro.data_extension.batch_dataset import BatchDataset
 
 class _TFTModuleAsis(_CusModule):
@@ -153,10 +153,12 @@ class _TFTModuleAsis(_CusModule):
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = data_batch    
         
-        recent_data = np.array([item["label_array"][:self.input_chunk_length] for item in target_info])
-        # 与近期高点比较，不能差太多
-        recent_max = np.max(recent_data,axis=1)
-        import_index_bool = (recent_max-recent_data[:,-1])/recent_max<(recent_threhold/100)
+        price_bool = np.ones(past_target.shape[0], dtype=bool)
+        # 如果周期内价格不发生变化，后续统计是会NAN，在此过滤
+        for i in range(len(target_info)):
+            item = target_info[i]
+            item_price = item["price_array"][:self.input_chunk_length]
+            price_bool[i] = (np.unique(item_price).shape[0]<=2)
         # 当前价格不能处于下降趋势
         # less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
         # import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
@@ -176,6 +178,7 @@ class _TFTModuleAsis(_CusModule):
         
         # import_index_bool = self.create_signal_macd(target_info)       
         import_index_bool = self.create_signal_kdj(target_info)    
+        import_index_bool = import_index_bool & price_bool
         if np.sum(import_index_bool)==0:
             return None
         print("total size:{},import_index_bool size:{}".format(past_target.shape[0],np.sum(import_index_bool)))
@@ -544,8 +547,8 @@ class TFTBatchModel(TFTExtModel):
                 train_sample=self.train_sample,
                 **self.pl_module_params,
             )               
-        if self.model_type=="dink_ts":
-            model = DinkModule(
+        if self.model_type=="sdcn":
+            model = SdcnModule(
                 output_dim=self.output_dim,
                 variables_meta_array=variables_meta_array,
                 num_static_components=n_static_components,

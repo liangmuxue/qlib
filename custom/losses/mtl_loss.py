@@ -295,13 +295,14 @@ class UncertaintyLoss(nn.Module):
         for i in range(len(input)):
             if optimizers_idx==i or optimizers_idx==-1:
                 input_item = input[i]
+                input_item_norm = torch.softmax(input_item.squeeze(),dim=1)
                 target_item = target[:,:,i]    
                 vr_item_class = vr_classes[i]
-                # classify_loss_combine[i] += self.vr_losses[i](vr_item_class,label_class)
-                # corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
-                triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
-                                                    dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                     
-                # triplet_loss_combine[i],similarity_value[i] = self.hsan_loss(input_item,index=i)                                                  
+                corr_loss_combine[i] += self.miner_loss_combine[i](input_item.squeeze(),target_item,label_class)
+                # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
+                #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                     
+                triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
+                                                                    target_item,labels=label_class,labels_value=label_item)                    
                 # triplet_loss_combine[i] += self.triplet_online(input_item.squeeze(),label_class,
                 #                                     dist_func=self.ccc_distance_torch,target=target_item,margin=0.3)                        
                 # if i==1:
@@ -325,20 +326,15 @@ class UncertaintyLoss(nn.Module):
                 #     # triplet_loss_combine[i],corr_acc_combine[i] = self.triplet_loss_combine[i](input_item.squeeze(-1), 
                 #     #                                                 target_item,labels=label_class,labels_value=label_item)      
                 loss_sum = corr_loss_combine[i] + triplet_loss_combine[i] + classify_loss_combine[i]
-        # 二次目标损失部分
-        if optimizers_idx==len(input):
-            # ce_loss,acc = self.rankloss(vr_combine_class, price_range_arr,label_class)
-            # ce_loss = self.triplet_online(vr_combine_class, label_class,target=price_range_arr)
-            loss_sum = ce_loss
+                
         # 验证阶段，全部累加
         if optimizers_idx==-1:
             # ce_loss,acc = self.rankloss(vr_combine_class, price_range_arr,label_class)
             # ce_loss = self.triplet_online(vr_combine_class, label_class,target=price_range_arr)
             loss_sum = torch.sum(corr_loss_combine+triplet_loss_combine) + ce_loss + value_diff_loss
             
-        return loss_sum,[corr_loss_combine,triplet_loss_combine,similarity_value[i]]
-
-
+        return loss_sum,[corr_loss_combine,triplet_loss_combine,classify_loss_combine]
+            
     def mse_loss(self,x1, x2):
         return torch.mean(self.mse_dis(x1,x2))
     

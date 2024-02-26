@@ -504,8 +504,8 @@ class StatDataAssis():
         output_pair_dis_arr = []
         # 按照不同的指标分别聚类
         for i in range(output_data.shape[-1]):
-            if i!=2:
-                continue
+            # if i!=2:
+            #     continue
             output = output_data[:,:,i]
             output = output[combine_index]
             target_single = target[:,:,i]
@@ -514,13 +514,17 @@ class StatDataAssis():
             output_pair_dis = pairwise_distances(torch.Tensor(output).to(device),distance_func=loss_unity.ccc_distance_torch,
                                         make_symmetric=True).cpu().numpy()         
             # self.draw_distance_elbaw(output_pair_dis)
+            
+            # 生成二维坐标数据
             mds = MDS(n_components=2, dissimilarity='precomputed',random_state=1)
             coords = mds.fit_transform(output_pair_dis)               
-            # print("do dbscan")  
+            
+            # 使用密度聚类，min_samples标识每簇至少多少个点以上，eps表示簇内距离要求
             db = DBSCAN(eps=0.1, metric='precomputed',min_samples=3,n_jobs=2).fit(output_pair_dis)  
             cluster_labels = self.dbscan_results(db,coords,name="NO_{}".format(i))
             noise_index = np.where(cluster_labels==-1)[0]
-            noise_index = self.filter_noise_data(coords, noise_index,eps=0.05)            
+            noise_index = self.filter_noise_data(coords, noise_index,eps=0.05)   
+            # 可视化，使用二维坐标在图形展示        
             self.matrix_results_viz(coords=coords,labels=labels,noise_index=noise_index,name="output_pn_{}".format(i))
             self.matrix_results_viz(coords=coords,labels=labels,noise_index=None,name="output_s_{}".format(i))
             
@@ -530,16 +534,18 @@ class StatDataAssis():
             # # print("noise_data is:",xy_rtn)
 
             # noise_index = noise_index[filter_idx]
-            for i in range(4):
-                total_acc_cnt = np.sum(target_class[noise_index]==i)   
-                total_acc = total_acc_cnt/noise_index.shape[0]
-                print("total_acc_{}:{}".format(i,total_acc))
+            # for i in range(4):
+            #     total_acc_cnt = np.sum(target_class[noise_index]==i)   
+            #     total_acc = total_acc_cnt/noise_index.shape[0]
+            #     print("total_acc_{}:{}".format(i,total_acc))
             # import_index = np.where(db.labels_==CLASS_SIMPLE_VALUE_MAX)[0]
             # import_target = np.where(target_class==CLASS_SIMPLE_VALUE_MAX)[0]
                                                  
-            # target_pair_dis = pairwise_distances(torch.Tensor(target_single).to(device),distance_func=loss_unity.ccc_distance_torch,
-            #                             make_symmetric=True).cpu().numpy()
-            # self.matrix_results_viz(target_pair_dis,labels=labels,name="target_pn_{}".format(i))    
+            target_pair_dis = pairwise_distances(torch.Tensor(target_single).to(device),distance_func=loss_unity.ccc_distance_torch,
+                                        make_symmetric=True).cpu().numpy()
+            # 对目标值分布的可视化
+            # self.matrix_results_viz(target_pair_dis,labels=labels,name="target_pn_{}".format(i))  
+              
             # target_db = DBSCAN(eps=0.2, metric='precomputed',min_samples=4,n_jobs=2).fit(target_pair_dis)  
             # self.dbscan_results(target_db,target_pair_dis,name="target")            
             # import_acc = import_acc_cnt/import_index.shape[0]
@@ -579,6 +585,7 @@ class StatDataAssis():
             plt.scatter(coords[p2_index,0],coords[p2_index,1], marker='o',color="b", s=50)
             plt.scatter(coords[n_index,0],coords[n_index,1], marker='x',color="k", s=50)
             plt.scatter(coords[n2_index,0],coords[n2_index,1], marker='x',color="y", s=50)
+            # 显示离群点
             if noise_index is not None:
                 plt.scatter(coords[noise_index,0],coords[noise_index,1], marker='p',color="m", s=80)
         # plt.show()      
