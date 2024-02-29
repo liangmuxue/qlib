@@ -37,8 +37,8 @@ class BatchDataset(Dataset):
         # 清除不合规数据
         aggregated = self.clear_inf_data(aggregated)
         # 生成采样数据，用于后续度量比对
-        imp_clu_data = self.cluster_compare_data(aggregated)
-        global_var.set_value("imp_clu_data",imp_clu_data)
+        # imp_clu_data = self.cluster_compare_data(aggregated)
+        # global_var.set_value("imp_clu_data",imp_clu_data)
         
         if self.mode=="process":
             self.batch_data = aggregated 

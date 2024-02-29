@@ -77,10 +77,10 @@ class SdcnTs(nn.Module):
         **kwargs
        ):    
         super(SdcnTs, self).__init__()
-        # Tide作为嵌入特征部分
+        # Tide作为嵌入特征部分,输入和输出使用同一维度
         self.emb_layer = Tide(input_dim,emb_output_dim,future_cov_dim,static_cov_dim,nr_params,num_encoder_layers,num_decoder_layers,
                               decoder_output_dim,hidden_size,temporal_decoder_hidden,temporal_width_past,temporal_width_future,
-                              use_layer_norm,dropout,kwargs["input_chunk_length"],kwargs["output_chunk_length"],outer_mode=1)
+                              use_layer_norm,dropout,kwargs["input_chunk_length"],kwargs["input_chunk_length"],outer_mode=1)
         
         ###### GCN部分的定义，根据Tide模型，取得对应的分层encode数据
         n_input = self.emb_layer.encoder_dim

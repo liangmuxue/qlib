@@ -193,6 +193,7 @@ class _CusModule(BaseMixModule):
         # 目标数据里包含分类信息
         scaler_tuple,target_class,target,target_info = train_batch[5:]       
         scaler = [s[0] for s in scaler_tuple] 
+        past_target = train_batch[0]
         input_batch = self._process_input_batch(train_batch[:5])
         target_class = target_class[:,:,0]     
         # 给criterion对象设置epoch数量。用于动态loss策略
@@ -202,9 +203,9 @@ class _CusModule(BaseMixModule):
         ce_loss = None
         for i in range(len(self.past_split)):
             y_transform = None 
-            (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=train_batch[0],optimizer_idx=i,target_info=target_info)
+            (output,vr_class,tar_class) = self(input_batch,future_target,scaler,past_target=past_target,optimizer_idx=i,target_info=target_info)
             self.output_postprocess(output,i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform),optimizers_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (target,target_class,target_info,y_transform,past_target),optimizers_idx=i)
             (corr_loss_combine,kl_loss,ce_loss) = detail_loss 
             self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.log("train_kl_loss_{}".format(i), kl_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
@@ -1077,7 +1078,7 @@ class _TFTModuleBatch(_CusModule):
         whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
         target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (rank_targets[0],target_class,target_info,None),optimizers_idx=-1)
+        loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (rank_targets[0],target_class,target_info,None,None),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,value_diff_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):

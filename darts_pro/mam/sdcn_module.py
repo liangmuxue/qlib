@@ -22,6 +22,7 @@ from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,normalization
 from tft.class_define import CLASS_SIMPLE_VALUES
 from losses.clustering_loss import ClusteringLoss
+from losses.clustering_loss import target_distribution
 from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
 import cus_utils.global_var as global_var
 
@@ -51,7 +52,7 @@ class SdcnModule(_TFTModuleBatch):
         norm_type: Union[str, nn.Module],
         use_weighted_loss_func=False,
         past_split=None,
-        filter_conv_index=0,
+        step_mode="pretrain",
         batch_file_path=None,
         device="cpu",
         **kwargs,
@@ -62,8 +63,11 @@ class SdcnModule(_TFTModuleBatch):
                                     use_weighted_loss_func=use_weighted_loss_func,batch_file_path=batch_file_path,
                                     device=device,**kwargs)  
         self.output_data_len = len(past_split)
-        self.step_mode = "pretrain"
-        self.switch_epoch_num = 10
+        self.switch_epoch_num = 0
+        self.switch_flag = 0
+        self.step_mode=step_mode
+        # 初始化中间结果数据
+        self.training_step_outputs = [[] for _ in range(self.output_data_len)]
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -104,13 +108,14 @@ class SdcnModule(_TFTModuleBatch):
                 + historic_future_covariates_shape
             )
     
-            # 不使用原设定的输出维度，而是以目标值数量作为实际维度
-            dataset = global_var.get_value("dataset")
             output_dim = 1
     
             future_cov_dim = (
                 future_covariates.shape[1] if future_covariates is not None else 0
             )
+            # 由于使用自监督，则取消未来协变量
+            future_cov_dim = 0
+            
             static_cov_dim = (
                 static_covariates.shape[0] * static_covariates.shape[1]
                 if static_covariates is not None
@@ -158,12 +163,16 @@ class SdcnModule(_TFTModuleBatch):
         out_class_total = []
         batch_size = x_in[1].shape[0]
         
-            
+        # 设置训练模式，预训练阶段，以及全模式的初始阶段，都使用预训练模式
+        if self.switch_flag==0 or self.step_mode=="pretrain":
+            step_mode = "pretrain"
+        else:
+            step_mode = "complete"            
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据优化器编号匹配计算
             if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
-                if self.step_mode=="complete":
+                if step_mode=="complete":
                     # 根据过去目标值(Past Target),生成邻接矩阵
                     with torch.no_grad():
                         # price_array = np.array([t["price_array"] for t in target_info])
@@ -183,10 +192,10 @@ class SdcnModule(_TFTModuleBatch):
                 past_convs_item = x_in[0][i]
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
                 # 使用embedding组合以及邻接矩阵作为输入
-                out = m(x_in_item,adj_matrix,mode=self.step_mode)
+                out = m(x_in_item,adj_matrix,mode=step_mode)
                 # 完整模式下，需要进行2次模型处理
-                if self.step_mode=="complete":
-                    out_again = m(x_in_item,adj_matrix,mode=self.step_mode)
+                if step_mode=="complete":
+                    out_again = m(x_in_item,adj_matrix,mode=step_mode)
                     out = (out,out_again)
                 else:
                     out = (out,None)
@@ -212,40 +221,46 @@ class SdcnModule(_TFTModuleBatch):
         # 由于使用无监督算法，故不需要target数据
         return self.criterion(output,target,optimizers_idx=optimizers_idx)
 
-    def on_train_start(self): 
-        super().on_train_start()
-        # 开始阶段，只训练特征部分
-        if self.current_epoch<self.switch_epoch_num:
-            self.step_mode = "pretrain"
-        else:
-            self.step_mode = "complete"
-        # 初始化训练结果数据
-        self.training_step_outputs = [[] for _ in range(self.output_data_len)]
+    def on_validation_start(self): 
+        super().on_validation_start()
+        if self.step_mode=="complete":
+            # 如果是加载之前的权重继续训练，则需要判断并重置switch_flag变量
+            if self.current_epoch>self.switch_epoch_num:
+                self.switch_flag = 1
 
     def on_train_epoch_start(self):  
         super().on_train_epoch_start()
-        # 每个轮次前，判断并进行训练内容切换
+        # 预训练模式下，没有下面的策略
+        if self.step_mode=="pretrain":
+            return
+        # 如果已经做过切换了，则不进行处理
+        if self.switch_flag==1:
+            return
+        # 全模式训练时，第一个轮次不进行梯度，只取得特征数据
         if self.current_epoch>self.switch_epoch_num:
-            # 切换时，进行聚类以取得初始化的簇心
-            if self.step_mode=="pretrain":
-                for model_seq in range(len(self.sub_models)):
-                    # 取得最近一次的特征中间值，作为聚类输入数据MACD_SDCN_2000_202010
-                    z = [output_item[-1] for output_item in self.training_step_outputs[model_seq]]
-                    z = torch.concat(z,dim=0).detach().cpu().numpy()
-                    n_clusters = len(CLASS_SIMPLE_VALUES.keys())
-                    kmeans = KMeans(n_clusters=n_clusters, n_init=20)
-                    y_pred = kmeans.fit_predict(z)
-                    model = self.sub_models[model_seq]
-                    # 直接把初始化簇心值赋予模型内的参数
-                    model.cluster_layer.data = torch.tensor(kmeans.cluster_centers_).to(self.device)                
-            # 超过特定轮次，切换到全模式
-            self.step_mode = "complete"  
-                                 
+            for model_seq in range(len(self.sub_models)):
+                # 取得最近一次的特征中间值，作为聚类输入数据
+                z = [output_item[-1] for output_item in self.training_step_outputs[model_seq]]
+                z = torch.concat(z,dim=0).detach().cpu().numpy()
+                n_clusters = len(CLASS_SIMPLE_VALUES.keys())
+                kmeans = KMeans(n_clusters=n_clusters, n_init=20)
+                y_pred = kmeans.fit_predict(z)
+                model = self.sub_models[model_seq]
+                # 直接把初始化簇心值赋予模型内的参数
+                model.cluster_layer.data = torch.tensor(kmeans.cluster_centers_).to(self.device)        
+                # 放开梯度冻结
+                self.freeze_apply(model_seq,flag=1)       
+            self.switch_flag = 1 
+        else:
+            # 梯度冻结
+            for model_seq in range(len(self.sub_models)):
+                self.freeze_apply(model_seq)
+                
     def output_postprocess(self,output,index):
         """对于单步输出的补充"""
         
         # 保存训练结果数据，用于后续分析,只在特定轮次进行
-        if self.current_epoch==self.switch_epoch_num:
+        if self.step_mode=="complete" and self.current_epoch==self.switch_epoch_num:
             # 只需要实际数据，忽略模拟数据
             output_act = output[index]
             self.training_step_outputs[index].append(output_act[0])
@@ -262,13 +277,6 @@ class SdcnModule(_TFTModuleBatch):
                 
         loss,detail_loss,output = self.validation_step_real(val_batch_convert, batch_idx)  
         
-        # if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
-        #     output = [output_item.cpu().numpy() for output_item in output]
-        #     (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,rank_scalers) = val_batch 
-        #     data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
-        #                      future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
-        #     output_combine = (output,data)
-        #     pickle.dump(output_combine,self.valid_fout)         
         return loss,detail_loss 
             
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
@@ -289,7 +297,7 @@ class SdcnModule(_TFTModuleBatch):
         target_class = target_class[:,:,0]
         target_vr_class = target_class[:,0].cpu().numpy()
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,y_transform),optimizers_idx=-1)
+        loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,y_transform,past_target),optimizers_idx=-1)
         (corr_loss_combine,kl_loss,ce_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -297,9 +305,56 @@ class SdcnModule(_TFTModuleBatch):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_kl_loss_{}".format(i), kl_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+        
+        if self.step_mode=="pretrain" or self.switch_flag==0:
+            return loss,detail_loss,output
+        # 准确率的计算
+        import_price_result = self.compute_real_class_acc(output_data=output,target_info=target_info,target_class=target_class)            
         return loss,detail_loss,output
 
+    def compute_real_class_acc(self,target_info=None,output_data=None,target_class=None):
+        """计算涨跌幅分类准确度"""
+        
+        # 使用分类判断
+        import_index = self.build_import_index(output_data=output_data)
+        import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result = \
+            self.collect_result(import_index, target_class, target_info)
+        
+        return import_price_result
+           
+    def build_import_index(self,output_data=None):  
+        """生成涨幅达标的预测数据下标"""
+        
+        p_values = []
+        q_values = []
+        pred_values = []
+        for i in range(len(output_data)):
+            output_item,out_again = output_data[i] 
+            _, tmp_q, _, _ = output_item
+            tmp_q = tmp_q.data
+            p = target_distribution(tmp_q)           
+            x_bar, q, pred, _ =  out_again 
+            p_values.append(p)
+            q_values.append(q)
+            pred_values.append(pred)
+        
+        p_values = torch.stack(p_values).cpu().numpy()
+        q_values = torch.stack(q_values).cpu().numpy()
+        pred_values = torch.stack(pred_values).cpu().numpy()
+        
+        p_import_index = self.compute_single_target(p_values)
+        q_import_index = self.compute_single_target(q_values)
+        pred_import_index = self.compute_single_target(pred_values)
+        
+        return p_import_index            
+    
+    def compute_single_target(self,values):     
+        # 综合筛选    
+        p_import_index = np.all(values.argmax(2)==3,axis=0)
+        # 单指标筛选
+        p_import_index = np.where(values[2].argmax(1)==3,axis=0)[0]    
+        return p_import_index
         
         
-              
+           
         

@@ -402,7 +402,7 @@ class TftDataframeModel():
                     model_name=model_name,
                     force_reset=True,
                     log_tensorboard=True,
-                    save_checkpoints=True,
+                    save_checkpoints=True, 
                     past_split=past_split,
                     filter_conv_index=filter_conv_index,
                     work_dir=self.optargs["work_dir"],
@@ -412,7 +412,10 @@ class TftDataframeModel():
                     optimizer_kwargs=optimizer_kwargs,
                     batch_file_path=self.batch_file_path,
                     model_type=model_type,
-                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    step_mode=self.optargs["step_mode"],
+                    pretrain_model_name=self.optargs["pretrain_model_name"],
+                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,
+                                       "callbacks": lightning_callbacks},
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )            
         return my_model          

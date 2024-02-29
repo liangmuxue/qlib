@@ -17,7 +17,9 @@ import tsaug
 
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
+import pytorch_lightning.callbacks as pl_callbacks
 from pytorch_lightning.trainer.states import RunningStage
+from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from sklearn.preprocessing import MinMaxScaler
 
 from cus_utils.common_compute import compute_price_class,compute_price_class_batch,slope_classify_compute,slope_classify_compute_batch
@@ -158,7 +160,7 @@ class _TFTModuleAsis(_CusModule):
         for i in range(len(target_info)):
             item = target_info[i]
             item_price = item["price_array"][:self.input_chunk_length]
-            price_bool[i] = (np.unique(item_price).shape[0]<=2)
+            price_bool[i] = (np.unique(item_price).shape[0]>=2)
         # 当前价格不能处于下降趋势
         # less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
         # import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
@@ -176,8 +178,8 @@ class _TFTModuleAsis(_CusModule):
         # # 需要近期的牛市力度一直处于上方
         # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
         
-        # import_index_bool = self.create_signal_macd(target_info)       
-        import_index_bool = self.create_signal_kdj(target_info)    
+        import_index_bool = self.create_signal_macd(target_info)       
+        # import_index_bool = self.create_signal_kdj(target_info)    
         import_index_bool = import_index_bool & price_bool
         if np.sum(import_index_bool)==0:
             return None
@@ -408,10 +410,11 @@ class TFTBatchModel(TFTExtModel):
         use_weighted_loss_func:bool = False,
         loss_number=3,
         monitor=None,
-        mode="train",
+        step_mode="pretrain",
         past_split=None,
         filter_conv_index=0,
         batch_file_path=None,
+        pretrain_model_name=None,
         **kwargs,
     ):
         
@@ -419,8 +422,27 @@ class TFTBatchModel(TFTExtModel):
                          full_attention,feed_forward,dropout,hidden_continuous_size,categorical_embedding_sizes,add_relative_index,
                          loss_fn,likelihood,norm_type,use_weighted_loss_func,loss_number,monitor,
                          past_split=past_split,filter_conv_index=filter_conv_index,**kwargs)
+        
         self.batch_file_path = batch_file_path
-    
+        # Can be pretrain step, Or complete step
+        self.step_mode = step_mode
+        self.pretrain_model_name = pretrain_model_name
+        
+        # 补充模型保存的参数
+        for index,c in enumerate(self.trainer_params["callbacks"]):
+            if isinstance(c,ModelCheckpoint):
+                # 无法直接修改，新生成并替换
+                checkpoint_callback = pl_callbacks.ModelCheckpoint(
+                    dirpath=c.dirpath,
+                    save_last=True,
+                    monitor="val_loss",
+                    filename="{epoch}-{val_loss:.2f}",
+                    every_n_epochs=2,
+                    save_top_k = -1
+                )
+                checkpoint_callback.CHECKPOINT_NAME_LAST = "last-{epoch}"        
+                self.trainer_params["callbacks"][index] = checkpoint_callback
+                
     def _build_train_dataset(
         self,
         target: Sequence[TimeSeries],
@@ -567,10 +589,17 @@ class TFTBatchModel(TFTExtModel):
                 filter_conv_index=self.filter_conv_index,
                 device=self.device,
                 batch_file_path=self.batch_file_path,
+                step_mode=self.step_mode,
                 model_type=self.model_type,
                 train_sample=self.train_sample,
                 **self.pl_module_params,
-            )      
+            )   
+            # 全模式下，先加载之前的预训练模型
+            if self.step_mode=="complete":
+                pretrained_model = self.load_from_checkpoint(self.pretrain_model_name,work_dir=self.work_dir,best=False)
+                for i in range(len(self.past_split)):
+                    s_model = pretrained_model.model.sub_models[i]
+                    model.sub_models[i] = s_model
         return model         
                
     def _batch_collate_filter(self,ori_batch: List[Tuple]) -> Tuple:
