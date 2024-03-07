@@ -160,15 +160,10 @@ class TensorViz(object):
         mav = ()
         fig, axes = mpf.plot(primary_data, title=target_title,type='candle',addplot=apds, mav=mav,volume=False,returnfig=True,savefig=file_path,figsize=(12, 8))
         axes[0].legend(pri_cols,loc='upper left')        
-    
-def reals_data_test():
-    viz = TensorViz()
-    reals = np.load("/home/qdata/project/pytorch-forecasting/viz/reals.npy")
-    viz.viz_matrix_var(reals)
-    
+
 if __name__ == "__main__":
-    # test_normal_vis()
-    reals_data_test()
+    test_normal_vis()
+    # reals_data_test()
     
        
     

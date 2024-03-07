@@ -25,7 +25,7 @@ from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 
 from cus_utils.common_compute import compute_price_class,compute_price_class_batch
-from darts_pro.data_extension.batch_dataset import BatchDataset,BatchOutputDataset
+from darts_pro.data_extension.batch_dataset import BatchDataset,BatchOutputDataset,ClustringBatchOutputDataset
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from darts_pro.data_extension.custom_nor_model import TFTAsisModel,TFTBatchModel
@@ -279,8 +279,8 @@ class TftDatafAnalysis():
         batch_file_path = self.kwargs["batch_file_path"]
         batch_file = "{}/valid_output_batch.pickel".format(batch_file_path)   
         
-        ds = BatchOutputDataset(batch_file,mode="process",range_num=None) 
+        ds = ClustringBatchOutputDataset(batch_file,mode="process",range_num=None) 
         data_assis = StatDataAssis()
-        data_assis.analysis_compare_output(ds)
+        data_assis.analysis_compare_output_clu(ds)
                 
         

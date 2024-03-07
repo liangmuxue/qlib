@@ -81,6 +81,17 @@ def ccc_distance(input_ori,target_ori):
     ccc_loss = 1 - ccc
     return ccc_loss  
 
+def test_corr():
+    clu = torch.rand(4,5)
+    print("clu",clu)
+    target = torch.rand(6,5)
+    print("target",target)
+    corr_tensor = torch.concat([clu,target],dim=0)
+    corr = torch.corrcoef(corr_tensor)
+    print("corr",corr)
+    corr_real = corr[clu.shape[0]:,:clu.shape[0]]
+    print("corr_real",corr_real)
+
 class MseLoss():
     """自定义mse损失，用于设置类别权重"""
     
@@ -135,7 +146,8 @@ if __name__ == "__main__":
     # test_sort()
     # test_kmeans()
     # test_repeat()
-    test_mul()
+    # test_mul()
+    test_corr()
     # test_pairwise()
     # test_embedding()
     # test_zip()

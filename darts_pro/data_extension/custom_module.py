@@ -1052,14 +1052,17 @@ class _TFTModuleBatch(_CusModule):
         loss,detail_loss,output = self.validation_step_real(val_batch_convert, batch_idx)  
         
         if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
-            output = [output_item.cpu().numpy() for output_item in output]
-            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,rank_scalers) = val_batch 
-            data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
-                             future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
-            output_combine = (output,data)
-            pickle.dump(output_combine,self.valid_fout)         
+            self.dump_val_data(val_batch,output)
         return loss,detail_loss   
     
+    def dump_val_data(self,val_batch,output):
+        output = [output_item.cpu().numpy() for output_item in output]
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,rank_scalers) = val_batch 
+        data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
+                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
+        output_combine = (output,data)
+        pickle.dump(output_combine,self.valid_fout)  
+                
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         

@@ -57,10 +57,10 @@ task:
             n_jobs: 20
             log_every_n_steps: 50
             type: 'fit_batch'
-            n_epochs : 100
+            n_epochs : 180
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/MACD_SDCN_100_202010'
+            batch_file_path: 'custom/data/asis/KDJ_SDCN_2000_202010'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,12 +77,12 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MACD_SDCN_PRETRAIN_100_202010'
+               model_name: 'KDJ_SDCN_NORM_2000_202010'
                model_type: 'sdcn'
-               load_weight: False
+               load_weight: True
                best_weight: False
-               step_mode: 'pretrain'
-               pretrain_model_name: 'MACD_SDCN_PRETRAIN_100_202010'
+               step_mode: 'complete'
+               pretrain_model_name: 'KDJ_SDCN_PRETRAIN_NORM_2000_202010'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

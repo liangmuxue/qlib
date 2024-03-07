@@ -15,15 +15,19 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
 from sklearn.metrics import adjusted_rand_score as ari_score
+from sklearn.manifold import MDS
 
+from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
 from darts_pro.act_model.sdcn_ts import SdcnTs
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
-from cus_utils.common_compute import build_symmetric_adj,normalization
-from tft.class_define import CLASS_SIMPLE_VALUES
+from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances
+from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
 from losses.clustering_loss import ClusteringLoss
 from losses.clustering_loss import target_distribution
 from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
+from cus_utils.visualization import clu_coords_viz
+
 import cus_utils.global_var as global_var
 
 MixedCovariatesTrainTensorType = Tuple[
@@ -102,6 +106,8 @@ class SdcnModule(_TFTModuleBatch):
             past_target_shape = len(variables_meta["input"]["past_target"])
             past_covariates_shape = len(variables_meta["input"]["past_covariate"])
             historic_future_covariates_shape = len(variables_meta["input"]["historic_future_covariate"])
+            # 记录动态数据长度，后续需要切片
+            self.dynamic_conv_shape = past_target_shape + past_covariates_shape
             input_dim = (
                 past_target_shape
                 + past_covariates_shape
@@ -170,26 +176,25 @@ class SdcnModule(_TFTModuleBatch):
             step_mode = "complete"            
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
+            # 根据配置，不同的模型使用不同的过去协变量
+            past_convs_item = x_in[0][i]            
             # 根据优化器编号匹配计算
             if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
                 if step_mode=="complete":
                     # 根据过去目标值(Past Target),生成邻接矩阵
                     with torch.no_grad():
-                        # price_array = np.array([t["price_array"] for t in target_info])
-                        # price_array_ori = price_array[:,:self.input_chunk_length]
-                        # adj_target = normalization(price_array_ori,axis=1)
-                        adj_target = future_target
-                        # 生成symmetric邻接矩阵以及拉普拉斯矩阵
-                        adj_matrix = build_symmetric_adj(adj_target,device=self.device,distance_func=self.criterion.ccc_distance_torch)
+                        # 使用目标协变量构造邻接矩阵
+                        adj_target = past_convs_item[:,:,:1]
+                        # 生成symmetric邻接矩阵以及拉普拉斯矩阵--使用协方差矩阵代替
+                        adj_matrix = batch_cov(adj_target)[0]
+                        # adj_matrix = build_symmetric_adj(adj_target,device=self.device,distance_func=self.criterion.ccc_distance_torch)
                         # 如果维度不够，则补0
-                        if adj_matrix.shape[0]<batch_size:
+                        if adj_matrix.shape[-1]<batch_size:
                             pad_zize = batch_size - adj_matrix.shape[0]
                             adj_matrix = torch.nn.functional.pad(adj_matrix, (0, pad_zize, 0, pad_zize))
                         adj_matrix = adj_matrix.double().to(self.device)      
                 else:
                     adj_matrix = None          
-                # 根据配置，不同的模型使用不同的过去协变量
-                past_convs_item = x_in[0][i]
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
                 # 使用embedding组合以及邻接矩阵作为输入
                 out = m(x_in_item,adj_matrix,mode=step_mode)
@@ -240,7 +245,7 @@ class SdcnModule(_TFTModuleBatch):
         if self.current_epoch>self.switch_epoch_num:
             for model_seq in range(len(self.sub_models)):
                 # 取得最近一次的特征中间值，作为聚类输入数据
-                z = [output_item[-1] for output_item in self.training_step_outputs[model_seq]]
+                z = [output_item[-2] for output_item in self.training_step_outputs[model_seq]]
                 z = torch.concat(z,dim=0).detach().cpu().numpy()
                 n_clusters = len(CLASS_SIMPLE_VALUES.keys())
                 kmeans = KMeans(n_clusters=n_clusters, n_init=20)
@@ -264,21 +269,12 @@ class SdcnModule(_TFTModuleBatch):
             # 只需要实际数据，忽略模拟数据
             output_act = output[index]
             self.training_step_outputs[index].append(output_act[0])
-
-    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
-        """训练验证部分"""
-        
-        (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,rank_targets) = val_batch    
-         
-        # 使用排序目标替换原数据
-        val_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
-                               static_covariates,scaler,target_class,target,target_info,rank_targets)
-                
-        loss,detail_loss,output = self.validation_step_real(val_batch_convert, batch_idx)  
-        
-        return loss,detail_loss 
-            
+    
+    
+    def training_step_real(self, train_batch, batch_idx) -> torch.Tensor:
+        ret =  super().training_step_real(train_batch, batch_idx)
+        return ret
+    
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -308,19 +304,45 @@ class SdcnModule(_TFTModuleBatch):
         
         if self.step_mode=="pretrain" or self.switch_flag==0:
             return loss,detail_loss,output
+        
         # 准确率的计算
-        import_price_result = self.compute_real_class_acc(output_data=output,target_info=target_info,target_class=target_class)            
+        import_price_result,z_values = self.compute_real_class_acc(output_data=output,target_info=target_info,target_class=target_class)          
+        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        if self.total_imp_cnt==0:
+            self.total_imp_cnt = total_imp_cnt
+        else:
+            self.total_imp_cnt += total_imp_cnt
+        # 累加结果集，后续统计   
+        if self.import_price_result is None:
+            self.import_price_result = import_price_result    
+        else:
+            if import_price_result is not None:
+                import_price_result_array = import_price_result.values
+                # 修改编号，避免重复
+                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
+                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
+        
+        # 可视化
+        whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
+        target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)        
+        output_viz = z_values.transpose(1,2,0)
+        # self.viz_results(output_viz, target_inverse, import_price_result, batch_idx, target_vr_class, target_info, viz_target)
+        
+        # 聚类可视化
+        self.clustring_viz(z_values,target_class=target_vr_class)
+        
         return loss,detail_loss,output
 
     def compute_real_class_acc(self,target_info=None,output_data=None,target_class=None):
         """计算涨跌幅分类准确度"""
         
         # 使用分类判断
-        import_index = self.build_import_index(output_data=output_data)
+        import_index,z_values = self.build_import_index(output_data=output_data)
         import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result = \
-            self.collect_result(import_index, target_class, target_info)
+            self.collect_result(import_index, target_class.cpu().numpy(), target_info)
         
-        return import_price_result
+        return import_price_result,z_values
            
     def build_import_index(self,output_data=None):  
         """生成涨幅达标的预测数据下标"""
@@ -328,33 +350,120 @@ class SdcnModule(_TFTModuleBatch):
         p_values = []
         q_values = []
         pred_values = []
+        z_values = []
         for i in range(len(output_data)):
             output_item,out_again = output_data[i] 
-            _, tmp_q, _, _ = output_item
+            _, tmp_q, _, _,_ = output_item
             tmp_q = tmp_q.data
             p = target_distribution(tmp_q)           
-            x_bar, q, pred, _ =  out_again 
+            x_bar, q, pred, _,z =  out_again 
             p_values.append(p)
             q_values.append(q)
             pred_values.append(pred)
+            z_values.append(z)
         
         p_values = torch.stack(p_values).cpu().numpy()
         q_values = torch.stack(q_values).cpu().numpy()
         pred_values = torch.stack(pred_values).cpu().numpy()
+        z_values = torch.stack(z_values).cpu().numpy()
         
         p_import_index = self.compute_single_target(p_values)
         q_import_index = self.compute_single_target(q_values)
         pred_import_index = self.compute_single_target(pred_values)
         
-        return p_import_index            
+        return pred_import_index,z_values       
     
     def compute_single_target(self,values):     
         # 综合筛选    
         p_import_index = np.all(values.argmax(2)==3,axis=0)
         # 单指标筛选
-        p_import_index = np.where(values[2].argmax(1)==3,axis=0)[0]    
+        p_import_index = np.where(values[2].argmax(1)==3)[0]    
         return p_import_index
         
+    
+    def viz_results(self,output_inverse=None,target_inverse=None,import_price_result=None,batch_idx=0,target_vr_class=None,target_info=None,viz_target=None):
+        dataset = global_var.get_value("dataset")
+        df_all = dataset.df_all
+        names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
+        names = ["price","macd_output","macd","rank_output","rank","qtlu_output","qtlu"]          
+        result = []
+              
+        res_group = import_price_result.groupby("result")
+        target_imp_index = np.where(target_vr_class==3)[0]
+        if target_imp_index.shape[0]>0:
+            for i in range(15):
+                rand_index = np.random.randint(0,target_imp_index.shape[0]-1)
+                s_index = target_imp_index[rand_index]
+                ts = target_info[s_index]
+                pred_data = output_inverse[s_index]
+                pred_center_data = pred_data[:,0]
+                pred_second_data = pred_data[:,1]         
+                pred_third_data = pred_data[:,2]      
+                target_item = target_inverse[s_index]
+                win = "win_target_{}".format(batch_idx,i)
+                self.draw_row(pred_center_data, pred_second_data, pred_third_data,target_item=target_item, ts=ts, names=names,viz=viz_target,win=win)
         
+        # total_index = 0                    
+        # for result,group in res_group:
+        #     r_index = -1
+        #     unique_group = group.drop_duplicates(subset=['instrument'], keep='first')
+        #     for index, row in unique_group.iterrows():
+        #         r_index += 1
+        #         total_index += 1
+        #         s_index = row["imp_index"]
+        #         ts = target_info[s_index]
+        #         pred_data = output_inverse[s_index]
+        #         pred_center_data = pred_data[:,0]
+        #         pred_second_data = pred_data[:,1]
+        #         target_item = target_inverse[s_index]
+        #         pred_third_data = pred_data[:,2]
+        #         # 可以从全局变量中，通过索引获得实际价格
+        #         # df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
+        #         #                         (df_all["instrument_rank"]==ts["item_rank_code"])]            
+        #         win = "win{}_{}".format(ts["instrument"],ts["future_start"])
+        #         if r_index>15:
+        #             break
+        #         if result==CLASS_SIMPLE_VALUE_MAX:                 
+        #             viz = viz_result_suc
+        #         elif result==0:                 
+        #             viz = viz_result_fail   
+        #         else:
+        #             viz = viz_result_nor  
+
+    def clustring_viz(self,z_values,target_class=None):
+        """使用聚类可视化方法进行测试"""
+        
+        len_t = len(self.sub_models)
+        combine_index = np.where((target_class==3)|(target_class==0)|(target_class==1)|(target_class==2))[0]
+        labels = target_class[combine_index]
+        labels = np.concatenate((np.array([0,1,2,3]),labels))
+        for i in range(len_t):
+            model = self.sub_models[i]
+            # 取得簇心参数，并与特征输出进行距离比较
+            cluster_center = model.cluster_layer.data.cpu().numpy()
+            z_value = z_values[i]
+            data = np.concatenate((cluster_center,z_value),axis=0)
+            # 生成二维坐标数据
+            mds = MDS(n_components=2, dissimilarity='euclidean',random_state=1)
+            coords = mds.fit_transform(data)      
+            # 重点标记学习到的簇心
+            imp_index=np.array([j for j in range(cluster_center.shape[0])])      
+            # 作图    
+            clu_coords_viz(coords,imp_index=imp_index,labels=labels,name="cluster_{}".format(i))             
+                       
+    def dump_val_data(self,val_batch,output):
+        pass
+        # output_real = []
+        # for output_item in output:
+        #     output_item,out_again = output_item
+        #     x_bar, q, pred, _,z =  out_again 
+        #     p = target_distribution(q.data) 
+        #     output_real.append([z.cpu().numpy(),p.cpu().numpy(),pred.cpu().numpy()])
+        # # output_real = np.array(output_real)  
+        # (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,rank_scalers) = val_batch 
+        # data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
+        #                  future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
+        # output_combine = (output_real,data)
+        # pickle.dump(output_combine,self.valid_fout)      
            
         

@@ -1,13 +1,10 @@
 import numpy as np
 import torch
+from torch import nn
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss
-from cus_utils.common_compute import pairwise_distances,pairwise_compare
-
-def target_distribution(q):
-    weight = q**2 / q.sum(0)
-    return (weight.t() / weight.sum(1)).t()
+from cus_utils.common_compute import pairwise_distances,target_distribution
 
 class ClusteringLoss(UncertaintyLoss):
     """基于聚类的损失函数"""
@@ -24,34 +21,38 @@ class ClusteringLoss(UncertaintyLoss):
         (target,target_class,target_info,y_transform,past_target) = target_ori
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         similarity_value = [None,None,None]
-        kl_loss = torch.Tensor(np.array([1 for i in range(len(output))])).to(self.device)
-        ce_loss = torch.Tensor(np.array([1 for i in range(len(output))])).to(self.device)
+        kl_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        ce_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
         # 指标分类
         loss_sum = torch.tensor(0.0).to(self.device) 
         fake_loss = torch.tensor(0.0).to(self.device) 
         # 相关系数损失,多个目标
+        label_class = target_class[:,0]
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
-                target_item = target[:,:,i]
+                real_target = target[:,:,i]
+                real_target = past_target[:,:,i]
                 # 全模式下，会有2次模型处理，得到2组数据
                 output_item,out_again = output[i] 
                 # 如果属于特征值阶段，则只比较特征距离
                 if out_again is None:
-                    x_bar, _, _, _ = output_item
-                    corr_loss_combine[i] += self.ccc_loss_comp(x_bar,past_target[:,:,i])
+                    x_bar, _, _, _,_ = output_item
+                    corr_loss_combine[i] = 100 * self.ccc_loss_comp(x_bar,real_target)
                 else:  
-                    _, tmp_q, _, _ = output_item
+                    _, tmp_q, _, _,_ = output_item
                     tmp_q = tmp_q.data
                     p = target_distribution(tmp_q)          
-                    x_bar, q, pred, _ =  out_again         
+                    x_bar, q, pred, _,z =  out_again         
                     # 实现损失计算
-                    corr_loss_combine[i] += self.ccc_loss_comp(x_bar,past_target[:,:,i])
+                    corr_loss_combine[i] = 100 * self.ccc_loss_comp(x_bar,real_target)
                     # DNN结果与聚类簇心的KL散度计算
-                    kl_loss[i] = 5 * F.kl_div(q.log(), p, reduction='batchmean')
+                    kl_loss[i] = 10 * F.kl_div(q.log(), p, reduction='batchmean')
                     # GCN结果与聚类簇心的KL散度计算
+                    # ce_loss[i] = nn.NLLLoss()(torch.log(pred),label_class)
                     ce_loss[i] = F.kl_div(pred.log(), p, reduction='batchmean')
                 loss_sum = loss_sum + corr_loss_combine[i] + kl_loss[i] + ce_loss[i]
         return loss_sum,[corr_loss_combine,kl_loss,ce_loss]
+
             
     @staticmethod
     def no_diag(x, n):

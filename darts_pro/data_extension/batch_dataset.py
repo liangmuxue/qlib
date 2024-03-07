@@ -321,5 +321,100 @@ class BatchOutputDataset(BatchDataset):
         target_inverse = scaler_tuple[0].inverse_transform(whole_target)  
         output_inverse = self.output_inverse_data[index]
         return target_inverse,target_class[0],output_inverse,target_info
+
+class ClustringBatchOutputDataset(BatchDataset):    
     
+    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=[0,10000]):
+        
+        self.mode = mode
+        self.filepath = filepath
+        self.target_col = target_col
+        self.fit_names = fit_names      
+            
+
+        output_batch_data = []
+        target_batch_data = []
+        
+        # 文件中已经包含了输出数据和目标数据
+        with open(filepath, "rb") as fin:
+            while True:
+                try:
+                    data = pickle.load(fin)
+                    output_batch_data.append(data[0])
+                    target_batch_data.append(data[1])
+                except EOFError:
+                    break  
+                        
+        # 训练数据 
+        aggregated = self.create_aggregated_data(target_batch_data)    
+        # 输出数据    
+        len_t = len(output_batch_data[0])
+        output_combine = [[[],[],[]] for _ in range(len_t)]    
+        for item in output_batch_data:
+            for i,t_item in enumerate(item):
+                z,p,pred = t_item
+                output_combine[i][0].append(z)
+                output_combine[i][1].append(p)
+                output_combine[i][2].append(pred)
+        output = [[np.concatenate(output_combine[i][0]),np.concatenate(output_combine[i][1]),np.concatenate(output_combine[i][2])] for i in range(len_t)]
+            
+        if range_num is not None:
+            output = output[range_num[0]:range_num[1]]
+            self.range_num = range_num    
+        else:
+            self.range_num = [0,output[0][0].shape[0]]    
+        # 目标数据
+        self.target_data = aggregated 
+        self.output_inverse_data = output
+        self.output_data = output
+
+    def create_aggregated_data(self,batch_data):
+        first_sample = batch_data[0]
+        aggregated = []
+        for i in range(len(first_sample)):
+            elem = first_sample[i][0]
+            if isinstance(elem, np.ndarray):
+                sample_list = np.concatenate([sample[i] for sample in batch_data],axis=0)
+                aggregated.append(
+                    sample_list
+                )
+            elif isinstance(elem, MinMaxScaler):
+                s_list = []
+                for sample in batch_data:
+                    for item in sample[i]:
+                        s_list.append(item)
+                aggregated.append(s_list)
+            elif isinstance(elem, StockNormalizer):
+                aggregated.append([sample[i] for sample in batch_data])    
+            elif isinstance(elem, tuple):
+                t_list = []
+                for sample in batch_data:
+                    for item in sample[i]:
+                        t_list.append(item)
+                aggregated.append(t_list)    
+            elif isinstance(elem, list):
+                t_list = []
+                for sample in batch_data:
+                    for item in sample[i]:
+                        t_list.append(item)
+                aggregated.append(t_list)                                    
+            elif isinstance(elem, Dict):
+                d_list = []
+                for sample in batch_data:
+                    for item in sample[i]:
+                        d_list.append(item)    
+                aggregated.append(d_list)       
+            elif elem is None:
+                aggregated.append(None)  
+        return aggregated
+            
+    def __getitem__(self, index):
+        
+        batch_data = [item[index] for item in self.target_data]
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = batch_data
+        # 反归一化取得实际目标数据
+        whole_target = np.concatenate((past_target,target),axis=0)
+        target_inverse = scaler_tuple[0].inverse_transform(whole_target)  
+        output_inverse = self.output_inverse_data[index]
+        return target_inverse,target_class[0],output_inverse,target_info    
     

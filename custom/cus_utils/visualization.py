@@ -3,7 +3,34 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+import matplotlib.pyplot as plt
+
 VIZ_ITEM_NUMBER = 3
+
+
+def clu_coords_viz(coords,imp_index=None,name="viz_coords_result",labels=None,save_path=None):
+    """Viz for coords points"""
+    
+    plt.figure(name,figsize=(12,9))
+    if labels is None:
+        plt.scatter(coords[:,0],coords[:,1],marker='o')
+    else:
+        p_index = np.where(labels==3)[0]
+        p2_index = np.where(labels==2)[0]
+        n_index = np.where(labels==0)[0]
+        n2_index = np.where(labels==1)[0]
+        plt.scatter(coords[p_index,0],coords[p_index,1], marker='o',color="r", s=50)
+        plt.scatter(coords[p2_index,0],coords[p2_index,1], marker='o',color="b", s=50)
+        plt.scatter(coords[n_index,0],coords[n_index,1], marker='x',color="k", s=50)
+        plt.scatter(coords[n2_index,0],coords[n2_index,1], marker='x',color="y", s=50)
+        # 显示关注点
+        if imp_index is not None and imp_index.shape[0]>0:
+            plt.scatter(coords[imp_index,0],coords[imp_index,1], marker='p',color="m", s=80)
+        if save_path is None:
+            save_path = './custom/data/results'
+    plt.savefig("{}/{}".format(save_path,name))  
+    return coords 
+
 
 class VisUtil:
     
@@ -186,4 +213,7 @@ class VisUtil:
         else:
             self.viz_valid.viz_matrix_var(output,win=win_output,title=title,names=names)
     
+       
+        
+        
     

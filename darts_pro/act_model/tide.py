@@ -26,6 +26,7 @@ class Tide(nn.Module):
         dropout: float,
         input_chunk_length=25,
         output_chunk_length=5,
+        z_layer_dim=5,
         outer_mode=0, 
     ):    
         
@@ -119,8 +120,8 @@ class Tide(nn.Module):
             ],
         )
         
-        # 添加一个线性连接层，用于向外透露encode中间数据
-        self.z_layer = nn.Linear(hidden_size, hidden_size)
+        # 添加一个线性连接层，用于向外透露encode中间数据,注意这里使用预测序列长度作为输出长度
+        self.z_layer = nn.Linear(hidden_size, z_layer_dim)
         
         self.decoders = nn.Sequential(
             *[
@@ -231,9 +232,9 @@ class Tide(nn.Module):
             enc_data.append(encoded)    
             
         # 添加中间数据层处理，用于模型协同
-        encoded = self.z_layer(encoded)
-        # 记录初始encode中间数据
-        encoded_z = encoded.clone()        
+        encoded_z = self.z_layer(encoded)
+        # # 记录初始encode中间数据
+        # encoded_z = encoded.clone()        
         decoded = self.decoders(encoded)
 
         # get view that is batch size x output chunk length x self.decoder_output_dim x nr params

@@ -134,8 +134,8 @@ def normalization(data,res=1e-5,mode="numpy",avoid_zero=True,axis=0):
             max_min = torch.max(data)-torch.min(data) + res
             rtn = sub/max_min
         else:
-            sub = data.transpose(1,0) - torch.min(data,dim=axis)
-            max_min = torch.max(data,dim=axis)-torch.min(data,dim=axis) + res
+            sub = data.transpose(1,0) - torch.min(data,dim=axis)[0]
+            max_min = torch.max(data,dim=axis)[0] - torch.min(data,dim=axis)[0] + res
             rtn = sub/max_min
             rtn = rtn.transpose(1,0)
     if avoid_zero:
@@ -383,6 +383,25 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     values = torch.from_numpy(sparse_mx.data)
     shape = torch.Size(sparse_mx.shape)
     return torch.sparse.FloatTensor(indices, values, shape)
+
+def batch_cov(points):
+    points = points.permute(2,1,0)
+    B, N, D = points.size()
+    mean = points.mean(dim=1).unsqueeze(1)
+    diffs = (points - mean).reshape(B * N, D)
+    prods = torch.bmm(diffs.unsqueeze(2), diffs.unsqueeze(1)).reshape(B, N, D, D)
+    bcov = prods.sum(dim=1) / (N - 1)  # Unbiased estimate
+    return bcov  # (B, D, D)
+
+def target_distribution(q):
+    weight = q**2 / q.sum(0)
+    return (weight.t() / weight.sum(1)).t()
+
+def corr_compute(source,target):
+    corr_tensor = torch.concat([source,target],dim=0)
+    corr = torch.corrcoef(corr_tensor)
+    corr_real = corr[source.shape[0]:,:source.shape[0]]
+    return corr_real
 
 if __name__ == "__main__":
     # test_normal_vis()
