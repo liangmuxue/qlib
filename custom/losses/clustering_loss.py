@@ -31,25 +31,27 @@ class ClusteringLoss(UncertaintyLoss):
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[:,:,i]
-                real_target = past_target[:,:,i]
+                # real_target = past_target[:,:,i]
                 # 全模式下，会有2次模型处理，得到2组数据
                 output_item,out_again = output[i] 
                 # 如果属于特征值阶段，则只比较特征距离
                 if out_again is None:
                     x_bar, _, _, _,_ = output_item
-                    corr_loss_combine[i] = 100 * self.ccc_loss_comp(x_bar,real_target)
+                    corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
                 else:  
-                    _, tmp_q, _, _,_ = output_item
+                    _, tmp_q, temp_pred, _,_ = output_item
                     tmp_q = tmp_q.data
-                    p = target_distribution(tmp_q)          
-                    x_bar, q, pred, _,z =  out_again         
+                    temp_pred = temp_pred.data
+                    p = target_distribution(tmp_q)      
+                    pred_p = target_distribution(temp_pred)     
+                    x_bar, q, pred, pred_value,z =  out_again         
                     # 实现损失计算
-                    corr_loss_combine[i] = 100 * self.ccc_loss_comp(x_bar,real_target)
+                    corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
                     # DNN结果与聚类簇心的KL散度计算
-                    kl_loss[i] = 10 * F.kl_div(q.log(), p, reduction='batchmean')
+                    # kl_loss[i] = 10 * F.kl_div(q.log(), p, reduction='batchmean')
                     # GCN结果与聚类簇心的KL散度计算
                     # ce_loss[i] = nn.NLLLoss()(torch.log(pred),label_class)
-                    ce_loss[i] = F.kl_div(pred.log(), p, reduction='batchmean')
+                    ce_loss[i] = 10 * F.kl_div(pred.log(), pred_p, reduction='batchmean')
                 loss_sum = loss_sum + corr_loss_combine[i] + kl_loss[i] + ce_loss[i]
         return loss_sum,[corr_loss_combine,kl_loss,ce_loss]
 

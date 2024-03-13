@@ -110,6 +110,7 @@ class BatchDataset(Dataset):
                 aggregated.append(None)  
         return aggregated
     
+    
     def clear_inf_data(self,agg_data):
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = agg_data
         keep_idx = []
@@ -258,7 +259,85 @@ class BatchDataset(Dataset):
         if self.mode.startswith("analysis"):
             return self.range_num[1] - self.range_num[0]
             
+
+class BatchCluDataset(BatchDataset):
     
+    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None):
+        
+        self.mode = mode
+        self.filepath = filepath
+        self.target_col = target_col
+        self.fit_names = fit_names      
+        self.range_num = range_num        
+        
+        batch_data = []
+        with open(filepath, "rb") as fin:
+            while True:
+                try:
+                    batch_data.append(pickle.load(fin))
+                except EOFError:
+                    break            
+                
+        aggregated = self.create_aggregated_data(batch_data)    
+        # 清除不合规数据
+        aggregated = self.combine_smb_data(aggregated)
+        self.batch_data = aggregated 
+                
+    def combine_smb_data(self,data):
+        """合并为以时间段为单位的多只股票并列的格式"""
+        
+        start_data_rec = [] 
+        instrument_data = [] 
+        for item in data[-1]:
+            start_data_rec.append(item["start"])
+            instrument_data.append(item["item_rank_code"])
+        
+        total_len = len(data[-1])
+        # 以开始日期为单位进行聚合
+        start_data_uni = list(set(start_data_rec)).sort()
+        instrument_data_uni = list(set(instrument_data)).sort()
+        data_sample = data[0]
+        
+        def concat_shape(item_data):
+            return [len(start_data_uni),len(instrument_data_uni)] + item_data.shape
+        
+        # 按照新结构生成空数据，然后填充
+        past_target_combine = np.zeros(concat_shape(data_sample[0]))
+        past_covariates_combine = np.zeros(concat_shape(data_sample[1]))
+        historic_future_covariates_combine = np.zeros(concat_shape(data_sample[2]))
+        future_covariates_combine = np.zeros(concat_shape(data_sample[3]))
+        static_covariates_combine = np.zeros(concat_shape(data_sample[4]))
+        scaler_tuple_combine = [[None for _ in range(len(instrument_data_uni))] for _ in len(start_data_uni)]
+        target_class_combine = np.zeros(concat_shape(data_sample[6]))
+        target_combine = np.zeros(concat_shape(data_sample[7]))
+        target_info_combine = [[None for _ in range(len(instrument_data_uni))] for _ in len(start_data_uni)]
+        
+        def fill_data(combine_data,item_data,i,j):
+            combine_data[i,j,:,:] = item_data
+                
+        # 遍历数据，进行位置匹配
+        for i in range(total_len):
+            (past_target,past_covariates, historic_future_covariates,future_covariates,
+             static_covariates,scaler_tuple,target_class,target,target_info) = data[i]
+            # 根据开始日期，以及股票编号，反向查询对应的位置索引
+            start = target_info["start"]
+            instrument = target_info["item_rank_code"]
+            start_data_idx = start_data_uni.index(start)
+            instrument_data_idx = instrument_data_uni.index(instrument)
+            # 直接按照索引坐标填充
+            fill_data(past_target_combine,past_target, start_data_idx,instrument_data_idx)
+            fill_data(past_covariates_combine,past_covariates, start_data_idx,instrument_data_idx)
+            fill_data(historic_future_covariates_combine,historic_future_covariates, start_data_idx,instrument_data_idx)
+            fill_data(future_covariates_combine,future_covariates, start_data_idx,instrument_data_idx)
+            fill_data(static_covariates_combine,static_covariates, start_data_idx,instrument_data_idx)
+            scaler_tuple_combine[start_data_idx,instrument_data_idx] = scaler_tuple
+            fill_data(target_class_combine,target_class, start_data_idx,instrument_data_idx)
+            fill_data(target_combine,target, start_data_idx,instrument_data_idx)
+            target_info_combine[start_data_idx,instrument_data_idx] = target_info
+            
+        return (past_target_combine,past_covariates_combine, historic_future_covariates_combine,future_covariates_combine,
+                static_covariates_combine,scaler_tuple_combine,target_class_combine,target_combine,target_info_combine)   
+                
 class BatchOutputDataset(BatchDataset):    
     
     def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=[0,10000]):

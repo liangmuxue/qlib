@@ -77,12 +77,12 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'KDJ_SDCN_NORM_2000_202010'
+               model_name: 'KDJ_SDCN_GCNPRED_2000_202010'
                model_type: 'sdcn'
                load_weight: True
                best_weight: False
                step_mode: 'complete'
-               pretrain_model_name: 'KDJ_SDCN_PRETRAIN_NORM_2000_202010'
+               pretrain_model_name: 'KDJ_SDCN_PRED_PRETRAIN_2000_202010'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

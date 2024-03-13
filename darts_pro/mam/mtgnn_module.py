@@ -10,22 +10,19 @@ import tsaug
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
-from torch.utils.data import DataLoader
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans,AgglomerativeClustering
 from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
 from sklearn.metrics import adjusted_rand_score as ari_score
 from sklearn.manifold import MDS
 
 from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
-from darts_pro.act_model.sdcn_ts import SdcnTs
+from darts_pro.act_model.mtgnn import gtnet
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
 from losses.clustering_loss import ClusteringLoss
 from losses.clustering_loss import target_distribution
-from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
 from cus_utils.visualization import clu_coords_viz
 from cus_utils.clustering import get_cluster_center
 import cus_utils.global_var as global_var
@@ -36,7 +33,7 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from darts_pro.data_extension.custom_module import _TFTModuleBatch
 
-class SdcnModule(_TFTModuleBatch):
+class MtgnnModule(_TFTModuleBatch):
     """自定义基于图模式和聚类的时间序列模块"""
     
     def __init__(
@@ -103,7 +100,7 @@ class SdcnModule(_TFTModuleBatch):
                 target_info
             ) = self.train_sample      
                   
-            past_target_shape = len(variables_meta["input"]["past_target"])
+            past_target_shape = past_target.shape[0]
             past_covariates_shape = len(variables_meta["input"]["past_covariate"])
             historic_future_covariates_shape = len(variables_meta["input"]["historic_future_covariate"])
             # 记录动态数据长度，后续需要切片
@@ -113,44 +110,16 @@ class SdcnModule(_TFTModuleBatch):
                 + past_covariates_shape
                 + historic_future_covariates_shape
             )
-    
-            output_dim = 1
-    
-            future_cov_dim = (
-                future_covariates.shape[1] if future_covariates is not None else 0
-            )
-            # 由于使用自监督，则取消未来协变量
-            # future_cov_dim = 0
             
-            static_cov_dim = (
-                static_covariates.shape[0] * static_covariates.shape[1]
-                if static_covariates is not None
-                else 0
-            )
-    
-            nr_params = 1
-
-            model = SdcnTs(
-                # Tide Part
-                input_dim=input_dim,
-                emb_output_dim=output_dim,
-                future_cov_dim=future_cov_dim,
-                static_cov_dim=static_cov_dim,
-                nr_params=nr_params,
-                num_encoder_layers=3,
-                num_decoder_layers=3,
-                decoder_output_dim=16,
-                hidden_size=hidden_size,
-                temporal_width_past=4,
-                temporal_width_future=4,
-                temporal_decoder_hidden=32,
-                use_layer_norm=False,
-                dropout=dropout,
-                # Sdcn Part
-                n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
-                activation="prelu",
-                **kwargs,
-            )           
+            model = gtnet(True, True, 3, past_target_shape,
+                  device, predefined_A=None,
+                  dropout=0.3, subgraph_size=0,
+                  node_dim=40,
+                  dilation_exponential=1,
+                  conv_channels=32, residual_channels=32,
+                  skip_channels=64, end_channels= 128,
+                  seq_length=self.output_chunk_length, in_dim=input_dim, out_dim=self.output_chunk_length,
+                  layers=3, propalpha=0.5, tanhalpha=3, layer_norm_affline=True)          
             
             return model
         

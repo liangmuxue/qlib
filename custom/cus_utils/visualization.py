@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 VIZ_ITEM_NUMBER = 3
 
 
-def clu_coords_viz(coords,imp_index=None,name="viz_coords_result",labels=None,save_path=None):
+def clu_coords_viz(coords,imp_index=None,name="viz_coords_result",labels=None,save_path=None,att_data=None):
     """Viz for coords points"""
     
     plt.figure(name,figsize=(12,9))
@@ -19,13 +19,23 @@ def clu_coords_viz(coords,imp_index=None,name="viz_coords_result",labels=None,sa
         p2_index = np.where(labels==2)[0]
         n_index = np.where(labels==0)[0]
         n2_index = np.where(labels==1)[0]
-        plt.scatter(coords[p_index,0],coords[p_index,1], marker='o',color="r", s=50)
-        plt.scatter(coords[p2_index,0],coords[p2_index,1], marker='o',color="b", s=50)
-        plt.scatter(coords[n_index,0],coords[n_index,1], marker='x',color="k", s=50)
-        plt.scatter(coords[n2_index,0],coords[n2_index,1], marker='x',color="y", s=50)
+        p = plt.scatter(coords[p_index,0],coords[p_index,1], marker='o',color="r", s=50)
+        p2 = plt.scatter(coords[p2_index,0],coords[p2_index,1], marker='o',color="b", s=50)
+        n = plt.scatter(coords[n_index,0],coords[n_index,1], marker='x',color="k", s=50)
+        n2 = plt.scatter(coords[n2_index,0],coords[n2_index,1], marker='x',color="y", s=50)
         # 显示关注点
         if imp_index is not None and imp_index.shape[0]>0:
             plt.scatter(coords[imp_index,0],coords[imp_index,1], marker='p',color="m", s=80)
+            # 给簇关注点打标注
+            for i in range(imp_index.shape[0]):
+                x = coords[imp_index[i]][0]
+                y = coords[imp_index[i]][1]
+                if att_data is None:
+                    imp_desc = "{}".format(i)
+                else:
+                    imp_desc = "{}/{}".format(i,att_data[i])
+                plt.annotate(imp_desc, xy = (x, y), xytext = (x+0.1, y+0.1))
+        # plt.legend((p, p2,n2, n), ('P','P2','N2','N'), loc=2)       
         if save_path is None:
             save_path = './custom/data/results'
     plt.savefig("{}/{}".format(save_path,name))  

@@ -12,13 +12,12 @@ import torch
 import matplotlib.pyplot as plt
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,get_complex_class
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import slope_compute,target_distribution
+from cus_utils.common_compute import slope_compute,pairwise_distances
 from cus_utils.log_util import AppLogger
 from losses.mtl_loss import UncertaintyLoss
 from projects.kmeans_pytorch import kmeans, kmeans_predict
 from tslearn.clustering import TimeSeriesKMeans
 from sklearn.cluster import DBSCAN,KMeans,SpectralClustering
-from cus_utils.common_compute import pairwise_distances
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.manifold import MDS
 

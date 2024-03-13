@@ -9,11 +9,13 @@ from torchmetrics import MeanSquaredError
 
 from darts import TimeSeries
 from darts.logging import get_logger, raise_if_not, raise_log
-
 from typing import Callable, Optional, Sequence, Tuple, Union
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 
-from cus_utils.common_compute import target_scale,slope_classify_compute
+from sklearn.manifold import MDS
+from sklearn.cluster import DBSCAN,KMeans
+
+from cus_utils.common_compute import pairwise_distances,slope_classify_compute
 from cus_utils.log_util import AppLogger
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES,get_simple_class
 
@@ -236,6 +238,17 @@ def _get_values_or_raise(
         series_b_det, isnan_mask, axis=0
     )
     
+def clusting_data(data,device="cpu"):    
+    # 生成配对距离矩阵
+    output_pair_dis = pairwise_distances(data,distance_func=loss_unity.mse_dis,
+                                make_symmetric=True).cpu().numpy()         
+    # 生成二维坐标数据
+    mds = MDS(n_components=2, dissimilarity='precomputed',random_state=1)
+    coords = mds.fit_transform(output_pair_dis)               
+    
+    # 使用密度聚类，min_samples标识每簇至少多少个点以上，eps表示簇内距离要求
+    db = DBSCAN(eps=0.1, metric='precomputed',min_samples=3,n_jobs=2).fit(output_pair_dis)  
+    return db.labels_
     
     
     

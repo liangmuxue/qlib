@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from torchmetrics.regression import ConcordanceCorrCoef
 
 import numpy as np
 import scipy.sparse as sp
@@ -384,6 +385,23 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     shape = torch.Size(sparse_mx.shape)
     return torch.sparse.FloatTensor(indices, values, shape)
 
+def ccc_distance_torch(x,y):
+    flag_numpy = 0
+    if isinstance(x,np.ndarray):
+        flag_numpy = 1
+        x = torch.Tensor(x)
+        y = torch.Tensor(y)
+    if len(x.shape)>1:
+        x = x.transpose(1,0)
+        y = y.transpose(1,0)
+        concordance = ConcordanceCorrCoef(num_outputs=x.shape[-1])
+    else:
+        concordance = ConcordanceCorrCoef()
+    dis = 1 - concordance(x, y)
+    if flag_numpy==1:
+        dis = dis.cpu().numpy()
+    return dis 
+    
 def batch_cov(points):
     points = points.permute(2,1,0)
     B, N, D = points.size()
@@ -403,11 +421,17 @@ def corr_compute(source,target):
     corr_real = corr[source.shape[0]:,:source.shape[0]]
     return corr_real
 
+def find_nearest(array, value):
+    array = np.asarray(array)
+    idx = np.sum((np.expand_dims(array,1) - value)**2,axis=2).argmin(axis=0)
+    return idx
+
 if __name__ == "__main__":
     # test_normal_vis()
-    input = torch.randn(3, 5)
-    target = torch.randn(3, 5)
-    mae_comp(input,target)
+    input = torch.randn(3, 2)
+    target = torch.randn(2, 2)
+    # mae_comp(input,target)
+    find_nearest(input.numpy(),target.numpy())
     
        
     

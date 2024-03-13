@@ -74,7 +74,7 @@ class SdcnTs(nn.Module):
         dropout: float,
         n_cluster=4,
         v=1,
-        mode=2,
+        mode=1,
         **kwargs
        ):    
         super(SdcnTs, self).__init__()
@@ -83,10 +83,12 @@ class SdcnTs(nn.Module):
             output_length = kwargs["output_chunk_length"]
         else:
             output_length = kwargs["input_chunk_length"]
+            
+        z_layer_dim = 10
         # Tide作为嵌入特征部分,输入和输出使用同一维度
         self.emb_layer = Tide(input_dim,emb_output_dim,future_cov_dim,static_cov_dim,nr_params,num_encoder_layers,num_decoder_layers,
                               decoder_output_dim,hidden_size,temporal_decoder_hidden,temporal_width_past,temporal_width_future,
-                              use_layer_norm,dropout,kwargs["input_chunk_length"],output_length,z_layer_dim=kwargs["output_chunk_length"],outer_mode=1)
+                              use_layer_norm,dropout,kwargs["input_chunk_length"],output_length,z_layer_dim=z_layer_dim,outer_mode=1)
         
         ###### GCN部分的定义，根据Tide模型，取得对应的分层encode数据
         n_input = self.emb_layer.encoder_dim
@@ -97,12 +99,12 @@ class SdcnTs(nn.Module):
         self.gnn_2 = GNNLayer(gnn_dec_dim, gnn_dec_dim)
         self.gnn_3 = GNNLayer(gnn_dec_dim, gnn_dec_dim)
         # 实际输出层，维度为预测序列长度
-        self.gnn_4 = GNNLayer(gnn_dec_dim, kwargs["output_chunk_length"])
+        self.gnn_4 = GNNLayer(gnn_dec_dim, z_layer_dim)
         # 对应分类层
-        self.gnn_5 = GNNLayer(kwargs["output_chunk_length"], n_cluster)
+        self.gnn_5 = GNNLayer(z_layer_dim, z_layer_dim)
 
         # 聚类部分设定
-        self.cluster_layer = Parameter(torch.Tensor(n_cluster, kwargs["output_chunk_length"]))
+        self.cluster_layer = Parameter(torch.Tensor(n_cluster, z_layer_dim))
         torch.nn.init.xavier_normal_(self.cluster_layer.data)
 
         # degree
@@ -118,7 +120,7 @@ class SdcnTs(nn.Module):
         x_bar = x_bar.squeeze()
         # pretrain模式只需要中间步骤的特征值
         if mode=="pretrain":
-            return x_bar,None,None,z,None
+            return x_bar,None,None,None,z
         
         tra1, tra2, tra3 = enc_data
         
@@ -137,13 +139,11 @@ class SdcnTs(nn.Module):
         q = self.compute_qdis(z,mode=1)
 
         # 使用GCN的输出，再次进行聚类距离衡量，并返回数值
-        # distance_z = pairwise_compare(self.cluster_layer,h5,distance_func=self.ccc_distance_torch)
-        # distance_z = distance_z.transpose(1, 0)
-        # z_score = self.transfer_dis(distance_z)
         # pred = normalization(h5,mode="torch",axis=1)  
-        pred = F.softmax(h5, dim=1)
-        
-        return x_bar, q, pred, None,z
+        # pred = F.softmax(pred,1)
+        pred = self.compute_qdis(h5,mode=1) 
+
+        return x_bar, q, pred, h5,z
     
     def compute_qdis(self,z,mode=1):
         if mode==1:
