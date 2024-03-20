@@ -1,14 +1,18 @@
 from __future__ import division
+from datetime import datetime 
+
 import torch
 import torch.nn as nn
 from torch.nn import init
 import numbers
 import torch.nn.functional as F
-
 from .mtgnn_layer import *
 
 class gtnet(nn.Module):
-    def __init__(self, gcn_true, buildA_true, gcn_depth, num_nodes, device, predefined_A=None, static_feat=None, dropout=0.3, subgraph_size=20, node_dim=40, dilation_exponential=1, conv_channels=32, residual_channels=32, skip_channels=64, end_channels=128, seq_length=12, in_dim=2, out_dim=12, layers=3, propalpha=0.05, tanhalpha=3, layer_norm_affline=True):
+    def __init__(self, gcn_true, buildA_true, gcn_depth, num_nodes, device, predefined_A=None, 
+                 static_feat=None, dropout=0.3, subgraph_size=20, node_dim=40, dilation_exponential=1, 
+                 conv_channels=32, residual_channels=32, skip_channels=64, end_channels=128, seq_length=12, 
+                 in_dim=2, out_dim=12, layers=3, propalpha=0.05, tanhalpha=3, layer_norm_affline=True):
         super(gtnet, self).__init__()
         self.gcn_true = gcn_true
         self.buildA_true = buildA_true
@@ -25,8 +29,9 @@ class gtnet(nn.Module):
         self.start_conv = nn.Conv2d(in_channels=in_dim,
                                     out_channels=residual_channels,
                                     kernel_size=(1, 1))
-        self.gc = graph_constructor(num_nodes, subgraph_size, node_dim, device, alpha=tanhalpha, static_feat=static_feat)
-
+        self.gc = graph_constructor(num_nodes, subgraph_size, node_dim, device,alpha=tanhalpha, static_feat=static_feat)
+        self.static_feat = static_feat
+        
         self.seq_length = seq_length
         kernel_size = 7
         if dilation_exponential>1:
@@ -92,50 +97,52 @@ class gtnet(nn.Module):
         self.idx = torch.arange(self.num_nodes).to(device)
 
 
-    def forward(self, input, idx=None):
+    def forward(self, input,adp_outer=None):
+        t = datetime.now()
         seq_len = input.size(3)
         assert seq_len==self.seq_length, 'input sequence length not equal to preset sequence length'
 
         if self.seq_length<self.receptive_field:
             input = nn.functional.pad(input,(self.receptive_field-self.seq_length,0,0,0))
 
-
-
-        if self.gcn_true:
-            if self.buildA_true:
-                if idx is None:
-                    adp = self.gc(self.idx)
-                else:
-                    adp = self.gc(idx)
-            else:
-                adp = self.predefined_A
-
+        # 修改原方法，直接使用全局静态特征变量
+        if adp_outer is not None:
+            adp = adp_outer
+        else:
+            adp = self.gc()
         x = self.start_conv(input)
         skip = self.skip0(F.dropout(input, self.dropout, training=self.training))
         for i in range(self.layers):
             residual = x
             filter = self.filter_convs[i](x)
+            print("filter time:",(datetime.now()-t).total_seconds()*1000)
+            t = datetime.now()                
             filter = torch.tanh(filter)
             gate = self.gate_convs[i](x)
             gate = torch.sigmoid(gate)
+            print("gate time:",(datetime.now()-t).total_seconds()*1000)
+            t = datetime.now()               
             x = filter * gate
             x = F.dropout(x, self.dropout, training=self.training)
             s = x
             s = self.skip_convs[i](s)
             skip = s + skip
+            print("skip_convs time:",(datetime.now()-t).total_seconds()*1000)
+            t = datetime.now()              
             if self.gcn_true:
                 x = self.gconv1[i](x, adp)+self.gconv2[i](x, adp.transpose(1,0))
             else:
                 x = self.residual_convs[i](x)
-
+            print("gconv1 time:",(datetime.now()-t).total_seconds()*1000)
+            t = datetime.now()  
             x = x + residual[:, :, :, -x.size(3):]
-            if idx is None:
-                x = self.norm[i](x,self.idx)
-            else:
-                x = self.norm[i](x,idx)
-
+            x = self.norm[i](x,self.idx)
+            print("norm time:",(datetime.now()-t).total_seconds()*1000)
+        print("layer time:",(datetime.now()-t).total_seconds()*1000)
+        t = datetime.now()
         skip = self.skipE(x) + skip
         x = F.relu(skip)
         x = F.relu(self.end_conv_1(x))
         x = self.end_conv_2(x)
+        print("end time:",(datetime.now()-t).total_seconds()*1000)
         return x

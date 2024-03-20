@@ -60,33 +60,37 @@ class ClusteringLoss(UncertaintyLoss):
     def no_diag(x, n):
         x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()    
     
-class DistanceMetricLoss(UncertaintyLoss):
+class MtgLoss(UncertaintyLoss):
     """基于距离矩阵的损失函数"""
     
     def __init__(self,ref_model=None,device=None):
-        super(DistanceMetricLoss, self).__init__(ref_model=ref_model,device=device)
+        super(MtgLoss, self).__init__(ref_model=ref_model,device=device)
         self.ref_model = ref_model
         self.device = device  
         
-    def forward(self, output_ori,target_ori,optimizers_idx=0,cluster_centers=None):
+    def forward(self, output_ori,target_ori,optimizers_idx=0):
 
         (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,target_info,y_transform) = target_ori
+        (target,target_class,target_info,past_target) = target_ori
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
-        similarity_value = [None,None,None]
+        similarity_value = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         triplet_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         # 指标分类
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 相关系数损失,多个目标
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
-                output_item = output[i][:,:,0]
-                target_item = target[:,:,i]    
+                output_item = output[i][...,0]
+                output_item = output_item.permute(0,2,1)
+                output_item = torch.reshape(output_item,(output_item.shape[0]*output_item.shape[1],output_item.shape[2]))
+                target_item = target[:,:,:,i]    
+                target_item = torch.reshape(target_item,(target_item.shape[0]*target_item.shape[1],target_item.shape[2]))
                 # 分别计算输出值与目标值的距离矩阵
-                mat_output = pairwise_distances(output_item,distance_func=self.ccc_distance_torch)
-                mat_target = pairwise_distances(target_item,distance_func=self.ccc_distance_torch)
+                # mat_output = pairwise_distances(output_item,distance_func=self.ccc_distance_torch)
+                # mat_target = pairwise_distances(target_item,distance_func=self.ccc_distance_torch)
                 # 计算距离矩阵的MSE损失作为实际损失
-                corr_loss_combine[i] = self.mse_loss(mat_output, mat_target)                
+                # corr_loss_combine[i] = self.mse_loss(mat_output, mat_target)                
+                corr_loss_combine[i] = self.ccc_loss_comp(output_item, target_item)     
                 loss_sum += corr_loss_combine[i] 
         return loss_sum,[corr_loss_combine,triplet_loss_combine,similarity_value[i]]
             

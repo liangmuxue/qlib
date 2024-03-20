@@ -89,6 +89,7 @@ class SdcnModule(_TFTModuleBatch):
         norm_type: Union[str, nn.Module],
         model_type="tft",
         device="cpu",
+        seq=0,
         **kwargs):
         
             (

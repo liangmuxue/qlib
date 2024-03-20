@@ -48,7 +48,7 @@ from cus_utils.data_aug import random_int_list
 from cus_utils.metrics import corr_dis,series_target_scale,diff_dis,cel_acc_compute,vr_acc_compute
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC
 from darts_pro.data_extension.custom_model import TFTExtModel
-from darts_pro.data_extension.custom_nor_model import TFTAsisModel,TFTBatchModel
+from darts_pro.data_extension.custom_nor_model import TFTAsisModel,TFTBatchModel,TFTCluBatchModel
 from darts_pro.data_extension.batch_dataset import BatchDataset
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 
@@ -265,7 +265,7 @@ class TftDataframeModel():
         if load_weight:
             best_weight = self.optargs["best_weight"]    
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
-            self.model = TFTBatchModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=best_weight)
+            self.model = TFTCluBatchModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=best_weight)
             self.model.batch_size = self.batch_size     
             self.model.mode = "train"
             self.model.model.monitor = monitor
@@ -383,7 +383,7 @@ class TftDataframeModel():
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )                
         else:
-            my_model = TFTBatchModel(
+            my_model = TFTCluBatchModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
                     hidden_size=64,

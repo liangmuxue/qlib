@@ -14,6 +14,16 @@ class nconv(nn.Module):
         x = torch.einsum('ncwl,vw->ncvl',(x,A))
         return x.contiguous()
 
+class bnconv(nn.Module):
+    """批量邻接矩阵卷积"""
+    
+    def __init__(self):
+        super(bnconv,self).__init__()
+
+    def forward(self,x, A):
+        x = torch.einsum('ncwl,nvw->ncvl',(x,A))
+        return x.contiguous()
+    
 class dy_nconv(nn.Module):
     def __init__(self):
         super(dy_nconv,self).__init__()
@@ -34,7 +44,7 @@ class linear(nn.Module):
 class prop(nn.Module):
     def __init__(self,c_in,c_out,gdep,dropout,alpha):
         super(prop, self).__init__()
-        self.nconv = nconv()
+        self.nconv = bnconv()
         self.mlp = linear(c_in,c_out)
         self.gdep = gdep
         self.dropout = dropout
@@ -55,7 +65,7 @@ class prop(nn.Module):
 class mixprop(nn.Module):
     def __init__(self,c_in,c_out,gdep,dropout,alpha):
         super(mixprop, self).__init__()
-        self.nconv = nconv()
+        self.nconv = bnconv()
         self.mlp = linear((gdep+1)*c_in,c_out)
         self.gdep = gdep
         self.dropout = dropout
@@ -63,8 +73,10 @@ class mixprop(nn.Module):
 
 
     def forward(self,x,adj):
-        adj = adj + torch.eye(adj.size(0)).to(x.device)
-        d = adj.sum(1)
+        n_dim = adj.size(-1)
+        eye_mat = torch.eye(n_dim, n_dim, dtype=x.dtype, device=x.device).unsqueeze(0).repeat(x.shape[0], 1, 1)
+        adj = adj + eye_mat
+        d = adj.sum(-1)
         h = x
         out = [h]
         a = adj / d.view(-1, 1)
@@ -150,7 +162,7 @@ class dilated_inception(nn.Module):
 
 
 class graph_constructor(nn.Module):
-    def __init__(self, nnodes, k, dim, device, alpha=3, static_feat=None):
+    def __init__(self, nnodes, k, dim, device,alpha=3, static_feat=None):
         super(graph_constructor, self).__init__()
         self.nnodes = nnodes
         if static_feat is not None:
@@ -169,20 +181,18 @@ class graph_constructor(nn.Module):
         self.alpha = alpha
         self.static_feat = static_feat
 
-    def forward(self, idx):
-        if self.static_feat is None:
-            nodevec1 = self.emb1(idx)
-            nodevec2 = self.emb2(idx)
-        else:
-            nodevec1 = self.static_feat[idx,:]
-            nodevec2 = nodevec1
+    def forward(self):
+        
+        # 直接使用全部静态属性
+        nodevec1 = self.static_feat
+        nodevec2 = nodevec1
 
         nodevec1 = torch.tanh(self.alpha*self.lin1(nodevec1))
         nodevec2 = torch.tanh(self.alpha*self.lin2(nodevec2))
 
         a = torch.mm(nodevec1, nodevec2.transpose(1,0))-torch.mm(nodevec2, nodevec1.transpose(1,0))
         adj = F.relu(torch.tanh(self.alpha*a))
-        mask = torch.zeros(idx.size(0), idx.size(0)).to(self.device)
+        mask = torch.zeros(self.static_feat.size(0), self.static_feat.size(0)).to(self.device)
         mask.fill_(float('0'))
         s1,t1 = (adj + torch.rand_like(adj)*0.01).topk(self.k,1)
         mask.scatter_(1,t1,s1.fill_(1))

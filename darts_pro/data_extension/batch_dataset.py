@@ -262,7 +262,7 @@ class BatchDataset(Dataset):
 
 class BatchCluDataset(BatchDataset):
     
-    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None):
+    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None,pre_static_datas=None):
         
         self.mode = mode
         self.filepath = filepath
@@ -279,65 +279,242 @@ class BatchCluDataset(BatchDataset):
                     break            
                 
         aggregated = self.create_aggregated_data(batch_data)    
-        # 清除不合规数据
+        # 生成新的维度形状
+        if pre_static_datas is not None:
+            # 如果使用预先设定的静态数据，需要过滤当前数据不存在对应股票的记录
+            aggregated = self.refileter_missing_data(aggregated,pre_static_datas)
+            
+        static_datas = None
+        # aggregated,static_datas = self.combine_batch_data(aggregated,pre_static_datas=pre_static_datas)
         aggregated = self.combine_smb_data(aggregated)
         self.batch_data = aggregated 
+        # 保存静态属性数据
+        self.static_datas = static_datas
                 
     def combine_smb_data(self,data):
-        """合并为以时间段为单位的多只股票并列的格式"""
+        """合并为多只股票并列的格式"""
         
-        start_data_rec = [] 
+        start_date_rec = [] 
         instrument_data = [] 
         for item in data[-1]:
-            start_data_rec.append(item["start"])
+            start_date_rec.append(item["start"])
+            instrument_data.append(item["item_rank_code"])
+        
+        total_len = len(data[-1])
+        # 根据批次内维度进行聚合
+        batch_item_size = 128
+        batch_len = total_len//batch_item_size + 1
+        
+        def concat_shape(item_data):
+            return [batch_len,batch_item_size] + list(item_data.shape)
+        
+        # 按照新结构生成空数据，然后填充
+        past_target_combine = np.zeros(concat_shape(data[0][0]))
+        past_covariates_combine = np.zeros(concat_shape(data[1][0]))
+        historic_future_covariates_combine = np.zeros(concat_shape(data[2][0]))
+        future_covariates_combine = np.zeros(concat_shape(data[3][0]))
+        static_covariates_combine = np.zeros([batch_len,batch_item_size,data[4].shape[-1]])
+        scaler_tuple_combine = np.array([[None for _ in range(batch_item_size)] for _ in range(batch_len)])
+        target_class_combine = np.zeros(concat_shape(data[6][0]))
+        target_combine = np.zeros(concat_shape(data[7][0]))
+        target_info_combine = np.array([[None for _ in range(batch_item_size)] for _ in range(batch_len)])
+        rank_index_combine = np.zeros([batch_len,batch_item_size])
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler_tuple,target_class,target,target_info) = data       
+        # 在这里对静态协变量进行全局归一化
+        static_covariates = MinMaxScaler().fit_transform(static_covariates[:,0,:])
+             
+        def fill_data(combine_data,item_data,i,j):
+            if len(combine_data.shape)==3:
+                combine_data[i,j,:] = item_data
+            else:
+                combine_data[i,j,:,:] = item_data
+             
+        # 遍历数据，进行位置匹配
+        for i in range(total_len):
+            # 根据开始日期，以及股票编号，反向查询对应的位置索引
+            b_idx = i // batch_item_size
+            item_idx = i % batch_item_size
+            # 直接按照索引坐标填充
+            fill_data(past_target_combine,past_target[i], b_idx,item_idx)
+            fill_data(past_covariates_combine,past_covariates[i], b_idx,item_idx)
+            fill_data(historic_future_covariates_combine,historic_future_covariates[i], b_idx,item_idx)
+            fill_data(future_covariates_combine,future_covariates[i], b_idx,item_idx)
+            fill_data(static_covariates_combine,static_covariates[i], b_idx,item_idx)
+            # 提前准备股票索引编号
+            rank_index_combine[b_idx,item_idx] = target_info[i]["item_rank_code"]
+            scaler_tuple_combine[b_idx,item_idx] = (scaler_tuple[i][0],scaler_tuple[i][1])
+            fill_data(target_class_combine,target_class[i], b_idx,item_idx)
+            fill_data(target_combine,target[i], b_idx,item_idx)
+            target_info_combine[b_idx,item_idx] = target_info[i]
+            
+        return (past_target_combine,past_covariates_combine, historic_future_covariates_combine,future_covariates_combine,
+                static_covariates_combine,scaler_tuple_combine,target_class_combine,target_combine,target_info_combine,rank_index_combine)   
+    
+    
+    def refileter_missing_data(self,data,pre_static_datas):
+        """过滤当前数据不存在对应股票的记录"""
+        
+        total_len = len(data[-1])
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler_tuple,target_class,target,target_info) = data     
+        
+        indexes = []            
+        for i in range(total_len):
+            # 取得数据中对应的股票代码，如果不在预留数据集合中，则标记
+            rank_code = target_info[i]["item_rank_code"]
+            if rank_code in pre_static_datas:
+                indexes.append(i)
+        indexes = np.array(indexes)
+        return (past_target[indexes],past_covariates[indexes], historic_future_covariates[indexes],future_covariates[indexes],
+         static_covariates[indexes],scaler_tuple[indexes],target_class[indexes],target[indexes],np.array(target_info)[indexes].tolist())                    
+        
+        
+    def combine_batch_data(self,data,split_flag=False,pre_static_datas=None):
+        """合并为以时间段为单位的多只股票并列的格式"""
+        
+        start_date_rec = [] 
+        instrument_data = [] 
+        for item in data[-1]:
+            start_date_rec.append(item["start"])
             instrument_data.append(item["item_rank_code"])
         
         total_len = len(data[-1])
         # 以开始日期为单位进行聚合
-        start_data_uni = list(set(start_data_rec)).sort()
-        instrument_data_uni = list(set(instrument_data)).sort()
-        data_sample = data[0]
+        start_date_uni = list(set(start_date_rec))
+        # 股票代码集合，如果已经传参使用传单的集合，否则根据实际数据生成集合
+        if pre_static_datas is not None:
+            instrument_data_uni = pre_static_datas[:,0].tolist()
+        else:
+            instrument_data_uni = list(set(instrument_data))
         
         def concat_shape(item_data):
-            return [len(start_data_uni),len(instrument_data_uni)] + item_data.shape
+            return [len(start_date_uni),len(instrument_data_uni)] + list(item_data.shape)
         
         # 按照新结构生成空数据，然后填充
-        past_target_combine = np.zeros(concat_shape(data_sample[0]))
-        past_covariates_combine = np.zeros(concat_shape(data_sample[1]))
-        historic_future_covariates_combine = np.zeros(concat_shape(data_sample[2]))
-        future_covariates_combine = np.zeros(concat_shape(data_sample[3]))
-        static_covariates_combine = np.zeros(concat_shape(data_sample[4]))
-        scaler_tuple_combine = [[None for _ in range(len(instrument_data_uni))] for _ in len(start_data_uni)]
-        target_class_combine = np.zeros(concat_shape(data_sample[6]))
-        target_combine = np.zeros(concat_shape(data_sample[7]))
-        target_info_combine = [[None for _ in range(len(instrument_data_uni))] for _ in len(start_data_uni)]
+        past_target_combine = np.zeros(concat_shape(data[0][0]))
+        past_covariates_combine = np.zeros(concat_shape(data[1][0]))
+        historic_future_covariates_combine = np.zeros(concat_shape(data[2][0]))
+        future_covariates_combine = np.zeros(concat_shape(data[3][0]))
+        static_covariates_combine = np.zeros(concat_shape(data[4][0]))
+        scaler_tuple_combine = np.array([[None for _ in range(len(instrument_data_uni))] for _ in range(len(start_date_uni))])
+        target_class_combine = np.zeros(concat_shape(data[6][0]))
+        target_combine = np.zeros(concat_shape(data[7][0]))
+        target_info_combine = np.array([[None for _ in range(len(instrument_data_uni))] for _ in range(len(start_date_uni))])
         
         def fill_data(combine_data,item_data,i,j):
             combine_data[i,j,:,:] = item_data
-                
+        
+        instru_idx = [[] for _ in range(len(start_date_uni))]    
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler_tuple,target_class,target,target_info) = data  
+        
+        for i in range(total_len):
+            start = target_info[i]["start"]
+            if start==2:
+                print("2 rank:",target_info[i]["item_rank_code"])
+        # 维护索引列表，后续作为对照
+        rank_index_combine = np.zeros([len(start_date_uni),len(instrument_data_uni)])
+        # 维护股票静态属性，用于图卷积的关系学习层
+        static_datas = np.zeros([len(instrument_data_uni),data[4].shape[-1]])
         # 遍历数据，进行位置匹配
         for i in range(total_len):
-            (past_target,past_covariates, historic_future_covariates,future_covariates,
-             static_covariates,scaler_tuple,target_class,target,target_info) = data[i]
             # 根据开始日期，以及股票编号，反向查询对应的位置索引
-            start = target_info["start"]
-            instrument = target_info["item_rank_code"]
-            start_data_idx = start_data_uni.index(start)
-            instrument_data_idx = instrument_data_uni.index(instrument)
+            start = target_info[i]["start"]
+            instrument = target_info[i]["item_rank_code"]
+            start_date_idx = start_date_uni.index(start)
+            # 根据日期内索引号，依次填充实际数据(实现末尾补0)
+            # value_index = len(instru_idx[start_date_idx]) - 1
+            # 根据日期内索引号，填充实际数据(实现中间缺失值补0)
+            if instrument==587:
+                print("ggg")
+            value_index = instrument_data_uni.index(instrument)
+            # 维护对应日期下的股票列表索引,两种方式
+            instru_idx[start_date_idx].append(instrument)            
+            rank_index_combine[start_date_idx,value_index] = instrument
+            # 股票静态属性,覆盖式填充
+            static_datas[value_index,:] = static_covariates[i]
             # 直接按照索引坐标填充
-            fill_data(past_target_combine,past_target, start_data_idx,instrument_data_idx)
-            fill_data(past_covariates_combine,past_covariates, start_data_idx,instrument_data_idx)
-            fill_data(historic_future_covariates_combine,historic_future_covariates, start_data_idx,instrument_data_idx)
-            fill_data(future_covariates_combine,future_covariates, start_data_idx,instrument_data_idx)
-            fill_data(static_covariates_combine,static_covariates, start_data_idx,instrument_data_idx)
-            scaler_tuple_combine[start_data_idx,instrument_data_idx] = scaler_tuple
-            fill_data(target_class_combine,target_class, start_data_idx,instrument_data_idx)
-            fill_data(target_combine,target, start_data_idx,instrument_data_idx)
-            target_info_combine[start_data_idx,instrument_data_idx] = target_info
+            fill_data(past_target_combine,past_target[i], start_date_idx,value_index)
+            fill_data(past_covariates_combine,past_covariates[i], start_date_idx,value_index)
+            fill_data(historic_future_covariates_combine,historic_future_covariates[i], start_date_idx,value_index)
+            fill_data(future_covariates_combine,future_covariates[i], start_date_idx,value_index)
+            fill_data(static_covariates_combine,static_covariates[i], start_date_idx,value_index)
+            scaler_tuple_combine[start_date_idx,value_index] = scaler_tuple[i][0],scaler_tuple[i][1]
+            fill_data(target_class_combine,target_class[i], start_date_idx,value_index)
+            fill_data(target_combine,target[i], start_date_idx,value_index)
+            target_info_combine[start_date_idx,value_index] = target_info[i] 
+        
+        if not split_flag:
+            # 返回重组后的数据，以及对应的索引
+            return (past_target_combine,past_covariates_combine, historic_future_covariates_combine,future_covariates_combine,
+                    static_covariates_combine,scaler_tuple_combine,target_class_combine,target_combine,target_info_combine,rank_index_combine),static_datas
             
-        return (past_target_combine,past_covariates_combine, historic_future_covariates_combine,future_covariates_combine,
-                static_covariates_combine,scaler_tuple_combine,target_class_combine,target_combine,target_info_combine)   
+        # 拆分为小的数据批次
+        split_rate = 3
+        # 根据股票数量计算拆分范围，最后一段一般是不全的
+        size = len(instrument_data_uni)//split_rate           
+        def sp_data(data,date_index,begin_index,end_index=0,data_rebuild=None):
+            if end_index>0:
+                data_split = data[date_index,begin_index:end_index]
+            else:
+                data_split = data[date_index,begin_index:]
+                # 最后的一段数据需要补0对齐
+                split_size = size - data_split.shape[1]
+                if isinstance(data_split[0,0],np.ndarray):
+                    padding_ele = np.zeros((split_size,data.shape[2],data.shape[3]))
+                else:
+                    padding_ele = np.array([None for _ in range(split_size)])
+                data_split = np.concatenate((data_split,padding_ele))
+                data_rebuild.append(data_rebuild)
+            return data_split        
+
+        past_target_rebuild = []
+        past_covariates_rebuild = []
+        historic_future_covariates_rebuild = []
+        future_covariates_rebuild = []
+        static_covariates_rebuild = []
+        scaler_tuple_rebuild = []
+        target_class_rebuild = []
+        target_rebuild = []
+        target_info_rebuild = []
+          
+        dt_ins_index = []   
+        for i in range(len(start_date_uni)):
+            dt_ins_index = instru_idx[i]
+            for j in range(split_rate):
+                begin_idx = j * size
+                end_idx = begin_idx + size if j<split_rate-1 else 0
+                # 生成索引数据
+                instru_index = instru_idx[i,begin_idx:end_idx]
+                dt_ins_index.append([i,instru_index])
+                # 生成实际数据
+                sp_data(past_target_combine,i,begin_idx,end_idx,data_rebuild=past_target_rebuild)         
+                sp_data(past_covariates_combine,i,begin_idx,end_idx,data_rebuild=past_covariates_rebuild)   
+                sp_data(historic_future_covariates_combine,i,begin_idx,end_idx,data_rebuild=historic_future_covariates_rebuild)     
+                sp_data(future_covariates_combine,i,begin_idx,end_idx,data_rebuild=future_covariates_rebuild)     
+                sp_data(static_covariates_combine,i,begin_idx,end_idx,data_rebuild=static_covariates_rebuild)    
+                sp_data(scaler_tuple_combine,i,begin_idx,end_idx,data_rebuild=scaler_tuple_rebuild)   
+                sp_data(target_class_combine,i,begin_idx,end_idx,data_rebuild=target_class_rebuild)     
+                sp_data(target_combine,i,begin_idx,end_idx,data_rebuild=target_rebuild)             
+                sp_data(target_info,i,begin_idx,end_idx,data_rebuild=target_info_rebuild)  
+           
+        return (past_target_rebuild,past_covariates_rebuild, historic_future_covariates_rebuild,future_covariates_rebuild,
+                static_covariates_rebuild,scaler_tuple_rebuild,target_class_rebuild,target_rebuild,target_info_rebuild)   
                 
+    def __getitem__(self, index):
+        
+        batch_data = [item[index] for item in self.batch_data]
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler_tuple,target_class,target,target_info,rank_index) = batch_data
+        # target_info["raise_range"] = raise_range
+        # (scaler,future_past_covariate) = scaler_tuple
+        # 生成图矩阵相关数据,使用价格数据作为关联数据
+        # pa = MinMaxScaler().fit_transform(price_array[:past_target.shape[-2]])
+        return past_target,past_covariates, historic_future_covariates,future_covariates, \
+            static_covariates, (scaler_tuple, None),target_class,target,target_info,rank_index
+    
+                                   
 class BatchOutputDataset(BatchDataset):    
     
     def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=[0,10000]):

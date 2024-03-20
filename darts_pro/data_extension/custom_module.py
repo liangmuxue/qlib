@@ -1022,13 +1022,9 @@ class _TFTModuleBatch(_CusModule):
         """重载原方法，直接使用已经加工好的数据"""
 
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,rank_targets) = train_batch    
-         
-        # 使用排序目标替换原数据--Cancel
-        train_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
-                               static_covariates,scaler,target_class,target,target_info)
-                               
-        loss,detail_loss,output = self.training_step_real(train_batch_convert, batch_idx) 
+         static_covariates,scaler,target_class,target,target_info,rank_indexes) = train_batch    
+
+        loss,detail_loss,output = self.training_step_real(train_batch, batch_idx) 
         if self.train_output_flag:
             output = [output_item.detach().cpu().numpy() for output_item in output]
             data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
@@ -1042,14 +1038,7 @@ class _TFTModuleBatch(_CusModule):
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
-        (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,rank_targets) = val_batch    
-         
-        # 使用排序目标替换原数据
-        val_batch_convert = (past_target,past_covariates, historic_future_covariates,future_covariates, 
-                               static_covariates,scaler,target_class,target,target_info,rank_targets)
-                
-        loss,detail_loss,output = self.validation_step_real(val_batch_convert, batch_idx)  
+        loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)  
         
         if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
             self.dump_val_data(val_batch,output)

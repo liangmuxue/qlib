@@ -14,7 +14,7 @@ from torchmetrics import MeanSquaredError
 from darts.models.forecasting.tft_model import _TFTModule
 from darts.models.forecasting.tide_model import _TideModule
 from losses.mtl_loss import TripletLoss,UncertaintyLoss
-from losses.clustering_loss import DistanceMetricLoss,ClusteringLoss
+from losses.clustering_loss import ClusteringLoss
 from .series_data_utils import StatDataAssis
 from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.act_model.hsan_ext import HsanExt
@@ -67,7 +67,7 @@ class BaseMixModule(PLMixedCovariatesModule):
             model =  self.create_real_model(output_dim, variables_meta_array[i], num_static_components, 
                                             hidden_size, lstm_layers, num_attention_heads, full_attention, 
                                             feed_forward, hidden_continuous_size, categorical_embedding_sizes, 
-                                            dropout, add_relative_index, norm_type,model_type=model_type,device=device,**kwargs)
+                                            dropout, add_relative_index, norm_type,model_type=model_type,device=device,seq=i,**kwargs)
             model_list.append(model)
             vr_layer = self._construct_classify_layer(self.output_chunk_length,vr_range_num)  
             classify_vr_layers.append(vr_layer)
@@ -90,7 +90,6 @@ class BaseMixModule(PLMixedCovariatesModule):
      
     def create_loss(self,model,device="cpu"):
         return ClusteringLoss(device=device,ref_model=model) 
-        # return DistanceMetricLoss(device=device,ref_model=model) 
         # return UncertaintyLoss(device=device,ref_model=model) 
     
     def create_real_model(self,
@@ -109,6 +108,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         norm_type: Union[str, nn.Module],
         model_type="tft",
         device="cpu",
+        seq=0,
         **kwargs):
 
         if model_type == "tft":

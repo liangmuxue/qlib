@@ -183,9 +183,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 elif type_name=="future_target":
                     type_values = ["target_0"]
                 else:
-                    type_values = [f"{var_name}_{i}" for i in range(tensor.shape[1])]
+                    type_values = [f"{var_name}_{i}" for i in range(tensor.shape[-1])]
             else:
-                type_values = [f"{var_name}_{i}" for i in range(tensor.shape[1])]
+                type_values = [f"{var_name}_{i}" for i in range(tensor.shape[-1])]
             input_meta[type_name] = type_values
             
         variables_meta = {
@@ -606,7 +606,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         train_sample = train_dataset[0]
         if self.model is None:
             # 使用future_target部分(倒数第二列)，进行输出维度判断
-            self.train_sample, self.output_dim = train_sample, train_sample[-2].shape[1]
+            self.train_sample, self.output_dim = train_sample, train_sample[7].shape[1]
             model = self._init_model(trainer)
             model.monitor = self.monitor
         else:

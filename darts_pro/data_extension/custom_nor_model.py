@@ -31,7 +31,8 @@ from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.data_extension.custom_module import _CusModule,_TFTModuleBatch
 from darts_pro.mam.hsan_module import HsanModule
 from darts_pro.mam.sdcn_module import SdcnModule
-from darts_pro.data_extension.batch_dataset import BatchDataset
+from darts_pro.mam.mtgnn_module import MtgnnModule
+from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset
 
 class _TFTModuleAsis(_CusModule):
     def __init__(
@@ -452,13 +453,13 @@ class TFTBatchModel(TFTExtModel):
         mode="train"
     ) -> BatchDataset:
         
-        return BatchDataset(
+        ds = BatchCluDataset(
             filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode)
-        )     
+        )    
+        return ds    
 
     def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
         """重载创建模型方法，使用自定义模型"""
-        
         
         (
             past_target,
@@ -466,11 +467,8 @@ class TFTBatchModel(TFTExtModel):
             historic_future_covariate,
             future_covariate,
             static_covariates,
-            target_scaler,
-            future_target_class,
-            future_target,
-            target_info,
-        ) = train_sample
+        ) = train_sample[:5]
+        future_target = train_sample[8]
 
         # add a covariate placeholder so that relative index will be included
         if self.add_relative_index:
@@ -499,20 +497,15 @@ class TFTBatchModel(TFTExtModel):
         self.output_dim = self.define_output_dim()
         
         # 根据拆分的过去协变量，生成多个配置
-        variables_meta_array = []
-        for i in range(len(self.past_split)):
-            past_index = self.past_split[i]
-            past_covariate_item = past_covariate[:,past_index[0]:past_index[1]]
-            tensors = [
-                past_target,
-                past_covariate_item,
-                historic_future_covariate,  # for time varying encoders
-                future_covariate,
-                future_target,  # for time varying decoders
-                static_covariates,  # for static encoder
-            ]            
-            variables_meta,categorical_embedding_sizes = self._build_vriable_metas(tensors, static_covariates,seq=i)
-            variables_meta_array.append(variables_meta)
+        ori_tensors = [
+            past_target,
+            past_covariate,
+            historic_future_covariate,  # for time varying encoders
+            future_covariate,
+            future_target,  # for time varying decoders
+            static_covariates,  # for static encoder
+        ]          
+        variables_meta_array,categorical_embedding_sizes = self.build_variable(ori_tensors)
         
         n_static_components = (
             len(static_covariates) if static_covariates is not None else 0
@@ -600,14 +593,56 @@ class TFTBatchModel(TFTExtModel):
                 for i in range(len(self.past_split)):
                     s_model = pretrained_model.model.sub_models[i]
                     model.sub_models[i] = s_model
+                                
+        if self.model_type=="mtgnn":
+            model = MtgnnModule(
+                output_dim=self.output_dim,
+                variables_meta_array=variables_meta_array,
+                num_static_components=n_static_components,
+                hidden_size=self.hidden_size,
+                lstm_layers=self.lstm_layers,
+                dropout=self.dropout,
+                num_attention_heads=self.num_attention_heads,
+                full_attention=self.full_attention,
+                feed_forward=self.feed_forward,
+                hidden_continuous_size=self.hidden_continuous_size,
+                categorical_embedding_sizes=self.categorical_embedding_sizes,
+                add_relative_index=self.add_relative_index,
+                norm_type=self.norm_type,
+                use_weighted_loss_func=self.use_weighted_loss_func,
+                past_split=self.past_split,
+                filter_conv_index=self.filter_conv_index,
+                device=self.device,
+                batch_file_path=self.batch_file_path,
+                step_mode=self.step_mode,
+                model_type=self.model_type,
+                static_datas=self.static_datas,
+                train_sample=self.train_sample,
+                **self.pl_module_params,
+            )               
         return model         
-               
+    
+    def build_variable(self,ori_tensors):
+        variables_meta_array = []
+        for i in range(len(self.past_split)):
+            past_index = self.past_split[i]
+            past_covariate_item = ori_tensors[1][...,past_index[0]:past_index[1]]
+            tensors = [
+                ori_tensors[0],
+                past_covariate_item,
+                ori_tensors[2],  # for time varying encoders
+                ori_tensors[3],
+                ori_tensors[4],  # for time varying decoders
+                ori_tensors[5],  # for static encoder
+            ]            
+            variables_meta,categorical_embedding_sizes = self._build_vriable_metas(tensors, ori_tensors[5],seq=i)
+            variables_meta_array.append(variables_meta)
+        return variables_meta_array,categorical_embedding_sizes
+                         
     def _batch_collate_filter(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
         """
-        if self.model_type=="hsan":
-            return super()._batch_collate_filter(ori_batch)
         
         batch = ori_batch 
         aggregated = []
@@ -635,21 +670,7 @@ class TFTBatchModel(TFTExtModel):
                 aggregated.append(None)                
             elif isinstance(elem, TimeSeries):
                 aggregated.append([sample[i] for sample in batch])
-        
-        # 添加排序号的目标
-        future_target = aggregated[-2]
-        _,indices = torch.sort(future_target,0)
-        _, idx_unsort = torch.sort(indices, dim=0)
-        # 归一化
-        rank_scalers = []
-        idx_unsort_verse = []
-        for i in range(idx_unsort.shape[-1]):
-            rank_scaler = MinMaxScaler()
-            idx_unsort_item = rank_scaler.fit_transform(idx_unsort[:,:,i].numpy())
-            idx_unsort_verse.append(idx_unsort_item)
-            rank_scalers.append(idx_unsort_item)
-        idx_unsort = torch.Tensor(np.array(idx_unsort_verse)).permute(1,2,0)
-        aggregated.append([idx_unsort,rank_scalers])
+
         return tuple(aggregated)
         
     def dynamic_build_training_data(self,item,rev_threhold=1):
@@ -718,5 +739,31 @@ class TFTBatchModel(TFTExtModel):
         #     view_data = np.concatenate((target_unscale[:,:1],price_array),axis=-1)
         #     viz_input_aug.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
         return rtn_item
+
+class TFTCluBatchModel(TFTBatchModel):
+    """集成图卷积模式"""
+    
+    def _build_train_dataset(
+        self,
+        target: Sequence[TimeSeries],
+        past_covariates: Optional[Sequence[TimeSeries]],
+        future_covariates: Optional[Sequence[TimeSeries]],
+        max_samples_per_ts: Optional[int],
+        mode="train"
+    ) -> BatchDataset:
+        
+        # 训练模式下，需要多放回一个静态数据对照集合
+        if mode=="train":
+            ds = BatchCluDataset(
+                filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode)
+            )    
+            self.static_datas = ds.static_datas
+        # 验证模式下，需要传入之前存储的静态数据集合
+        if mode=="valid":
+            ds = BatchCluDataset(
+                filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode),
+                pre_static_datas=self.static_datas
+            )    
+        return ds    
 
                
