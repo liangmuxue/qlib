@@ -18,13 +18,13 @@ from sklearn.metrics import adjusted_rand_score as ari_score
 from sklearn.manifold import MDS
 
 from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
-from darts_pro.act_model.sdcn_ts import SdcnTs
+from darts_pro.act_model.sdcn_ts import SdcnTs,SdcnTs3D
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
 from losses.clustering_loss import ClusteringLoss
-from losses.clustering_loss import target_distribution
+from cus_utils.common_compute import target_distribution
 from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
 from cus_utils.visualization import clu_coords_viz
 from cus_utils.clustering import get_cluster_center
@@ -101,11 +101,17 @@ class SdcnModule(_TFTModuleBatch):
                 (scaler,future_past_covariate),
                 target_class,
                 future_target,
-                target_info
+                target_info,
+                rank_index,
+                adj_target
             ) = self.train_sample      
                   
-            past_target_shape = len(variables_meta["input"]["past_target"])
-            past_covariates_shape = len(variables_meta["input"]["past_covariate"])
+            # 固定单目标值
+            past_target_shape = 1
+            past_conv_index = self.past_split[seq]
+            # 只检查属于自己模型的协变量
+            past_covariates_item = past_covariates[...,past_conv_index[0]:past_conv_index[1]]            
+            past_covariates_shape = past_covariates_item.shape[-1]
             historic_future_covariates_shape = len(variables_meta["input"]["historic_future_covariate"])
             # 记录动态数据长度，后续需要切片
             self.dynamic_conv_shape = past_target_shape + past_covariates_shape
@@ -118,20 +124,20 @@ class SdcnModule(_TFTModuleBatch):
             output_dim = 1
     
             future_cov_dim = (
-                future_covariates.shape[1] if future_covariates is not None else 0
+                future_covariates.shape[-1] if future_covariates is not None else 0
             )
             # 由于使用自监督，则取消未来协变量
             # future_cov_dim = 0
             
             static_cov_dim = (
-                static_covariates.shape[0] * static_covariates.shape[1]
+                static_covariates.shape[-2] * static_covariates.shape[-1]
                 if static_covariates is not None
                 else 0
             )
     
             nr_params = 1
 
-            model = SdcnTs(
+            model = SdcnTs3D(
                 # Tide Part
                 input_dim=input_dim,
                 emb_output_dim=output_dim,
@@ -158,7 +164,7 @@ class SdcnModule(_TFTModuleBatch):
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
         future_target,
-        scaler,
+        adj_target,
         past_target=None,
         target_info=None,
         optimizer_idx=-1
@@ -174,7 +180,7 @@ class SdcnModule(_TFTModuleBatch):
         if self.switch_flag==0 or self.step_mode=="pretrain":
             step_mode = "pretrain"
         else:
-            step_mode = "complete"            
+            step_mode = "complete"       
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据配置，不同的模型使用不同的过去协变量
@@ -184,27 +190,12 @@ class SdcnModule(_TFTModuleBatch):
                 if step_mode=="complete":
                     # 根据过去目标值(Past Target),生成邻接矩阵
                     with torch.no_grad():
-                        # 使用目标协变量构造邻接矩阵
-                        adj_target = past_convs_item[:,:,:1]
-                        # 生成symmetric邻接矩阵以及拉普拉斯矩阵--使用协方差矩阵代替
-                        adj_matrix = batch_cov(adj_target)[0]
-                        # adj_matrix = build_symmetric_adj(adj_target,device=self.device,distance_func=self.criterion.ccc_distance_torch)
-                        # 如果维度不够，则补0
-                        if adj_matrix.shape[-1]<batch_size:
-                            pad_zize = batch_size - adj_matrix.shape[0]
-                            adj_matrix = torch.nn.functional.pad(adj_matrix, (0, pad_zize, 0, pad_zize))
-                        adj_matrix = adj_matrix.double().to(self.device)      
+                        adj_matrix = adj_target[:,:adj_target.shape[1]//2,:]    
                 else:
                     adj_matrix = None          
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
                 # 使用embedding组合以及邻接矩阵作为输入
                 out = m(x_in_item,adj_matrix,mode=step_mode)
-                # 完整模式下，需要进行2次模型处理
-                if step_mode=="complete":
-                    out_again = m(x_in_item,adj_matrix,mode=step_mode)
-                    out = (out,out_again)
-                else:
-                    out = (out,None)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
                 # 模拟数据
@@ -223,9 +214,15 @@ class SdcnModule(_TFTModuleBatch):
 
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
-        
-        # 由于使用无监督算法，故不需要target数据
-        return self.criterion(output,target,optimizers_idx=optimizers_idx)
+
+        if self.switch_flag==0 or self.step_mode=="pretrain":
+            step_mode = "pretrain"
+        else:
+            step_mode = "complete"   
+            
+        (future_target,target_class,target_info,adj_target) = target   
+        future_target_adj = adj_target[:,adj_target.shape[1]//2:,:]
+        return self.criterion(output,(future_target,target_class,future_target_adj),mode=step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
         super().on_validation_start()
@@ -253,7 +250,7 @@ class SdcnModule(_TFTModuleBatch):
                 centers = get_cluster_center(z_value,n_clusters=n_clusters)
                 model = self.sub_models[model_seq]
                 # 直接把初始化簇心值赋予模型内的参数
-                model.cluster_layer.data = torch.Tensor(centers).to(self.device)    
+                # model.cluster_layer.data = torch.Tensor(centers).to(self.device)    
                 # 放开梯度冻结
                 self.freeze_apply(model_seq,flag=1)       
             self.switch_flag = 1 
@@ -271,68 +268,119 @@ class SdcnModule(_TFTModuleBatch):
             output_act = output[index]
             self.training_step_outputs[index].append(output_act[0])
     
+
+    def training_step(self, train_batch, batch_idx) -> torch.Tensor:
+        """重载原方法，直接使用已经加工好的数据"""
+
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler,target_class,target,target_info,rank_indexes,adj_target) = train_batch    
+
+        loss,detail_loss,output = self.training_step_real(train_batch, batch_idx) 
+        if self.train_output_flag:
+            output = [output_item.detach().cpu().numpy() for output_item in output]
+            data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
+                             future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
+                             target.cpu().detach().numpy(),target_info,adj_target.cpu().detach().numpy()]                
+            output_combine = (output,data)
+            pickle.dump(output_combine,self.train_fout)  
+        # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
+        return loss
     
     def training_step_real(self, train_batch, batch_idx) -> torch.Tensor:
-        ret =  super().training_step_real(train_batch, batch_idx)
-        return ret
-    
+        """包括第一及第二部分数值数据,以及分类数据"""
+
+        # 收集目标数据用于分类
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target) = train_batch
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)     
+        scaler = [s[0] for s in scaler_tuple] 
+        past_target = train_batch[0]
+        input_batch = self._process_input_batch(inp)
+        target_class = target_class[:,:,0]     
+        # 给criterion对象设置epoch数量。用于动态loss策略
+        if self.criterion is not None:
+            self.criterion.epoch = self.epochs_trained   
+        total_loss = torch.tensor(0.0).to(self.device)
+        ce_loss = None
+        for i in range(len(self.past_split)):
+            y_transform = None 
+            (output,vr_class,tar_class) = self(input_batch,future_target,adj_target,past_target=past_target,optimizer_idx=i,target_info=target_info)
+            self.output_postprocess(output,i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,adj_target),optimizers_idx=i)
+            (corr_loss_combine,kl_loss,ce_loss) = detail_loss 
+            # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            # self.log("train_kl_loss_{}".format(i), kl_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.loss_data.append(detail_loss)
+            total_loss += loss
+            # 手动更新参数
+            opt = self.trainer.optimizers[i]
+            opt.zero_grad()
+            self.manual_backward(loss)
+            # 如果已冻结则不执行更新
+            if self.freeze_mode[i]==1:
+                opt.step()
+                self.lr_schedulers()[i].step()
+        self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        self.log("lr0",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)                
+        # 手动维护global_step变量  
+        self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
+        return total_loss,detail_loss,output
+        
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
-        input_batch = self._process_input_batch(val_batch[:5])
-        # 收集目标数据用于分类
-        scaler_tuple,target_class,future_target,target_info = val_batch[5:-1]  
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target) = val_batch
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
+        input_batch = self._process_input_batch(inp)
         scaler = [s[0] for s in scaler_tuple]
-        (output,vr_class,vr_class_list) = self(input_batch,future_target,scaler,past_target=val_batch[0],target_info=target_info,optimizer_idx=-1)
+        (output,vr_class,vr_class_list) = self(input_batch,future_target,adj_target,past_target=val_batch[0],target_info=target_info,optimizer_idx=-1)
         
-        raise_range_batch = np.expand_dims(np.array([ts["raise_range"] for ts in target_info]),axis=-1)
-        y_transform = raise_range_batch  
-        y_transform = torch.Tensor(y_transform).to(self.device)  
-              
         past_target = val_batch[0]
         past_covariate = val_batch[1]
         target_class = target_class[:,:,0]
         target_vr_class = target_class[:,0].cpu().numpy()
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,y_transform,past_target),optimizers_idx=-1)
+        loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,adj_target),optimizers_idx=-1)
         (corr_loss_combine,kl_loss,ce_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("val_kl_loss_{}".format(i), kl_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_kl_loss_{}".format(i), kl_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         if self.step_mode=="pretrain" or self.switch_flag==0:
             return loss,detail_loss,output
         
         # 准确率的计算
-        import_price_result,values = self.compute_real_class_acc(output_data=output,target_info=target_info,target_class=target_class)          
-        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        if self.total_imp_cnt==0:
-            self.total_imp_cnt = total_imp_cnt
-        else:
-            self.total_imp_cnt += total_imp_cnt
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                # 修改编号，避免重复
-                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
-        
-        # 可视化
-        whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
-        target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)        
+        # import_price_result,values = self.compute_real_class_acc(output_data=output,target_info=target_info,target_class=target_class)          
+        # total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        # if self.total_imp_cnt==0:
+        #     self.total_imp_cnt = total_imp_cnt
+        # else:
+        #     self.total_imp_cnt += total_imp_cnt
+        # # 累加结果集，后续统计   
+        # if self.import_price_result is None:
+        #     self.import_price_result = import_price_result    
+        # else:
+        #     if import_price_result is not None:
+        #         import_price_result_array = import_price_result.values
+        #         # 修改编号，避免重复
+        #         import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
+        #         import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+        #         self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
+        #
+        # # 可视化
+        # whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
+        # target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)        
         # output_viz = z_values.transpose(1,2,0)
         # self.viz_results(z_values, target_inverse, import_price_result, batch_idx, target_vr_class, target_info, viz_target)
         
         # 聚类可视化
-        if (self.current_epoch%10==1 and batch_idx==0):
-            self.clustring_viz(values,target_class=target_vr_class,index_no=self.current_epoch)
+        # if (self.current_epoch%10==1 and batch_idx==0):
+        #     self.clustring_viz(values,target_class=target_vr_class,index_no=self.current_epoch)
         
         return loss,detail_loss,output
 
@@ -468,7 +516,41 @@ class SdcnModule(_TFTModuleBatch):
             # 按照输出概率标绘
             clu_coords_viz(coords_pred,imp_index=None,labels=labels_p,att_data=cluster_center,
                            name="gcn/p_cluster_{}_{}".format(index_no,i))  
-                                   
+
+    def _process_input_batch(
+        self, input_batch
+    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """重载方法，以适应数据结构变化"""
+        (
+            past_target,
+            past_covariates,
+            historic_future_covariates,
+            future_covariates,
+            static_covariates,
+        ) = input_batch
+        dim_variable = -1
+
+        # 生成多组过去协变量，用于不同子模型匹配
+        x_past_array = []
+        for i,p_index in enumerate(self.past_split):
+            past_conv_index = self.past_split[i]
+            past_covariates_item = past_covariates[...,past_conv_index[0]:past_conv_index[1]]
+            # 修改协变量生成模式，只取自相关目标作为协变量
+            conv_defs = [
+                        past_target[...,i:i+1],
+                        past_covariates_item,
+                        historic_future_covariates,
+                ]            
+            x_past = torch.cat(
+                [
+                    tensor
+                    for tensor in conv_defs if tensor is not None
+                ],
+                dim=dim_variable,
+            )
+            x_past_array.append(x_past)
+        return x_past_array, future_covariates, static_covariates     
+                                       
     def dump_val_data(self,val_batch,output):
         pass
         # output_real = []

@@ -225,9 +225,10 @@ class _CusModule(BaseMixModule):
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss,detail_loss,output
-    
+ 
     def output_postprocess(self,output,index):
         pass
+       
         
     def build_focus_data(self,output_ori,past_target_ori,target_info=None,scalers=None):
         # 根据序列预测输出结果，整合并形成二次特征

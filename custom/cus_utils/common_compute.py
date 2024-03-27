@@ -403,7 +403,7 @@ def ccc_distance_torch(x,y):
     return dis 
     
 def batch_cov(points):
-    # points = points.permute(2,1,0)
+    points = points.permute(0,2,1)
     B, N, D = points.size()
     mean = points.mean(dim=1).unsqueeze(1)
     diffs = (points - mean).reshape(B * N, D)

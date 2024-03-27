@@ -4,7 +4,7 @@ from torch import nn
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss
-from cus_utils.common_compute import pairwise_distances,target_distribution
+from cus_utils.common_compute import pairwise_distances,batch_cov
 
 class ClusteringLoss(UncertaintyLoss):
     """基于聚类的损失函数"""
@@ -14,11 +14,11 @@ class ClusteringLoss(UncertaintyLoss):
         self.ref_model = ref_model
         self.device = device  
         
-    def forward(self, output_ori,target_ori,optimizers_idx=0):
+    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
         """套用dinknet中的聚类损失计算，使用具有梯度的聚类中心参数进行计算"""
 
         (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,target_info,y_transform,past_target) = target_ori
+        (target,target_class,future_target_adj) = target_ori
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         similarity_value = [None,None,None]
         kl_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
@@ -27,32 +27,25 @@ class ClusteringLoss(UncertaintyLoss):
         loss_sum = torch.tensor(0.0).to(self.device) 
         fake_loss = torch.tensor(0.0).to(self.device) 
         # 相关系数损失,多个目标
-        label_class = target_class[:,0]
+        label_class = target_class[:,:,0].long()
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
-                real_target = target[:,:,i]
+                real_target = target[:,:,:,i]
                 # real_target = past_target[:,:,i]
                 # 全模式下，会有2次模型处理，得到2组数据
-                output_item,out_again = output[i] 
-                # 如果属于特征值阶段，则只比较特征距离
-                if out_again is None:
-                    x_bar, _, _, _,_ = output_item
-                    corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
+                output_item = output[i] 
+                x_bar, q, pred, pred_value,z = output_item  
+                
+                x_bar = x_bar.view(x_bar.shape[0]*x_bar.shape[1],-1)
+                real_target = real_target.view(real_target.shape[0]*real_target.shape[1],-1)
+                corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
+                if mode=="pretrain":
+                    # 如果属于特征值阶段，则只比较特征距离
+                    loss_sum = loss_sum + corr_loss_combine[i]
                 else:  
-                    _, tmp_q, temp_pred, _,_ = output_item
-                    tmp_q = tmp_q.data
-                    temp_pred = temp_pred.data
-                    p = target_distribution(tmp_q)      
-                    pred_p = target_distribution(temp_pred)     
-                    x_bar, q, pred, pred_value,z =  out_again         
-                    # 实现损失计算
-                    corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
-                    # DNN结果与聚类簇心的KL散度计算
-                    # kl_loss[i] = 10 * F.kl_div(q.log(), p, reduction='batchmean')
-                    # GCN结果与聚类簇心的KL散度计算
-                    # ce_loss[i] = nn.NLLLoss()(torch.log(pred),label_class)
-                    ce_loss[i] = 10 * F.kl_div(pred.log(), pred_p, reduction='batchmean')
-                loss_sum = loss_sum + corr_loss_combine[i] + kl_loss[i] + ce_loss[i]
+                    # 分别计算输出值与目标值的分类差别
+                    ce_loss[i] = nn.CrossEntropyLoss()(pred,label_class.reshape(-1))   
+                    loss_sum = loss_sum + corr_loss_combine[i] + kl_loss[i] + ce_loss[i]
         return loss_sum,[corr_loss_combine,kl_loss,ce_loss]
 
             

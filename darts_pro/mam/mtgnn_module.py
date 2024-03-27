@@ -22,7 +22,7 @@ from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
 from losses.clustering_loss import MtgLoss
-from losses.clustering_loss import target_distribution
+from cus_utils.common_compute import target_distribution
 from cus_utils.visualization import clu_coords_viz
 from cus_utils.clustering import get_cluster_center
 import cus_utils.global_var as global_var
