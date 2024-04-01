@@ -103,7 +103,8 @@ class SdcnModule(_TFTModuleBatch):
                 future_target,
                 target_info,
                 rank_index,
-                adj_target
+                adj_target,
+                price_target
             ) = self.train_sample      
                   
             # 固定单目标值
@@ -220,9 +221,11 @@ class SdcnModule(_TFTModuleBatch):
         else:
             step_mode = "complete"   
             
-        (future_target,target_class,target_info,adj_target) = target   
+        (future_target,target_class,target_info,adj_target,price_target) = target   
         future_target_adj = adj_target[:,adj_target.shape[1]//2:,:]
-        return self.criterion(output,(future_target,target_class,future_target_adj),mode=step_mode,optimizers_idx=optimizers_idx)
+        future_price_target = price_target[:,:,self.input_chunk_length:-1,0]
+        pca_target = price_target[:,:,-1,0]
+        return self.criterion(output,(future_target,target_class,future_target_adj,pca_target),mode=step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
         super().on_validation_start()
@@ -273,14 +276,14 @@ class SdcnModule(_TFTModuleBatch):
         """重载原方法，直接使用已经加工好的数据"""
 
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,rank_indexes,adj_target) = train_batch    
+         static_covariates,scaler,target_class,target,target_info,rank_indexes,adj_target,price_target) = train_batch    
 
         loss,detail_loss,output = self.training_step_real(train_batch, batch_idx) 
         if self.train_output_flag:
             output = [output_item.detach().cpu().numpy() for output_item in output]
             data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
                              future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-                             target.cpu().detach().numpy(),target_info,adj_target.cpu().detach().numpy()]                
+                             target.cpu().detach().numpy(),target_info,adj_target.cpu().detach().numpy(),price_target.cpu().detach().numpy()]                
             output_combine = (output,data)
             pickle.dump(output_combine,self.train_fout)  
         # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
@@ -291,7 +294,7 @@ class SdcnModule(_TFTModuleBatch):
 
         # 收集目标数据用于分类
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target) = train_batch
+                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target,price_target) = train_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)     
         scaler = [s[0] for s in scaler_tuple] 
         past_target = train_batch[0]
@@ -306,7 +309,7 @@ class SdcnModule(_TFTModuleBatch):
             y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,adj_target,past_target=past_target,optimizer_idx=i,target_info=target_info)
             self.output_postprocess(output,i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,adj_target),optimizers_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,adj_target,price_target),optimizers_idx=i)
             (corr_loss_combine,kl_loss,ce_loss) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             # self.log("train_kl_loss_{}".format(i), kl_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
@@ -331,7 +334,7 @@ class SdcnModule(_TFTModuleBatch):
         """训练验证部分"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target) = val_batch
+                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target,price_target) = val_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
         input_batch = self._process_input_batch(inp)
         scaler = [s[0] for s in scaler_tuple]
@@ -342,7 +345,8 @@ class SdcnModule(_TFTModuleBatch):
         target_class = target_class[:,:,0]
         target_vr_class = target_class[:,0].cpu().numpy()
         # 全部损失
-        loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), (future_target,target_class,target_info,adj_target),optimizers_idx=-1)
+        loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
+                    (future_target,target_class,target_info,adj_target,price_target),optimizers_idx=-1)
         (corr_loss_combine,kl_loss,ce_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -355,22 +359,22 @@ class SdcnModule(_TFTModuleBatch):
             return loss,detail_loss,output
         
         # 准确率的计算
-        # import_price_result,values = self.compute_real_class_acc(output_data=output,target_info=target_info,target_class=target_class)          
-        # total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        # if self.total_imp_cnt==0:
-        #     self.total_imp_cnt = total_imp_cnt
-        # else:
-        #     self.total_imp_cnt += total_imp_cnt
-        # # 累加结果集，后续统计   
-        # if self.import_price_result is None:
-        #     self.import_price_result = import_price_result    
-        # else:
-        #     if import_price_result is not None:
-        #         import_price_result_array = import_price_result.values
-        #         # 修改编号，避免重复
-        #         import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
-        #         import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-        #         self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
+        import_price_result,values = self.compute_real_class_acc(output_data=output,target_info=self.transfer_target_info(target_info),target_class=target_class)          
+        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        if self.total_imp_cnt==0:
+            self.total_imp_cnt = total_imp_cnt
+        else:
+            self.total_imp_cnt += total_imp_cnt
+        # 累加结果集，后续统计   
+        if self.import_price_result is None:
+            self.import_price_result = import_price_result    
+        else:
+            if import_price_result is not None:
+                import_price_result_array = import_price_result.values
+                # 修改编号，避免重复
+                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
+                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
         #
         # # 可视化
         # whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
@@ -389,8 +393,9 @@ class SdcnModule(_TFTModuleBatch):
         
         # 使用分类判断
         import_index,values = self.build_import_index(output_data=output_data)
-        import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result = \
-            self.collect_result(import_index, target_class.cpu().numpy(), target_info)
+        target_class = target_class.view(-1)
+        import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
+            import_price_result = self.collect_result(import_index, target_class.cpu().numpy(), target_info)
         
         return import_price_result,values
            
@@ -403,35 +408,37 @@ class SdcnModule(_TFTModuleBatch):
         z_values = []
         x_bars = []
         for i in range(len(output_data)):
-            output_item,out_again = output_data[i] 
-            _, tmp_q, _, _,_ = output_item
-            tmp_q = tmp_q.data
-            p = target_distribution(tmp_q)           
-            x_bar, q, pred, pred_value,z =  out_again 
-            p_values.append(p)
-            q_values.append(q)
-            pred_values.append(pred_value)
+            output_item = output_data[i] 
+            # _, tmp_q, _, _,_ = output_item
+            # tmp_q = tmp_q.data
+            # p = target_distribution(tmp_q)           
+            x_bar, q, pred, pred_value,z =  output_item 
+            # p_values.append(p)
+            # q_values.append(q)
+            pred_values.append(pred.squeeze())
             z_values.append(z)
             x_bars.append(x_bar)
         
-        p_values = torch.stack(p_values).cpu().numpy().transpose(1,2,0)
-        q_values = torch.stack(q_values).cpu().numpy().transpose(1,2,0)
-        pred_values = torch.stack(pred_values).cpu().numpy().transpose(1,2,0)
-        z_values = torch.stack(z_values).cpu().numpy().transpose(1,2,0)
-        x_bars = torch.stack(x_bars).cpu().numpy().transpose(1,2,0)
+        # p_values = torch.stack(p_values).cpu().numpy().transpose(1,2,0)
+        # q_values = torch.stack(q_values).cpu().numpy().transpose(1,2,0)
+        pred_values = torch.stack(pred_values).cpu().numpy()
+        # z_values = torch.stack(z_values).cpu().numpy().transpose(1,2,3,0)
+        # x_bars = torch.stack(x_bars).cpu().numpy().transpose(1,2,3,0)
         
-        p_import_index = self.compute_single_target(p_values)
-        q_import_index = self.compute_single_target(q_values)
+        # p_import_index = self.compute_single_target(p_values)
+        # q_import_index = self.compute_single_target(q_values)
+        # pred_values = np.reshape(pred_values,
+        #     [pred_values.shape[0]*pred_values.shape[1],pred_values.shape[2],pred_values.shape[3]])
         pred_import_index = self.compute_single_target(pred_values)
-        output_import_index = self.compute_values_target(pred_values)
+        # output_import_index = self.compute_values_target(pred_values)
+        pred_import_index = pred_import_index.flatten()
         
-        return output_import_index,(p_values,z_values,pred_values)       
+        return pred_import_index,(p_values,z_values,pred_values)       
     
-    def compute_single_target(self,values):     
-        # 综合筛选    
-        p_import_index = np.all(values.argmax(2)==3,axis=0)
-        # 单指标筛选
-        p_import_index = np.where(values[2].argmax(1)==3)[0]    
+    def compute_single_target(self,values):   
+        v2 =  values 
+        # 排序筛选,取得每组排名前几个，作为候选 
+        p_import_index = np.argsort(-values[1],axis=1)[:,:10]
         return p_import_index
 
     def compute_values_target(self,values,target=None):     
@@ -516,7 +523,14 @@ class SdcnModule(_TFTModuleBatch):
             # 按照输出概率标绘
             clu_coords_viz(coords_pred,imp_index=None,labels=labels_p,att_data=cluster_center,
                            name="gcn/p_cluster_{}_{}".format(index_no,i))  
-
+    
+    def transfer_target_info(self,target_info):
+        ts_rtn = []
+        for t in target_info:
+            for t_iner in t:
+                ts_rtn.append(t_iner)
+        return ts_rtn
+        
     def _process_input_batch(
         self, input_batch
     ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:

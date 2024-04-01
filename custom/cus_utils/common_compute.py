@@ -411,6 +411,14 @@ def batch_cov(points):
     bcov = prods.sum(dim=1) / (N - 1)  # Unbiased estimate
     return bcov  # (B, D, D)
 
+def batch_cov_comp(x,y):
+    """实现对给定2个变量的协方差矩阵的计算，变量shape为：(batch_size,样本数,样本时间长度)"""
+    
+    # 在最后一个维度合并,并计算
+    points = torch.concat((x,y),dim=-1)
+    bcov = batch_cov(points)
+    return bcov 
+
 def target_distribution(q):
     weight = q**2 / q.sum(0)
     return (weight.t() / weight.sum(1)).t()

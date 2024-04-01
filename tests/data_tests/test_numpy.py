@@ -594,14 +594,64 @@ def test_matrix_view():
     print(coords)
     plt.plot(coords[:,0],coords[:,1],'o',color='b')
     plt.show()  
-    
+
+def test_mahalanobis():
+    from scipy.spatial.distance import mahalanobis
+
+    # np.random.seed(42)
+    # data = np.random.multivariate_normal(mean=[5, 5], cov=[[2, 1], [1, 2]], size=100) 
+    # print("data shape",data.shape)
+    #
+    # covariance_matrix = np.cov(data, rowvar=False)
+    #
+    # inverse_covariance_matrix = np.linalg.inv(covariance_matrix)
+    #
+    # point1 = np.array([4, 4])
+    # point2 = np.array([6, 6])
+    #
+    # diff = point1 - point2
+    # mahalanobis_distance = np.sqrt(diff.T.dot(inverse_covariance_matrix).dot(diff))
+    #
+    # print("mahalanobis_distance", mahalanobis_distance)
+
+
+   
+    # x = np.random.random([128,5])
+    # y = np.random.random([128,5])
+    # S = np.cov(x,y) 
+    # X = np.stack([x,y])
+    # # XT = X.T
+    #
+    # print("X.shape",X.shape)
+    #
+    # S = np.cov(X) 
+    # print("S.shape",S.shape)
+    # SI = np.linalg.inv(S)
+    #
+    # # diff = x - y
+    # # mahalanobis_distance = np.sqrt(diff.T.dot(SI).dot(diff))    
+    #
+    # from scipy.spatial.distance import pdist
+    # mahalanobis_distance = pdist(X,'mahalanobis')
+    # print('mahalanobis_distance =', mahalanobis_distance)
+
+    x = np.array([[3,4],[5,6],[2,2],[8,4]])
+    xT=x.T
+    D=np.cov(xT)
+    invD = np.linalg.inv(D)
+    tp=x[0]-x[1]
+    print(np.sqrt(np.dot(np.dot(tp,invD),tp.T)))
+    S = np.load("/home/qdata/project/qlib/custom/data/asis/KDJ_2000_202010/s_test.npy")
+    print("det",np.linalg.det(S))
+   
 if __name__ == "__main__":
     # test_mask()
     # test_pair_compute()
     # test_argwhere()
     # test_condition3()
     # test_condi_remove()
-    test_group()
+    # test_group()
+    test_mahalanobis()
     # test_corr()
     # test_corr_tensor()
     # test_slope()

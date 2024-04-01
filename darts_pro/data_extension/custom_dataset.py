@@ -247,6 +247,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         target_info["last_raise_range"] = last_raise_range
         
         scaler = MinMaxScaler()
+        scaler_price = MinMaxScaler()
         target_info["future_target"] = future_target_ori[:,0]
         # 如果目标数据全都一样，会引发corr计算的NAN，在这里微调
         for i in range(future_target_ori.shape[1]):
@@ -261,6 +262,9 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             scaler.fit(past_target_ori)             
             past_target = scaler.transform(past_target_ori)   
             future_target = scaler.transform(future_target_ori)   
+            scaler_price.fit(np.expand_dims(target_info["label_array"][:self.input_chunk_length],-1)) 
+            # 增加价格目标数据
+            price_target = scaler_price.transform(np.expand_dims(target_info["label_array"],-1))   
         else:
             future_target = future_target_ori     
             
@@ -280,7 +284,8 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             (scaler,future_past_covariate),
             target_class,
             future_target,
-            target_info
+            target_info,
+            price_target
         )
         
 class CustomInferenceDataset(InferenceDataset):

@@ -79,9 +79,10 @@ class _TFTModuleAsis(_CusModule):
             return fake_loss
         # 过滤后，进行数据增强
         # train_batch = self.dynamic_build_training_data(train_batch).transpose(1,0)     
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = train_batch 
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,price_target) = train_batch 
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
-                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]        
+                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),
+                         scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info,price_target.cpu().numpy()]        
         pickle.dump(data,self.train_fout) 
         return fake_loss
 
@@ -154,7 +155,7 @@ class _TFTModuleAsis(_CusModule):
     def filter_batch_by_condition(self,data_batch,filter_conv_index=0,rev_threhold=3,recent_threhold=3):
         """按照已知指标，对结果集的重点关注部分进行初步筛选"""
         
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = data_batch    
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target) = data_batch    
         
         price_bool = np.ones(past_target.shape[0], dtype=bool)
         # 如果周期内价格不发生变化，后续统计是会NAN，在此过滤
@@ -179,8 +180,8 @@ class _TFTModuleAsis(_CusModule):
         # # 需要近期的牛市力度一直处于上方
         # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
         
-        import_index_bool = self.create_signal_macd(target_info)       
-        # import_index_bool = self.create_signal_kdj(target_info)    
+        # import_index_bool = self.create_signal_macd(target_info)       
+        import_index_bool = self.create_signal_kdj(target_info)    
         import_index_bool = import_index_bool & price_bool
         if np.sum(import_index_bool)==0:
             return None
@@ -190,7 +191,7 @@ class _TFTModuleAsis(_CusModule):
         data_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
                             future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
                             np.array(scaler_tuple,dtype=object)[rtn_index],target_class[rtn_index,:,:],
-                            target[rtn_index,:,:],np.array(target_info)[rtn_index].tolist()]
+                            target[rtn_index,:,:],np.array(target_info)[rtn_index].tolist(),price_target[rtn_index,:,:]]
         return data_batch_filter
     
     def create_signal_macd(self,target_info):
@@ -241,9 +242,10 @@ class _TFTModuleAsis(_CusModule):
         val_batch = self.filter_batch_by_condition(val_batch_ori,filter_conv_index=self.filter_conv_index)
         if val_batch is None:
             return fake_loss  
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info) = val_batch 
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,price_target) = val_batch 
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
-                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]
+                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),
+                         scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info,price_target.cpu().numpy()]
         print("dump valid,batch:{},target shape:{}".format(batch_idx,past_target.shape))
         pickle.dump(data,self.valid_fout) 
         
@@ -315,6 +317,7 @@ class TFTAsisModel(TFTExtModel):
             future_target_class,
             future_target,
             target_info,
+            price_target
         ) = train_sample
 
         # add a covariate placeholder so that relative index will be included

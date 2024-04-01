@@ -4,7 +4,7 @@ from torch import nn
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss
-from cus_utils.common_compute import pairwise_distances,batch_cov
+from cus_utils.common_compute import pairwise_distances,batch_cov_comp
 
 class ClusteringLoss(UncertaintyLoss):
     """基于聚类的损失函数"""
@@ -18,7 +18,7 @@ class ClusteringLoss(UncertaintyLoss):
         """套用dinknet中的聚类损失计算，使用具有梯度的聚类中心参数进行计算"""
 
         (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,future_target_adj) = target_ori
+        (target,target_class,future_target_adj,pca_target) = target_ori
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         similarity_value = [None,None,None]
         kl_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
@@ -32,23 +32,36 @@ class ClusteringLoss(UncertaintyLoss):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[:,:,:,i]
                 # real_target = past_target[:,:,i]
-                # 全模式下，会有2次模型处理，得到2组数据
                 output_item = output[i] 
                 x_bar, q, pred, pred_value,z = output_item  
-                
                 x_bar = x_bar.view(x_bar.shape[0]*x_bar.shape[1],-1)
                 real_target = real_target.view(real_target.shape[0]*real_target.shape[1],-1)
-                corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
+                corr_loss_combine[i] = self.corr_loss_comp(x_bar,real_target)
                 if mode=="pretrain":
                     # 如果属于特征值阶段，则只比较特征距离
                     loss_sum = loss_sum + corr_loss_combine[i]
                 else:  
-                    # 分别计算输出值与目标值的分类差别
-                    ce_loss[i] = nn.CrossEntropyLoss()(pred,label_class.reshape(-1))   
+                    # 使用相关距离，进行横向损失比较
+                    ce_loss[i] = self.mse_loss(pred[:,:,0],pca_target)   
                     loss_sum = loss_sum + corr_loss_combine[i] + kl_loss[i] + ce_loss[i]
         return loss_sum,[corr_loss_combine,kl_loss,ce_loss]
 
-            
+    def mahalanobis_distance(self,x,y): 
+        """计算马氏距离"""
+        
+        delta = x - y
+        delta_T = delta.permute(0,2,1)
+        # 计算协方差矩阵
+        S = batch_cov_comp(x,y)
+        np.save("custom/data/asis/KDJ_2000_202010/s_test.npy",S.detach().cpu().numpy())
+        # 逆矩阵
+        S_inv = torch.linalg.pinv(S)
+        # 向量与矩阵点乘
+        bm1_test = torch.bmm(delta_T, S)
+        bm1 = torch.bmm(delta_T, S_inv)
+        m = torch.bmm(bm1, delta)
+        return torch.sqrt(m)
+           
     @staticmethod
     def no_diag(x, n):
         x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()    

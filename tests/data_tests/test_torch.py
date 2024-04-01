@@ -1,6 +1,7 @@
 import torch 
 import torch.nn as nn
 import numpy as np
+import time
 
 def test_tensor():
     a = torch.randn(1, requires_grad=True).cuda()
@@ -140,14 +141,46 @@ def test_mul():
     print(feats.shape)
     sim_mat = torch.matmul(feats, torch.t(feats))
     print(sim_mat)
-  
+
+def test_where():
+    tensor = torch.rand([10,6300]).to("cuda:0")
+    for i in range(100):
+        tensor = torch.rand([10,6300]).to("cuda:0")
+        t1 = time.time()
+        torch.where(tensor>0.9)
+        t2 = time.time()
+        print("time is",(t2-t1)*1000)
+
+def test_transfer():
+    arr = np.ones([1,1920,1080,3])
+    for i in range(100):
+        t1 = time.time()
+        tensor = torch.Tensor(arr)#.to("cuda:0")
+        # tensor = torch.from_numpy(arr).to("cuda:0")
+        t2 = time.time()
+        print("time is",(t2-t1)*1000)
+
+def test_pca():
+    k = 1
+    tensor = torch.rand([128,5]).to("cuda:0")
+    cov = torch.matmul(torch.t(tensor), tensor) / tensor.size(0)
+    # cov = torch.cov(tensor.T)
+    # tensor = tensor - torch.mean(tensor, dim=0)
+    eigvals, eigvecs = torch.eig(cov, eigenvectors=True)
+    idx = eigvals.sort(descending=True)[1][:k]
+    transform = eigvecs[:, idx]
+    rtn = torch.matmul(tensor, transform)
+    print("rtn",rtn)
+         
 if __name__ == "__main__":
     # test_tensor()    
     # test_sort()
     # test_kmeans()
     # test_repeat()
     # test_mul()
-    test_corr()
+    # test_corr()
+    test_pca()
+    # test_transfer()
     # test_pairwise()
     # test_embedding()
     # test_zip()

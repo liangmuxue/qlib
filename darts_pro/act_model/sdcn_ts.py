@@ -56,6 +56,50 @@ class GCN(nn.Module):
         return self.act(out)
 
 
+def svd_flip(u, v):
+    # columns of u, rows of v
+    max_abs_cols = torch.argmax(torch.abs(u), 0)
+    i = torch.arange(u.shape[1]).to(u.device)
+    signs = torch.sign(u[max_abs_cols, i])
+    u *= signs
+    v *= signs.view(-1, 1)
+    return u, v
+
+class PCA(nn.Module):
+    """对于时间序列进行降维，以实现多样本的横向比较"""
+    
+    def __init__(self, n_components):
+        super().__init__()
+        self.n_components = n_components
+
+    @torch.no_grad()
+    def fit(self, X):
+        n, d = X.size()
+        if self.n_components is not None:
+            d = min(self.n_components, d)
+        self.register_buffer("mean_", X.mean(0, keepdim=True))
+        Z = X - self.mean_ # center
+        U, S, Vh = torch.linalg.svd(Z, full_matrices=False)
+        Vt = Vh
+        U, Vt = svd_flip(U, Vt)
+        self.register_buffer("components_", Vt[:d])
+        return self
+
+    def forward(self, X):
+        return self.transform(X)
+
+    def transform(self, X):
+        assert hasattr(self, "components_"), "PCA must be fit before use."
+        return torch.matmul(X - self.mean_, self.components_.t())
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+
+    def inverse_transform(self, Y):
+        assert hasattr(self, "components_"), "PCA must be fit before use."
+        return torch.matmul(Y, self.components_) + self.mean_
+    
 class SdcnTs(nn.Module):
     """融合SDCN以及Tide模式的序列处理，用于时间序列聚类方式预测"""
     
@@ -102,15 +146,18 @@ class SdcnTs(nn.Module):
         self.gnn_3 = GNNLayer(gnn_dec_dim, gnn_dec_dim)
         # 实际输出层，维度为预测序列长度
         self.gnn_4 = GNNLayer(gnn_dec_dim, z_layer_dim)
-        # 对应分类层
-        self.gnn_5 = GNNLayer(z_layer_dim, z_layer_dim)
+        # 对应降维后的数据序列
+        self.gnn_5 = GNNLayer(z_layer_dim, 1)
 
         # 聚类部分设定
         self.cluster_layer = Parameter(torch.Tensor(n_cluster, z_layer_dim))
         torch.nn.init.xavier_normal_(self.cluster_layer.data)
 
         # degree
-        self.v = v     
+        self.v = v   
+        
+        # 降维模块，使用1维  
+        self.pca = PCA(1)
 
     def forward(self, x, adj,mode="pretrain"):
         """先提取序列特征，然后根据中间变量做GCN，然后做自监督计算
@@ -141,8 +188,8 @@ class SdcnTs(nn.Module):
         q = self.compute_qdis(z,mode=1)
 
         # 使用GCN的输出，再次进行聚类距离衡量，并返回数值
-        pred = normalization(h5,mode="torch",axis=1)  
-        pred = F.softmax(pred,1)
+        pred = h5 # normalization(h5,mode="torch",axis=1)  
+        # pred = F.softmax(pred,1)
         # pred = self.compute_qdis(h5,mode=1) 
 
         return x_bar, q, pred, h5,z
@@ -212,7 +259,7 @@ class SdcnTs3D(SdcnTs):
         else:
             output_length = kwargs["input_chunk_length"]
             
-        z_layer_dim = 10
+        z_layer_dim = kwargs["output_chunk_length"]
         # Tide作为嵌入特征部分,输入和输出使用同一维度
         self.emb_layer = Tide3D(input_dim,emb_output_dim,future_cov_dim,static_cov_dim,nr_params,num_encoder_layers,num_decoder_layers,
                               decoder_output_dim,hidden_size,temporal_decoder_hidden,temporal_width_past,temporal_width_future,
@@ -228,8 +275,8 @@ class SdcnTs3D(SdcnTs):
         self.gnn_3 = GNNLayer(gnn_dec_dim, gnn_dec_dim)
         # 实际输出层，维度为预测序列长度
         self.gnn_4 = GNNLayer(gnn_dec_dim, z_layer_dim)
-        # 对应分类层
-        self.gnn_5 = GNNLayer(z_layer_dim, n_cluster)
+        # 对应降维后的数据序列
+        self.gnn_5 = GNNLayer(z_layer_dim, 1)
 
         # 聚类部分设定
         self.cluster_layer = Parameter(torch.Tensor(n_cluster, z_layer_dim))
@@ -238,7 +285,6 @@ class SdcnTs3D(SdcnTs):
         # degree
         self.v = v     
         
-        
     def forward(self, x, adj,mode="pretrain"):
         """先提取序列特征，然后根据中间变量做GCN，然后做自监督计算
            根据mode参数分为2种模式，pretrain表示只进行特征提取
@@ -246,7 +292,7 @@ class SdcnTs3D(SdcnTs):
         
         # 获取嵌入特征，包含中间过程结果
         x_bar,z,enc_data,encoded_input_data = self.emb_layer(x)
-        x_bar = x_bar.squeeze()
+        x_bar = x_bar.squeeze(-1)
         # pretrain模式只需要中间步骤的特征值
         if mode=="pretrain":
             return x_bar,None,None,None,z
@@ -267,8 +313,7 @@ class SdcnTs3D(SdcnTs):
         # 自监督部分
         # q = self.compute_qdis(z,mode=1)
         q = None
-        # 使用GCN的输出，再次进行聚类距离衡量，并返回数值
-        pred = normalization(torch.reshape(h5,(h5.shape[0]*h5.shape[1],h5.shape[2])),mode="torch",axis=1)
+        pred = h5 # normalization(torch.reshape(h5,(h5.shape[0]*h5.shape[1],h5.shape[2])),mode="torch",axis=1).reshape(h5.shape)
         # pred = F.softmax(pred,1)
         # pred = self.compute_qdis(h5,mode=1) 
         # pred = batch_cov(h5)

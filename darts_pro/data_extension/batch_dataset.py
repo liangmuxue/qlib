@@ -9,6 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 from cus_utils.encoder_cus import StockNormalizer   
 from sktime.transformations.panel.pca import PCATransformer
+from sklearn.decomposition import PCA
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from cus_utils.common_compute import batch_cov
 import cus_utils.global_var as global_var
@@ -297,13 +298,13 @@ class BatchCluDataset(BatchDataset):
         
         start_date_rec = [] 
         instrument_data = [] 
-        for item in data[-1]:
+        for item in data[-2]:
             start_date_rec.append(item["start"])
             instrument_data.append(item["item_rank_code"])
         
         total_len = len(data[-1])
         # 根据批次内维度进行聚合
-        batch_item_size = 128
+        batch_item_size = 256
         batch_len = total_len//batch_item_size + 1
         
         def concat_shape(item_data):
@@ -320,11 +321,10 @@ class BatchCluDataset(BatchDataset):
         target_combine = np.zeros(concat_shape(data[7][0]))
         target_info_combine = np.array([[None for _ in range(batch_item_size)] for _ in range(batch_len)])
         rank_index_combine = np.zeros([batch_len,batch_item_size])
-        past_price_target = np.zeros([batch_len,batch_item_size,past_target_combine.shape[-2]])
-        future_price_target = np.zeros([batch_len,batch_item_size,target_combine.shape[-2]])
+        price_target_combine = np.zeros(concat_shape(data[-1][0]))
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler_tuple,target_class,target,target_info) = data       
+         static_covariates,scaler_tuple,target_class,target,target_info,price_target) = data       
         # 在这里对静态协变量进行全局归一化
         static_covariates = MinMaxScaler().fit_transform(static_covariates[:,0,:])
              
@@ -351,17 +351,28 @@ class BatchCluDataset(BatchDataset):
             fill_data(target_class_combine,target_class[i], b_idx,item_idx)
             fill_data(target_combine,target[i], b_idx,item_idx)
             target_info_combine[b_idx,item_idx] = target_info[i]
-            past_price_target[b_idx,item_idx,:] = target_info[i]["price_array"][:past_target_combine.shape[-2]]
-            future_price_target[b_idx,item_idx,:] = target_info[i]["price_array"][past_target_combine.shape[-2]:]
+            fill_data(price_target_combine,price_target[i], b_idx,item_idx)
          
+        past_price_target = price_target_combine[:,:,:past_target_combine.shape[-2],0]
+        future_price_target = price_target_combine[:,:,past_target_combine.shape[-2]:,0]
         # 提前计算距离矩阵，包括过去和未来两部分
         adj_target_combine = batch_cov(torch.Tensor(past_price_target).to("cuda:0")).cpu().numpy()
         adj_future_combine = batch_cov(torch.Tensor(future_price_target).to("cuda:0")).cpu().numpy()
         # 合并传值
         adj_target_combine = np.concatenate([adj_target_combine,adj_future_combine],axis=1)
-                  
+        
+        # 生成一维pca主成分，用于后续横向比较
+        transformer = PCA(n_components=1)
+        pca_target = []
+        for i in range(future_price_target.shape[0]):
+            p = transformer.fit_transform(future_price_target[i])
+            pca_target.append(p)
+        pca_target = np.stack(pca_target)
+        # 合并传输数据
+        price_target_combine = np.concatenate((price_target_combine,np.expand_dims(pca_target,-1)),axis=2)
         return (past_target_combine,past_covariates_combine, historic_future_covariates_combine,future_covariates_combine,
-                static_covariates_combine,scaler_tuple_combine,target_class_combine,target_combine,target_info_combine,rank_index_combine,adj_target_combine)   
+                static_covariates_combine,scaler_tuple_combine,target_class_combine,target_combine,target_info_combine,
+                rank_index_combine,adj_target_combine,price_target_combine)   
     
     
     def refileter_missing_data(self,data,pre_static_datas):
@@ -518,13 +529,13 @@ class BatchCluDataset(BatchDataset):
         
         batch_data = [item[index] for item in self.batch_data]
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler_tuple,target_class,target,target_info,rank_index,adj_target) = batch_data
+         static_covariates,scaler_tuple,target_class,target,target_info,rank_index,adj_target,price_target) = batch_data
         # target_info["raise_range"] = raise_range
         # (scaler,future_past_covariate) = scaler_tuple
         # 生成图矩阵相关数据,使用价格数据作为关联数据
         # pa = MinMaxScaler().fit_transform(price_array[:past_target.shape[-2]])
         return past_target,past_covariates, historic_future_covariates,future_covariates, \
-            static_covariates, (scaler_tuple, None),target_class,target,target_info,rank_index,adj_target
+            static_covariates, (scaler_tuple, None),target_class,target,target_info,rank_index,adj_target,price_target
     
                                    
 class BatchOutputDataset(BatchDataset):    
