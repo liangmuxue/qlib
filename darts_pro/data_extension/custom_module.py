@@ -341,32 +341,33 @@ class _CusModule(BaseMixModule):
         # self.log("last_vr_loss", last_vr_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
         # 涨跌幅度类别的准确率
-        vr_class_sf = [self.build_vr_class_cer(vc).cpu().numpy() for vc in vr_class_list]
-        self.metric_data(output_combine,future_target.cpu().numpy(),target_vr_class)
-        import_price_result = self.compute_real_class_acc(output_inverse=output_inverse,target_vr_class=target_vr_class,
-                    vr_class=vr_class_sf,output_data=output_combine,target_info=target_info,target_inverse=target_inverse)   
-        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        if self.total_imp_cnt==0:
-            self.total_imp_cnt = total_imp_cnt
-        else:
-            self.total_imp_cnt += total_imp_cnt
-        
-        past_target = val_batch[0]
-        self.val_metric_show(output,future_target,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
-                             target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
-                            batch_idx=batch_idx)
-        
-        # # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                # 修改编号，避免重复
-                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*1000
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
-        
+        # vr_class_sf = [self.build_vr_class_cer(vc).cpu().numpy() for vc in vr_class_list]
+        # self.metric_data(output_combine,future_target.cpu().numpy(),target_vr_class)
+        # import_price_result = self.compute_real_class_acc(output_inverse=output_inverse,target_vr_class=target_vr_class,
+        #             vr_class=vr_class_sf,output_data=output_combine,target_info=target_info,target_inverse=target_inverse)   
+        # total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        # if self.total_imp_cnt==0:
+        #     self.total_imp_cnt = total_imp_cnt
+        # else:
+        #     self.total_imp_cnt += total_imp_cnt
+        #
+        # past_target = val_batch[0]
+        # self.val_metric_show(output,future_target,target_vr_class,output_inverse=output_inverse,vr_class=vr_class,
+        #                      target_inverse=target_inverse,target_info=target_info,import_price_result=import_price_result,past_covariate=past_covariate,
+        #                     batch_idx=batch_idx)
+        #
+        # # # 累加结果集，后续统计   
+        # if self.import_price_result is None:
+        #     self.import_price_result = import_price_result    
+        # else:
+        #     if import_price_result is not None:
+        #         import_price_result_array = import_price_result.values
+        #         # 修改编号，避免重复
+        #         import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*1000
+        #         import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+        #         self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
+        #
+
         # for i in range(3):
         #     self.log("triplet acc_{}".format(i), corr_acc_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("output_imp_class_acc_cnt", output_imp_class_acc_cnt, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -1041,7 +1042,7 @@ class _TFTModuleBatch(_CusModule):
         
         loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)  
         
-        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
+        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag or True:
             self.dump_val_data(val_batch,output)
         return loss,detail_loss   
     

@@ -7,11 +7,12 @@ import pandas as pd
 import torch
 import tsaug
 
+import torchvision
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from sklearn.cluster import KMeans,AgglomerativeClustering
 from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
 from sklearn.metrics import adjusted_rand_score as ari_score
@@ -24,7 +25,7 @@ from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
 from losses.clustering_loss import ClusteringLoss
-from cus_utils.common_compute import target_distribution
+from cus_utils.common_compute import target_distribution,normalization_axis,intersect2d
 from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
 from cus_utils.visualization import clu_coords_viz
 from cus_utils.clustering import get_cluster_center
@@ -58,9 +59,11 @@ class SdcnModule(_TFTModuleBatch):
         past_split=None,
         step_mode="pretrain",
         batch_file_path=None,
+        static_datas=None,
         device="cpu",
         **kwargs,
     ):
+        self.static_datas = static_datas
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
@@ -72,6 +75,7 @@ class SdcnModule(_TFTModuleBatch):
         self.step_mode=step_mode
         # 初始化中间结果数据
         self.training_step_outputs = [[] for _ in range(self.output_data_len)]
+        
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -137,7 +141,14 @@ class SdcnModule(_TFTModuleBatch):
             )
     
             nr_params = 1
-
+            num_nodes = past_target.shape[0]
+            if self.static_datas is None:
+                static_feat = None
+            else:
+                # Standard Static Data
+                static_feat = torch.Tensor(StandardScaler().fit_transform(self.static_datas)).double().to(device)
+                # static_feat = None 
+                          
             model = SdcnTs3D(
                 # Tide Part
                 input_dim=input_dim,
@@ -157,6 +168,9 @@ class SdcnModule(_TFTModuleBatch):
                 # Sdcn Part
                 n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
                 activation="prelu",
+                num_nodes=num_nodes,
+                static_feat=static_feat,
+                device=device,
                 **kwargs,
             )           
             
@@ -168,6 +182,7 @@ class SdcnModule(_TFTModuleBatch):
         adj_target,
         past_target=None,
         target_info=None,
+        rank_mask=None,
         optimizer_idx=-1
     ) -> torch.Tensor:
         
@@ -175,28 +190,36 @@ class SdcnModule(_TFTModuleBatch):
         
         out_total = []
         out_class_total = []
-        batch_size = x_in[1].shape[0]
+        (batch_size,dim_size,_,_) = x_in[1].shape
         
         # 设置训练模式，预训练阶段，以及全模式的初始阶段，都使用预训练模式
         if self.switch_flag==0 or self.step_mode=="pretrain":
             step_mode = "pretrain"
         else:
-            step_mode = "complete"       
+            step_mode = "complete"   
+        # 训练的时候使用动态索引值
+        if self.trainer.state.stage==RunningStage.TRAINING:
+            perm_idx = np.random.permutation(range(dim_size))   
+        else:
+            perm_idx = np.array(range(dim_size))
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据配置，不同的模型使用不同的过去协变量
             past_convs_item = x_in[0][i]            
             # 根据优化器编号匹配计算
             if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
-                if step_mode=="complete":
-                    # 根据过去目标值(Past Target),生成邻接矩阵
-                    with torch.no_grad():
-                        adj_matrix = adj_target[:,:adj_target.shape[1]//2,:]    
-                else:
-                    adj_matrix = None          
-                x_in_item = (past_convs_item,x_in[1],x_in[2])
+                # if step_mode=="complete":
+                #     # 根据过去目标值(Past Target),生成邻接矩阵
+                #     with torch.no_grad():
+                #         adj_matrix = adj_target[:,:adj_target.shape[1]//2,:]    
+                # else:
+                #     adj_matrix = None      
+                
+                # 根据索引重新排序
+                idx = torch.Tensor(perm_idx).to(self.device).long()
+                x_in_item = (past_convs_item[:,perm_idx,:,:],x_in[1][:,perm_idx,:,:],x_in[2][:,perm_idx,:,:])
                 # 使用embedding组合以及邻接矩阵作为输入
-                out = m(x_in_item,adj_matrix,mode=step_mode)
+                out = m(x_in_item,idx=idx,mode=step_mode,rank_mask=rank_mask)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
                 # 模拟数据
@@ -222,10 +245,22 @@ class SdcnModule(_TFTModuleBatch):
             step_mode = "complete"   
             
         (future_target,target_class,target_info,adj_target,price_target) = target   
-        future_target_adj = adj_target[:,adj_target.shape[1]//2:,:]
+        future_target_slope = adj_target
+        pca_price_target = price_target[:,:,-1:,0]
         future_price_target = price_target[:,:,self.input_chunk_length:-1,0]
-        pca_target = price_target[:,:,-1,0]
-        return self.criterion(output,(future_target,target_class,future_target_adj,pca_target),mode=step_mode,optimizers_idx=optimizers_idx)
+        # 拆分出之前绑定的复合变量
+        pca_target = future_target[:,:,-2:,:]
+        future_target = future_target[:,:,:-2,:]
+        # Eva Price Range
+        price_range_data = np.zeros((future_target.shape[0],future_target.shape[1]))
+        for i in range(len(target_info)):
+            for j in range(price_range_data.shape[1]):
+                if target_info[i][j] is not None:
+                    price_range_data[i,j] = target_info[i][j]["raise_range"]
+        price_range_data = StandardScaler().fit_transform(price_range_data)
+        # price_range_data = normalization_axis(price_range_data,axis=0)
+        price_range_data = torch.Tensor(price_range_data).to(self.device).unsqueeze(-1)
+        return self.criterion(output,(future_target,target_class,future_target_slope,pca_target,price_range_data),mode=step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
         super().on_validation_start()
@@ -246,12 +281,12 @@ class SdcnModule(_TFTModuleBatch):
         if self.current_epoch>self.switch_epoch_num:
             for model_seq in range(len(self.sub_models)):
                 # 取得最近一次的预测特征值，作为聚类输入数据
-                z_value = [output_item[-1] for output_item in self.training_step_outputs[model_seq]]
-                z_value = torch.concat(z_value,dim=0).data.cpu()
+                # z_value = [output_item[-1] for output_item in self.training_step_outputs[model_seq]]
+                # z_value = torch.concat(z_value,dim=0).data.cpu()
                 # x_bar = x_bar[:1024,:]
                 n_clusters = len(CLASS_SIMPLE_VALUES.keys())
-                centers = get_cluster_center(z_value,n_clusters=n_clusters)
-                model = self.sub_models[model_seq]
+                # centers = get_cluster_center(z_value,n_clusters=n_clusters)
+                # model = self.sub_models[model_seq]
                 # 直接把初始化簇心值赋予模型内的参数
                 # model.cluster_layer.data = torch.Tensor(centers).to(self.device)    
                 # 放开梯度冻结
@@ -307,13 +342,14 @@ class SdcnModule(_TFTModuleBatch):
         ce_loss = None
         for i in range(len(self.past_split)):
             y_transform = None 
-            (output,vr_class,tar_class) = self(input_batch,future_target,adj_target,past_target=past_target,optimizer_idx=i,target_info=target_info)
+            (output,vr_class,tar_class) = self(input_batch,future_target,adj_target,past_target=past_target,rank_mask=rank_index,
+                                               optimizer_idx=i,target_info=target_info)
             self.output_postprocess(output,i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,adj_target,price_target),optimizers_idx=i)
             (corr_loss_combine,kl_loss,ce_loss) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            # self.log("train_kl_loss_{}".format(i), kl_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_kl_loss_{}".format(i), kl_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            # self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.loss_data.append(detail_loss)
             total_loss += loss
             # 手动更新参数
@@ -329,7 +365,16 @@ class SdcnModule(_TFTModuleBatch):
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss,detail_loss,output
+
+    def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
+        """训练验证部分"""
         
+        loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)  
+        
+        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag or True:
+            self.dump_val_data(val_batch,output,detail_loss)
+        return loss,detail_loss
+           
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -338,7 +383,8 @@ class SdcnModule(_TFTModuleBatch):
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
         input_batch = self._process_input_batch(inp)
         scaler = [s[0] for s in scaler_tuple]
-        (output,vr_class,vr_class_list) = self(input_batch,future_target,adj_target,past_target=val_batch[0],target_info=target_info,optimizer_idx=-1)
+        (output,vr_class,vr_class_list) = self(input_batch,future_target,adj_target,past_target=val_batch[0],rank_mask=rank_index,
+                                               target_info=target_info,optimizer_idx=-1)
         
         past_target = val_batch[0]
         past_covariate = val_batch[1]
@@ -352,29 +398,32 @@ class SdcnModule(_TFTModuleBatch):
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_kl_loss_{}".format(i), kl_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_kl_loss_{}".format(i), kl_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         if self.step_mode=="pretrain" or self.switch_flag==0:
             return loss,detail_loss,output
         
+        # PCA准确率计算
+        self.compute_pac_acc(output,price_target)
+        
         # 准确率的计算
-        import_price_result,values = self.compute_real_class_acc(output_data=output,target_info=self.transfer_target_info(target_info),target_class=target_class)          
-        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        if self.total_imp_cnt==0:
-            self.total_imp_cnt = total_imp_cnt
-        else:
-            self.total_imp_cnt += total_imp_cnt
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                # 修改编号，避免重复
-                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
+        # import_price_result,values = self.compute_real_class_acc(output_data=output,target_info=self.transfer_target_info(target_info),target_class=target_class)          
+        # total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        # if self.total_imp_cnt==0:
+        #     self.total_imp_cnt = total_imp_cnt
+        # else:
+        #     self.total_imp_cnt += total_imp_cnt
+        # # 累加结果集，后续统计   
+        # if self.import_price_result is None:
+        #     self.import_price_result = import_price_result    
+        # else:
+        #     if import_price_result is not None:
+        #         import_price_result_array = import_price_result.values
+        #         # 修改编号，避免重复
+        #         import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
+        #         import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+        #         self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
         #
         # # 可视化
         # whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
@@ -388,6 +437,20 @@ class SdcnModule(_TFTModuleBatch):
         
         return loss,detail_loss,output
 
+    def compute_pac_acc(self,output,price_target):
+        pca_price_target = price_target[:,:,0,0].cpu().numpy()
+        price_index = np.argsort(pca_price_target,axis=1)[:,:50]
+        match_cnt_total = []
+        for i in range(len(output)):
+            output_item = output[i]
+            x_bar, q, pred, pred_value,z = output_item     
+            pred = pred.cpu().numpy()
+            # 通过排序后的交集取得匹配数目   
+            pred_index = np.argsort(pred[...,0],axis=1)[:,:50]
+            match_cnt = intersect2d(price_index,pred_index)  
+            match_cnt_total.append(match_cnt)
+        return match_cnt_total
+        
     def compute_real_class_acc(self,target_info=None,output_data=None,target_class=None):
         """计算涨跌幅分类准确度"""
         
@@ -415,13 +478,14 @@ class SdcnModule(_TFTModuleBatch):
             x_bar, q, pred, pred_value,z =  output_item 
             # p_values.append(p)
             # q_values.append(q)
-            pred_values.append(pred.squeeze())
+            pred_values.append(pred)
             z_values.append(z)
             x_bars.append(x_bar)
         
         # p_values = torch.stack(p_values).cpu().numpy().transpose(1,2,0)
         # q_values = torch.stack(q_values).cpu().numpy().transpose(1,2,0)
         pred_values = torch.stack(pred_values).cpu().numpy()
+        # pred_values = pred_values.transpose(1,2,3,0)
         # z_values = torch.stack(z_values).cpu().numpy().transpose(1,2,3,0)
         # x_bars = torch.stack(x_bars).cpu().numpy().transpose(1,2,3,0)
         
@@ -438,7 +502,7 @@ class SdcnModule(_TFTModuleBatch):
     def compute_single_target(self,values):   
         v2 =  values 
         # 排序筛选,取得每组排名前几个，作为候选 
-        p_import_index = np.argsort(-values[1],axis=1)[:,:10]
+        p_import_index = np.argsort(-values[2],axis=1)[:,:20]
         return p_import_index
 
     def compute_values_target(self,values,target=None):     
@@ -565,19 +629,29 @@ class SdcnModule(_TFTModuleBatch):
             x_past_array.append(x_past)
         return x_past_array, future_covariates, static_covariates     
                                        
-    def dump_val_data(self,val_batch,output):
-        pass
-        # output_real = []
-        # for output_item in output:
-        #     output_item,out_again = output_item
-        #     x_bar, q, pred, _,z =  out_again 
-        #     p = target_distribution(q.data) 
-        #     output_real.append([z.cpu().numpy(),p.cpu().numpy(),pred.cpu().numpy()])
-        # # output_real = np.array(output_real)  
-        # (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,rank_scalers) = val_batch 
-        # data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
-        #                  future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info]            
-        # output_combine = (output_real,data)
-        # pickle.dump(output_combine,self.valid_fout)      
+    def dump_val_data(self,val_batch,output,detail_loss):
+        # pass
+        if self.switch_flag==0 or self.step_mode=="pretrain":
+            return
+        output_real = []
+        for output_item in output:
+            x_bar, q, pred, pred_value,z = output_item  
+            output_real.append([x_bar.cpu().numpy(),pred.cpu().numpy()])
+        # output_real = np.array(output_real)  
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target,price_target) = val_batch
+        scaler = []
+        for st in scaler_tuple:
+            s_item = [st_item[0] if st_item is not None else None for st_item in st[0]]    
+            scaler.append(s_item)
+        scaler = np.array(scaler)    
+        pca_price_target = price_target[:,:,-1:,0]
+        future_price_target = price_target[:,:,self.input_chunk_length:-1,0]
+        data = [past_target.cpu().numpy(),scaler,target_class.cpu().numpy(),
+                future_target.cpu().numpy(),future_price_target.cpu().numpy(),adj_target.cpu().numpy(),target_info]          
+        corr_loss_combine,ot_loss_detail,ce_loss = detail_loss 
+        ot_loss_detail = torch.ones(past_target.shape[0],1000) # torch.stack(ot_loss_detail)
+        output_combine = (output_real,data,ot_loss_detail.cpu().numpy())
+        pickle.dump(output_combine,self.valid_fout)      
            
         

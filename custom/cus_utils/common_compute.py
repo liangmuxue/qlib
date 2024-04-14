@@ -143,9 +143,24 @@ def normalization(data,res=1e-5,mode="numpy",avoid_zero=True,axis=0):
         rtn = rtn + res  
     return rtn
 
+def normalization_axis(data,res=1e-5,avoid_zero=True,axis=0):
+    if isinstance(data,torch.Tensor):
+        sub = data - torch.unsqueeze(torch.min(data,dim=axis)[0],dim=axis)
+        div = torch.unsqueeze((torch.max(data,axis=axis)[0]-torch.min(data,dim=axis)[0]),dim=axis)
+        rtn = sub/div
+    else:
+        sub = data - np.expand_dims(np.min(data,axis=axis),axis=axis)
+        div = np.expand_dims((np.max(data,axis=axis)-np.min(data,axis=axis)),axis=axis)
+        rtn = sub/div        
+    if avoid_zero:
+        rtn = rtn + res  
+    return rtn
+
 def batch_normalization(data,res=1e-5):
     if isinstance(data, torch.Tensor):
         rtn = (data - torch.min(data))/(torch.max(data)-torch.min(data) + res) 
+    else:
+        rtn = (data - np.min(data))/(np.max(data)-np.min(data) + res)         
     return rtn
 
 def price_range_normalization(data,res=0.001,mode="numpy",avoid_zero=True):
@@ -348,6 +363,12 @@ def intersect1d(tensor1, tensor2):
     aux = aux.sort()[0]
     return aux[:-1][(aux[1:] == aux[:-1]).data]
 
+def intersect2d(A,B):
+    ret = []
+    for i in range(A.shape[0]):
+        res = np.intersect1d(A[i],B[i])
+        ret.append(res)
+    return np.array(ret)
 
 def build_symmetric_adj(arr,distance_func=None,device=None):
     """根据原始数据，生成symmetric邻接矩阵以及拉普拉斯矩阵"""
@@ -434,6 +455,32 @@ def find_nearest(array, value):
     idx = np.sum((np.expand_dims(array,1) - value)**2,axis=2).argmin(axis=0)
     return idx
 
+def eps_rebuild(data):
+    """Eps for Zero data"""
+    
+    if isinstance(data,np.ndarray):
+        eps_ori = np.random.uniform(low=1e-4,high=1e-3,size=data.shape)
+        data = np.where(data==0,eps_ori,data)
+    else:
+        eps_ori = torch.ones(data.shape).uniform_(1e-4, 1e-3).to(data.device)
+        data = torch.where(data==0,eps_ori,data)      
+    return data
+
+def same_value_eps(data):
+    """Eps for Same Value problem"""
+    
+    eps = 1e-4
+    if isinstance(data,np.ndarray):
+        for i in range(data.shape[0]):
+            eps_adju = np.random.uniform(low=eps,high=eps*10,size=data.shape[1])
+            item = data[i]
+            if np.unique(item).shape[0]==1:
+                data[i] = data[i] + eps_adju
+    else:
+        eps_ori = torch.ones(data.shape).uniform_(1e-4, 1e-3).to(data.device)
+        data = torch.where(data==0,eps_ori,data)      
+    return data
+   
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)

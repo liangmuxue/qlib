@@ -564,9 +564,15 @@ class StatDataAssis():
         
         viz = TensorViz(env="data_analysis")
         index = 0
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = ds_data.target_data
-        target_class = target_class[:,0,0]
+        (past_target,scaler,target_class,future_target,future_price_target,slope_target,target_info) = ds_data.target_data
+        price_data = ds_data.price_data
+        target = future_target[:,:,:-2,:]
+        pca_target = future_target[:,:,-2:,:]
+        target_class = target_class[...,0,0]
         output_data = ds_data.output_data
+        x_bar_total = output_data[0].transpose(1,2,3,0)
+        pred_total = output_data[1].transpose(1,2,3,0)
+                
         device_str = 'cuda:0'
         device_str = 'cpu'
         device = torch.device(device_str)
@@ -574,58 +580,50 @@ class StatDataAssis():
         num_clusters = len(CLASS_SIMPLE_VALUES.keys())
         import_index = np.where(target_class==3)[0]
         neg_index = np.where(target_class==0)[0]
-        combine_index = np.where((target_class==3)|(target_class==0)|(target_class==1)|(target_class==2))[0]
+        
+        sample_index = 30
+        loss = ds_data.loss_batch_data[:,sample_index]
+        price_data_sample = price_data[sample_index]
+        slope_target_sample = slope_target[sample_index]
+        x_bar_sample = x_bar_total[sample_index]
+        future_price_sample = future_price_target[sample_index]
+        pred_sample = pred_total[sample_index]
+        pca_target_sample = pca_target[sample_index]
+        target_class_sample = target_class[sample_index]
+        target_sample = target[sample_index]
+        combine_index = np.where((target_class_sample==3)|(target_class_sample==0)|(target_class_sample==1)|(target_class_sample==2))[0]
         # combine_index = np.where((target_class==3)|(target_class==0))[0]
-        labels = target_class[combine_index]
-        output_pair_dis_arr = []
-        # 按照不同的指标分别聚类
-        for i in range(len(output_data)):
+        labels_sample = target_class_sample[combine_index]    
+ 
+        future_price_target_flat = future_price_target.reshape(-1,future_price_target.shape[2])
+        
+        mds = MDS(n_components=2, dissimilarity='precomputed',random_state=1)        
+        mds = MDS(n_components=2, random_state=1)            
+        # target_pair_dis = pairwise_distances(torch.Tensor(slope_target_sample).to(device),distance_func=loss_unity.mse_dis,
+        #                             make_symmetric=True).cpu().numpy()
+        coords = mds.fit_transform(slope_target_sample)                               
+        self.matrix_results_viz(coords,labels=labels_sample,name="target_combine")   
+                               
+        for i in range(3):
             # if i!=2:
             #     continue
-            output = output_data[i]
-            z,p,pred = output
-            target_single = target[:,:,i]
-            target_single = target_single[combine_index]
+            x_bar = x_bar_sample[...,i]
+            pred = pred_sample[...,i]
+            target_single = target_sample[...,i]
+            pca_target_single = pca_target_sample[...,i]
+            loss_item = loss[i]
+            print("loss is:",loss_item)
             # 生成配对距离矩阵
-            output_pair_dis = pairwise_distances(torch.Tensor(z).to(device),distance_func=loss_unity.mse_dis,
-                                        make_symmetric=True).cpu().numpy()         
-            # self.draw_distance_elbaw(output_pair_dis)
-            
-            # 生成二维坐标数据
-            mds = MDS(n_components=2, dissimilarity='precomputed',random_state=1)
-            coords = mds.fit_transform(output_pair_dis)               
-            
-            # 使用密度聚类，min_samples标识每簇至少多少个点以上，eps表示簇内距离要求
-            db = DBSCAN(eps=0.1, metric='precomputed',min_samples=3,n_jobs=2).fit(output_pair_dis)  
-            cluster_labels = self.dbscan_results(db,coords,name="NO_{}".format(i))
-            noise_index = np.where(cluster_labels==-1)[0]
-            noise_index = self.filter_noise_data(coords, noise_index,eps=0.05)   
-            # 可视化，使用二维坐标在图形展示        
-            self.matrix_results_viz(coords=coords,labels=labels,noise_index=noise_index,name="output_pn_{}".format(i))
-            self.matrix_results_viz(coords=coords,labels=labels,noise_index=None,name="output_s_{}".format(i))
-            
-            # cluster = SpectralClustering(n_clusters=2, gamma=1,random_state=1,affinity="precomputed")
-            # cluster.fit(output_pair_dis)
-            # self.spec_results(cluster,coords,name="NO_{}".format(i))
-            # # print("noise_data is:",xy_rtn)
+            # output_pair_dis = pairwise_distances(torch.Tensor(pred).to(device),distance_func=loss_unity.mse_dis,
+            #                             make_symmetric=True).cpu().numpy()         
 
-            # noise_index = noise_index[filter_idx]
-            # for i in range(4):
-            #     total_acc_cnt = np.sum(target_class[noise_index]==i)   
-            #     total_acc = total_acc_cnt/noise_index.shape[0]
-            #     print("total_acc_{}:{}".format(i,total_acc))
-            # import_index = np.where(db.labels_==CLASS_SIMPLE_VALUE_MAX)[0]
-            # import_target = np.where(target_class==CLASS_SIMPLE_VALUE_MAX)[0]
-                                                 
-            target_pair_dis = pairwise_distances(torch.Tensor(target_single).to(device),distance_func=loss_unity.ccc_distance_torch,
-                                        make_symmetric=True).cpu().numpy()
-            # 对目标值分布的可视化
-            # self.matrix_results_viz(target_pair_dis,labels=labels,name="target_pn_{}".format(i))  
-              
-            # target_db = DBSCAN(eps=0.2, metric='precomputed',min_samples=4,n_jobs=2).fit(target_pair_dis)  
-            # self.dbscan_results(target_db,target_pair_dis,name="target")            
-            # import_acc = import_acc_cnt/import_index.shape[0]
-            # print("acc_{},total_acc:{},import_acc:{}".format(i,total_acc,import_acc)) 
+            # 生成二维坐标数据
+            # coords = mds.fit_transform(output_pair_dis)    
+            coords = mds.fit_transform(pred)        
+            
+            # 可视化，使用二维坐标在图形展示        
+            self.matrix_results_viz(coords=coords,labels=labels_sample,noise_index=None,name="output_s_{}".format(i))
+
             
         # 合并指标聚类分析
         # output = output_data[combine_index,1:]        

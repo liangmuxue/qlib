@@ -181,7 +181,9 @@ class _TFTModuleAsis(_CusModule):
         # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
         
         # import_index_bool = self.create_signal_macd(target_info)       
-        import_index_bool = self.create_signal_kdj(target_info)    
+        # import_index_bool = self.create_signal_kdj(target_info)    
+        # All Data In
+        import_index_bool = np.ones(past_target.shape[0], dtype=bool)
         import_index_bool = import_index_bool & price_bool
         if np.sum(import_index_bool)==0:
             return None
@@ -588,6 +590,7 @@ class TFTBatchModel(TFTExtModel):
                 step_mode=self.step_mode,
                 model_type=self.model_type,
                 train_sample=self.train_sample,
+                static_datas=self.static_datas,
                 **self.pl_module_params,
             )   
             # 全模式下，先加载之前的预训练模型

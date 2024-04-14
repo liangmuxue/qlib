@@ -346,7 +346,7 @@ class UncertaintyLoss(nn.Module):
         distance = torch.mean(loss_arr,dim=1)
         return distance       
        
-    def pearson_dis(self, input: Tensor, target: Tensor):
+    def pearson_dis(self, input: Tensor, target: Tensor,eps=False):
         if len(input.shape)==1:
             num_outputs = 1
             pearson = torchmetrics.PearsonCorrCoef().to(self.device)
@@ -358,9 +358,10 @@ class UncertaintyLoss(nn.Module):
             input_corr = input.transpose(1,0)
             target_corr = target.transpose(1,0)
             # 为了避免NAN，需要进行校验和调整
-            input_corr = adjude_seq_eps(input_corr.permute(1,0)).permute(1,0)
-            target_corr = adjude_seq_eps(target_corr.permute(1,0)).permute(1,0)
-        distance = 1 - pearson(input_corr, target_corr) 
+            if eps:
+                input_corr = adjude_seq_eps(input_corr.permute(1,0)).permute(1,0)
+                target_corr = adjude_seq_eps(target_corr.permute(1,0)).permute(1,0)
+        distance = 1 - pearson(input_corr, target_corr).pow(2)
         return distance
 
     def corr_distance(self, input: Tensor, target: Tensor):
@@ -392,7 +393,14 @@ class UncertaintyLoss(nn.Module):
         if flag_numpy==1:
             dis = dis.cpu().numpy()
         return dis
-    
+
+    def ccc_distance_3d(self,x,y):
+        x_reshape = x.reshape(-1,x.shape[2])
+        y_reshape = y.reshape(-1,y.shape[2])
+        dis = self.ccc_distance_torch(x_reshape, y_reshape)
+        dis = dis.reshape(x.shape[0],x.shape[1],1)
+        return dis
+       
     def ccc_distance(self,input_ori,target_ori):
         if len(input_ori.shape)==1:
             input_with_dims = input_ori.unsqueeze(0)
@@ -453,4 +461,6 @@ class UncertaintyLoss(nn.Module):
         # 同时返回综合相似度数值后续使用
         return loss,S
         
-        
+    def kl_loss(self,input,target): 
+        kl = F.kl_div(input.softmax(dim=-1).log(), target.softmax(dim=-1), reduction='mean')
+        return kl

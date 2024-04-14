@@ -9,8 +9,9 @@ import numpy as np
 from cus_utils.dink_util import aug_feature_shuffle,aug_feature_dropout
 from .tide import Tide,Tide3D
 from custom_model.embedding import embed
-from cus_utils.common_compute import normalization,corr_compute,batch_cov
+from cus_utils.common_compute import eps_rebuild,corr_compute,batch_cov
 from torchmetrics.regression import ConcordanceCorrCoef
+from darts_pro.act_model.mtgnn_layer import graph_constructor
 
 ########################对于深度聚类的扩展,适配时间序列#######################
 class GNNLayer(Module):
@@ -29,8 +30,8 @@ class GNNLayer(Module):
             output = self.bn(output)   
         else:
             support = torch.matmul(features, self.weight)
-            output = torch.bmm(adj, support)     
-            output = self.bn(output.permute(0,2,1)).permute(0,2,1)  
+            output = torch.matmul(support.permute(0,2,1),adj)     
+            output = self.bn(output).permute(0,2,1)  
         if active:
             output = F.relu(output)
         return output
@@ -147,7 +148,7 @@ class SdcnTs(nn.Module):
         # 实际输出层，维度为预测序列长度
         self.gnn_4 = GNNLayer(gnn_dec_dim, z_layer_dim)
         # 对应降维后的数据序列
-        self.gnn_5 = GNNLayer(z_layer_dim, 1)
+        self.gnn_5 = GNNLayer(z_layer_dim, z_layer_dim)
 
         # 聚类部分设定
         self.cluster_layer = Parameter(torch.Tensor(n_cluster, z_layer_dim))
@@ -155,9 +156,6 @@ class SdcnTs(nn.Module):
 
         # degree
         self.v = v   
-        
-        # 降维模块，使用1维  
-        self.pca = PCA(1)
 
     def forward(self, x, adj,mode="pretrain"):
         """先提取序列特征，然后根据中间变量做GCN，然后做自监督计算
@@ -188,7 +186,7 @@ class SdcnTs(nn.Module):
         q = self.compute_qdis(z,mode=1)
 
         # 使用GCN的输出，再次进行聚类距离衡量，并返回数值
-        pred = h5 # normalization(h5,mode="torch",axis=1)  
+        pred = F.softmax(h5,1) # normalization(h5,mode="torch",axis=1)  
         # pred = F.softmax(pred,1)
         # pred = self.compute_qdis(h5,mode=1) 
 
@@ -250,6 +248,9 @@ class SdcnTs3D(SdcnTs):
         n_cluster=4,
         v=1,
         mode=1,
+        num_nodes=100,
+        static_feat=None,
+        device='cpu',
         **kwargs
        ):    
         super(SdcnTs, self).__init__()
@@ -283,9 +284,12 @@ class SdcnTs3D(SdcnTs):
         torch.nn.init.xavier_normal_(self.cluster_layer.data)
 
         # degree
-        self.v = v     
+        self.v = v 
+        # 定义图学习层    
+        k = int(num_nodes/1)
+        self.gc = graph_constructor(num_nodes, k, 40,device,alpha=3, static_feat=static_feat)
         
-    def forward(self, x, adj,mode="pretrain"):
+    def forward(self, x, idx=None,rank_mask=None,mode="pretrain"):
         """先提取序列特征，然后根据中间变量做GCN，然后做自监督计算
            根据mode参数分为2种模式，pretrain表示只进行特征提取
         """
@@ -300,7 +304,9 @@ class SdcnTs3D(SdcnTs):
         tra1, tra2, tra3 = enc_data
         
         sigma = 0.5
-
+        
+        # 自主学习距离矩阵
+        adj = self.gc(idx)
         # GCN Module
         h1 = self.gnn_1(encoded_input_data, adj)
         h2 = self.gnn_2((1-sigma)*h1 + sigma*tra1, adj)
@@ -313,7 +319,11 @@ class SdcnTs3D(SdcnTs):
         # 自监督部分
         # q = self.compute_qdis(z,mode=1)
         q = None
-        pred = h5 # normalization(torch.reshape(h5,(h5.shape[0]*h5.shape[1],h5.shape[2])),mode="torch",axis=1).reshape(h5.shape)
+        
+        
+        # 处理缺失值问题，通过掩码把缺失部分归零,并且转为非0数值
+        pred = h5 
+        
         # pred = F.softmax(pred,1)
         # pred = self.compute_qdis(h5,mode=1) 
         # pred = batch_cov(h5)

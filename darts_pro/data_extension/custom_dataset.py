@@ -48,6 +48,8 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
             instrument = global_var.get_value("dataset").get_group_code_by_rank(code)
             price_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label_ori"].values
+            datetime_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["datetime_number"].values                                
             label_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label"].values           
             focus1_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
@@ -56,7 +58,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                                 &(df_all["instrument_rank"]==code)]["KDJ_D"].values      
             focus3_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["KDJ_J"].values                                                                                                                     
-            self.ass_data[code] = (instrument,label_array,price_array,focus1_array,focus2_array,focus3_array)
+            self.ass_data[code] = (instrument,label_array,price_array,datetime_array,focus1_array,focus2_array,focus3_array)
             
     def __getitem__(
         self, idx
@@ -125,13 +127,16 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         instrument = self.ass_data[code][0]
         label_array = self.ass_data[code][1][past_start:future_end]
         price_array = self.ass_data[code][2][past_start:future_end]
-        focus1_array = self.ass_data[code][3][past_start:future_end]
-        focus2_array = self.ass_data[code][4][past_start:future_end]
-        focus3_array = self.ass_data[code][5][past_start:future_end]
+        # 记录预测未来第一天的关联日期，用于后续数据对齐
+        future_start_datetime = self.ass_data[code][3][past_end]
+        focus1_array = self.ass_data[code][4][past_start:future_end]
+        focus2_array = self.ass_data[code][5][past_start:future_end]
+        focus3_array = self.ass_data[code][6][past_start:future_end]
         # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
-                       "future_start":future_start,"future_end":future_end,"price_array":price_array,"label_array":label_array,
+                       "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
+                       "price_array":price_array,"label_array":label_array,
                        "focus1_array":focus1_array,"focus2_array":focus2_array,"focus3_array":focus3_array,
                        "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
@@ -235,7 +240,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
         
         # 使用原值衡量涨跌幅度
         label_array = target_info["label_array"][self.input_chunk_length:]
-        price_array = target_info["price_array"][self.input_chunk_length:]
+        price_array = target_info["price_array"][self.input_chunk_length-1:]
         # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
         raise_range = (price_array[-1] - price_array[0])/price_array[0]*100
         # 添加最后一段的走势分类

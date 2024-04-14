@@ -52,7 +52,7 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 128
+            batch_size: 32
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -60,14 +60,14 @@ task:
             n_epochs : 180
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/KDJ_2000_202010'
+            batch_file_path: 'custom/data/asis/KDJ_1000_202110'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
                base_lr: 1e-4
-               max_lr: 1.5e-3     
+               max_lr: 1.5e-3
                cycle_momentum: False
-               step_size_up: 250
+               step_size_up: 2500
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -77,12 +77,12 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'KDJ_SDCN3D_2000_202010'
+               model_name: 'SDCN3D_RAINGE_1000_202110'
                model_type: 'sdcn'
                load_weight: False
                best_weight: False
                step_mode: 'complete'
-               pretrain_model_name: 'KDJ_SDCN3D_PRETRAIN_2000_202010'
+               pretrain_model_name: 'SDCN3D_RAINGE_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

@@ -3,15 +3,16 @@ from typing import Dict
 import torch
 import pandas as pd
 import numpy as np
-import random
+from datetime import datetime 
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 from cus_utils.encoder_cus import StockNormalizer   
 from sktime.transformations.panel.pca import PCATransformer
 from sklearn.decomposition import PCA
+import time
 from darts_pro.data_extension.series_data_utils import StatDataAssis
-from cus_utils.common_compute import batch_cov
+from cus_utils.common_compute import batch_cov,normalization_axis,eps_rebuild,same_value_eps,slope_compute
 import cus_utils.global_var as global_var
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -286,9 +287,9 @@ class BatchCluDataset(BatchDataset):
             # 如果使用预先设定的静态数据，需要过滤当前数据不存在对应股票的记录
             aggregated = self.refileter_missing_data(aggregated,pre_static_datas)
             
-        static_datas = None
-        # aggregated,static_datas = self.combine_batch_data(aggregated,pre_static_datas=pre_static_datas)
-        aggregated = self.combine_smb_data(aggregated)
+        # static_datas = None
+        aggregated,static_datas = self.combine_batch_data(aggregated,pre_static_datas=pre_static_datas)
+        # aggregated = self.combine_smb_data(aggregated)
         self.batch_data = aggregated 
         # 保存静态属性数据
         self.static_datas = static_datas
@@ -380,7 +381,7 @@ class BatchCluDataset(BatchDataset):
         
         total_len = len(data[-1])
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler_tuple,target_class,target,target_info) = data     
+         static_covariates,scaler_tuple,target_class,target,target_info,price_target) = data     
         
         indexes = []            
         for i in range(total_len):
@@ -390,7 +391,7 @@ class BatchCluDataset(BatchDataset):
                 indexes.append(i)
         indexes = np.array(indexes)
         return (past_target[indexes],past_covariates[indexes], historic_future_covariates[indexes],future_covariates[indexes],
-         static_covariates[indexes],scaler_tuple[indexes],target_class[indexes],target[indexes],np.array(target_info)[indexes].tolist())                    
+         static_covariates[indexes],scaler_tuple[indexes],target_class[indexes],target[indexes],np.array(target_info)[indexes].tolist(),price_target)                    
         
         
     def combine_batch_data(self,data,split_flag=False,pre_static_datas=None):
@@ -398,11 +399,11 @@ class BatchCluDataset(BatchDataset):
         
         start_date_rec = [] 
         instrument_data = [] 
-        for item in data[-1]:
-            start_date_rec.append(item["start"])
+        for item in data[-2]:
+            start_date_rec.append(item["future_start_datetime"])
             instrument_data.append(item["item_rank_code"])
         
-        total_len = len(data[-1])
+        total_len = len(data[-2])
         # 以开始日期为单位进行聚合
         start_date_uni = list(set(start_date_rec))
         # 股票代码集合，如果已经传参使用传单的集合，否则根据实际数据生成集合
@@ -410,6 +411,7 @@ class BatchCluDataset(BatchDataset):
             instrument_data_uni = pre_static_datas[:,0].tolist()
         else:
             instrument_data_uni = list(set(instrument_data))
+        instrument_data_uni = np.array(instrument_data_uni).astype(np.int32).tolist()
         
         def concat_shape(item_data):
             return [len(start_date_uni),len(instrument_data_uni)] + list(item_data.shape)
@@ -424,33 +426,35 @@ class BatchCluDataset(BatchDataset):
         target_class_combine = np.zeros(concat_shape(data[6][0]))
         target_combine = np.zeros(concat_shape(data[7][0]))
         target_info_combine = np.array([[None for _ in range(len(instrument_data_uni))] for _ in range(len(start_date_uni))])
+        price_target_combine = np.zeros(concat_shape(data[-1][0]))
+        # 增加涨跌幅度数据
+        raise_target_combine = np.zeros([price_target_combine.shape[0],price_target_combine.shape[1],future_covariates_combine.shape[2]])
         
         def fill_data(combine_data,item_data,i,j):
             combine_data[i,j,:,:] = item_data
         
         instru_idx = [[] for _ in range(len(start_date_uni))]    
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler_tuple,target_class,target,target_info) = data  
+         static_covariates,scaler_tuple,target_class,target,target_info,price_target) = data   
         
         for i in range(total_len):
             start = target_info[i]["start"]
-            if start==2:
-                print("2 rank:",target_info[i]["item_rank_code"])
+            # if start==2:
+            #     print("2 rank:",target_info[i]["item_rank_code"])
         # 维护索引列表，后续作为对照
         rank_index_combine = np.zeros([len(start_date_uni),len(instrument_data_uni)])
         # 维护股票静态属性，用于图卷积的关系学习层
         static_datas = np.zeros([len(instrument_data_uni),data[4].shape[-1]])
         # 遍历数据，进行位置匹配
+        t = datetime.now()
         for i in range(total_len):
             # 根据开始日期，以及股票编号，反向查询对应的位置索引
-            start = target_info[i]["start"]
+            start = target_info[i]["future_start_datetime"]
             instrument = target_info[i]["item_rank_code"]
             start_date_idx = start_date_uni.index(start)
             # 根据日期内索引号，依次填充实际数据(实现末尾补0)
             # value_index = len(instru_idx[start_date_idx]) - 1
             # 根据日期内索引号，填充实际数据(实现中间缺失值补0)
-            if instrument==587:
-                print("ggg")
             value_index = instrument_data_uni.index(instrument)
             # 维护对应日期下的股票列表索引,两种方式
             instru_idx[start_date_idx].append(instrument)            
@@ -467,11 +471,60 @@ class BatchCluDataset(BatchDataset):
             fill_data(target_class_combine,target_class[i], start_date_idx,value_index)
             fill_data(target_combine,target[i], start_date_idx,value_index)
             target_info_combine[start_date_idx,value_index] = target_info[i] 
+            fill_data(price_target_combine,price_target[i], start_date_idx,value_index)
+            # 维护涨跌幅度数据部分
+            price_array = target_info[i]["price_array"][-future_covariates_combine.shape[2]-1:]
+            raise_range = (price_array[1:] - price_array[:-1])/price_array[:-1]   
+            raise_target_combine[start_date_idx,value_index,:] = raise_range
+        print("loop time:{}".format((datetime.now()-t).seconds))
         
+        past_price_target = price_target_combine[:,:,:past_target_combine.shape[-2],0]
+        future_price_target = price_target_combine[:,:,past_target_combine.shape[-2]:,0]
+      
+        # 提前计算距离矩阵，包括过去和未来两部分
+        # adj_target_combine = batch_cov(torch.Tensor(past_price_target).to("cuda:0")).cpu().numpy()
+        # adj_future_combine = batch_cov(torch.Tensor(future_price_target).to("cuda:0")).cpu().numpy()
+        # # 合并传值
+        # adj_target_combine = np.concatenate([adj_target_combine,adj_future_combine],axis=1)
+        adj_target_combine = raise_target_combine # np.zeros([len(start_date_uni),len(instrument_data_uni),1])
+        transformer = PCA(n_components=1)
+        
+        # 价格pca主成分，用于后续横向比较  
+        pca_price_target = []
+        for i in range(future_price_target.shape[0]):
+            # 处理价格重复值的问题
+            future_price_target[i] = same_value_eps(future_price_target[i])       
+            pca_price_target.append(transformer.fit_transform(future_price_target[i]))
+        price_target_combine = np.concatenate((past_price_target,future_price_target),axis=2)  
+        price_target_combine = np.expand_dims(price_target_combine,axis=-1)
+        
+        pca_price_target = np.expand_dims(np.array(pca_price_target),-1)
+        price_target_combine = np.concatenate((price_target_combine,pca_price_target),axis=2) 
+        
+        # 目标pca主成分，用于后续横向比较  
+        pca_target = []
+        transformer = PCA(n_components=2)
+        for i in range(future_price_target.shape[0]):
+            pca_item_target = []
+            for j in range(target_combine.shape[-1]):
+                p = transformer.fit_transform(target_combine[i,:,:,j])
+                pca_item_target.append(p)
+            pca_target.append(pca_item_target)
+           
+        pca_target = np.array(pca_target).transpose(0,2,3,1) 
+        # 合并传输数据   
+        target_combine = np.concatenate((target_combine,pca_target),axis=2) 
+        # Norm static data here
+        static_covariates_combine = normalization_axis(static_covariates_combine,axis=1)     
+        # static_datas = normalization_axis(static_datas,axis=1)      
+        
+        # 使用掩码矩阵用于处理缺失值问题
+        rank_index_combine = (rank_index_combine>0).astype(np.int32) 
         if not split_flag:
             # 返回重组后的数据，以及对应的索引
             return (past_target_combine,past_covariates_combine, historic_future_covariates_combine,future_covariates_combine,
-                    static_covariates_combine,scaler_tuple_combine,target_class_combine,target_combine,target_info_combine,rank_index_combine),static_datas
+                    static_covariates_combine,scaler_tuple_combine,target_class_combine,
+                    target_combine,target_info_combine,rank_index_combine,adj_target_combine,price_target_combine),static_datas
             
         # 拆分为小的数据批次
         split_rate = 3
@@ -613,6 +666,7 @@ class ClustringBatchOutputDataset(BatchDataset):
 
         output_batch_data = []
         target_batch_data = []
+        loss_batch_data = []
         
         # 文件中已经包含了输出数据和目标数据
         with open(filepath, "rb") as fin:
@@ -621,31 +675,30 @@ class ClustringBatchOutputDataset(BatchDataset):
                     data = pickle.load(fin)
                     output_batch_data.append(data[0])
                     target_batch_data.append(data[1])
+                    loss_batch_data.append(data[2])
                 except EOFError:
                     break  
                         
         # 训练数据 
         aggregated = self.create_aggregated_data(target_batch_data)    
+        price_data = self.build_price_data(aggregated[-1])
         # 输出数据    
-        len_t = len(output_batch_data[0])
-        output_combine = [[[],[],[]] for _ in range(len_t)]    
-        for item in output_batch_data:
-            for i,t_item in enumerate(item):
-                z,p,pred = t_item
-                output_combine[i][0].append(z)
-                output_combine[i][1].append(p)
-                output_combine[i][2].append(pred)
-        output = [[np.concatenate(output_combine[i][0]),np.concatenate(output_combine[i][1]),np.concatenate(output_combine[i][2])] for i in range(len_t)]
-            
-        if range_num is not None:
-            output = output[range_num[0]:range_num[1]]
-            self.range_num = range_num    
-        else:
-            self.range_num = [0,output[0][0].shape[0]]    
+        x_bar = []
+        pred = [] 
+        for item in output_batch_data[0]:
+            x_bar.append(item[0])
+            pred.append(item[1])
+        x_bar = np.array(x_bar)
+        pred = np.array(pred)
+        output_combine = (x_bar,pred)
+        loss_batch_data = np.stack(loss_batch_data)
+        loss_batch_data = loss_batch_data.reshape(loss_batch_data.shape[0]*loss_batch_data.shape[1],loss_batch_data.shape[2])
         # 目标数据
         self.target_data = aggregated 
-        self.output_inverse_data = output
-        self.output_data = output
+        self.output_inverse_data = output_combine
+        self.output_data = output_combine
+        self.price_data = price_data
+        self.loss_batch_data = loss_batch_data
 
     def create_aggregated_data(self,batch_data):
         first_sample = batch_data[0]
@@ -686,14 +739,22 @@ class ClustringBatchOutputDataset(BatchDataset):
             elif elem is None:
                 aggregated.append(None)  
         return aggregated
-            
+    
+    def build_price_data(self,target_info):
+        price_data = []
+        for i in range(target_info.shape[0]):
+            p_data = [ts["price_array"][25:] if ts is not None else [0 for _ in range(5)] for ts in target_info[i]]
+            price_data.append(p_data)
+        price_data = np.array(price_data)
+        return price_data   
+        
     def __getitem__(self, index):
         
         batch_data = [item[index] for item in self.target_data]
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = batch_data
+        (past_target,scaler,target_class,future_target,pca_price_target,adj_target,target_info) = batch_data
         # 反归一化取得实际目标数据
-        whole_target = np.concatenate((past_target,target),axis=0)
-        target_inverse = scaler_tuple[0].inverse_transform(whole_target)  
-        output_inverse = self.output_inverse_data[index]
-        return target_inverse,target_class[0],output_inverse,target_info    
+        whole_target = np.concatenate((past_target,future_target),axis=0)
+        target_inverse = scaler.inverse_transform(whole_target)  
+        output = (self.output[0][index],self.output[1][index])
+        return target_inverse,target_class[0],pca_price_target,output,target_info    
     
