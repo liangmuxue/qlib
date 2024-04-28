@@ -147,10 +147,12 @@ def normalization_axis(data,res=1e-5,avoid_zero=True,axis=0):
     if isinstance(data,torch.Tensor):
         sub = data - torch.unsqueeze(torch.min(data,dim=axis)[0],dim=axis)
         div = torch.unsqueeze((torch.max(data,axis=axis)[0]-torch.min(data,dim=axis)[0]),dim=axis)
+        div[div==0] = res
         rtn = sub/div
     else:
         sub = data - np.expand_dims(np.min(data,axis=axis),axis=axis)
         div = np.expand_dims((np.max(data,axis=axis)-np.min(data,axis=axis)),axis=axis)
+        div[div==0] = res
         rtn = sub/div        
     if avoid_zero:
         rtn = rtn + res  

@@ -60,7 +60,7 @@ task:
             n_epochs : 180
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/KDJ_1000_202110'
+            batch_file_path: 'custom/data/asis/KDJ_100_202010'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,12 +77,12 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'SDCN3D_COVTARGET_1000_202110'
-               model_type: 'sdcn'
+               model_name: 'VADE_1000_202110'
+               model_type: 'vade'
                load_weight: False
                best_weight: False
                step_mode: 'complete'
-               pretrain_model_name: 'SDCN3D_RAINGE_PRETRAIN_1000_202110'
+               pretrain_model_name: 'VADE_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

@@ -31,7 +31,7 @@ from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.data_extension.custom_module import _CusModule,_TFTModuleBatch
 from darts_pro.mam.hsan_module import HsanModule
 from darts_pro.mam.sdcn_module import SdcnModule
-from darts_pro.mam.mtgnn_module import MtgnnModule
+from darts_pro.mam.vade_module import VaDEModule
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset
 
 class _TFTModuleAsis(_CusModule):
@@ -600,8 +600,8 @@ class TFTBatchModel(TFTExtModel):
                     s_model = pretrained_model.model.sub_models[i]
                     model.sub_models[i] = s_model
                                 
-        if self.model_type=="mtgnn":
-            model = MtgnnModule(
+        if self.model_type=="vade":
+            model = VaDEModule(
                 output_dim=self.output_dim,
                 variables_meta_array=variables_meta_array,
                 num_static_components=n_static_components,
@@ -622,10 +622,16 @@ class TFTBatchModel(TFTExtModel):
                 batch_file_path=self.batch_file_path,
                 step_mode=self.step_mode,
                 model_type=self.model_type,
-                static_datas=self.static_datas,
                 train_sample=self.train_sample,
+                static_datas=self.static_datas,
                 **self.pl_module_params,
-            )               
+            )   
+            # 全模式下，先加载之前的预训练模型
+            if self.step_mode=="complete":
+                pretrained_model = self.load_from_checkpoint(self.pretrain_model_name,work_dir=self.work_dir,best=False)
+                for i in range(len(self.past_split)):
+                    s_model = pretrained_model.model.sub_models[i]
+                    model.sub_models[i] = s_model            
         return model         
     
     def build_variable(self,ori_tensors):

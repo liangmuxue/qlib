@@ -163,8 +163,8 @@ def test_transfer():
 def test_pca():
     k = 1
     tensor = torch.rand([128,5]).to("cuda:0")
-    cov = torch.matmul(torch.t(tensor), tensor) / tensor.size(0)
-    # cov = torch.cov(tensor.T)
+    # cov = torch.matmul(torch.t(tensor), tensor) / tensor.size(0)
+    cov = torch.cov(tensor)
     # tensor = tensor - torch.mean(tensor, dim=0)
     eigvals, eigvecs = torch.eig(cov, eigenvectors=True)
     idx = eigvals.sort(descending=True)[1][:k]

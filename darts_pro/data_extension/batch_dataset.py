@@ -478,6 +478,9 @@ class BatchCluDataset(BatchDataset):
             raise_target_combine[start_date_idx,value_index,:] = raise_range
         print("loop time:{}".format((datetime.now()-t).seconds))
         
+        # Norm target 
+        past_target_combine = normalization_axis(past_target_combine,axis=1)   
+          
         past_price_target = price_target_combine[:,:,:past_target_combine.shape[-2],0]
         future_price_target = price_target_combine[:,:,past_target_combine.shape[-2]:,0]
       

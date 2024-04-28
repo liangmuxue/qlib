@@ -9,10 +9,11 @@ import scipy.spatial as spt
 from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.neighbors import KNeighborsTimeSeriesClassifier
 import torch
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,get_complex_class
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import slope_compute,pairwise_distances
+from cus_utils.common_compute import slope_compute,pairwise_distances,batch_cov
 from cus_utils.log_util import AppLogger
 from losses.mtl_loss import UncertaintyLoss
 from projects.kmeans_pytorch import kmeans, kmeans_predict
@@ -20,6 +21,7 @@ from tslearn.clustering import TimeSeriesKMeans
 from sklearn.cluster import DBSCAN,KMeans,SpectralClustering
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.manifold import MDS
+from sklearn.mixture import GaussianMixture
 
 logger = AppLogger()
 
@@ -565,6 +567,7 @@ class StatDataAssis():
         viz = TensorViz(env="data_analysis")
         index = 0
         (past_target,scaler,target_class,future_target,future_price_target,slope_target,target_info) = ds_data.target_data
+        
         price_data = ds_data.price_data
         target = future_target[:,:,:-2,:]
         pca_target = future_target[:,:,-2:,:]
@@ -578,9 +581,18 @@ class StatDataAssis():
         device = torch.device(device_str)
         loss_unity = UncertaintyLoss(device=device)
         num_clusters = len(CLASS_SIMPLE_VALUES.keys())
+        
         import_index = np.where(target_class==3)[0]
         neg_index = np.where(target_class==0)[0]
         
+        # Viz target distribution
+        sample_index = 16
+        # self.target_cov_viz(target,target_class,sample_index=sample_index)
+        # self.output_cov_viz(pred_total,target_class,sample_index=sample_index)
+        # self.out_tar_cov_viz(target,pred_total)
+        self.view_target_gmm(target)
+        
+        return
         sample_index = 30
         loss = ds_data.loss_batch_data[:,sample_index]
         price_data_sample = price_data[sample_index]
@@ -612,7 +624,7 @@ class StatDataAssis():
             target_single = target_sample[...,i]
             pca_target_single = pca_target_sample[...,i]
             loss_item = loss[i]
-            print("loss is:",loss_item)
+            # print("loss is:",loss_item)
             # 生成配对距离矩阵
             # output_pair_dis = pairwise_distances(torch.Tensor(pred).to(device),distance_func=loss_unity.mse_dis,
             #                             make_symmetric=True).cpu().numpy()         
@@ -636,6 +648,89 @@ class StatDataAssis():
         # self.matrix_results_viz(target_pair_dis,labels=labels,name="target_combine")   
                
     
+    def target_cov_viz(self,target_data,target_class,sample_index=0):
+        
+        sp_len = 10
+        sample_index = 3
+        sample_target = target_data[sample_index]
+        sample_target_class = target_class[sample_index]
+        split_size = target_data.shape[0]//sp_len
+        split_index_arr = np.array_split(np.arange(target_data.shape[1]), sp_len)
+        
+        for i in range(target_data.shape[-1]):
+            cov_matrix = batch_cov(torch.Tensor(target_data[...,i])).numpy()   
+            cov_target = cov_matrix[:,:,0]        
+            sample_cov_target = cov_target[sample_index]
+            coords = None
+            for j in range(sp_len):
+                axis_y = np.array([(j + 1) for _ in range(split_index_arr[j].shape[0])])
+                axis_x = sample_cov_target[split_index_arr[j]]
+                item = np.array([(a,b) for a, b in zip(axis_x,axis_y)])
+                if coords is None:
+                    coords = item
+                else:
+                    coords = np.concatenate((coords,item),axis=0)
+            self.matrix_results_viz(coords=coords,labels=sample_target_class,noise_index=None,name="target_cov_{}".format(i))
+
+    def output_cov_viz(self,output_data,target_class,sample_index=0):
+        
+        sp_len = 10
+        sample_target = output_data[sample_index,:,0,:]
+        sample_target_class = target_class[sample_index]
+        split_index_arr = np.array_split(np.arange(output_data.shape[1]), sp_len)
+        
+        for i in range(output_data.shape[-1]):
+            sample_cov_target = sample_target[:,i]
+            coords = None
+            for j in range(sp_len):
+                axis_y = np.array([(j + 1) for _ in range(split_index_arr[j].shape[0])])
+                axis_x = sample_cov_target[split_index_arr[j]]
+                item = np.array([(a,b) for a, b in zip(axis_x,axis_y)])
+                if coords is None:
+                    coords = item
+                else:
+                    coords = np.concatenate((coords,item),axis=0)
+            self.matrix_results_viz(coords=coords,labels=sample_target_class,noise_index=None,name="output_{}".format(i))
+
+    def out_tar_cov_viz(self,target_data,output_data,target_class=None,sample_index=0):
+        
+        sp_len = 1
+        sample_index = 12
+        sample_output = output_data[sample_index,:,0,:]
+        split_index_arr = np.array_split(np.arange(target_data.shape[1]), sp_len)
+        pred_total = output_data[:,:,0,:]
+                           
+        viz_util = [TensorViz(env="out_tar_cov_{}".format(i)) for i in range(target_data.shape[-1])]
+        names = ["target","output"]
+        scale_size = [1,50,20]
+        
+        for i in range(target_data.shape[-1]):
+            viz_util = TensorViz(env="out_tar_cov_{}".format(i))
+            
+            pred_t = F.softmax(torch.Tensor(pred_total[:,:,i]), dim=1).numpy() 
+            pred_t_sample = pred_t[sample_index,:]
+            cov_matrix = batch_cov(torch.Tensor(target_data[...,i]))
+            cov_target = cov_matrix[:,:,0]       
+            cov_target_t = F.softmax(cov_target, dim=1).numpy()
+            cov_target_t = cov_target_t[sample_index]
+            for j in range(sp_len):
+                sp_output = pred_t_sample[split_index_arr[j]]
+                sp_target = cov_target_t[split_index_arr[j]]
+                target_title = "ot_cov_{}".format(j)
+                win = "win_{}".format(j)
+                view_data = np.stack([sp_target*scale_size[i],sp_output]).transpose(1,0)
+                viz_util.viz_matrix_var(view_data,win=win,title=target_title,names=names)                   
+                
+    def view_target_gmm(self,target):     
+        
+        X = target[1,...,0]
+        gmm = GaussianMixture(n_components=4)
+        gmm.fit(X)
+        clusters = gmm.predict(X)
+        probs = gmm.predict_proba(X)
+        print(probs[:100].round(2))    
+        
+                           
     def filter_noise_data(self,data,noise_index,eps=0.1):
         tree = spt.cKDTree(data=data)  
         results = []

@@ -13,18 +13,19 @@ from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
-from sklearn.cluster import KMeans,AgglomerativeClustering
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import accuracy_score
 from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
 from sklearn.metrics import adjusted_rand_score as ari_score
 from sklearn.manifold import MDS
 
 from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
-from darts_pro.act_model.sdcn_ts import SdcnTs,SdcnTs3D
+from darts_pro.act_model.vade_ts import VaDE
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
-from losses.clustering_loss import ClusteringLoss
+from losses.clustering_loss import VadeLoss,cluster_acc
 from cus_utils.common_compute import target_distribution,normalization_axis,intersect2d
 from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
 from cus_utils.visualization import clu_coords_viz
@@ -37,7 +38,7 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from darts_pro.data_extension.custom_module import _TFTModuleBatch
 
-class SdcnModule(_TFTModuleBatch):
+class VaDEModule(_TFTModuleBatch):
     """自定义基于图模式和聚类的时间序列模块"""
     
     def __init__(
@@ -75,7 +76,7 @@ class SdcnModule(_TFTModuleBatch):
         self.step_mode=step_mode
         # 初始化中间结果数据
         self.training_step_outputs = [[] for _ in range(self.output_data_len)]
-        
+        self.training_step_targets = [[] for _ in range(self.output_data_len)]
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -132,7 +133,7 @@ class SdcnModule(_TFTModuleBatch):
                 future_covariates.shape[-1] if future_covariates is not None else 0
             )
             # 由于使用自监督，则取消未来协变量
-            # future_cov_dim = 0
+            future_cov_dim = 0
             
             static_cov_dim = (
                 static_covariates.shape[-2] * static_covariates.shape[-1]
@@ -149,7 +150,7 @@ class SdcnModule(_TFTModuleBatch):
                 static_feat = torch.Tensor(StandardScaler().fit_transform(self.static_datas)).double().to(device)
                 # static_feat = None 
                           
-            model = SdcnTs3D(
+            model = VaDE(
                 # Tide Part
                 input_dim=input_dim,
                 emb_output_dim=output_dim,
@@ -165,7 +166,7 @@ class SdcnModule(_TFTModuleBatch):
                 temporal_decoder_hidden=32,
                 use_layer_norm=False,
                 dropout=dropout,
-                # Sdcn Part
+                # Vade Part
                 n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
                 activation="prelu",
                 num_nodes=num_nodes,
@@ -228,7 +229,7 @@ class SdcnModule(_TFTModuleBatch):
 
 
     def create_loss(self,model,device="cpu"):
-        return ClusteringLoss(device=device,ref_model=model) 
+        return VadeLoss(device=device,ref_model=model) 
 
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
@@ -238,10 +239,7 @@ class SdcnModule(_TFTModuleBatch):
         else:
             step_mode = "complete"   
             
-        (future_target,target_class,target_info,adj_target,price_target) = target   
-        future_target_slope = adj_target
-        pca_price_target = price_target[:,:,-1:,0]
-        future_price_target = price_target[:,:,self.input_chunk_length:-1,0]
+        (future_target,target_class,target_info,past_target,price_target) = target   
         # 拆分出之前绑定的复合变量
         pca_target = future_target[:,:,-2:,:]
         future_target = future_target[:,:,:-2,:]
@@ -254,7 +252,7 @@ class SdcnModule(_TFTModuleBatch):
         price_range_data = StandardScaler().fit_transform(price_range_data)
         # price_range_data = normalization_axis(price_range_data,axis=0)
         price_range_data = torch.Tensor(price_range_data).to(self.device).unsqueeze(-1)
-        return self.criterion(output,(future_target,target_class,future_target_slope,pca_target,price_range_data),mode=step_mode,optimizers_idx=optimizers_idx)
+        return self.criterion(output,(future_target,target_class,past_target,pca_target,price_range_data),mode=step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
         super().on_validation_start()
@@ -271,18 +269,24 @@ class SdcnModule(_TFTModuleBatch):
         # 如果已经做过切换了，则不进行处理
         if self.switch_flag==1:
             return
-        # 全模式训练时，第一个轮次不进行梯度，只取得特征数据,以及聚类初始数据
+        # 全模式训练时，第一个轮次不进行梯度，只取得特征数据,并生成聚类初始数据
         if self.current_epoch>self.switch_epoch_num:
             for model_seq in range(len(self.sub_models)):
-                # 取得最近一次的预测特征值，作为聚类输入数据
-                # z_value = [output_item[-1] for output_item in self.training_step_outputs[model_seq]]
-                # z_value = torch.concat(z_value,dim=0).data.cpu()
-                # x_bar = x_bar[:1024,:]
+                # 取得最近一次的预测特征值，作为混合高斯分布的输入数据
+                z_value = torch.concat(self.training_step_outputs[model_seq])
+                z_value = z_value.reshape(-1,z_value.shape[-1]).detach().cpu().numpy()
+                Y = [target_item[...,0] for target_item in self.training_step_targets[model_seq]]
+                Y = torch.concat(Y)
+                Y = Y.reshape(-1).detach().cpu().numpy().astype(np.int8)
                 n_clusters = len(CLASS_SIMPLE_VALUES.keys())
-                # centers = get_cluster_center(z_value,n_clusters=n_clusters)
-                # model = self.sub_models[model_seq]
-                # 直接把初始化簇心值赋予模型内的参数
-                # model.cluster_layer.data = torch.Tensor(centers).to(self.device)    
+                gmm = GaussianMixture(n_components=n_clusters, covariance_type='diag')
+                # 和价格目标进行比较，检查正确率
+                pre = gmm.fit_predict(z_value)
+                print('Acc={:.4f}%'.format(cluster_acc(pre, Y)[0] * 100))
+                # 参数初始赋值
+                self.sub_models[model_seq].pi_.data = torch.from_numpy(gmm.weights_).to(self.device).float()
+                self.sub_models[model_seq].mu_c.data = torch.from_numpy(gmm.means_).to(self.device).float()
+                self.sub_models[model_seq].log_sigma2_c.data = torch.log(torch.from_numpy(gmm.covariances_).to(self.device).float())                
                 # 放开梯度冻结
                 self.freeze_apply(model_seq,flag=1)       
             self.switch_flag = 1 
@@ -291,15 +295,15 @@ class SdcnModule(_TFTModuleBatch):
             for model_seq in range(len(self.sub_models)):
                 self.freeze_apply(model_seq)
                 
-    def output_postprocess(self,output,index):
+    def output_postprocess(self,output,targets,index):
         """对于不同指标输出的补充"""
         
         # 保存训练结果数据，用于后续分析,只在特定轮次进行
         if self.step_mode=="complete" and self.current_epoch==self.switch_epoch_num:
             # 只需要实际数据，忽略模拟数据
             output_act = output[index]
-            self.training_step_outputs[index].append(output_act[0])
-    
+            self.training_step_outputs[index].append(output_act[1])
+            self.training_step_targets[index].append(targets) 
 
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """重载原方法，直接使用已经加工好的数据"""
@@ -338,11 +342,11 @@ class SdcnModule(_TFTModuleBatch):
             y_transform = None 
             (output,vr_class,tar_class) = self(input_batch,future_target,adj_target,past_target=past_target,rank_mask=rank_index,
                                                optimizer_idx=i,target_info=target_info)
-            self.output_postprocess(output,i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,adj_target,price_target),optimizers_idx=i)
-            (corr_loss_combine,kl_loss,ce_loss) = detail_loss 
+            self.output_postprocess(output,target_class,i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,past_target,price_target),optimizers_idx=i)
+            (corr_loss_combine,elbu_loss,ce_loss) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            self.log("train_kl_loss_{}".format(i), kl_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_elbu_loss_{}".format(i), elbu_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             # self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.loss_data.append(detail_loss)
             total_loss += loss
@@ -386,13 +390,13 @@ class SdcnModule(_TFTModuleBatch):
         target_vr_class = target_class[:,0].cpu().numpy()
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,target_info,adj_target,price_target),optimizers_idx=-1)
-        (corr_loss_combine,kl_loss,ce_loss) = detail_loss
+                    (future_target,target_class,target_info,past_target,price_target),optimizers_idx=-1)
+        (corr_loss_combine,elbu_loss,ce_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("val_kl_loss_{}".format(i), kl_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_elbu_loss_{}".format(i), elbu_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         if self.step_mode=="pretrain" or self.switch_flag==0:
@@ -602,6 +606,8 @@ class SdcnModule(_TFTModuleBatch):
         ) = input_batch
         dim_variable = -1
 
+        # Norm his conv
+        historic_future_covariates = normalization_axis(historic_future_covariates,axis=2)
         # 生成多组过去协变量，用于不同子模型匹配
         x_past_array = []
         for i,p_index in enumerate(self.past_split):

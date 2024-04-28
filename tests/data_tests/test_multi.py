@@ -1,5 +1,9 @@
 from tslearn.generators import random_walk_blobs
 from tslearn.svm import TimeSeriesSVC
+from sklearn.mixture import GaussianMixture
+import matplotlib.pyplot as plt
+from sklearn.datasets import make_blobs
+import numpy as np
 
 def test_tslearn():
     
@@ -15,6 +19,24 @@ def test_tslearn():
     clf.predict_proba(X).shape
     print("ok")
     
+def test_gmm():
+    X, _ = make_blobs(n_samples=300, centers=4, cluster_std=0.60, random_state=0)
+    
+    # X = np.array([i for i in range(100)])
+    gmm = GaussianMixture(n_components=4)
+    gmm.fit(X)
+    clusters = gmm.predict(X)
+    probs = gmm.predict_proba(X)
+    print(probs[:100].round(2))
+    
+    plt.scatter(X[:, 0], X[:, 1], c=clusters, cmap='viridis', marker='o', s=50)
+    plt.title("Gaussian Mixture Model Clustering")
+    plt.xlabel("Feature 1")
+    plt.ylabel("Feature 2")
+    plt.show()
 
 if __name__ == "__main__":
-    test_tslearn()
+    # test_tslearn()
+    test_gmm()
+    
+    
