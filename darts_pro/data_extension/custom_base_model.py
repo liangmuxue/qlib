@@ -77,7 +77,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,device=device)        
         self.classify_tar_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,device=device)  
         # 使用不确定多重损失函数
-        self.criterion = self.create_loss(model,device=device)
+        self.criterion = self.create_loss(self.sub_models,device=device)
                     
         self.val_results = {}
         # 辅助数据功能

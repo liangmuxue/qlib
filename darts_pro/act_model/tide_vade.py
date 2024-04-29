@@ -211,12 +211,7 @@ class TideVaDE(nn.Module):
         # past covariates: feature projection or raw features
         # the past covariates are embedded in `x`
         if self.past_cov_dim:
-            x_dynamic_past_covariates = x[
-                :,
-                :,
-                :,
-                self.output_dim : self.output_dim + self.past_cov_dim,
-            ]
+            x_dynamic_past_covariates = self.get_dy_past_convs(x)
             if torch.any(torch.isnan(x_dynamic_past_covariates)):
                 print("ggg")           
             if torch.any(torch.isnan(list(self.past_cov_projection.parameters())[0])):
@@ -257,8 +252,19 @@ class TideVaDE(nn.Module):
             return y,encoded_mu,encoded_sigma,y_sig,x_lookback
         else:
             return y
-        
-        
+    
+    def get_past_conv_dim(self):
+        return self.output_dim + self.past_cov_dim
+    
+    def get_dy_past_convs(self,x):
+        x_dynamic_past_covariates = x[
+            :,
+            :,
+            :,
+            self.output_dim : self.get_past_conv_dim(),
+        ]
+        return x_dynamic_past_covariates      
+       
     def decode_through(self,encoded_mu,x_lookback):
         
         decoded = self.decoders(encoded_mu)

@@ -102,62 +102,66 @@ class VaDE(nn.Module):
                               input_chunk_length=kwargs["input_chunk_length"],output_chunk_length=kwargs["input_chunk_length"],
                               z_layer_dim=z_layer_dim,outer_mode=1)
 
-        self.encoder=Encoder()
-        self.decoder=Decoder()
+        enc_input_dim = (self.emb_layer.past_cov_dim+1)*kwargs["input_chunk_length"]
+        inter_dims = [100,100,300]
+        self.encoder=Encoder(input_dim=enc_input_dim,hid_dim=n_cluster,inter_dims=inter_dims)
+        self.decoder=Decoder(input_dim=enc_input_dim,hid_dim=n_cluster,inter_dims=inter_dims)
                 
         ###### VADE部分的定义
         self.pi_ = nn.Parameter(torch.FloatTensor(n_cluster,).fill_(1)/n_cluster,requires_grad=True)
         self.mu_c=nn.Parameter(torch.FloatTensor(n_cluster).fill_(0),requires_grad=True)
         self.log_sigma2_c=nn.Parameter(torch.FloatTensor(n_cluster).fill_(0),requires_grad=True)
 
-    def forward(self, x, idx=None,rank_mask=None,mode="pretrain"):
+    def forward(self, x_in, idx=None,rank_mask=None,mode="pretrain"):
         """先提取序列特征，然后根据中间变量做聚类，然后做自监督计算
            根据mode参数分为2种模式，pretrain表示只进行特征提取
         """
         
         # 获取嵌入特征，包含中间过程结果
-        x_bar,mu,log_sigma2,x_sig,x_lookback = self.emb_layer(x)
-        x_bar = x_bar.squeeze(-1)
-        x_sig = x_sig.squeeze(-1)
+        # x_bar,mu,log_sigma2,x_sig,x_lookback = self.emb_layer(x)
+        # x_bar = x_bar.squeeze(-1)
+        # x_sig = x_sig.squeeze(-1)
         
         # pretrain模式返回中间步骤的特征值
+        x, x_future_covariates, x_static_covariates = x_in
+        x_dynamic_past_covariates = x[...,:self.emb_layer.past_cov_dim+1]
+        x_reshape = x_dynamic_past_covariates.reshape(x_dynamic_past_covariates.shape[0]*x_dynamic_past_covariates.shape[1],x_dynamic_past_covariates.shape[2]*x_dynamic_past_covariates.shape[3])
         if mode=="pretrain":
-            return x_bar,mu,log_sigma2,None,x_lookback
+            
+            z, mu = self.encoder(x_reshape)
+            x_bar = self.decoder(z)                        
+            return x_bar,mu,None,None,None
+        
+        z_mu, z_sigma2_log = self.encoder(x_reshape)
         
         # 在这里提前进行综合loss的计算
-        mu_reshape = mu.reshape(mu.shape[0]*mu.shape[1],mu.shape[2])
-        log_sigma2_reshape = log_sigma2.reshape(mu_reshape.shape)
-        loss = self.ELBO_compute(x_sig, mu_reshape, log_sigma2_reshape,x_lookback=x_lookback)
+        loss = self.ELBO_compute(x_reshape, z_mu, z_sigma2_log)
         
-        return x_bar, mu, log_sigma2, None,loss
+        return None, z_mu, z_sigma2_log, None,loss
             
-    def ELBO_compute(self,x,z_mu, z_sigma2_log,x_lookback=None,L=1):
+    def ELBO_compute(self,x,z_mu, z_sigma2_log,L=1):
         
         det=1e-10
         L_rec=0
         for l in range(L):
 
             z=torch.randn_like(z_mu)*torch.exp(z_sigma2_log/2)+z_mu
-            x_lookback_ran = torch.randn_like(x_lookback)
-            # 使用模拟z调用decode方法，进行相对熵计算
-            _,x_pro=self.emb_layer.decode_through(z, x_lookback_ran)
-            x_pro = x_pro.squeeze(-1)
-            x_reshape = x.reshape(x.shape[0]*x.shape[1],x.shape[2])
-            x_pro_reshape = x_pro.reshape(x_pro.shape[0]*x_pro.shape[1],x_pro.shape[2])
-            L_rec+=F.binary_cross_entropy(x_reshape,x_pro_reshape)
-            print("L_rec:{},x_pro.max():{},x_pro.min():{},x.max():{},x.min():{}".format(L_rec,x_pro.max(),x_pro.min(),x.max(),x.min()))
+
+            x_pro=self.decoder(z)
+            L_rec+=F.binary_cross_entropy(x_pro,x)
+            # print("L_rec:{},x_pro max:{},x_pro min:{},x.max():{},x.min():{}".format(L_rec,x_pro.max(),x_pro.min(),x.max(),x.min()))
+
         L_rec/=L
 
         Loss=L_rec*x.size(1)
 
         pi=self.pi_
-        log_sigma2_c=self.log_sigma2_c  
+        log_sigma2_c=self.log_sigma2_c
         mu_c=self.mu_c
 
         z = torch.randn_like(z_mu) * torch.exp(z_sigma2_log / 2) + z_mu
         yita_c=torch.exp(torch.log(pi.unsqueeze(0))+self.gaussian_pdfs_log(z,mu_c,log_sigma2_c))+det
-
-        yita_c=yita_c/(yita_c.sum(1).view(-1,1))#batch_size*Clusters
+        yita_c=yita_c/(yita_c.sum(1).view(-1,1))
 
         Loss+=0.5*torch.mean(torch.sum(yita_c*torch.sum(log_sigma2_c.unsqueeze(0)+
                                                 torch.exp(z_sigma2_log.unsqueeze(1)-log_sigma2_c.unsqueeze(0))+
@@ -165,7 +169,6 @@ class VaDE(nn.Module):
 
         Loss-=torch.mean(torch.sum(yita_c*torch.log(pi.unsqueeze(0)/(yita_c)),1))+0.5*torch.mean(torch.sum(1+z_sigma2_log,1))
 
-   
         return Loss
     
     def predict(self,x):

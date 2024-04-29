@@ -56,7 +56,7 @@ class ClusteringLoss(UncertaintyLoss):
                 x_bar, q, pred, pred_value,z = output_item  
                 x_bar = x_bar.view(x_bar.shape[0]*x_bar.shape[1],-1)
                 pre_target = real_target.view(real_target.shape[0]*real_target.shape[1],-1)
-                corr_loss_combine[i] = self.ccc_loss_comp(x_bar,pre_target)
+                corr_loss_combine[i] = self.mse(x_bar,pre_target)
                 if mode=="pretrain":
                     # 如果属于特征值阶段，则只比较特征距离
                     loss_sum = loss_sum + corr_loss_combine[i]
@@ -108,7 +108,7 @@ class VadeLoss(UncertaintyLoss):
         """套用vade中的聚类损失计算，使用聚类模式进行计算"""
 
         (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,past_target,pca_target,price_range) = target_ori
+        (target,target_class,past_target,pca_target,past_covariates) = target_ori
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         similarity_value = [None,None,None]
         elbu_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
@@ -120,9 +120,6 @@ class VadeLoss(UncertaintyLoss):
         label_class = target_class[:,:,0].long()
         ot_loss_detail = []
         
-        price_range = price_range.squeeze(-1)
-        price_range_t = F.softmax(price_range, dim=1)
-                
         for i in range(len(output)):
             
             if optimizers_idx==i or optimizers_idx==-1:
@@ -131,10 +128,12 @@ class VadeLoss(UncertaintyLoss):
                 # real_target = past_target[:,:,i]
                 output_item = output[i] 
                 x_bar, mu, log_sigma2, _,_elbu_loss = output_item  
-                x_bar = x_bar.view(x_bar.shape[0]*x_bar.shape[1],-1)
+                # x_bar = x_bar.view(x_bar.shape[0]*x_bar.shape[1],-1)
                 pre_target = real_target.view(real_target.shape[0]*real_target.shape[1],-1)
+                p_conv = past_covariates[...,:(self.ref_model[i].emb_layer.past_cov_dim+1)]
+                p_conv = p_conv.reshape(p_conv.shape[0]*p_conv.shape[1],p_conv.shape[2]*p_conv.shape[3])                
                 if mode=="pretrain":
-                    corr_loss_combine[i] = self.ccc_loss_comp(x_bar,pre_target)
+                    corr_loss_combine[i] = self.mse_loss(x_bar,p_conv)
                     # 如果属于特征值阶段，则只比较特征距离
                     loss_sum = loss_sum + corr_loss_combine[i]
                 else:  

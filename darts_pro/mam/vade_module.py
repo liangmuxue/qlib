@@ -132,8 +132,6 @@ class VaDEModule(_TFTModuleBatch):
             future_cov_dim = (
                 future_covariates.shape[-1] if future_covariates is not None else 0
             )
-            # 由于使用自监督，则取消未来协变量
-            future_cov_dim = 0
             
             static_cov_dim = (
                 static_covariates.shape[-2] * static_covariates.shape[-1]
@@ -239,7 +237,7 @@ class VaDEModule(_TFTModuleBatch):
         else:
             step_mode = "complete"   
             
-        (future_target,target_class,target_info,past_target,price_target) = target   
+        (future_target,target_class,target_info,past_target,past_covariates) = target   
         # 拆分出之前绑定的复合变量
         pca_target = future_target[:,:,-2:,:]
         future_target = future_target[:,:,:-2,:]
@@ -252,7 +250,7 @@ class VaDEModule(_TFTModuleBatch):
         price_range_data = StandardScaler().fit_transform(price_range_data)
         # price_range_data = normalization_axis(price_range_data,axis=0)
         price_range_data = torch.Tensor(price_range_data).to(self.device).unsqueeze(-1)
-        return self.criterion(output,(future_target,target_class,past_target,pca_target,price_range_data),mode=step_mode,optimizers_idx=optimizers_idx)
+        return self.criterion(output,(future_target,target_class,past_target,pca_target,past_covariates),mode=step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
         super().on_validation_start()
@@ -284,6 +282,7 @@ class VaDEModule(_TFTModuleBatch):
                 pre = gmm.fit_predict(z_value)
                 print('Acc={:.4f}%'.format(cluster_acc(pre, Y)[0] * 100))
                 # 参数初始赋值
+                self.sub_models[model_seq].encoder.log_sigma2_l.load_state_dict(self.sub_models[model_seq].encoder.mu_l.state_dict())
                 self.sub_models[model_seq].pi_.data = torch.from_numpy(gmm.weights_).to(self.device).float()
                 self.sub_models[model_seq].mu_c.data = torch.from_numpy(gmm.means_).to(self.device).float()
                 self.sub_models[model_seq].log_sigma2_c.data = torch.log(torch.from_numpy(gmm.covariances_).to(self.device).float())                
@@ -343,7 +342,7 @@ class VaDEModule(_TFTModuleBatch):
             (output,vr_class,tar_class) = self(input_batch,future_target,adj_target,past_target=past_target,rank_mask=rank_index,
                                                optimizer_idx=i,target_info=target_info)
             self.output_postprocess(output,target_class,i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,past_target,price_target),optimizers_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,past_target,past_covariates),optimizers_idx=i)
             (corr_loss_combine,elbu_loss,ce_loss) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.log("train_elbu_loss_{}".format(i), elbu_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
@@ -369,8 +368,8 @@ class VaDEModule(_TFTModuleBatch):
         
         loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)  
         
-        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag or True:
-            self.dump_val_data(val_batch,output,detail_loss)
+        # if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
+        #     self.dump_val_data(val_batch,output,detail_loss)
         return loss,detail_loss
            
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
@@ -390,7 +389,7 @@ class VaDEModule(_TFTModuleBatch):
         target_vr_class = target_class[:,0].cpu().numpy()
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,target_info,past_target,price_target),optimizers_idx=-1)
+                    (future_target,target_class,target_info,past_target,past_covariates),optimizers_idx=-1)
         (corr_loss_combine,elbu_loss,ce_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -403,7 +402,7 @@ class VaDEModule(_TFTModuleBatch):
             return loss,detail_loss,output
         
         # PCA准确率计算
-        self.compute_pac_acc(output,price_target)
+        # self.compute_pac_acc(output,price_target)
         
         # 准确率的计算
         # import_price_result,values = self.compute_real_class_acc(output_data=output,target_info=self.transfer_target_info(target_info),target_class=target_class)          
