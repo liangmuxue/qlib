@@ -52,7 +52,7 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 32
+            batch_size: 1024
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -77,12 +77,12 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'SDCN3D_COVTARGET_1000_202110'
+               model_name: 'SDCN_CLS_1000_202110'
                model_type: 'sdcn'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
-               pretrain_model_name: 'SDCN3D_RAINGE_PRETRAIN_1000_202110'
+               pretrain_model_name: 'SDCN_ClS_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

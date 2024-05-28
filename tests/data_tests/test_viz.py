@@ -3,6 +3,11 @@ import matplotlib.pyplot as plt
 
 import time
 import warnings
+import torch
+import torch.nn.modules
+import torch.nn
+import torch.nn.functional as F 
+from torch.nn.parameter import Parameter
 
 from sklearn.cluster import DBSCAN
 from sklearn import metrics
@@ -232,10 +237,129 @@ def test_SpectralClustering():
     
     plt.show()
     print("done")
-       
+     
+
+def test_matirx_view():
+
+    # create testing data which is 4x5 data
+    mat = np.arange(20).reshape(4,5)
+    print(mat)
+    
+    # Save Image Function
+    fig = plt.figure(figsize=(10,8))
+    ax = plt.gca()
+    cax = plt.imshow(mat, cmap='viridis')
+    # set up colorbar
+    cbar = plt.colorbar(cax, extend='both', drawedges = False)
+    cbar.set_label('Intensity',size=36, weight =  'bold')
+    cbar.ax.tick_params( labelsize=18 )
+    cbar.minorticks_on()
+    # set up axis labels
+    ticks=np.arange(0,mat.shape[0],1)
+    ## For x ticks
+    plt.xticks(ticks, fontsize=12, fontweight = 'bold')
+    ax.set_xticklabels(ticks)
+    ## For y ticks
+    plt.yticks(ticks, fontsize=12, fontweight = 'bold')
+    ax.set_yticklabels(ticks)
+    plt.savefig('test.png', dpi = 300)
+    plt.close()    
+ 
+ 
+class Net(torch.nn.Module):
+    def __init__(self,n_features,n_hiddens,n_outputs):
+        super(Net,self).__init__()
+        self.hidden=torch.nn.Linear(n_features,n_hiddens)
+        self.predict=torch.nn.Linear(n_hiddens,n_outputs)
+ 
+    def forward(self, x):
+        x=F.relu(self.hidden(x))
+        predict=F.softmax(self.predict(x))
+        return predict
+ 
+class MyNet:
+    def __init__(self,n_features,n_hiddens,n_outputs,times):
+        self.NeuronalNet=Net(n_features,n_hiddens,n_outputs)
+        self.realX=None
+        self.realY=None
+        self.opitimizer=None
+        self.lossFunc=None
+        self.times=times
+        
+    def getData(self):
+        temp = torch.ones(100, 2)
+ 
+        B = torch.normal(2 * temp, 1)
+ 
+        By = torch.ones(100)
+        A = torch.normal(-2 * temp, 1)
+        Ay = torch.zeros(100)
+ 
+        self.realX = (torch.cat([A, B], 0))
+        self.realY = (torch.cat([Ay, By]).type(torch.LongTensor))
+ 
+        # plt.scatter(realX.data.numpy()[:,0],realX.data.numpy()[:,1],c=realY)
+        # plt.show()
+ 
+ 
+    def run(self):
+        self.opitimizer=torch.optim.SGD(self.NeuronalNet.parameters(),lr=0.01)
+        self.lossFunc=torch.nn.CrossEntropyLoss()
+ 
+        for i in range(self.times):
+            out=self.NeuronalNet(self.realX)
+ 
+            loss=self.lossFunc(out,self.realY)
+ 
+            self.opitimizer.zero_grad()
+ 
+            loss.backward()
+ 
+            self.opitimizer.step()
+ 
+    def showBoundary(self):
+        x_min, x_max = self.realX[:, 0].min() - 0.1, self.realX[:, 0].max() + 0.1
+        y_min, y_max = self.realX[:, 1].min() - 0.1, self.realX[:, 1].max() + 0.1
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 101), np.linspace(y_min, y_max, 101))
+        cmap = plt.cm.Spectral
+ 
+        X_test = torch.from_numpy(np.c_[xx.ravel(), yy.ravel()]).float()
+        y_pred = self.NeuronalNet(X_test)
+        _, y_pred = y_pred.max(dim=1)
+        y_pred = y_pred.reshape(xx.shape)
+ 
+        plt.contourf(xx, yy, y_pred, cmap=plt.cm.Spectral, alpha=0.8)
+        plt.scatter(self.realX[:, 0], self.realX[:, 1], c=self.realY, s=40, cmap=plt.cm.RdYlBu)
+        plt.xlim(xx.min(), xx.max())
+        plt.ylim(yy.min(), yy.max())
+        plt.title("binary classifier")
+        plt.show()
+        
+ 
+    def predict(self,inputData):
+        #inputData should be a 1x2 matrix
+        data=torch.from_numpy(np.array(inputData)).int()
+        return self.NeuronalNet(data.float())
+ 
+
+def test_bound():
+ 
+    myNet = MyNet(2,18,2,1000)
+    myNet.getData()
+    myNet.run()
+    myNet.showBoundary()
+    probabilitys=list(myNet.predict([3, 3]).data.numpy())
+    print("class:{}".format(1+probabilitys.index(max(probabilitys))))
+ 
+ 
+ 
+   
+      
 if __name__ == "__main__":
     # test_dbscan()
-    test_SpectralClustering()
+    # test_SpectralClustering()
+    # test_matirx_view()
+    test_bound()
     
         
     

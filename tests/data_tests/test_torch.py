@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import time
+from cus_utils.metrics import pca_apply
 
 def test_tensor():
     a = torch.randn(1, requires_grad=True).cuda()
@@ -161,16 +162,15 @@ def test_transfer():
         print("time is",(t2-t1)*1000)
 
 def test_pca():
-    k = 1
+    k = 2
     tensor = torch.rand([128,5]).to("cuda:0")
-    # cov = torch.matmul(torch.t(tensor), tensor) / tensor.size(0)
-    cov = torch.cov(tensor)
-    # tensor = tensor - torch.mean(tensor, dim=0)
-    eigvals, eigvecs = torch.eig(cov, eigenvectors=True)
-    idx = eigvals.sort(descending=True)[1][:k]
-    transform = eigvecs[:, idx]
-    rtn = torch.matmul(tensor, transform)
+    rtn = pca_apply(tensor,k)
     print("rtn",rtn)
+    
+def test_nor():
+    a = 1
+    a-=0.5+0.1
+    print(a)
          
 if __name__ == "__main__":
     # test_tensor()    
@@ -180,6 +180,7 @@ if __name__ == "__main__":
     # test_mul()
     # test_corr()
     test_pca()
+    # test_nor()
     # test_transfer()
     # test_pairwise()
     # test_embedding()

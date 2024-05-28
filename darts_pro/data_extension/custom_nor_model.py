@@ -32,6 +32,7 @@ from darts_pro.data_extension.custom_module import _CusModule,_TFTModuleBatch
 from darts_pro.mam.hsan_module import HsanModule
 from darts_pro.mam.sdcn_module import SdcnModule
 from darts_pro.mam.vade_module import VaDEModule
+from darts_pro.mam.vare_module import VaREModule
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset
 
 class _TFTModuleAsis(_CusModule):
@@ -181,9 +182,9 @@ class _TFTModuleAsis(_CusModule):
         # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
         
         # import_index_bool = self.create_signal_macd(target_info)       
-        # import_index_bool = self.create_signal_kdj(target_info)    
+        import_index_bool = self.create_signal_kdj(target_info)    
         # All Data In
-        import_index_bool = np.ones(past_target.shape[0], dtype=bool)
+        # import_index_bool = np.ones(past_target.shape[0], dtype=bool)
         import_index_bool = import_index_bool & price_bool
         if np.sum(import_index_bool)==0:
             return None
@@ -590,7 +591,6 @@ class TFTBatchModel(TFTExtModel):
                 step_mode=self.step_mode,
                 model_type=self.model_type,
                 train_sample=self.train_sample,
-                static_datas=self.static_datas,
                 **self.pl_module_params,
             )   
             # 全模式下，先加载之前的预训练模型
@@ -623,7 +623,7 @@ class TFTBatchModel(TFTExtModel):
                 step_mode=self.step_mode,
                 model_type=self.model_type,
                 train_sample=self.train_sample,
-                static_datas=self.static_datas,
+                # static_datas=self.static_datas,
                 **self.pl_module_params,
             )   
             # 全模式下，先加载之前的预训练模型
@@ -631,7 +631,38 @@ class TFTBatchModel(TFTExtModel):
                 pretrained_model = self.load_from_checkpoint(self.pretrain_model_name,work_dir=self.work_dir,best=False)
                 for i in range(len(self.past_split)):
                     s_model = pretrained_model.model.sub_models[i]
-                    model.sub_models[i] = s_model            
+                    model.sub_models[i] = s_model      
+        if self.model_type=="vare":
+            model = VaREModule(
+                output_dim=self.output_dim,
+                variables_meta_array=variables_meta_array,
+                num_static_components=n_static_components,
+                hidden_size=self.hidden_size,
+                lstm_layers=self.lstm_layers,
+                dropout=self.dropout,
+                num_attention_heads=self.num_attention_heads,
+                full_attention=self.full_attention,
+                feed_forward=self.feed_forward,
+                hidden_continuous_size=self.hidden_continuous_size,
+                categorical_embedding_sizes=self.categorical_embedding_sizes,
+                add_relative_index=self.add_relative_index,
+                norm_type=self.norm_type,
+                use_weighted_loss_func=self.use_weighted_loss_func,
+                past_split=self.past_split,
+                filter_conv_index=self.filter_conv_index,
+                device=self.device,
+                batch_file_path=self.batch_file_path,
+                step_mode=self.step_mode,
+                model_type=self.model_type,
+                train_sample=self.train_sample,
+                **self.pl_module_params,
+            )   
+            # 全模式下，先加载之前的预训练模型
+            if self.step_mode=="complete":
+                pretrained_model = self.load_from_checkpoint(self.pretrain_model_name,work_dir=self.work_dir,best=False)
+                for i in range(len(self.past_split)):
+                    s_model = pretrained_model.model.sub_models[i]
+                    model.sub_models[i] = s_model                            
         return model         
     
     def build_variable(self,ori_tensors):
@@ -778,4 +809,29 @@ class TFTCluBatchModel(TFTBatchModel):
             )    
         return ds    
 
+class TFTCluSerModel(TFTBatchModel):
+    """用于聚类的集成时间序列模式"""
+    
+    def _build_train_dataset(
+        self,
+        target: Sequence[TimeSeries],
+        past_covariates: Optional[Sequence[TimeSeries]],
+        future_covariates: Optional[Sequence[TimeSeries]],
+        max_samples_per_ts: Optional[int],
+        mode="train"
+    ) -> BatchDataset:
+        
+        # 训练模式下，需要多放回一个静态数据对照集合
+        if mode=="train":
+            ds = BatchDataset(
+                filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode)
+            )    
+            # self.static_datas = ds.static_datas
+        # 验证模式下，需要传入之前存储的静态数据集合
+        if mode=="valid":
+            ds = BatchDataset(
+                filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode),
+                # pre_static_datas=self.static_datas
+            )    
+        return ds
                

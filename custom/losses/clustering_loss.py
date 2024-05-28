@@ -5,6 +5,7 @@ from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss
 from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild
+from cus_utils.metrics import pca_apply
 import geomloss
 
 def cluster_acc(Y_pred, Y):
@@ -108,7 +109,7 @@ class VadeLoss(UncertaintyLoss):
         """套用vade中的聚类损失计算，使用聚类模式进行计算"""
 
         (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,past_target,pca_target,past_covariates) = target_ori
+        (target,target_class,past_target,past_covariates) = target_ori
         corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         similarity_value = [None,None,None]
         elbu_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
@@ -117,28 +118,116 @@ class VadeLoss(UncertaintyLoss):
         loss_sum = torch.tensor(0.0).to(self.device) 
         fake_loss = torch.tensor(0.0).to(self.device) 
         # 相关系数损失,多个目标
-        label_class = target_class[:,:,0].long()
+        label_class = target_class[:,0].long()
         ot_loss_detail = []
         
         for i in range(len(output)):
             
             if optimizers_idx==i or optimizers_idx==-1:
-                real_target = past_target[:,:,:,i]
+                real_target = target[...,i]
                 # pca_target_item = pca_target[:,:,:,i]
                 # real_target = past_target[:,:,i]
                 output_item = output[i] 
                 x_bar, mu, log_sigma2, _,_elbu_loss = output_item  
-                # x_bar = x_bar.view(x_bar.shape[0]*x_bar.shape[1],-1)
-                pre_target = real_target.view(real_target.shape[0]*real_target.shape[1],-1)
-                p_conv = past_covariates[...,:(self.ref_model[i].emb_layer.past_cov_dim+1)]
-                p_conv = p_conv.reshape(p_conv.shape[0]*p_conv.shape[1],p_conv.shape[2]*p_conv.shape[3])                
                 if mode=="pretrain":
-                    corr_loss_combine[i] = self.mse_loss(x_bar,p_conv)
+                    detail_loss = None
+                    x_bar = x_bar.permute(1,0,2).squeeze()
+                    corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
                     # 如果属于特征值阶段，则只比较特征距离
                     loss_sum = loss_sum + corr_loss_combine[i]
                 else:  
-                    elbu_loss[i] = _elbu_loss
+                    elbu_loss[i],detail_loss,yita_c = _elbu_loss
+                    ce_loss[i] = nn.CrossEntropyLoss()(yita_c,label_class)
+                    # 使用elbo中的预测损失
+                    corr_loss_combine[i] = detail_loss[0]
                     # 使用ELBO损失，最大化下界
-                    loss_sum = loss_sum + elbu_loss[i] + ce_loss[i]
-        return loss_sum,[corr_loss_combine,elbu_loss,ce_loss]
+                    loss_sum = loss_sum + ce_loss[i] + corr_loss_combine[i]
+        return loss_sum,[corr_loss_combine,ce_loss,detail_loss]
+
+class VaRELoss(UncertaintyLoss):
+    """基于变分聚类的损失函数"""
+    
+    def __init__(self,ref_model=None,device=None):
+        super(VaRELoss, self).__init__(ref_model=ref_model,device=device)
+        self.ref_model = ref_model
+        self.device = device  
+        
+    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
+
+        """套用vade中的聚类损失计算，使用聚类模式进行计算"""
+
+        (output,vr_combine_class,vr_classes) = output_ori
+        (target,target_class,past_target,past_covariates) = target_ori
+        corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        similarity_value = [None,None,None]
+        elbu_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        ce_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        # 指标分类
+        loss_sum = torch.tensor(0.0).to(self.device) 
+        comb_detail_loss = []
+        label_class = target_class[:,0].long()
+        
+        for i in range(len(output)):
+            
+            if optimizers_idx==i or optimizers_idx==-1:
+                real_target = target[...,i]
+                
+                output_item = output[i] 
+                x_bar, mu, log_sigma2, _,loss_tup= output_item  
+                x_bar = x_bar.permute(1,0,2).squeeze()
+                p_conv = past_covariates[i]
+                corr_loss_combine[i] += self.ccc_loss_comp(x_bar,real_target)
+                if mode=="pretrain":
+                    # 如果属于特征值阶段，则只比较特征距离
+                    loss_sum = loss_sum + corr_loss_combine[i]
+                else:  
+                    elbu_loss[i] = loss_tup
+                    # 使用ELBO损失，最大化下界
+                    loss_sum = loss_sum + elbu_loss[i] + corr_loss_combine[i]
+        return loss_sum,[corr_loss_combine,elbu_loss,comb_detail_loss]
+
+class SdcnLoss(UncertaintyLoss):
+    """基于位置关系比对的损失函数"""
+    
+    def __init__(self,ref_model=None,device=None):
+        super(SdcnLoss, self).__init__(ref_model=ref_model,device=device)
+        self.ref_model = ref_model
+        self.device = device  
+        
+    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
+
+        """使用预测标准距离结合位置比对模式进行计算"""
+
+        (output,vr_combine_class,vr_classes) = output_ori
+        (target,target_class,pca_target) = target_ori
+        corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        similarity_value = [None,None,None]
+        cls_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        ce_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        # 指标分类
+        loss_sum = torch.tensor(0.0).to(self.device) 
+        # 相关系数损失,多个目标
+        label_class = target_class[:,0].long()
+        
+        for i in range(len(output)):
+            if optimizers_idx==i or optimizers_idx==-1:
+                real_target = target[...,i]
+                pca_target_item = pca_target[...,i]
+                output_item = output[i] 
+                x_bar, z_ca, lattend, _,output_class = output_item  
+                corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
+                if mode=="pretrain":
+                    # 预训练阶段，追加计算目标数据的分类损失
+                    cls_loss[i] = nn.CrossEntropyLoss()(output_class,label_class)                      
+                    # 如果属于特征值阶段，则只比较特征距离
+                    loss_sum = loss_sum + corr_loss_combine[i] + cls_loss[i]
+                else:  
+                    # 正式阶段，使用预测目标的分类损失
+                    cls_loss[i] = nn.CrossEntropyLoss()(output_class,label_class)  
+                    # 对降维后的二维数据，进行位置关系比较,同时使用分类损失
+                    ce_loss[i] = self.mse_loss(z_ca, pca_target_item)
+
+                    loss_sum = loss_sum + ce_loss[i] + corr_loss_combine[i] + cls_loss[i]
+        return loss_sum,[corr_loss_combine,ce_loss,cls_loss,None]
+
 

@@ -250,5 +250,14 @@ def clusting_data(data,device="cpu"):
     db = DBSCAN(eps=0.1, metric='precomputed',min_samples=3,n_jobs=2).fit(output_pair_dis)  
     return db.labels_
     
-    
-    
+def pca_apply(X, k=2):   
+    """SVD降维的pytorch实现"""
+
+    X_mean = torch.mean(X, 0)
+    X = X - X_mean.expand_as(X)
+    # SVD
+    U,S,V = torch.svd(torch.t(X))
+    return torch.mm(X,U[:,:k])
+
+
+

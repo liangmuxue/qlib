@@ -441,22 +441,6 @@ class StatDataAssis():
             match_index = np.intersect1d(measure_index,import_price_index)
             print("{},match cnt:{}".format(fit_names[i],match_index.shape[0]))
             print("{}，measure cnt:{}".format(fit_names[i],measure_index.shape[0]))
-
-    def knn_clustering(self,ds_data):
-        loss_unity = UncertaintyLoss()
-        viz = TensorViz(env="data_analysis")
-        index = 0
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = ds_data.target_data
-        target_class = target_class[:,0,0]
-        output_data = ds_data.output_data
-        device_str = 'cuda:0'
-        device = torch.device(device_str)
-        num_clusters = len(CLASS_SIMPLE_VALUES.keys())
-        # 按照不同的指标分别聚类
-        for i in range(output_data.shape[-1]):
-            neigh = KNeighborslClassifier(n_neighbors = 4)
-            output = output_data[:,:,i]
-            kmeans = KMeans(n_clusters = 4,random_state = 0).fit(output)  
             
     def clustering_output(self,ds_data):
         """对输出按照目标类别进行聚类"""
@@ -488,9 +472,10 @@ class StatDataAssis():
         
         viz = TensorViz(env="data_analysis")
         index = 0
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = ds_data.target_data
+        (past_target,target_class,target,pca_target,price_target,target_info) = ds_data.target_data
         target_class = target_class[:,0,0]
         output_data = ds_data.output_data
+        (x_bar, z_pca,lattend) = output_data
         device_str = 'cuda:0'
         device_str = 'cpu'
         device = torch.device(device_str)
@@ -503,63 +488,25 @@ class StatDataAssis():
         labels = target_class[combine_index]
         output_pair_dis_arr = []
         # 按照不同的指标分别聚类
-        for i in range(output_data.shape[-1]):
+        for i in range(x_bar.shape[-1]):
             # if i!=2:
             #     continue
-            output = output_data[:,:,i]
-            output = output[combine_index]
-            target_single = target[:,:,i]
+            output_item = z_pca[...,i]
+            output = output_item[combine_index]
+            target_single = target[...,i]
+            pca_target_single = pca_target[...,i]
             target_single = target_single[combine_index]
-            # 生成配对距离矩阵
-            output_pair_dis = pairwise_distances(torch.Tensor(output).to(device),distance_func=loss_unity.ccc_distance_torch,
-                                        make_symmetric=True).cpu().numpy()         
-            # self.draw_distance_elbaw(output_pair_dis)
             
-            # 生成二维坐标数据
-            mds = MDS(n_components=2, dissimilarity='precomputed',random_state=1)
-            coords = mds.fit_transform(output_pair_dis)               
-            
-            # 使用密度聚类，min_samples标识每簇至少多少个点以上，eps表示簇内距离要求
-            db = DBSCAN(eps=0.1, metric='precomputed',min_samples=3,n_jobs=2).fit(output_pair_dis)  
-            cluster_labels = self.dbscan_results(db,coords,name="NO_{}".format(i))
-            noise_index = np.where(cluster_labels==-1)[0]
-            noise_index = self.filter_noise_data(coords, noise_index,eps=0.05)   
             # 可视化，使用二维坐标在图形展示        
-            self.matrix_results_viz(coords=coords,labels=labels,noise_index=noise_index,name="output_pn_{}".format(i))
-            self.matrix_results_viz(coords=coords,labels=labels,noise_index=None,name="output_s_{}".format(i))
-            
-            # cluster = SpectralClustering(n_clusters=2, gamma=1,random_state=1,affinity="precomputed")
-            # cluster.fit(output_pair_dis)
-            # self.spec_results(cluster,coords,name="NO_{}".format(i))
-            # # print("noise_data is:",xy_rtn)
-
-            # noise_index = noise_index[filter_idx]
-            # for i in range(4):
-            #     total_acc_cnt = np.sum(target_class[noise_index]==i)   
-            #     total_acc = total_acc_cnt/noise_index.shape[0]
-            #     print("total_acc_{}:{}".format(i,total_acc))
-            # import_index = np.where(db.labels_==CLASS_SIMPLE_VALUE_MAX)[0]
-            # import_target = np.where(target_class==CLASS_SIMPLE_VALUE_MAX)[0]
-                                                 
-            target_pair_dis = pairwise_distances(torch.Tensor(target_single).to(device),distance_func=loss_unity.ccc_distance_torch,
-                                        make_symmetric=True).cpu().numpy()
+            # self.matrix_results_viz(coords=coords,labels=labels,noise_index=noise_index,name="output_pn_{}".format(i))
+            self.matrix_results_viz(coords=output_item,labels=labels,noise_index=None,name="output_s_{}".format(i))
             # 对目标值分布的可视化
-            # self.matrix_results_viz(target_pair_dis,labels=labels,name="target_pn_{}".format(i))  
+            self.matrix_results_viz(pca_target_single,labels=labels,name="target_pn_{}".format(i))  
               
             # target_db = DBSCAN(eps=0.2, metric='precomputed',min_samples=4,n_jobs=2).fit(target_pair_dis)  
             # self.dbscan_results(target_db,target_pair_dis,name="target")            
             # import_acc = import_acc_cnt/import_index.shape[0]
             # print("acc_{},total_acc:{},import_acc:{}".format(i,total_acc,import_acc)) 
-            
-        # 合并指标聚类分析
-        # output = output_data[combine_index,1:]        
-        # target_ana = target[combine_index]
-        # output_pair_dis = pairwise_distances(torch.Tensor(output).to(device),distance_func=loss_unity.ccc_distance_torch,
-        #                             make_symmetric=True,reduction="max").cpu().numpy()         
-        # self.matrix_results_viz(output_pair_dis,labels=labels,name="output_combine")  
-        # target_pair_dis = pairwise_distances(torch.Tensor(target_ana).to(device),distance_func=loss_unity.ccc_distance_torch,
-        #                             make_symmetric=True).cpu().numpy()
-        # self.matrix_results_viz(target_pair_dis,labels=labels,name="target_combine")   
 
     def analysis_compare_output_clu(self,ds_data):
         """使用度量的方式，综合分析输出值与目标值"""
@@ -840,7 +787,7 @@ class StatDataAssis():
                 xy_rtn = xy[:, :2]           
         
         plt.title('Estimated number of clusters: %d' % n_clusters_)    
-        plt.savefig('./custom/data/results/{}_cluster_result.png'.format(name))
+        # plt.savefig('./custom/data/results/{}_cluster_result.png'.format(name))
                
 if __name__ == "__main__":       
     data_assis = StatDataAssis()

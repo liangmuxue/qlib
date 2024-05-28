@@ -115,7 +115,8 @@ class BatchDataset(Dataset):
     
     
     def clear_inf_data(self,agg_data):
-        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = agg_data
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler_tuple,target_class,target,target_info,price_target) = agg_data
         keep_idx = []
         for i in range(target.shape[0]):
             t_item = target[i]
@@ -139,8 +140,9 @@ class BatchDataset(Dataset):
         target = target[keep_idx]
         scaler_tuple = [scaler_tuple[i] for i in keep_idx]
         target_info = [target_info[i] for i in keep_idx]
+        price_target = price_target[keep_idx]
         
-        return (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info)
+        return (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target)
         
     def cluster_compare_data(self,aggregated_data,sampler_cnt=10):
         """对目标进行聚类，选取具有代表性的数据"""
@@ -232,7 +234,8 @@ class BatchDataset(Dataset):
         
         if self.mode=="process":
             batch_data = [item[index] for item in self.batch_data]
-            (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info) = batch_data
+            (past_target,past_covariates, historic_future_covariates,future_covariates,
+             static_covariates,scaler_tuple,target_class,target,target_info,price_target) = batch_data
             # 生成价位幅度目标 
             price_array = target_info["price_array"]
             raise_range = (price_array[-1] - price_array[-5])/price_array[-5]*10
@@ -247,7 +250,8 @@ class BatchDataset(Dataset):
             target_range_scaler = MinMaxScaler()
             target_range_scaler.fit(past_target_slope)
             target_info["target_range_scaler"] = target_range_scaler
-            return past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,(scaler,future_past_covariate),target_class,target,target_info
+            return past_target,past_covariates, historic_future_covariates,future_covariates, \
+                static_covariates,(scaler,future_past_covariate),target_class,target,target_info,price_target
         if self.mode=="analysis":
             return self.target_data[index],self.target_class[index]
         if self.mode=="analysis_reg":
@@ -657,107 +661,4 @@ class BatchOutputDataset(BatchDataset):
         output_inverse = self.output_inverse_data[index]
         return target_inverse,target_class[0],output_inverse,target_info
 
-class ClustringBatchOutputDataset(BatchDataset):    
-    
-    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=[0,10000]):
-        
-        self.mode = mode
-        self.filepath = filepath
-        self.target_col = target_col
-        self.fit_names = fit_names      
-            
-
-        output_batch_data = []
-        target_batch_data = []
-        loss_batch_data = []
-        
-        # 文件中已经包含了输出数据和目标数据
-        with open(filepath, "rb") as fin:
-            while True:
-                try:
-                    data = pickle.load(fin)
-                    output_batch_data.append(data[0])
-                    target_batch_data.append(data[1])
-                    loss_batch_data.append(data[2])
-                except EOFError:
-                    break  
-                        
-        # 训练数据 
-        aggregated = self.create_aggregated_data(target_batch_data)    
-        price_data = self.build_price_data(aggregated[-1])
-        # 输出数据    
-        x_bar = []
-        pred = [] 
-        for item in output_batch_data[0]:
-            x_bar.append(item[0])
-            pred.append(item[1])
-        x_bar = np.array(x_bar)
-        pred = np.array(pred)
-        output_combine = (x_bar,pred)
-        loss_batch_data = np.stack(loss_batch_data)
-        loss_batch_data = loss_batch_data.reshape(loss_batch_data.shape[0]*loss_batch_data.shape[1],loss_batch_data.shape[2])
-        # 目标数据
-        self.target_data = aggregated 
-        self.output_inverse_data = output_combine
-        self.output_data = output_combine
-        self.price_data = price_data
-        self.loss_batch_data = loss_batch_data
-
-    def create_aggregated_data(self,batch_data):
-        first_sample = batch_data[0]
-        aggregated = []
-        for i in range(len(first_sample)):
-            elem = first_sample[i][0]
-            if isinstance(elem, np.ndarray):
-                sample_list = np.concatenate([sample[i] for sample in batch_data],axis=0)
-                aggregated.append(
-                    sample_list
-                )
-            elif isinstance(elem, MinMaxScaler):
-                s_list = []
-                for sample in batch_data:
-                    for item in sample[i]:
-                        s_list.append(item)
-                aggregated.append(s_list)
-            elif isinstance(elem, StockNormalizer):
-                aggregated.append([sample[i] for sample in batch_data])    
-            elif isinstance(elem, tuple):
-                t_list = []
-                for sample in batch_data:
-                    for item in sample[i]:
-                        t_list.append(item)
-                aggregated.append(t_list)    
-            elif isinstance(elem, list):
-                t_list = []
-                for sample in batch_data:
-                    for item in sample[i]:
-                        t_list.append(item)
-                aggregated.append(t_list)                                    
-            elif isinstance(elem, Dict):
-                d_list = []
-                for sample in batch_data:
-                    for item in sample[i]:
-                        d_list.append(item)    
-                aggregated.append(d_list)       
-            elif elem is None:
-                aggregated.append(None)  
-        return aggregated
-    
-    def build_price_data(self,target_info):
-        price_data = []
-        for i in range(target_info.shape[0]):
-            p_data = [ts["price_array"][25:] if ts is not None else [0 for _ in range(5)] for ts in target_info[i]]
-            price_data.append(p_data)
-        price_data = np.array(price_data)
-        return price_data   
-        
-    def __getitem__(self, index):
-        
-        batch_data = [item[index] for item in self.target_data]
-        (past_target,scaler,target_class,future_target,pca_price_target,adj_target,target_info) = batch_data
-        # 反归一化取得实际目标数据
-        whole_target = np.concatenate((past_target,future_target),axis=0)
-        target_inverse = scaler.inverse_transform(whole_target)  
-        output = (self.output[0][index],self.output[1][index])
-        return target_inverse,target_class[0],pca_price_target,output,target_info    
     

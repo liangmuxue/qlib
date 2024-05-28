@@ -41,6 +41,81 @@ def clu_coords_viz(coords,imp_index=None,name="viz_coords_result",labels=None,sa
     plt.savefig("{}/{}".format(save_path,name))  
     return coords 
 
+def ShowClsResult(W, B, X, Y, xt=None, yt=None,save_file=None):
+    fig = plt.figure(figsize=(6,6))
+    
+    DrawFourCategoryPoints(X[:,0], X[:,1], Y[:], xlabel="x1", ylabel="x2", show=False)
+
+    b12 = (B[0,1] - B[0,0])/(W[1,0] - W[1,1])
+    w12 = (W[0,1] - W[0,0])/(W[1,0] - W[1,1])
+    
+    b13 = (B[0,0] - B[0,2])/(W[1,2] - W[1,0])
+    w13 = (W[0,0] - W[0,2])/(W[1,2] - W[1,0])
+
+    b14 = (B[0,0] - B[0,3])/(W[1,3] - W[1,0])
+    w14 = (W[0,0] - W[0,3])/(W[1,3] - W[1,0])
+    
+    b23 = (B[0,2] - B[0,1])/(W[1,1] - W[1,2])
+    w23 = (W[0,2] - W[0,1])/(W[1,1] - W[1,2])
+
+    b24 = (B[0,3] - B[0,1])/(W[1,1] - W[1,3])
+    w24 = (W[0,3] - W[0,1])/(W[1,1] - W[1,3])
+
+    b34 = (B[0,3] - B[0,2])/(W[1,2] - W[1,3])
+    w34 = (W[0,3] - W[0,2])/(W[1,2] - W[1,3])
+    
+    def create_xdata():
+        return np.array([X[:,0].min(),X[:,0].max()])
+    
+    x = create_xdata()
+    y = w13 * x + b13
+    # p13, = plt.plot(x,y,c='r')
+
+    x = create_xdata()
+    y = w23 * x + b23
+    p23, = plt.plot(x,y,c='b')
+
+    x = create_xdata()
+    y = w12 * x + b12
+    p12, = plt.plot(x,y,c='black')
+
+    x = create_xdata()
+    y = w14 * x + b14
+    # p14, = plt.plot(x,y,c='yellow')
+
+    x = create_xdata()
+    y = w24 * x + b24
+    # p24, = plt.plot(x,y,c='black')
+
+    x = create_xdata()
+    y = w34 * x + b34
+    p34, = plt.plot(x,y,c='r')
+            
+    # plt.legend([p12,p13,p14,p23,p24,p34], ["12","13","14","23","24","34"])
+    plt.legend([p12,p23,p34], ["12","23","34"])
+    plt.axis([X[:,0].min(),X[:,0].max(),X[:,1].min(),X[:,1].max()])
+    
+    # DrawFourCategoryPoints(xt[:,0], xt[:,1], yt[:], xlabel="x1", ylabel="x2", show=True, isPredicate=True)
+    plt.savefig(save_file)
+
+def DrawFourCategoryPoints(X1, X2, Y_label, xlabel="x1", ylabel="x2", title=None, show=False, isPredicate=False):
+    colors = ['black', 'y', 'b','r']
+    shapes = ['x', 'x', 'o','o']
+    assert(X1.shape[0] == X2.shape[0] == Y_label.shape[0])
+    count = X1.shape[0]
+    for i in range(count):
+        j = Y_label[i]
+        if isPredicate:
+            plt.scatter(X1[i], X2[i], color=colors[j], marker='^', s=200, zorder=10)
+        else:
+            plt.scatter(X1[i], X2[i], color=colors[j], marker=shapes[j], zorder=10)
+    #end for
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    if title is not None:
+        plt.title(title)
+    if show:
+        plt.show() 
 
 class VisUtil:
     

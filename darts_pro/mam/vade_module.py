@@ -107,8 +107,6 @@ class VaDEModule(_TFTModuleBatch):
                 target_class,
                 future_target,
                 target_info,
-                rank_index,
-                adj_target,
                 price_target
             ) = self.train_sample      
                   
@@ -124,7 +122,7 @@ class VaDEModule(_TFTModuleBatch):
             input_dim = (
                 past_target_shape
                 + past_covariates_shape
-                + historic_future_covariates_shape
+                # + historic_future_covariates_shape
             )
     
             output_dim = 1
@@ -147,23 +145,13 @@ class VaDEModule(_TFTModuleBatch):
                 # Standard Static Data
                 static_feat = torch.Tensor(StandardScaler().fit_transform(self.static_datas)).double().to(device)
                 # static_feat = None 
-                          
+            
             model = VaDE(
-                # Tide Part
+                # EncDec Part
                 input_dim=input_dim,
-                emb_output_dim=output_dim,
-                future_cov_dim=future_cov_dim,
-                static_cov_dim=static_cov_dim,
-                nr_params=nr_params,
-                num_encoder_layers=3,
-                num_decoder_layers=3,
-                decoder_output_dim=16,
-                hidden_size=hidden_size,
-                temporal_width_past=4,
-                temporal_width_future=4,
-                temporal_decoder_hidden=32,
-                use_layer_norm=False,
-                dropout=dropout,
+                input_length=self.input_chunk_length,
+                output_length=self.output_chunk_length,
+                batch_size=self.batch_size,
                 # Vade Part
                 n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
                 activation="prelu",
@@ -178,10 +166,8 @@ class VaDEModule(_TFTModuleBatch):
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
         future_target,
-        adj_target,
         past_target=None,
         target_info=None,
-        rank_mask=None,
         optimizer_idx=-1
     ) -> torch.Tensor:
         
@@ -189,30 +175,20 @@ class VaDEModule(_TFTModuleBatch):
         
         out_total = []
         out_class_total = []
-        (batch_size,dim_size,_,_) = x_in[1].shape
+        (batch_size,_,_) = x_in[1].shape
         
         # 设置训练模式，预训练阶段，以及全模式的初始阶段，都使用预训练模式
         if self.switch_flag==0 or self.step_mode=="pretrain":
             step_mode = "pretrain"
         else:
             step_mode = "complete"   
-        # 训练的时候使用动态索引值
-        if self.trainer.state.stage==RunningStage.TRAINING:
-            perm_idx = np.random.permutation(range(dim_size))   
-        else:
-            perm_idx = np.array(range(dim_size))
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据配置，不同的模型使用不同的过去协变量
             past_convs_item = x_in[0][i]            
             # 根据优化器编号匹配计算
             if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
-                
-                # 根据索引重新排序
-                idx = torch.Tensor(perm_idx).to(self.device).long()
-                x_in_item = (past_convs_item[:,perm_idx,:,:],x_in[1][:,perm_idx,:,:],x_in[2][:,perm_idx,:,:])
-                # 使用embedding组合以及邻接矩阵作为输入
-                out = m(x_in_item,idx=idx,mode=step_mode,rank_mask=rank_mask)
+                out = m(past_convs_item,target=future_target[...,i],mode=step_mode)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
                 # 模拟数据
@@ -237,20 +213,9 @@ class VaDEModule(_TFTModuleBatch):
         else:
             step_mode = "complete"   
             
-        (future_target,target_class,target_info,past_target,past_covariates) = target   
-        # 拆分出之前绑定的复合变量
-        pca_target = future_target[:,:,-2:,:]
-        future_target = future_target[:,:,:-2,:]
-        # Eva Price Range
-        price_range_data = np.zeros((future_target.shape[0],future_target.shape[1]))
-        for i in range(len(target_info)):
-            for j in range(price_range_data.shape[1]):
-                if target_info[i][j] is not None:
-                    price_range_data[i,j] = target_info[i][j]["raise_range"]
-        price_range_data = StandardScaler().fit_transform(price_range_data)
-        # price_range_data = normalization_axis(price_range_data,axis=0)
-        price_range_data = torch.Tensor(price_range_data).to(self.device).unsqueeze(-1)
-        return self.criterion(output,(future_target,target_class,past_target,pca_target,past_covariates),mode=step_mode,optimizers_idx=optimizers_idx)
+        (future_target,target_class,target_info,past_target,input_batch) = target   
+        past_covariates = input_batch[0]
+        return self.criterion(output,(future_target,target_class,past_target,past_covariates),mode=step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
         super().on_validation_start()
@@ -283,7 +248,7 @@ class VaDEModule(_TFTModuleBatch):
                 print('Acc={:.4f}%'.format(cluster_acc(pre, Y)[0] * 100))
                 # 参数初始赋值
                 self.sub_models[model_seq].encoder.log_sigma2_l.load_state_dict(self.sub_models[model_seq].encoder.mu_l.state_dict())
-                self.sub_models[model_seq].pi_.data = torch.from_numpy(gmm.weights_).to(self.device).float()
+                # self.sub_models[model_seq].pi_.data = torch.from_numpy(gmm.weights_).to(self.device).float()
                 self.sub_models[model_seq].mu_c.data = torch.from_numpy(gmm.means_).to(self.device).float()
                 self.sub_models[model_seq].log_sigma2_c.data = torch.log(torch.from_numpy(gmm.covariances_).to(self.device).float())                
                 # 放开梯度冻结
@@ -308,14 +273,14 @@ class VaDEModule(_TFTModuleBatch):
         """重载原方法，直接使用已经加工好的数据"""
 
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,rank_indexes,adj_target,price_target) = train_batch    
+         static_covariates,scaler,target_class,target,target_info,price_target) = train_batch    
 
         loss,detail_loss,output = self.training_step_real(train_batch, batch_idx) 
         if self.train_output_flag:
             output = [output_item.detach().cpu().numpy() for output_item in output]
             data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
                              future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-                             target.cpu().detach().numpy(),target_info,adj_target.cpu().detach().numpy(),price_target.cpu().detach().numpy()]                
+                             target.cpu().detach().numpy(),target_info,price_target.cpu().detach().numpy()]                
             output_combine = (output,data)
             pickle.dump(output_combine,self.train_fout)  
         # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
@@ -326,7 +291,7 @@ class VaDEModule(_TFTModuleBatch):
 
         # 收集目标数据用于分类
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target,price_target) = train_batch
+                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = train_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)     
         scaler = [s[0] for s in scaler_tuple] 
         past_target = train_batch[0]
@@ -339,13 +304,13 @@ class VaDEModule(_TFTModuleBatch):
         ce_loss = None
         for i in range(len(self.past_split)):
             y_transform = None 
-            (output,vr_class,tar_class) = self(input_batch,future_target,adj_target,past_target=past_target,rank_mask=rank_index,
-                                               optimizer_idx=i,target_info=target_info)
+            (output,vr_class,tar_class) = self(input_batch,future_target,past_target=train_batch[0],
+                                               target_info=target_info,optimizer_idx=i)
             self.output_postprocess(output,target_class,i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,past_target,past_covariates),optimizers_idx=i)
-            (corr_loss_combine,elbu_loss,ce_loss) = detail_loss 
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,target_info,past_target,input_batch),optimizers_idx=i)
+            (corr_loss_combine,ce_loss,comb_detail_loss) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            self.log("train_elbu_loss_{}".format(i), elbu_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             # self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.loss_data.append(detail_loss)
             total_loss += loss
@@ -376,11 +341,11 @@ class VaDEModule(_TFTModuleBatch):
         """训练验证部分"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target,price_target) = val_batch
+                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = val_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
         input_batch = self._process_input_batch(inp)
         scaler = [s[0] for s in scaler_tuple]
-        (output,vr_class,vr_class_list) = self(input_batch,future_target,adj_target,past_target=val_batch[0],rank_mask=rank_index,
+        (output,vr_class,vr_class_list) = self(input_batch,future_target,past_target=val_batch[0],
                                                target_info=target_info,optimizer_idx=-1)
         
         past_target = val_batch[0]
@@ -389,15 +354,25 @@ class VaDEModule(_TFTModuleBatch):
         target_vr_class = target_class[:,0].cpu().numpy()
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,target_info,past_target,past_covariates),optimizers_idx=-1)
-        (corr_loss_combine,elbu_loss,ce_loss) = detail_loss
+                    (future_target,target_class,target_info,past_target,input_batch),optimizers_idx=-1)
+        (corr_loss_combine,ce_loss,comb_detail_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        preds_combine = []
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("val_elbu_loss_{}".format(i), elbu_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # if comb_detail_loss is not None:
+            #     self.log("val_loss_xz_{}".format(i), comb_detail_loss[1], batch_size=val_batch[0].shape[0], prog_bar=False)
+            #     self.log("val_loss_xc_{}".format(i), comb_detail_loss[2], batch_size=val_batch[0].shape[0], prog_bar=False)
+            
+            # past_convs_item = input_batch[0][i] 
+            # pred,pred_combine = self.sub_models[i].predict(past_convs_item)
+            # preds_combine.append(pred_combine)
+            # acc = self.cluster_acc(pred,target_vr_class)
+            # self.log("val_acc_{}".format(i), acc[0], batch_size=val_batch[0].shape[0], prog_bar=True)
         
+        output_combine = (output,preds_combine)
         if self.step_mode=="pretrain" or self.switch_flag==0:
             return loss,detail_loss,output
         
@@ -432,8 +407,18 @@ class VaDEModule(_TFTModuleBatch):
         # if (self.current_epoch%10==1 and batch_idx==0):
         #     self.clustring_viz(values,target_class=target_vr_class,index_no=self.current_epoch)
         
-        return loss,detail_loss,output
+        return loss,detail_loss,output_combine
 
+    def cluster_acc(self,Y_pred, Y):
+        from scipy.optimize import linear_sum_assignment as linear_assignment
+        assert Y_pred.size == Y.size
+        D = max(Y_pred.max(), Y.max())+1
+        w = np.zeros((D,D), dtype=np.int64)
+        for i in range(Y_pred.size):
+            w[Y_pred[i], Y[i]] += 1
+        ind = linear_assignment(w.max() - w)
+        return sum(w[ind[0],ind[1]])*1.0/Y_pred.size, w
+        
     def compute_pac_acc(self,output,price_target):
         pca_price_target = price_target[:,:,0,0].cpu().numpy()
         price_index = np.argsort(pca_price_target,axis=1)[:,:50]
@@ -628,29 +613,21 @@ class VaDEModule(_TFTModuleBatch):
             x_past_array.append(x_past)
         return x_past_array, future_covariates, static_covariates     
                                        
-    def dump_val_data(self,val_batch,output,detail_loss):
-        # pass
+    def dump_val_data(self,val_batch,outputs,detail_loss):
         if self.switch_flag==0 or self.step_mode=="pretrain":
             return
+        output,preds_combine = outputs
         output_real = []
-        for output_item in output:
-            x_bar, q, pred, pred_value,z = output_item  
-            output_real.append([x_bar.cpu().numpy(),pred.cpu().numpy()])
         # output_real = np.array(output_real)  
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,rank_index,adj_target,price_target) = val_batch
-        scaler = []
-        for st in scaler_tuple:
-            s_item = [st_item[0] if st_item is not None else None for st_item in st[0]]    
-            scaler.append(s_item)
-        scaler = np.array(scaler)    
-        pca_price_target = price_target[:,:,-1:,0]
-        future_price_target = price_target[:,:,self.input_chunk_length:-1,0]
-        data = [past_target.cpu().numpy(),scaler,target_class.cpu().numpy(),
-                future_target.cpu().numpy(),future_price_target.cpu().numpy(),adj_target.cpu().numpy(),target_info]          
-        corr_loss_combine,ot_loss_detail,ce_loss = detail_loss 
-        ot_loss_detail = torch.ones(past_target.shape[0],1000) # torch.stack(ot_loss_detail)
-        output_combine = (output_real,data,ot_loss_detail.cpu().numpy())
-        pickle.dump(output_combine,self.valid_fout)      
+                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = val_batch
+        for i,output_item in enumerate(output):
+            pred_combine = preds_combine[i]  
+            (yita,z,latent,cell_output) = pred_combine
+            output_real
+        data = [past_target.cpu().numpy(),target_class.cpu().numpy(),
+                future_target.cpu().numpy(),price_target.cpu().numpy(),target_info]          
+        output_combine = (preds_combine,data)
+        pickle.dump(output_combine,self.valid_fout)       
            
         
