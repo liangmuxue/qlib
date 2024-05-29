@@ -237,9 +237,8 @@ class SdcnTs(nn.Module):
         
         # 对编码数据进行PCA降维，后续和同样降维的目标值进行比较
         z_pca = pca_apply(z,2)
-        # 正式阶段，使用降维后的变量进行分类预测,此步骤不反向传播
-        with torch.no_grad():
-            output_class = self.target_classify(z_pca)  
+        # 正式阶段，使用降维后的变量进行分类预测
+        output_class = self.target_classify(z_pca)  
         # 返回pca数据，以及隐含分类数据
         return x_bar, z_pca,lattend,None,output_class
     

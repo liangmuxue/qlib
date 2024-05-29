@@ -29,7 +29,7 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from darts_pro.data_extension.custom_model import TFTExtModel
 from darts_pro.data_extension.custom_module import _CusModule,_TFTModuleBatch
-from darts_pro.mam.hsan_module import HsanModule
+from darts_pro.mam.covcnn_module import CovCnnModule
 from darts_pro.mam.sdcn_module import SdcnModule
 from darts_pro.mam.vade_module import VaDEModule
 from darts_pro.mam.vare_module import VaREModule
@@ -544,8 +544,8 @@ class TFTBatchModel(TFTExtModel):
                 train_sample=self.train_sample,
                 **self.pl_module_params,
             )   
-        if self.model_type=="hsan":
-            model = HsanModule(
+        if self.model_type=="covcnn":
+            model = CovCnnModule(
                 output_dim=self.output_dim,
                 variables_meta_array=variables_meta_array,
                 num_static_components=n_static_components,
@@ -564,6 +564,7 @@ class TFTBatchModel(TFTExtModel):
                 filter_conv_index=self.filter_conv_index,
                 device=self.device,
                 batch_file_path=self.batch_file_path,
+                step_mode=self.step_mode,
                 model_type=self.model_type,
                 train_sample=self.train_sample,
                 **self.pl_module_params,

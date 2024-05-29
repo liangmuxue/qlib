@@ -21,13 +21,13 @@ from sklearn.manifold import MDS
 import matplotlib.pyplot as plt
 
 from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
-from darts_pro.act_model.sdcn_ts import SdcnTs
+from darts_pro.act_model.cov_cnn import CovCnn,PcaCnn
 from cus_utils.metrics import pca_apply
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX
-from losses.clustering_loss import SdcnLoss,cluster_acc
+from losses.clustering_loss import CovCnnLoss,cluster_acc
 from cus_utils.common_compute import target_distribution,normalization_axis,intersect2d
 from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
 from cus_utils.visualization import clu_coords_viz
@@ -41,8 +41,8 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from darts_pro.data_extension.custom_module import _TFTModuleBatch
 
-class SdcnModule(_TFTModuleBatch):
-    """自定义基于图模式和聚类的时间序列模块"""
+class CovCnnModule(_TFTModuleBatch):
+    """自定义基于卷积模式的时间序列模块"""
     
     def __init__(
         self,
@@ -142,24 +142,12 @@ class SdcnModule(_TFTModuleBatch):
     
             nr_params = 1
             num_nodes = past_target.shape[0]
-            if self.static_datas is None:
-                static_feat = None
-            else:
-                # Standard Static Data
-                static_feat = torch.Tensor(StandardScaler().fit_transform(self.static_datas)).double().to(device)
-                # static_feat = None 
-            
-            model = SdcnTs(
-                # EncDec Part
+            self.pca_dim = 4
+            model = PcaCnn(
+                pca_dim=self.pca_dim,
                 input_dim=input_dim,
-                input_length=self.input_chunk_length,
-                output_length=self.output_chunk_length,
-                batch_size=self.batch_size,
-                # Vade Part
+                output_dim=2,
                 n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
-                activation="prelu",
-                num_nodes=num_nodes,
-                static_feat=static_feat,
                 device=device,
                 **kwargs,
             )           
@@ -191,7 +179,15 @@ class SdcnModule(_TFTModuleBatch):
             past_convs_item = x_in[0][i]            
             # 根据优化器编号匹配计算
             if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
-                out = m(past_convs_item,pca_target=pca_target[...,i],mode=step_mode)
+                # 输入值只使用动态变量
+                past_convs_item = past_convs_item[...,:m.input_dim]
+                # 输入内容转化为降维数据
+                pca_matrix = []
+                for j in range(past_convs_item.shape[-1]):
+                    pca_item = pca_apply(past_convs_item[...,j],self.pca_dim)
+                    pca_matrix.append(pca_item)
+                pca_matrix = torch.stack(pca_matrix).permute(1,2,0)
+                out = m(pca_matrix,pca_target=pca_target[...,i])
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
                 # 模拟数据
@@ -206,7 +202,7 @@ class SdcnModule(_TFTModuleBatch):
 
 
     def create_loss(self,model,device="cpu"):
-        return SdcnLoss(device=device,ref_model=model) 
+        return CovCnnLoss(device=device,ref_model=model) 
 
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
@@ -221,40 +217,17 @@ class SdcnModule(_TFTModuleBatch):
 
     def on_validation_start(self): 
         super().on_validation_start()
-        if self.step_mode=="complete":
-            # 如果是加载之前的权重继续训练，则需要判断并重置switch_flag变量
-            if self.current_epoch>self.switch_epoch_num:
-                self.switch_flag = 1
 
     def on_train_epoch_start(self):  
         super().on_train_epoch_start()
-        # 预训练模式下，没有下面的策略
-        if self.step_mode=="pretrain":
-            return
-        # 如果已经做过切换了，则不进行处理
-        if self.switch_flag==1:
-            return
-        # 全模式训练时，第一个轮次不进行梯度，只取得特征数据,并生成分类权重的初始数据
-        if self.current_epoch>self.switch_epoch_num:
-            for model_seq in range(len(self.sub_models)):
-                w = self.sub_models[model_seq].target_classify.lin_layer.weight.data            
-                # 放开梯度冻结
-                self.freeze_apply(model_seq,flag=1)       
-            self.switch_flag = 1 
-        else:
-            # 梯度冻结
-            for model_seq in range(len(self.sub_models)):
-                self.freeze_apply(model_seq)
                 
     def output_postprocess(self,output,targets,index):
         """对于不同指标输出的补充"""
         
-        # 保存训练结果数据，用于后续分析,只在特定轮次进行
-        if self.step_mode=="complete" and self.current_epoch==self.switch_epoch_num:
-            # 只需要实际数据，忽略模拟数据
-            output_act = output[index]
-            self.training_step_outputs[index].append(output_act[1])
-            self.training_step_targets[index].append(targets) 
+        # 只需要实际数据，忽略模拟数据
+        output_act = output[index]
+        self.training_step_outputs[index].append(output_act[1])
+        self.training_step_targets[index].append(targets) 
 
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """重载原方法，直接使用已经加工好的数据"""
@@ -283,7 +256,7 @@ class SdcnModule(_TFTModuleBatch):
         scaler = [s[0] for s in scaler_tuple] 
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
-        pca_target = self._process_target_batch(future_target)
+        cov_targets,pca_target = self._process_target_batch(future_target)
         target_class = target_class[:,:,0]     
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
@@ -295,7 +268,7 @@ class SdcnModule(_TFTModuleBatch):
             (output,vr_class,tar_class) = self(input_batch,future_target,pca_target=pca_target,
                                                target_info=target_info,optimizer_idx=i)
             self.output_postprocess(output,target_class,i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,pca_target),optimizers_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (cov_targets,target_class,pca_target),optimizers_idx=i)
             (corr_loss_combine,ce_loss,cls_loss,_) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
@@ -332,7 +305,7 @@ class SdcnModule(_TFTModuleBatch):
                 static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = val_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
         input_batch = self._process_input_batch(inp)
-        pca_target = self._process_target_batch(future_target)
+        cov_targets,pca_target = self._process_target_batch(future_target)
         scaler = [s[0] for s in scaler_tuple]
         (output,vr_class,vr_class_list) = self(input_batch,future_target,pca_target=pca_target,
                                                target_info=target_info,optimizer_idx=-1)
@@ -344,13 +317,13 @@ class SdcnModule(_TFTModuleBatch):
         
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,pca_target),optimizers_idx=-1)
+                    (cov_targets,target_class,pca_target),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,cls_loss,_) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         preds_combine = []
         for i in range(len(corr_loss_combine)):
-            self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # if comb_detail_loss is not None:
@@ -364,48 +337,46 @@ class SdcnModule(_TFTModuleBatch):
             # self.log("val_acc_{}".format(i), acc[0], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,pca_target)
-        if self.step_mode=="pretrain" or self.switch_flag==0:
-            real_pca_target = pca_target
-        else:
-            real_pca_target = [output_item[1] for output_item in output]
-            real_pca_target = torch.stack(real_pca_target).permute(1,2,0)
+        # if self.step_mode=="pretrain" or self.switch_flag==0:
+        #     real_pca_target = pca_target
+        # else:
+        #     real_pca_target = [output_item[1] for output_item in output]
+        #     real_pca_target = torch.stack(real_pca_target).permute(1,2,0)
         # 目标类别分类评估
-        for i in range(len(corr_loss_combine)):
-            pred,w = self.sub_models[i].predict_pca_cls(real_pca_target[...,i])
-            acc_cnt = np.sum(pred==target_class[:,0].cpu().numpy())
-            acc = acc_cnt/pred.shape[0]
-            # self.log("cls_acc_{}".format(i), acc, batch_size=val_batch[0].shape[0], prog_bar=True)
-            # 可视化权重分割情况
-            path = "custom/data/results/pred/{}".format(i)
-            if not os.path.exists(path):
-                os.makedirs(path)                 
-            save_file = "{}/pred_{}-{}.png".format(path,self.current_epoch,batch_idx)
-            ShowClsResult(w[0].transpose(),np.expand_dims(w[1],axis=0),real_pca_target[...,i].cpu().numpy(),target_vr_class,save_file=save_file)
-            
-        if self.step_mode=="pretrain" or self.switch_flag==0:
-            return loss,detail_loss,output
+        # for i in range(len(corr_loss_combine)):
+        #     pred,w = self.sub_models[i].predict_pca_cls(real_pca_target[...,i])
+        #     acc_cnt = np.sum(pred==target_class[:,0].cpu().numpy())
+        #     acc = acc_cnt/pred.shape[0]
+        #     # self.log("cls_acc_{}".format(i), acc, batch_size=val_batch[0].shape[0], prog_bar=True)
+        #     # 可视化权重分割情况
+        #     path = "custom/data/results/pred/{}".format(i)
+        #     if not os.path.exists(path):
+        #         os.makedirs(path)                 
+        #     save_file = "{}/pred_{}-{}.png".format(path,self.current_epoch,batch_idx)
+        #     ShowClsResult(w[0].transpose(),np.expand_dims(w[1],axis=0),real_pca_target[...,i].cpu().numpy(),target_vr_class,save_file=save_file)
         
         # 准确率的计算
-        import_price_result,values = self.compute_real_class_acc(output_data=output,pca_target=pca_target,target_class=target_class,target_info=target_info)          
-        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        if self.total_imp_cnt==0:
-            self.total_imp_cnt = total_imp_cnt
-        else:
-            self.total_imp_cnt += total_imp_cnt
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                # 修改编号，避免重复
-                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
-        
+        # import_price_result,values = self.compute_real_class_acc(output_data=output,pca_target=pca_target,target_class=target_class,target_info=target_info)          
+        # total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        # if self.total_imp_cnt==0:
+        #     self.total_imp_cnt = total_imp_cnt
+        # else:
+        #     self.total_imp_cnt += total_imp_cnt
+        # # 累加结果集，后续统计   
+        # if self.import_price_result is None:
+        #     self.import_price_result = import_price_result    
+        # else:
+        #     if import_price_result is not None:
+        #         import_price_result_array = import_price_result.values
+        #         # 修改编号，避免重复
+        #         import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
+        #         import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+        #         self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
+        #
+
         # 可视化
         index = "{}-{}".format(self.current_epoch,batch_idx)
-        self.viz_results(output, pca_target,target_class=target_class[:,0].cpu().numpy(),index=index)
+        # self.viz_results(output, pca_target,target_class=target_class[:,0].cpu().numpy(),index=index)
         
         return loss,detail_loss,output_combine
 
@@ -423,26 +394,26 @@ class SdcnModule(_TFTModuleBatch):
     def build_import_index(self,output_data=None,pca_target=None,target_class=None):  
         """生成涨幅达标的预测数据下标"""
         
-        pred_values = []
-        z_values = []
-        lattends = []
+        cls_values = []
+        fea_values = []
+        pca_values = []
         for i in range(len(output_data)):
             output_item = output_data[i] 
-            x_bar, z_pca, lattend,_,_ =  output_item 
-            pred_values.append(x_bar)
-            z_values.append(z_pca)
-            lattends.append(lattend)
+            cls,features,fea_pca  =  output_item 
+            cls_values.append(cls)
+            fea_values.append(features)
+            pca_values.append(fea_pca)
         
-        pred_values = torch.stack(pred_values).cpu().numpy().transpose(1,2,0)
-        z_values = torch.stack(z_values).cpu().numpy().transpose(1,2,0)
-        lattends = torch.stack(lattends).cpu().numpy().transpose(1,2,0)
+        cls_values = torch.stack(cls_values).cpu().numpy().transpose(1,2,0)
+        fea_values = torch.stack(fea_values).cpu().numpy().transpose(1,2,0)
+        pca_values = torch.stack(pca_values).cpu().numpy().transpose(1,2,0)
         
-        lattends_i = lattends[...,2]
-        lattends_cls = np.argmax(lattends_i,1)
-        pred_import_bool = (lattends_cls==target_class)
+        cls_2 = cls_values[...,2]
+        cls_2 = np.argmax(cls_2,1)
+        pred_import_bool = (cls_2==target_class)
         pred_import_index = np.where(pred_import_bool)[0]
         
-        return pred_import_index,(pred_values,z_values,lattends)       
+        return pred_import_index,(cls_values,fea_values,pca_values)       
 
     def viz_results(self,output, pca_target,target_class=None,index=None):
         """可视化，显示聚合过程"""
@@ -497,15 +468,21 @@ class SdcnModule(_TFTModuleBatch):
             
     
     def _process_target_batch(self,future_target):
-        """生成辅助目标数据"""
+        """生成目标数据,包括降维数据以及协方差数据"""
         
         pca_target = []
+        cov_targets = []
         for i in range(future_target.shape[-1]):
             real_target = future_target[...,i]
+            cov_target = torch.corrcoef(real_target)
+            cov_targets.append(cov_target)
             pca_target_item = pca_apply(real_target,2)   
+            # 归一化
+            pca_target_item = pca_target_item/pca_target_item.max()
             pca_target.append(pca_target_item)    
         pca_target = torch.stack(pca_target).permute(1,2,0)
-        return pca_target
+        cov_targets = torch.stack(cov_targets).permute(1,2,0)
+        return cov_targets,pca_target
         
     def _process_input_batch(
         self, input_batch

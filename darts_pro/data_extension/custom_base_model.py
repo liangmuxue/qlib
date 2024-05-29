@@ -17,7 +17,7 @@ from losses.mtl_loss import TripletLoss,UncertaintyLoss
 from losses.clustering_loss import ClusteringLoss
 from .series_data_utils import StatDataAssis
 from tft.class_define import CLASS_SIMPLE_VALUES
-from darts_pro.act_model.hsan_ext import HsanExt
+from darts_pro.act_model.cov_cnn import CovCnn
 from darts_pro.act_model.tide import Tide
 from cus_utils.process import create_from_cls_and_kwargs
 

@@ -77,12 +77,12 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'SDCN_CLS_1000_202110'
-               model_type: 'sdcn'
+               model_name: 'COVCNN_CLS_1000_202110'
+               model_type: 'covcnn'
                load_weight: False
                best_weight: False
                step_mode: 'complete'
-               pretrain_model_name: 'SDCN_ClS_PRETRAIN_1000_202110'
+               pretrain_model_name: 'COVCNN_CLS_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 

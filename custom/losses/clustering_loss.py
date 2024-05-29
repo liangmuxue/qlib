@@ -216,18 +216,49 @@ class SdcnLoss(UncertaintyLoss):
                 output_item = output[i] 
                 x_bar, z_ca, lattend, _,output_class = output_item  
                 corr_loss_combine[i] = self.ccc_loss_comp(x_bar,real_target)
+                # 追加计算目标数据的分类损失
+                cls_loss[i] = nn.CrossEntropyLoss()(output_class,label_class)                
                 if mode=="pretrain":
-                    # 预训练阶段，追加计算目标数据的分类损失
-                    cls_loss[i] = nn.CrossEntropyLoss()(output_class,label_class)                      
                     # 如果属于特征值阶段，则只比较特征距离
                     loss_sum = loss_sum + corr_loss_combine[i] + cls_loss[i]
                 else:  
-                    # 正式阶段，使用预测目标的分类损失
-                    cls_loss[i] = nn.CrossEntropyLoss()(output_class,label_class)  
                     # 对降维后的二维数据，进行位置关系比较,同时使用分类损失
-                    ce_loss[i] = self.mse_loss(z_ca, pca_target_item)
-
+                    ce_loss[i] = self.mse_loss(z_ca, pca_target_item) + cls_loss[i]
                     loss_sum = loss_sum + ce_loss[i] + corr_loss_combine[i] + cls_loss[i]
         return loss_sum,[corr_loss_combine,ce_loss,cls_loss,None]
 
+class CovCnnLoss(UncertaintyLoss):
+    """基于协方差关系比对的损失函数"""
+    
+    def __init__(self,ref_model=None,device=None):
+        super(CovCnnLoss, self).__init__(ref_model=ref_model,device=device)
+        self.ref_model = ref_model
+        self.device = device  
+        
+    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
+        """协方差结果进行比对"""
 
+        (output,vr_combine_class,vr_classes) = output_ori
+        (target,target_class,pca_target) = target_ori
+        corr_loss_combine = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        similarity_value = [None,None,None]
+        cls_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        ce_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        # 指标分类
+        loss_sum = torch.tensor(0.0).to(self.device) 
+        # 相关系数损失,多个目标
+        label_class = target_class[:,0].long()
+        
+        for i in range(len(output)):
+            if optimizers_idx==i or optimizers_idx==-1:
+                real_target = target[...,i]
+                pca_target_item = pca_target[...,i]
+                output_item = output[i] 
+                cls,features,_ = output_item  
+                # 计算目标数据的分类损失
+                cls_loss[i] = nn.CrossEntropyLoss()(cls,label_class)       
+                # 降维目标之间的欧氏距离         
+                ce_loss[i] = self.mse_loss(features, pca_target_item) + cls_loss[i]
+                loss_sum = loss_sum + ce_loss[i] + cls_loss[i]
+        return loss_sum,[corr_loss_combine,ce_loss,cls_loss,None]
+    
