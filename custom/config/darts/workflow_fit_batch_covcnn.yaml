@@ -79,7 +79,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: 'COVCNN_CLS_1000_202110'
                model_type: 'covcnn'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'COVCNN_CLS_1000_202110'

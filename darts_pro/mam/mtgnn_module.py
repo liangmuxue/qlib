@@ -16,7 +16,7 @@ from sklearn.metrics import adjusted_rand_score as ari_score
 from sklearn.manifold import MDS
 
 from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
-from darts_pro.act_model.mtgnn import gtnet
+from darts_pro.act_model.mlp_ts import gtnet
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest

@@ -148,6 +148,7 @@ class CovCnnModule(_TFTModuleBatch):
                 input_dim=input_dim,
                 output_dim=2,
                 n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
+                use_layer_norm=True,
                 device=device,
                 **kwargs,
             )           
