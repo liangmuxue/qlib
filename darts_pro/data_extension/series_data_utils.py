@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,get_complex_class
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import slope_compute,pairwise_distances,batch_cov
+from cus_utils.common_compute import slope_compute,pairwise_distances,batch_cov,normalization_axis
 from cus_utils.log_util import AppLogger
 from losses.mtl_loss import UncertaintyLoss
 from projects.kmeans_pytorch import kmeans, kmeans_predict
@@ -22,6 +22,7 @@ from sklearn.cluster import DBSCAN,KMeans,SpectralClustering
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.manifold import MDS
 from sklearn.mixture import GaussianMixture
+from sklearn.preprocessing import MinMaxScaler
 
 logger = AppLogger()
 
@@ -298,26 +299,40 @@ class StatDataAssis():
         # print(df_corr)
         # sns.heatmap(df_corr, vmax=1, vmin=-1, center=0)
         fit_names = ds_data.fit_names
-        size = ds_data.batch_data[0].shape[0]
+        np_target = ds_data.np_data
+        # np_target = normalization_axis(np_target,axis=1)         
+        # df_target = df_target.apply(lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)))
+        size = np_target.shape[0]
         df_combine = None
+        fit_last_values = np.zeros((size,len(analysis_columns)-1))
         for i in range(size):
-            df_item = pd.DataFrame(ds_data.target_data[i],columns=fit_names)
-            tar_data = []
-            for col in analysis_columns:
-                values = df_item[col].values
-                slope_values = slope_compute(np.expand_dims(values,axis=-1))[:,0]
-                tar_data.append(values)
-                # tar_data.append(slope_values)
-            tar_data = np.stack(tar_data,axis=-1)
-            tar_data = pd.DataFrame(tar_data,columns=analysis_columns)
+            target_item = np_target[i]
+            scaler = MinMaxScaler()
+            scaler.fit(target_item[:25])             
+            past_target = scaler.transform(target_item[:25])   
+            future_target = scaler.transform(target_item[25:])     
+            # tar_data = np.concatenate([past_target,future_target],axis=0)    
+            df_item = pd.DataFrame(future_target,columns=ds_data.fit_names)
+            tar_data = df_item[analysis_columns]        
+            fit_last_values[i] = tar_data.values[-1,1:]     
             df_corr = tar_data.corr(method="spearman").iloc[[0]]
             if df_combine is None:
                 df_combine = df_corr
             else:
-                df_combine = pd.concat([df_combine,df_corr])
+                df_combine = pd.concat([df_combine,df_corr])        
         print("corr value:{}".format(df_combine.mean()))
+        
         # plt.savefig('./custom/data/asis/seaborn_heatmap_corr_result.png')
-    
+        
+        # 衡量序列末尾数值，与价格涨幅的关系
+        price_target = np_target.squeeze()
+        price_range = (price_target[:,-1,0] - price_target[:,-5,0])
+        for i in range(len(analysis_columns)-1):
+            col = analysis_columns[i+1]
+            concat = np.stack([price_range,fit_last_values[:,i]])
+            corr = np.corrcoef(concat)[0,1]
+            print("{}:{}".format(col,corr))
+        
     def output_corr_analysis(self,ds_data,analysis_columns=None,fit_names=None,target_col=None,diff_columns=None):
         size = len(ds_data)
         df_combine = None

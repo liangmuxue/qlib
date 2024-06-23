@@ -11,7 +11,6 @@ from custom_model.embedding import embed
 from cus_utils.common_compute import eps_rebuild,corr_compute,batch_cov
 from cus_utils.metrics import pca_apply
 from torchmetrics.regression import ConcordanceCorrCoef
-from darts_pro.act_model.mtgnn_layer import graph_constructor
 
 ########################使用协方差及降维模式,适配时间序列#######################
 

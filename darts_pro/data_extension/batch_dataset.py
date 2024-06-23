@@ -47,16 +47,16 @@ class BatchDataset(Dataset):
             self.batch_data = aggregated 
         if self.mode.startswith("analysis"):
             self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
-            self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
+            self.target_data = self.get_df_data(fit_names,target_info=aggregated[-2][range_num[0]:range_num[1]])
             self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
         if self.mode=="analysis_reg":
             self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
             self.target_class = aggregated[0][range_num[0]:range_num[1],0,0]
-            self.target_data = self.get_df_data(fit_names,target_info=aggregated[-1][range_num[0]:range_num[1]])
-            self.analysis_data = self.get_df_data(target_col,target_info=aggregated[-1][range_num[0]:range_num[1]])
+            self.target_data = self.get_df_data(fit_names,target_info=aggregated[-2][range_num[0]:range_num[1]])
+            self.analysis_data = self.get_df_data(target_col,target_info=aggregated[2][range_num[0]:range_num[1]])
             print("self.target_data shape:{}".format(self.target_data.shape))
         if self.mode=="analysis_reg_ota":               
-            self.target_data = aggregated[-2][range_num[0]:range_num[1]]
+            self.target_data = aggregated[-3][range_num[0]:range_num[1]]
             target_inverse_data = []
             for i in range(range_num[1]-range_num[0]):
                 scaler = aggregated[5][i]
@@ -189,16 +189,16 @@ class BatchDataset(Dataset):
         rtn = transformer.fit_transform(train_data, target_class)
         print(rtn)
     
-    def get_df_data(self,fit_names,target_info=None):
+    def get_df_data(self,fit_names,target_info=None,get_all=False):
         
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
+        if get_all:
+            return df_all
         target_data = None
-        if target_info is None:
-            target_info = self.batch_data[-1]
         for ts in target_info:
             df_item = df_all[(df_all["instrument"]==ts["instrument"])&
-                             (df_all["time_idx"]>=ts["future_start"])&(df_all["time_idx"]<ts["future_end"])] 
+                             (df_all["time_idx"]>=ts["past_start"])&(df_all["time_idx"]<ts["future_end"])] 
             item_values = np.expand_dims(df_item[fit_names].values,axis=0)
             if target_data is None:
                 target_data = item_values
@@ -623,8 +623,23 @@ class BatchOutputDataset(BatchDataset):
                         
         # 训练数据 
         aggregated = self.create_aggregated_data(target_batch_data)    
+        target_info = aggregated[-1]
+        save_data_path = "custom/data/asis/ana_data.npy"
+        # np_data = self.get_df_data(fit_names,target_info=target_info)
+        # np.save(save_data_path,np_data) 
+        np_data = np.load(save_data_path)
+        output = self.build_output(output_batch_data, range_num)
+        # 目标数据
+        self.target_data = aggregated 
+        self.output_data = output
+        self.np_data = np_data
+    
+    def build_output(self,output_batch_data,range_num=None):
+        
+        
         # 输出数据    
         output_combine = []    
+        return output_combine
         for item in output_batch_data:
             out_item = np.stack([conv for conv in item],axis=2)[:,:,:,0,0]
             output_combine.append(out_item)
@@ -633,9 +648,9 @@ class BatchOutputDataset(BatchDataset):
         target_inverse_data = []
         for index in range(output.shape[0]):
             output_item = output[index]
-            scaler = aggregated[5][index][0]           
-            output_inverse = scaler.inverse_transform(output_item)      
-            output_inverse_data.append(output_inverse)
+            # scaler = aggregated[5][index][0]           
+            # output_inverse = scaler.inverse_transform(output_item)      
+            # output_inverse_data.append(output_inverse)
             # target_data = aggregated[-2][index]
             # inverse_data = scaler.inverse_transform(target_data)
             # target_inverse_data.append(inverse_data)      
@@ -645,12 +660,10 @@ class BatchOutputDataset(BatchDataset):
             output_inverse_data = output_inverse_data[range_num[0]:range_num[1]]
             self.range_num = range_num    
         else:
-            self.range_num = [0,output_inverse_data.shape[0]]    
-        # 目标数据
-        self.target_data = aggregated 
-        self.output_inverse_data = output_inverse_data
-        self.output_data = output
+            self.range_num = [0,output_inverse_data.shape[0]] 
         
+        return output_combine
+               
     def __getitem__(self, index):
         
         batch_data = [item[index] for item in self.target_data]

@@ -831,8 +831,7 @@ class _CusModule(BaseMixModule):
                         
         return last_batch_index,last_batch_imp_index,item_codes
                                 
-    def val_metric_show(self,output,target,target_vr_class,output_inverse=None,target_inverse=None,
-                        vr_class=None,past_covariate=None,target_info=None,import_price_result=None,batch_idx=0):
+    def val_metric_show(self,output,target,target_vr_class,target_info=None,import_price_result=None,names=None,batch_idx=0):
         
         if import_price_result is None or import_price_result.shape[0]==0:
             return
@@ -841,8 +840,9 @@ class _CusModule(BaseMixModule):
         
         dataset = global_var.get_value("dataset")
         df_all = dataset.df_all
-        names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
-        names = ["price","macd_output","macd","rank_output","rank","qtlu_output","qtlu"]          
+        if names is None:
+            names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
+            names = ["price","macd_output","macd","rank_output","rank","qtlu_output","qtlu"]          
         result = []
         
         # viz_result_suc.remove_env()
@@ -856,12 +856,12 @@ class _CusModule(BaseMixModule):
                 rand_index = np.random.randint(0,target_imp_index.shape[0]-1)
                 s_index = target_imp_index[rand_index]
                 ts = target_info[s_index]
-                pred_data = output_inverse[s_index]
+                pred_data = output[s_index]
                 pred_center_data = pred_data[:,0]
                 pred_second_data = pred_data[:,1]         
                 pred_third_data = pred_data[:,2]      
-                target_item = target_inverse[s_index]
-                win = "win_target_{}".format(batch_idx,i)
+                target_item = target[s_index]
+                win = "win_target_{}".format(i)
                 self.draw_row(pred_center_data, pred_second_data, pred_third_data,target_item=target_item, ts=ts, names=names,viz=viz_target,win=win)
         
         total_index = 0                    
@@ -871,17 +871,19 @@ class _CusModule(BaseMixModule):
             for index, row in unique_group.iterrows():
                 r_index += 1
                 total_index += 1
-                s_index = row["imp_index"]
+                # 恢复原编号
+                s_index = row["imp_index"] - 3000*batch_idx
                 ts = target_info[s_index]
-                pred_data = output_inverse[s_index]
+                pred_data = output[s_index]
                 pred_center_data = pred_data[:,0]
                 pred_second_data = pred_data[:,1]
-                target_item = target_inverse[s_index]
+                target_item = target[s_index]
                 pred_third_data = pred_data[:,2]
                 # 可以从全局变量中，通过索引获得实际价格
                 # df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
                 #                         (df_all["instrument_rank"]==ts["item_rank_code"])]            
                 win = "win{}_{}".format(ts["instrument"],ts["future_start"])
+                win = "win_{}".format(r_index)
                 if r_index>15:
                     break
                 if result==CLASS_SIMPLE_VALUE_MAX:                 
@@ -890,13 +892,12 @@ class _CusModule(BaseMixModule):
                     viz = viz_result_fail   
                 else:
                     viz = viz_result_nor  
-                # self.draw_row(pred_center_data, pred_second_data, pred_third_data,ts=ts,target_item=target_item, names=names,viz=viz,win=win)
+                self.draw_row(pred_center_data, pred_second_data, pred_third_data,ts=ts,target_item=target_item, names=names,viz=viz,win=win)
                       
     def draw_row(self,pred_center_data,pred_second_data,pred_third_data,target_item=None,ts=None,names=None,viz=None,win="win"):
         """draw one line"""
         
-        names = ['MACD','QTLUMA5','RANKMA5','MACD_OUTPUT','RANKMA5_OUTPUT','QTLUMA5_OUTPUT']
-        
+        # names = ['MACD','QTLUMA5','RANKMA5','MACD_OUTPUT','RANKMA5_OUTPUT','QTLUMA5_OUTPUT']
         price_array = ts["price_array"]
         # 补充画出前面的label数据
         pad_data = np.array([0 for i in range(self.input_chunk_length)])

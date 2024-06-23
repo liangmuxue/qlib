@@ -33,6 +33,7 @@ from darts_pro.mam.covcnn_module import CovCnnModule
 from darts_pro.mam.sdcn_module import SdcnModule
 from darts_pro.mam.vade_module import VaDEModule
 from darts_pro.mam.vare_module import VaREModule
+from darts_pro.mam.mlp_module import MlpModule
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset
 
 class _TFTModuleAsis(_CusModule):
@@ -182,6 +183,7 @@ class _TFTModuleAsis(_CusModule):
         # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
         
         # import_index_bool = self.create_signal_macd(target_info)       
+        # import_index_bool = self.create_signal_rsi(target_info)  
         import_index_bool = self.create_signal_kdj(target_info)    
         # All Data In
         # import_index_bool = np.ones(past_target.shape[0], dtype=bool)
@@ -204,7 +206,7 @@ class _TFTModuleAsis(_CusModule):
         dea_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         macd_cov = np.array([item["focus3_array"][self.input_chunk_length-5:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即diff快线向上突破dea慢线
-        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)==8) & (np.sum(diff_cov[:,-2:]>=dea_cov[:,-2:],axis=1)==2)
+        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=5) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=1)
         return index_bool
 
     def create_signal_rsi(self,target_info):
@@ -213,7 +215,7 @@ class _TFTModuleAsis(_CusModule):
         rsi5_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         rsi20_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即rsi快线向上突破rsi慢线
-        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)==8) & (np.sum(rsi5_cov[:,-2:]>=rsi20_cov[:,-2:],axis=1)==2)
+        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=5) & (np.sum(rsi5_cov[:,-5:]>=rsi20_cov[:,-5:],axis=1)>=1)
         return index_bool
 
     def create_signal_kdj(self,target_info):
@@ -223,13 +225,13 @@ class _TFTModuleAsis(_CusModule):
         d_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         j_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即k线向上突破j线
-        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)==8) & (np.sum(d_cov[:,-2:]>=d_cov[:,-2:],axis=1)==2)
+        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=6) # & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
         # 突破的时候d线也是向上的
         j_slope = j_cov[:,1:] - j_cov[:,:-1]
-        index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)
+        # index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)
         # index_bool = index_bool & (np.sum(j_cov[:,:-2]<=d_cov[:,:-2],axis=1)==8) & (np.sum(j_cov[:,-2:]>=d_cov[:,-2:],axis=1)==2)
         # 还需要满足K和D值小于一定阈值
-        index_bool = index_bool & (np.sum(k_cov[:,:-2]<20,axis=1)>=8) & (np.sum(d_cov[:,:-2]<30,axis=1)>=8)
+        index_bool = index_bool & (np.sum(k_cov[:,:-2]<20,axis=1)>=7) & (np.sum(d_cov[:,:-2]<30,axis=1)>=7)
         # 还需要满足J线小于阈值
         # index_bool = index_bool & (np.sum(j_cov[:,:-2]<0,axis=1)>=8) & (np.sum(j_cov[:,-2:]>0,axis=1)>=1)
         return index_bool
@@ -663,7 +665,32 @@ class TFTBatchModel(TFTExtModel):
                 pretrained_model = self.load_from_checkpoint(self.pretrain_model_name,work_dir=self.work_dir,best=False)
                 for i in range(len(self.past_split)):
                     s_model = pretrained_model.model.sub_models[i]
-                    model.sub_models[i] = s_model                            
+                    model.sub_models[i] = s_model          
+        if self.model_type=="mlp":
+            model = MlpModule(
+                output_dim=self.output_dim,
+                variables_meta_array=variables_meta_array,
+                num_static_components=n_static_components,
+                hidden_size=self.hidden_size,
+                lstm_layers=self.lstm_layers,
+                dropout=self.dropout,
+                num_attention_heads=self.num_attention_heads,
+                full_attention=self.full_attention,
+                feed_forward=self.feed_forward,
+                hidden_continuous_size=self.hidden_continuous_size,
+                categorical_embedding_sizes=self.categorical_embedding_sizes,
+                add_relative_index=self.add_relative_index,
+                norm_type=self.norm_type,
+                use_weighted_loss_func=self.use_weighted_loss_func,
+                past_split=self.past_split,
+                filter_conv_index=self.filter_conv_index,
+                device=self.device,
+                batch_file_path=self.batch_file_path,
+                step_mode=self.step_mode,
+                model_type=self.model_type,
+                train_sample=self.train_sample,
+                **self.pl_module_params,
+            )                                         
         return model         
     
     def build_variable(self,ori_tensors):

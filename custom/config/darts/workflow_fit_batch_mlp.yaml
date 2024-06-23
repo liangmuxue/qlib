@@ -52,22 +52,22 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 16
+            batch_size: 1024
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
             type: 'fit_batch'
             n_epochs : 180
-            save_dataset_file: False
+            save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/MACD_2000_202010'
+            batch_file_path: 'custom/data/asis/KDJ_2000_202008'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
-               base_lr: 1e-4
-               max_lr: 1.5e-3     
+               base_lr: 0.5e-4
+               max_lr: 1.5e-3
                cycle_momentum: False
-               step_size_up: 5000
+               step_size_up: 30000
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -77,12 +77,12 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MACD_MTGNN_2000_202010'
-               model_type: 'mtgnn'
+               model_name: 'MLP_CLS_2000_202008'
+               model_type: 'mlp'
                load_weight: False
                best_weight: False
                step_mode: 'complete'
-               pretrain_model_name: 'KDJ_SDCN_PRED_PRETRAIN_2000_202010'
+               pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
@@ -118,10 +118,10 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['MACD','RANKMA5','QTLUMA5']
+                target_column: ['QTLU5','CNTN5','RANKMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KDJ_K','KDJ_D','KDJ_J','CORR5','KLOW2','KLEN','REV5'] 
+                past_covariate_col: ['KDJ_K','KDJ_D','RSQR5','RSQR5','KLEN','RSQR5','REV5'] 
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 

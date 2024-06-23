@@ -310,7 +310,7 @@ class TftDataHandler(DataHandlerLP):
                 fields += ["Mean($turnover, %d)/($turnover+1e-12)" % d for d in windows]
                 names += ["TMA%d" % d for d in windows]                
             if use("TSUMP"):
-                # 对换手率进行SUMP
+                # 对换手率进行SUM
                 fields += [
                     "Sum(Greater($turnover-Ref($turnover, 1), 0), %d)/(Sum(Abs($turnover-Ref($turnover, 1)), %d)+1e-12)"
                     % (d, d)

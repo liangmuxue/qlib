@@ -1,5 +1,10 @@
 import torch 
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data.dataset import Dataset
+from torch.utils.data import DataLoader
+import torch.optim as optim
+
 import numpy as np
 import time
 from cus_utils.metrics import pca_apply
@@ -171,7 +176,86 @@ def test_nor():
     a = 1
     a-=0.5+0.1
     print(a)
-         
+
+def test_grad():       
+
+    class TrainDataset(Dataset):
+        def __init__(self):
+            super(TrainDataset, self).__init__()
+            self.data = []
+            for i in range(1,1000):
+                for j in range(1,1000):
+                    self.data.append([i,j])
+        def __getitem__(self, index):
+            input_data = self.data[index]
+            label = input_data[0] + input_data[1]
+            return torch.Tensor(input_data),torch.Tensor([label])
+        def __len__(self):
+            return len(self.data)
+    
+    class TestNet(nn.Module):
+        def __init__(self):
+            super(TestNet, self).__init__()
+            self.net1 = nn.Linear(2,1)
+    
+        def forward(self, x):
+            x = self.net1(x)
+            return x
+    
+    def train():
+        traindataset = TrainDataset()
+        traindataloader = DataLoader(dataset = traindataset,batch_size=1,shuffle=False)
+        testnet = TestNet().cuda()
+        myloss = nn.MSELoss().cuda()
+        optimizer = optim.SGD(testnet.parameters(), lr=0.001 )
+        for epoch in range(100):
+            for data,label in traindataloader :
+                print("\n=====begin iter=====")
+                data = data.cuda()
+                label = label.cuda()
+                output = testnet(data)
+                print("input",data)
+                print("output",output)
+                print("label",label)
+                loss = myloss(output,label)
+                optimizer.zero_grad()
+                for name, parms in testnet.named_parameters():    
+                    print('-->name:', name)
+                    print('-->para:', parms)
+                    print('-->grad_requirs:',parms.requires_grad)
+                    print('-->grad_value:',parms.grad)
+                    print("===")
+                loss.backward()
+                optimizer.step()
+                print("=============after step===========")
+                for name, parms in testnet.named_parameters():    
+                    print('-->name:', name)
+                    print('-->para:', parms)
+                    print('-->grad_requirs:',parms.requires_grad)
+                    print('-->grad_value:',parms.grad)
+                    print("===")
+                print(optimizer)
+                input("=====end iter=====")
+
+    train()
+
+def test_js():
+    
+    def js_div(p_output, q_output, get_softmax=True):
+        """
+        Function that measures JS divergence between target and output logits:
+        """
+        KLDivLoss = nn.KLDivLoss(reduction='batchmean')
+        if get_softmax:
+            p_output = F.softmax(p_output)
+            q_output = F.softmax(q_output)
+        log_mean_output = ((p_output + q_output )/2).log()
+        return (KLDivLoss(log_mean_output, p_output) + KLDivLoss(log_mean_output, q_output))/2
+    
+    t1 = torch.Tensor([0.1,0.2,0.3])
+    t2 = torch.Tensor([0.5,0.6])
+    print(js_div(t1,t2))
+    
 if __name__ == "__main__":
     # test_tensor()    
     # test_sort()
@@ -179,7 +263,9 @@ if __name__ == "__main__":
     # test_repeat()
     # test_mul()
     # test_corr()
-    test_pca()
+    # test_pca()
+    # test_grad()
+    test_js()
     # test_nor()
     # test_transfer()
     # test_pairwise()

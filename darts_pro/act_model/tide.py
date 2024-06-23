@@ -156,7 +156,7 @@ class Tide(nn.Module):
             input_dim=decoder_input_dim,
             output_dim=output_dim * self.nr_params,
             hidden_size=temporal_decoder_hidden,
-            use_layer_norm=use_layer_norm,
+            use_layer_norm=False, # 这里不能使用layer norm,否则输出值都为0
             dropout=dropout,
         )
 
@@ -256,7 +256,7 @@ class Tide(nn.Module):
         # this is needed because the skip connection is applied across the input time steps
         # and not across the output time steps
         skip = self.lookback_skip(x_lookback.transpose(1, 2)).transpose(1, 2)
-
+        
         # add skip connection
         y = temporal_decoded + skip.reshape_as(
             temporal_decoded
@@ -266,7 +266,7 @@ class Tide(nn.Module):
         
         if self.outer_mode==1:
             # 同时返回原始数据和中间数据 
-            return y,encoded_z,enc_data,encoded_input_data
+            return y,encoded_z,enc_data[-1],encoded_input_data
         else:
             return y
         
@@ -422,7 +422,7 @@ class Tide3D(Tide):
             input_dim=decoder_input_dim,
             output_dim=output_dim * self.nr_params,
             hidden_size=temporal_decoder_hidden,
-            use_layer_norm=use_layer_norm,
+            use_layer_norm=False, # 这里不能使用layer norm,否则输出值都为0
             dropout=dropout,
         )
 
@@ -528,7 +528,7 @@ class Tide3D(Tide):
         y = temporal_decoded + skip.reshape_as(
             temporal_decoded
         )  # skip.view(temporal_decoded.shape)
-
+        # y = temporal_decoded 
         y = y.view(-1, x.shape[1],self.output_chunk_length, self.output_dim)
         
         if self.outer_mode==1:

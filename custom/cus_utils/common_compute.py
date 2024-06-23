@@ -482,6 +482,8 @@ def same_value_eps(data):
         eps_ori = torch.ones(data.shape).uniform_(1e-4, 1e-3).to(data.device)
         data = torch.where(data==0,eps_ori,data)      
     return data
+
+
    
 if __name__ == "__main__":
     # test_normal_vis()

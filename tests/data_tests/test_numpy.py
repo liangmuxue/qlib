@@ -1,3 +1,4 @@
+import math
 import pandas as pd
 import sys, os
 import numpy as np
@@ -643,7 +644,20 @@ def test_mahalanobis():
     print(np.sqrt(np.dot(np.dot(tp,invD),tp.T)))
     S = np.load("/home/qdata/project/qlib/custom/data/asis/KDJ_2000_202010/s_test.npy")
     print("det",np.linalg.det(S))
-   
+
+def test_pdf():
+
+    x = 0.3
+    mu = 0
+    sigma = 1
+    
+    pdf_value = math.exp(-(x - mu) ** 2 / (2 * sigma ** 2)) / (math.sqrt(2 * math.pi) * sigma)
+    print(f"PDF value at x={x}, mu={mu}, sigma={sigma}: {pdf_value}")
+    
+    cdf_value = (1 + math.erf((x - mu) / (sigma * math.sqrt(2)))) / 2
+    print(f"CDF value at x={x}, mu={mu}, sigma={sigma}: {cdf_value}")
+
+       
 if __name__ == "__main__":
     # test_mask()
     # test_pair_compute()
@@ -651,7 +665,8 @@ if __name__ == "__main__":
     # test_condition3()
     # test_condi_remove()
     # test_group()
-    test_mahalanobis()
+    # test_mahalanobis()
+    test_pdf()
     # test_corr()
     # test_corr_tensor()
     # test_slope()

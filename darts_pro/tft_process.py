@@ -156,15 +156,20 @@ class TftDatafAnalysis():
         data_assis = StatDataAssis()
         batch_file_path = self.kwargs["batch_file_path"]
         batch_file = "{}/train_batch.pickel".format(batch_file_path)   
+        batch_file = "{}/valid_output_batch.pickel".format(batch_file_path)   
         col_list = dataset.col_def["col_list"] + ["label"]
         analysis_columns = ["OBV5","CLOSE","MASCOPE5","OBV5","RSI5","MACD",'KDJ_K','KDJ_D','KDJ_J','CCI5','RESI5']
-        analysis_columns = ['label_ori','label_ori','MOMENTUM','RVI','OBV5','RSI5','CCI5','MA5','label','REV5','REV5_ORI','MACD','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5',
-              'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','IMAX5',"ATR5","AOS",'WVMA5','HIGH_QTLU5','RSQR5',
-              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
-              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5'] 
+        analysis_columns = ["label_ori","REV5","IMAX5","QTLUMA5","OBV5","CCI5","KMID","KLEN","KMID2","KUP","KUP2",
+                            "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
+            'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
+        # analysis_columns = ['label_ori','label_ori','MOMENTUM','RVI','OBV5','RSI5','CCI5','MA5','label','REV5','REV5_ORI','MACD','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5',
+        #       'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','IMAX5',"ATR5","AOS",'WVMA5','HIGH_QTLU5','RSQR5',
+        #       "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
+        #       'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5'] 
         # col_list.remove("label_ori")
         # col_list.remove("REV5_ORI")
-        train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
+        # train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
+        train_ds = BatchOutputDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
         data_assis.data_corr_analysis(train_ds,analysis_columns=analysis_columns)
 
     def output_corr(
@@ -187,8 +192,8 @@ class TftDatafAnalysis():
         range_num = None
         # range_num = [0,1000]
         train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=range_num)
-        # data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
-        data_assis.output_target_viz(train_ds,fit_names=fit_names)
+        data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
+        # data_assis.output_target_viz(train_ds,fit_names=fit_names)
         
     def data_linear_reg(
         self,

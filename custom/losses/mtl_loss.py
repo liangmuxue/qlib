@@ -335,7 +335,7 @@ class UncertaintyLoss(nn.Module):
             
         return loss_sum,[corr_loss_combine,triplet_loss_combine,classify_loss_combine]
             
-    def mse_loss(self,x1, x2):
+    def mse_loss(self,x1, x2,weighted_data=None):
         return torch.mean(self.mse_dis(x1,x2))
     
     def triplet_dis(self,x1, x2):
@@ -464,3 +464,17 @@ class UncertaintyLoss(nn.Module):
     def kl_loss(self,input,target): 
         kl = F.kl_div(input.softmax(dim=-1).log(), target.softmax(dim=-1), reduction='mean')
         return kl
+
+    def weighted_mse_loss(self,inputs, targets, weights=None):
+        loss = (inputs - targets) ** 2
+        if weights is not None:
+            loss *= weights.expand_as(loss)
+        loss = torch.mean(loss)
+        return loss
+    
+    def weighted_l1_loss(self,inputs, targets, weights=None):
+        loss = F.l1_loss(inputs, targets, reduction='none')
+        if weights is not None:
+            loss *= weights.expand_as(loss)
+        loss = torch.mean(loss)
+        return loss   

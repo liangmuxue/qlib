@@ -1,6 +1,14 @@
+import numpy as np
+
 # 分类定义,根据价格幅度区间进行分类
 CLASS_VALUES={1:[-1000,-10],2:[-10,-9],3:[-9,-8],4:[-8,-7],5:[-7,-6],6:[-6,-5],7:[-5,-4],8:[-4,-3],9:[-3,-2],10:[-2,-1],11:[-1,0]
               ,12:[0,1],13:[1,2],14:[2,3],15:[3,4],16:[4,5],17:[5,6],18:[6,7],19:[7,8],20:[8,9],21:[9,10],22:[10,1000]}
+
+CLASS_VALUES_REBUILD = {}
+for k,v in CLASS_VALUES.items():
+    v = [v,0.05]
+    CLASS_VALUES_REBUILD[k-1] = v
+CLASS_VALUES = CLASS_VALUES_REBUILD
 
 # 涨跌幅分类区间,包括区间以及损失权重
 # CLASS_SIMPLE_VALUES={0:[[-1000,-5],0.3],1:[[-5,0],0.1],2:[[0,3],0.2],3:[[3,1000],0.4]}
@@ -46,7 +54,13 @@ def get_complex_class(range_class,last_class):
     if range_class<=1 and last_class==CLASS_LAST_VALUE_SEC:
         return 2
     return 1  
-                  
+
+def get_weight_with_target(target_class):
+    weighted_data = np.zeros(target_class.shape)
+    for k, v in CLASS_SIMPLE_VALUES.items():
+        weighted_data[target_class==k] = v[1]
+    return weighted_data    
+     
 VALUE_BINS = [-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0, 1, 2, 3,4, 5, 6, 7,8, 9, 10]
 #CLASS_VALUES={0:[-1000,-10],1:[-10,-5],2:[-5,0],3:[0,5],4:[5,10],5:[10,1000]}
 

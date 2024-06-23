@@ -1,148 +1,118 @@
-from __future__ import division
-from datetime import datetime 
-
 import torch
+from torch import Tensor
 import torch.nn as nn
-from torch.nn import init
-import numbers
 import torch.nn.functional as F
-from .mtgnn_layer import *
+from torch.nn.parameter import Parameter
+from torch.nn.modules.module import Module
+import torchmetrics
+import numpy as np
+from .tide import Tide,Tide3D
+from custom_model.embedding import embed
+from cus_utils.common_compute import eps_rebuild,corr_compute,batch_cov
+from torchmetrics.regression import ConcordanceCorrCoef
+from darts.models.forecasting.tide_model import _ResidualBlock
+from .fds import FDS
 
-class gtnet(nn.Module):
-    def __init__(self, gcn_true, buildA_true, gcn_depth, num_nodes, device, predefined_A=None, 
-                 static_feat=None, dropout=0.3, subgraph_size=20, node_dim=40, dilation_exponential=1, 
-                 conv_channels=32, residual_channels=32, skip_channels=64, end_channels=128, seq_length=12, 
-                 in_dim=2, out_dim=12, layers=3, propalpha=0.05, tanhalpha=3, layer_norm_affline=True):
-        super(gtnet, self).__init__()
-        self.gcn_true = gcn_true
-        self.buildA_true = buildA_true
-        self.num_nodes = num_nodes
-        self.dropout = dropout
-        self.predefined_A = predefined_A
-        self.filter_convs = nn.ModuleList()
-        self.gate_convs = nn.ModuleList()
-        self.residual_convs = nn.ModuleList()
-        self.skip_convs = nn.ModuleList()
-        self.gconv1 = nn.ModuleList()
-        self.gconv2 = nn.ModuleList()
-        self.norm = nn.ModuleList()
-        self.start_conv = nn.Conv2d(in_channels=in_dim,
-                                    out_channels=residual_channels,
-                                    kernel_size=(1, 1))
-        self.gc = graph_constructor(num_nodes, subgraph_size, node_dim, device,alpha=tanhalpha, static_feat=static_feat)
-        self.static_feat = static_feat
+class LineClassify(nn.Module):
+    """线性分类器，用于对预测结果指标进行分类"""
+    
+    def __init__(self, input_dim, output_dim=1,hidden_size=64,dropout=0.5,use_layer_norm=True,num_encoder_layers=3):
+        super(LineClassify, self).__init__()
         
-        self.seq_length = seq_length
-        kernel_size = 7
-        if dilation_exponential>1:
-            self.receptive_field = int(1+(kernel_size-1)*(dilation_exponential**layers-1)/(dilation_exponential-1))
-        else:
-            self.receptive_field = layers*(kernel_size-1) + 1
-
-        for i in range(1):
-            if dilation_exponential>1:
-                rf_size_i = int(1 + i*(kernel_size-1)*(dilation_exponential**layers-1)/(dilation_exponential-1))
-            else:
-                rf_size_i = i*layers*(kernel_size-1)+1
-            new_dilation = 1
-            for j in range(1,layers+1):
-                if dilation_exponential > 1:
-                    rf_size_j = int(rf_size_i + (kernel_size-1)*(dilation_exponential**j-1)/(dilation_exponential-1))
-                else:
-                    rf_size_j = rf_size_i+j*(kernel_size-1)
-
-                self.filter_convs.append(dilated_inception(residual_channels, conv_channels, dilation_factor=new_dilation))
-                self.gate_convs.append(dilated_inception(residual_channels, conv_channels, dilation_factor=new_dilation))
-                self.residual_convs.append(nn.Conv2d(in_channels=conv_channels,
-                                                    out_channels=residual_channels,
-                                                 kernel_size=(1, 1)))
-                if self.seq_length>self.receptive_field:
-                    self.skip_convs.append(nn.Conv2d(in_channels=conv_channels,
-                                                    out_channels=skip_channels,
-                                                    kernel_size=(1, self.seq_length-rf_size_j+1)))
-                else:
-                    self.skip_convs.append(nn.Conv2d(in_channels=conv_channels,
-                                                    out_channels=skip_channels,
-                                                    kernel_size=(1, self.receptive_field-rf_size_j+1)))
-
-                if self.gcn_true:
-                    self.gconv1.append(mixprop(conv_channels, residual_channels, gcn_depth, dropout, propalpha))
-                    self.gconv2.append(mixprop(conv_channels, residual_channels, gcn_depth, dropout, propalpha))
-
-                if self.seq_length>self.receptive_field:
-                    self.norm.append(LayerNorm((residual_channels, num_nodes, self.seq_length - rf_size_j + 1),elementwise_affine=layer_norm_affline))
-                else:
-                    self.norm.append(LayerNorm((residual_channels, num_nodes, self.receptive_field - rf_size_j + 1),elementwise_affine=layer_norm_affline))
-
-                new_dilation *= dilation_exponential
-
-        self.layers = layers
-        self.end_conv_1 = nn.Conv2d(in_channels=skip_channels,
-                                             out_channels=end_channels,
-                                             kernel_size=(1,1),
-                                             bias=True)
-        self.end_conv_2 = nn.Conv2d(in_channels=end_channels,
-                                             out_channels=out_dim,
-                                             kernel_size=(1,1),
-                                             bias=True)
-        if self.seq_length > self.receptive_field:
-            self.skip0 = nn.Conv2d(in_channels=in_dim, out_channels=skip_channels, kernel_size=(1, self.seq_length), bias=True)
-            self.skipE = nn.Conv2d(in_channels=residual_channels, out_channels=skip_channels, kernel_size=(1, self.seq_length-self.receptive_field+1), bias=True)
-
-        else:
-            self.skip0 = nn.Conv2d(in_channels=in_dim, out_channels=skip_channels, kernel_size=(1, self.receptive_field), bias=True)
-            self.skipE = nn.Conv2d(in_channels=residual_channels, out_channels=skip_channels, kernel_size=(1, 1), bias=True)
-
-
-        self.idx = torch.arange(self.num_nodes).to(device)
-
-
-    def forward(self, input,adp_outer=None):
-        t = datetime.now()
-        seq_len = input.size(3)
-        assert seq_len==self.seq_length, 'input sequence length not equal to preset sequence length'
-
-        if self.seq_length<self.receptive_field:
-            input = nn.functional.pad(input,(self.receptive_field-self.seq_length,0,0,0))
-
-        # 修改原方法，直接使用全局静态特征变量
-        if adp_outer is not None:
-            adp = adp_outer
-        else:
-            adp = self.gc()
-        x = self.start_conv(input)
-        skip = self.skip0(F.dropout(input, self.dropout, training=self.training))
-        for i in range(self.layers):
-            residual = x
-            filter = self.filter_convs[i](x)
-            print("filter time:",(datetime.now()-t).total_seconds()*1000)
-            t = datetime.now()                
-            filter = torch.tanh(filter)
-            gate = self.gate_convs[i](x)
-            gate = torch.sigmoid(gate)
-            print("gate time:",(datetime.now()-t).total_seconds()*1000)
-            t = datetime.now()               
-            x = filter * gate
-            x = F.dropout(x, self.dropout, training=self.training)
-            s = x
-            s = self.skip_convs[i](s)
-            skip = s + skip
-            print("skip_convs time:",(datetime.now()-t).total_seconds()*1000)
-            t = datetime.now()              
-            if self.gcn_true:
-                x = self.gconv1[i](x, adp)+self.gconv2[i](x, adp.transpose(1,0))
-            else:
-                x = self.residual_convs[i](x)
-            print("gconv1 time:",(datetime.now()-t).total_seconds()*1000)
-            t = datetime.now()  
-            x = x + residual[:, :, :, -x.size(3):]
-            x = self.norm[i](x,self.idx)
-            print("norm time:",(datetime.now()-t).total_seconds()*1000)
-        print("layer time:",(datetime.now()-t).total_seconds()*1000)
-        t = datetime.now()
-        skip = self.skipE(x) + skip
-        x = F.relu(skip)
-        x = F.relu(self.end_conv_1(x))
-        x = self.end_conv_2(x)
-        print("end time:",(datetime.now()-t).total_seconds()*1000)
+        self.encoders = nn.Sequential(
+            _ResidualBlock(
+                input_dim=input_dim,
+                output_dim=hidden_size,
+                hidden_size=hidden_size,
+                use_layer_norm=use_layer_norm,
+                dropout=dropout,
+            ),
+            *[
+                _ResidualBlock(
+                    input_dim=hidden_size,
+                    output_dim=hidden_size,
+                    hidden_size=hidden_size,
+                    use_layer_norm=use_layer_norm,
+                    dropout=dropout,
+                )
+                for _ in range(num_encoder_layers - 1)
+            ],          
+        )
+        self.lin_layer = nn.Linear(hidden_size,output_dim)
+        
+    def forward(self, x):
+        # x = self.encoders(x)
+        x = self.lin_layer(x)
         return x
+    
+class MlpTs(nn.Module):
+    """Encoder-Decoder框架，并基于DNN模式的时间序列预测"""
+    
+    def __init__(self, 
+        input_dim: int,
+        emb_output_dim: int,
+        future_cov_dim: int,
+        static_cov_dim: int,
+        nr_params: int,
+        num_encoder_layers: int,
+        num_decoder_layers: int,
+        decoder_output_dim: int,
+        hidden_size: int,
+        temporal_decoder_hidden: int,
+        temporal_width_past: int,
+        temporal_width_future: int,
+        use_layer_norm: bool,
+        dropout: float,
+        n_cluster=4,
+        pca_dim=2,
+        **kwargs
+       ):    
+        super(MlpTs, self).__init__()
+        
+        output_length = kwargs["output_chunk_length"]
+        input_length = kwargs["input_chunk_length"]
+        
+        # Tide作为嵌入特征部分,输入和输出使用同一维度
+        self.emb_layer = Tide(input_dim,emb_output_dim,future_cov_dim,static_cov_dim,nr_params,num_encoder_layers,num_decoder_layers,
+                              decoder_output_dim,hidden_size,temporal_decoder_hidden,temporal_width_past,temporal_width_future,
+                              use_layer_norm,dropout,input_length,output_length,z_layer_dim=pca_dim,outer_mode=1)
+        
+        # 目标数据分类层，用于对降维后的预测目标进行分类
+        self.target_classify = LineClassify(input_dim=pca_dim,output_dim=n_cluster)    
+        self.z_classify = LineClassify(input_dim=hidden_size,output_dim=1)   
+        #  针对不均很数据，使用特征分布随机(FDS)的方式处理
+        self.regressor = nn.Linear(pca_dim, 1)
+        self.FDS = FDS(feature_dim=pca_dim,bucket_num=n_cluster,bucket_start=0)
+        # 降维后拟合高斯分布的均值和方差
+        
+        # self.mu_c = nn.Parameter(torch.FloatTensor([0.2,0,-0.08,-0.2]),requires_grad=False)
+        self.mu_c = torch.FloatTensor([0.2,0,-0.08,-0.2])
+        # self.sigma2_c = nn.Parameter(torch.FloatTensor([0.15,0.2,0.2,0.15]),requires_grad=False)
+        self.sigma2_c = torch.FloatTensor([0.15,0.2,0.2,0.15])
+        
+    def forward(self, x,pca_target,labels=None,epoch=0,mode="smooth"):
+        """先提取序列特征，然后根据中间变量做GCN，然后做自监督计算
+           根据mode参数分为2种模式，smooth表示使用平滑特征模式
+        """
+        
+        # 获取嵌入特征，包含中间过程结果
+        x_bar,z,encoded,encoded_input_data = self.emb_layer(x)
+        x_bar = x_bar.squeeze()
+        encoding_s = z
+        if self.training and mode=="smooth" and False:
+            # 使用平滑特征
+            encoding_s = self.FDS.smooth(encoding_s, labels, epoch)
+        cls = self.z_classify(encoded)
+        x_smo = self.regressor(z)
+        # 执行目标分类，用于辅助输出分类
+        # tar_cls = self.target_classify(pca_target)
+        return x_bar,encoding_s,cls,None,x_smo
+    
+    def predict_pca_cls(self,pca_data):
+        
+        real_classify = self.z_classify
+        cls = real_classify(pca_data)
+        cls = cls.detach().cpu().numpy()
+        return np.argmax(cls,axis=1),(real_classify.lin_layer.weight.data.cpu().numpy(),real_classify.lin_layer.bias.data.cpu().numpy())   
+    
+    
