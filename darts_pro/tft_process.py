@@ -170,8 +170,9 @@ class TftDatafAnalysis():
         # col_list.remove("REV5_ORI")
         # train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
         train_ds = BatchOutputDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
-        data_assis.data_corr_analysis(train_ds,analysis_columns=analysis_columns)
-
+        # data_assis.data_corr_analysis(train_ds,analysis_columns=analysis_columns)
+        data_assis.est_thredhold(train_ds)
+        
     def output_corr(
         self,
         dataset: TFTSeriesDataset,

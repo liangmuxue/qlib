@@ -41,7 +41,7 @@ class LineClassify(nn.Module):
         self.lin_layer = nn.Linear(hidden_size,output_dim)
         
     def forward(self, x):
-        # x = self.encoders(x)
+        x = self.encoders(x)
         x = self.lin_layer(x)
         return x
     
@@ -65,6 +65,7 @@ class MlpTs(nn.Module):
         dropout: float,
         n_cluster=4,
         pca_dim=2,
+        enc_nr_params=1,
         **kwargs
        ):    
         super(MlpTs, self).__init__()
@@ -79,12 +80,11 @@ class MlpTs(nn.Module):
         
         # 目标数据分类层，用于对降维后的预测目标进行分类
         self.target_classify = LineClassify(input_dim=pca_dim,output_dim=n_cluster)    
-        self.z_classify = LineClassify(input_dim=hidden_size,output_dim=1)   
-        #  针对不均很数据，使用特征分布随机(FDS)的方式处理
+        # 使用分位数回归模式，所以输出维度为分位数数量
+        self.z_classify = LineClassify(input_dim=hidden_size,output_dim=enc_nr_params)   
         self.regressor = nn.Linear(pca_dim, 1)
         self.FDS = FDS(feature_dim=pca_dim,bucket_num=n_cluster,bucket_start=0)
         # 降维后拟合高斯分布的均值和方差
-        
         # self.mu_c = nn.Parameter(torch.FloatTensor([0.2,0,-0.08,-0.2]),requires_grad=False)
         self.mu_c = torch.FloatTensor([0.2,0,-0.08,-0.2])
         # self.sigma2_c = nn.Parameter(torch.FloatTensor([0.15,0.2,0.2,0.15]),requires_grad=False)

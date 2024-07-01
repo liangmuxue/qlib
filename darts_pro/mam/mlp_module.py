@@ -38,6 +38,7 @@ from cus_utils.clustering import get_cluster_center
 from cus_utils.visualization import ShowClsResult
 import cus_utils.global_var as global_var
 from losses.fds_loss import weighted_focal_l1_loss
+from losses.quanlity_loss import QuanlityLoss
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -166,6 +167,7 @@ class MlpModule(_TFTModuleBatch):
                 use_layer_norm=True,
                 dropout=dropout,
                 # Mlp Part
+                enc_nr_params=len(QuanlityLoss().quantiles),
                 n_cluster=len(CLASS_SIMPLE_VALUES.keys()),
                 pca_dim=self.pca_dim,
                 device=device,
@@ -486,24 +488,19 @@ class MlpModule(_TFTModuleBatch):
         v1 = fea_values[...,1]
         pt = past_target[...,1]
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_2<0) & (fea_1_range<-1) & (fea_0_range<0)
-        # sv_import_bool = (sv_2<0)
-        # sv_import_bool = (cls_1>0.3)
-        # pred_import_index = np.where(pred_import_bool)[0]
-        
-        # 使用高斯概率判断类别
-        dist_probs = []
-        for i in range(len(CLASS_SIMPLE_VALUES)):
-            mean = self.sub_models[1].mu_c[i]
-            std = self.sub_models[1].sigma2_c[i]
-            dist_prob = Normal(mean,std).log_prob(torch.Tensor(cls_1)).exp()
-            dist_probs.append(dist_prob)
-        dist_probs = torch.stack(dist_probs)
-        dist_probs = F.softmax(dist_probs,dim=0)
-        cls_arg = torch.max(dist_probs,0)
-        cls_import_bool = (cls_arg[1].numpy()==CLASS_SIMPLE_VALUE_MAX) & (cls_arg[0].numpy()>0.6)
-        
-        pred_import_index = np.where(sv_import_bool)[0]
+        sv_import_bool = (sv_2<0) & (fea_0_range>0) & (fea_1_range<-1) & (sv_1>0)
+        # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
+        # ce_para2 = ce_thre_para[2]
+        # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
+        # sv_import_bool = (sv_2<0) & (sv_1>0) & (fea_1_range<-1)
+        # 分位数回归模式下的阈值选择
+        cls_thre_para = [[0.1,8],[-0,8],[-0,7]]
+        # 包含2个参数：分数阈值以及个数阈值
+        para0 = cls_thre_para[0]
+        para1 = cls_thre_para[1]
+        para2 = cls_thre_para[2]
+        cls_import_bool = (np.sum(cls_1<para1[0],1)>para1[1]) # & (np.sum(cls_2<para2[0],1)>para2[0]) # & (np.sum(cls_0>para0[0],1)>para0[0]) 
+        pred_import_index = np.where(cls_import_bool & sv_import_bool)[0]
         
         return pred_import_index,(cls_values,fea_values,pca_values)       
 

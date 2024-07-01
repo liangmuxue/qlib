@@ -657,6 +657,15 @@ def test_pdf():
     cdf_value = (1 + math.erf((x - mu) / (sigma * math.sqrt(2)))) / 2
     print(f"CDF value at x={x}, mu={mu}, sigma={sigma}: {cdf_value}")
 
+def test_hist():
+    import random
+    x = [random.gauss(3,1) for _ in range(400)]
+    y = [random.gauss(4,2) for _ in range(400)]
+    bins = np.linspace(-10, 10, 100)
+    plt.hist(x, bins, alpha=0.5, label='x')
+    plt.hist(y, bins, alpha=0.5, label='y')
+    plt.legend(loc='upper right')
+    plt.show()        
        
 if __name__ == "__main__":
     # test_mask()
@@ -666,7 +675,8 @@ if __name__ == "__main__":
     # test_condi_remove()
     # test_group()
     # test_mahalanobis()
-    test_pdf()
+    # test_pdf()
+    test_hist()
     # test_corr()
     # test_corr_tensor()
     # test_slope()

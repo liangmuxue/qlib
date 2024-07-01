@@ -60,14 +60,14 @@ task:
             n_epochs : 180
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/KDJ_2000_202008'
+            batch_file_path: 'custom/data/asis/KDJ_2000_202109_M'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
                base_lr: 0.5e-4
                max_lr: 1.5e-3
                cycle_momentum: False
-               step_size_up: 30000
+               step_size_up: 50000
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -77,9 +77,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MLP_CLS_2000_202008'
+               model_name: 'MLP_QUAN10_2000_202109M'
                model_type: 'mlp'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
@@ -118,7 +118,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['QTLU5','CNTN5','RANKMA5']
+                target_column: ['RANKMA5','CNTN5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['KDJ_K','KDJ_D','RSQR5','RSQR5','KLEN','RSQR5','REV5'] 

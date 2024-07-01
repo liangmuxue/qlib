@@ -60,7 +60,7 @@ task:
             n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/KDJ_2000_202008'
+            batch_file_path: 'custom/data/asis/KDJ_2000_202109_M'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -95,7 +95,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2010-01-01, 2023-05-31]
-                valid: [2020-08-01, 2021-08-30]
+                valid: [2021-09-01, 2022-09-30]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
@@ -115,7 +115,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['QTLU5','CNTN5','RANKMA5']
+                target_column: ['RANKMA5','CNTN5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['KDJ_K','KDJ_D','RSQR5','RSQR5','KLEN','RSQR5','REV5'] 

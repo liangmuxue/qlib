@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from tft.class_define import CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUES,get_complex_class
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import slope_compute,pairwise_distances,batch_cov,normalization_axis
+from cus_utils.common_compute import np_qcut,pairwise_distances,batch_cov,normalization_axis
 from cus_utils.log_util import AppLogger
 from losses.mtl_loss import UncertaintyLoss
 from projects.kmeans_pytorch import kmeans, kmeans_predict
@@ -23,6 +23,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.manifold import MDS
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import MinMaxScaler
+from matplotlib import pyplot as plt
 
 logger = AppLogger()
 
@@ -803,7 +804,46 @@ class StatDataAssis():
         
         plt.title('Estimated number of clusters: %d' % n_clusters_)    
         # plt.savefig('./custom/data/results/{}_cluster_result.png'.format(name))
-               
+        
+    def est_thredhold(self,target_ds):
+        """预估预测阈值"""
+        
+        # self.viz_est = TensorViz(env="dataview_est_thredhold")
+        viz_target = TensorViz(env="data_target")
+        target_data = target_ds.target_data
+        (past_target,target_class,future_target,pca_target,price_target,target_info) = target_data
+        target_class = target_class[:,0,0]
+        bins_cnt = 10
+        total_size = pca_target.shape[0] 
+        names = ["tar_{}".format(i) for i in range(4)]
+        for j in range(pca_target.shape[-1]):
+            plt.figure(figsize=(24,8))
+            bins_data = []
+            # 分箱模式，拆分为多个区间
+            pca_target_item = pca_target[:,0,j]
+            data_cont = np.histogram(pca_target_item, bins=bins_cnt)            
+            for i in range(len(CLASS_SIMPLE_VALUES)):
+                plt.subplot(1, len(CLASS_SIMPLE_VALUES), i+1)
+                title = "est_type{}".format(i)
+                plt.title(title)
+                idx = np.where(target_class==i)[0]
+                pca_target_v = pca_target_item[idx]
+                # 根据总体分箱范围，对特定类别进行再次区域拆分统计
+                data_item = np.histogram(pca_target_v, bins=data_cont[1])  
+                # 计算数量占比
+                data_item_per = np.round(data_item[0]/total_size,5)
+                bins_data.append(data_item_per)
+                # 做柱状图，衡量重叠部分阈值
+                plt.hist(pca_target_v, data_cont[1], alpha=0.5, label=title)
+            bins_data = np.stack(bins_data).transpose(1,0)
+            win = "win_{}".format(j)
+            target_title = "target_{}".format(j)
+            viz_target.viz_matrix_var(bins_data,win=win,title=target_title,names=names,x_range=data_cont[1])   
+            save_path = "custom/data/results/est/estth_{}.png".format(j)
+            plt.savefig(save_path)
+            plt.clf()
+            # plt.close()        
+                    
 if __name__ == "__main__":       
     data_assis = StatDataAssis()
     # data_assis.view_data()

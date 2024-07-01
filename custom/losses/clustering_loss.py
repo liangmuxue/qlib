@@ -9,6 +9,7 @@ from tft.class_define import CLASS_SIMPLE_VALUES
 from cus_utils.metrics import pca_apply,guass_cdf,sampler_normal
 from .fds_loss import weighted_mse_loss
 import geomloss
+from .quanlity_loss import QuanlityLoss
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
@@ -285,9 +286,10 @@ class MlpLoss(UncertaintyLoss):
         self.mining_func = miners.TripletMarginMiner(
             margin=0.03,type_of_triplets="semihard"
         )     
-           
+        self.quan_loss = QuanlityLoss(device=device)   
+        
     def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
-        """协方差结果进行比对"""
+        """Multiple Loss Combine"""
 
         (output,vr_combine_class,vr_classes) = output_ori
         (target,target_class,last_target,pca_target) = target_ori
@@ -308,62 +310,20 @@ class MlpLoss(UncertaintyLoss):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[...,i]
                 last_target_item = last_target[...,i:i+1]
-                pca_target_item = pca_target[...,i].squeeze()
+                pca_target_item = pca_target[...,i]
                 # pca_target_item = normalization(pca_target_item, mode="torch")
                 output_item = output[i] 
                 x_bar,z,cls,tar_cls,x_smo = output_item  
                 # 预测值的一致性损失
                 corr_loss[i] = self.ccc_loss_comp(x_bar, real_target)
-                # 计算目标数据的分类损失
+                # 计算分位数损失
+                out_cls = output_item[2].unsqueeze(-1).unsqueeze(-1).permute(0,2,3,1)
+                cls_loss[i] = self.quan_loss.compute_loss(out_cls, pca_target_item.unsqueeze(-1))
                 # indices_tuple = self.mining_func(z, label_class)
                 # cls_loss[i] = self.triplet_loss(z, label_class, indices_tuple)
-                
-                # 使用全局参数计算不同类别的高斯分布，并进行损失计算
-                for j in range(len(CLASS_SIMPLE_VALUES)):
-                    label_index = torch.where(label_class==j)[0]
-                    pca_target_spl = pca_target_item[label_index]
-                    size = pca_target_spl.shape[0]
-                    real_label_index = label_index
-                    # 采样具备典型性质的数据
-                    if j==3:
-                        size = pca_target_spl.shape[0]//2
-                        real_label_index = label_index[torch.sort(pca_target_spl)[1][:size]]
-                    if j==0:
-                        size = pca_target_spl.shape[0]//2
-                        real_label_index = label_index[torch.sort(pca_target_spl,descending=True)[1][:size]]
-                    # 如果数量太少则忽略   
-                    if size<3:
-                        continue          
-                    # 通过权重参数模拟均值和方差，进行高斯概率计算
-                    pca_target_spl = pca_target_item[real_label_index]
-                    # gua_target,pca_mean[j],pca_std[j] = guass_cdf(pca_target_spl)
-                    # 输出内容对齐使用同样样本
-                    output_spl = cls[real_label_index,0]
-                    cls_loss[i] += self.mse_loss(output_spl.unsqueeze(-1), pca_target_spl.unsqueeze(-1))
-                    # 使用目标端的高斯分布参数计算输出端的高斯概率密度
-                    gua_data,mu,sigma2 = guass_cdf(output_spl)
-                    # 记录赌赢参数，推理时使用
-                    # self.ref_model[i].mu_c[j] = mu
-                    # self.ref_model[i].sigma2_c[j] = sigma2
-                    # 计算预测概率密度与实际概率密度的距离损失
-                    # cls_loss[i] += self.mse_loss(gua_data.unsqueeze(-1), gua_target.unsqueeze(-1))
-                    
-                    # 累加分布本身的均值参数和方差参数距离损失 
-                # cls_loss[i] += self.ccc_loss_comp(data_mean.unsqueeze(-1), pca_mean.unsqueeze(-1))
-                # cls_loss[i] += self.ccc_loss_comp(data_std.unsqueeze(-1),pca_std.unsqueeze(-1)) 
-                    # if torch.isnan(cls_loss[i]):
-                    #     print("ggg")
-                    # + 1000*self.mse_loss(self.ref_model[i].sigma2_c.unsqueeze(1), pca_var.unsqueeze(1)) 
-                
-                # 使用dtw距离衡量分类别的分布距离
-                # for j in range(len(CLASS_SIMPLE_VALUES)):
-                #     label_index = torch.where(label_class==j)[0]
-                #     pca_dist = pca_target_item[label_index]
-                #     cls_dist = cls[label_index] 
-                #     dist = 10 * self.compute_dtw_loss(cls_dist, pca_dist)
-                #     cls_loss[i] += dist        
                              
                 # 降维目标之间的欧氏距离         
                 ce_loss[i] = 10 * self.mse_loss(x_smo, last_target_item)
+                # ce_loss[i] = self.quan_loss.compute_loss(x_smo.unsqueeze(1).unsqueeze(1), last_target_item)
                 loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    

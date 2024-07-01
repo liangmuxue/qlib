@@ -17,7 +17,6 @@ from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_SEC,CLASS_SI
 from numba.cuda.cudadrv import ndarray
 from losses.triplet_loss import TripletTargetLoss
 from losses.triplet_miner import TripletTargetMiner
-from losses.multi_similarity_loss import MultiSimilarityLoss
 from losses.hsan_metirc_util import HsanLoss
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
@@ -445,13 +444,6 @@ class UncertaintyLoss(nn.Module):
         loss = loss_func(embeddings, labels, hard_pairs,ref_target=target)      
         # acc = torch.sum((n_dis - p_dis - self.semi_margin)>0)/p_dis.shape[0] 
         return loss 
-        
-    def ms_loss(self,embeddings,labels,target=None,dist_func=None,margin=0.3):
-        """在线triplet挖掘及损失计算"""
-        
-        criterion = MultiSimilarityLoss(distance_func=dist_func)
-        loss = criterion(embeddings,labels)
-        return loss  
     
     def hsan_loss(self,output,index=0):    
         """HSAN模式的损失计算"""   

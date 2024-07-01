@@ -225,7 +225,7 @@ class _TFTModuleAsis(_CusModule):
         d_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         j_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即k线向上突破j线
-        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=6) # & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
+        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=6) & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
         # 突破的时候d线也是向上的
         j_slope = j_cov[:,1:] - j_cov[:,:-1]
         # index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)
