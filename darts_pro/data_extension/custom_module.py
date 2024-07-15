@@ -154,15 +154,8 @@ class _CusModule(BaseMixModule):
             out_total.append(out)    
             out_class_total.append(out_class)
         
-        # if optimizer_idx==3:
-        #     print("ggg")
-        # out_for_class = torch.cat(out_total,dim=2)[:,:,:,0] 
-        # focus_data = self.build_focus_data(out_for_class,past_target,target_info=target_info,scalers=scaler)
         # 根据预测数据进行二次分析
         vr_class = torch.ones([batch_size,len(CLASS_SIMPLE_VALUES.keys())]).to(self.device) 
-        # if optimizer_idx>=len(self.sub_models):
-        #     print("ggg")
-        # vr_class = self.classify_vr_layer(focus_data)
         tar_class = torch.ones(vr_class.shape).to(self.device) # self.classify_tar_layer(x_conv_transform)
         return out_total,vr_class,out_class_total
  

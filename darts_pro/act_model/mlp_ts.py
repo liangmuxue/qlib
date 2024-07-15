@@ -90,18 +90,15 @@ class MlpTs(nn.Module):
         # self.sigma2_c = nn.Parameter(torch.FloatTensor([0.15,0.2,0.2,0.15]),requires_grad=False)
         self.sigma2_c = torch.FloatTensor([0.15,0.2,0.2,0.15])
         
-    def forward(self, x,pca_target,labels=None,epoch=0,mode="smooth"):
+    def forward(self, x):
         """先提取序列特征，然后根据中间变量做GCN，然后做自监督计算
            根据mode参数分为2种模式，smooth表示使用平滑特征模式
         """
         
         # 获取嵌入特征，包含中间过程结果
         x_bar,z,encoded,encoded_input_data = self.emb_layer(x)
-        x_bar = x_bar.squeeze()
+        x_bar = x_bar.squeeze(-1).squeeze(-1)
         encoding_s = z
-        if self.training and mode=="smooth" and False:
-            # 使用平滑特征
-            encoding_s = self.FDS.smooth(encoding_s, labels, epoch)
         cls = self.z_classify(encoded)
         x_smo = self.regressor(z)
         # 执行目标分类，用于辅助输出分类

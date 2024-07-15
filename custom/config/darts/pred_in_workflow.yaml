@@ -1,26 +1,29 @@
 qlib_init:
-    provider_uri: "/home/qdata/qlib_data/custom_cn_data"
+    provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market all
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2022-01-01
-    end_time: 2023-12-31
-    fit_start_time: 2022-01-01
-    fit_end_time: 2023-12-31
+    start_time: 2021-09-01
+    end_time: 2022-12-31
+    fit_start_time: 2021-09-01
+    fit_end_time: 2022-12-31
     instruments: *market
     infer_processors:
         - class: FilterCol
           kwargs:
               fields_group: feature
-              # col_list: &col_list ["STD5", "TURNOVER_CLOSE", "TMA5","TSUMP5", "CORR5","RESI10","ROC60","CORR20","KSFT","KLOW"]  
-              col_list: &col_list ['STD5', 'TURNOVER_CLOSE','PRICE_SCOPE', 'CORR5','RESI10','CLOSE','OPEN','HIGH', 'LOW','VOLUME_CLOSE','RSI20','MACD']                  
+              # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
+              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','RSQR5',
+              'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5',
+              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','QTLUMA5',
+              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5']                                   
     learn_processors:
         - class: DropnaLabel
-    # label: ["Ref($close, -1)"] 
-    label: ["$close"] 
-    # label: ["$volume/100"]
+    # label: ['Ref($close, -1)'] 
+    label: ['$close'] 
+    # label: ['$volume/100']
 
 port_analysis_config: &port_analysis_config
     strategy:
@@ -33,8 +36,8 @@ port_analysis_config: &port_analysis_config
             topk: 50
             n_drop: 5
     backtest:
-        start_time: 2020-11-16
-        end_time: 2021-01-31
+        start_time: 2017-01-01
+        end_time: 2020-08-01
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -45,26 +48,48 @@ port_analysis_config: &port_analysis_config
             min_cost: 5
 task:
     model:
-        class: TftDataframeModel
-        module_path: darts_pro.tft_process_dataframe
+        class: CombineProcess
+        module_path: darts_pro.combine_process
         kwargs:
             GPU: 0
-            batch_size: 1024
+            batch_size: 3072
             seed: 0
             n_jobs: 20
+            log_every_n_steps: 50
             type: 'predict'
-            n_epochs : 300
-            save_dataset_file: False  
-            load_dataset_file: &load_dataset_file False     
-            pred_data_path: "custom/data/darts/dump_data"     
+            n_epochs : 100
+            save_dataset_file: False 
+            load_dataset_file: &load_dataset_file False
+            batch_file_path: 'custom/data/asis/PRED_2000_202110'
+            ignore_exp: True
+            pred_data_path: &pred_data_path "custom/data/pred"   
+            pred_data_file: &pred_data_file "pred_df_total.pkl"
+            scheduler_config: 
+               # gamma: 0.8  
+               base_lr: 0.5e-4
+               max_lr: 1.5e-3
+               cycle_momentum: False
+               step_size_up: 50000
+               # T_max: 5
+               # eta_min: 0.001
+            optimizer_kwargs:
+               lr: 0.001
+               weight_decay: 0.001
             optargs:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
-               work_dir: '/home/qdata/workflow/wf_review_flow_2023/task/141/model'
-               model_name: 'train_202303'
+               work_dir: 'custom/data/darts'
+               model_name: 'MLP_QUAN_2000_202109M'
+               model_type: 'mlp'
                load_weight: True
+               best_weight: True
+               step_mode: 'complete'
+               pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
+               dropout: 0.5 
+               past_split: [[0,3],[3,5],[5,7]]
+               filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
         module_path: darts_pro.tft_series_dataset
@@ -74,15 +99,15 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2022-01-01, 2023-03-31]
-                valid: [2022-01-01, 2023-03-08]
-                test: [2021-01-01, 2021-03-01]
+                train_total: [2022-06-01, 2022-12-31]
+                valid: [2022-08-15, 2022-11-05]
+                test: [2022-10-19, 2022-10-25]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
-            # instrument_pick: [428,429,504]
-            instrument_pick: []
+            transform_inner: True
+            instrument_pick: [600520,600521,600522]
             scaler_type: 'norm'
             model_type: 'tft'
             step_len: *wave_period
@@ -95,20 +120,23 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: 'label'
+                target_column: ['RANKMA5','CNTN5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['STD5','PRICE_SCOPE','TURNOVER_CLOSE', 'CORR5','RESI10']  
-                static_covariate_col: ['industry','tradable_shares']  
-                
+                past_covariate_col: ['KDJ_K','KDJ_D','RSQR5','RSQR5','KLEN','RSQR5','REV5'] 
+                static_covariate_col: ['industry','tradable_shares']    
+
     record: 
         - class: SignalRecord
           module_path: trader.tft_recorder
           kwargs: 
             model: <MODEL>
             dataset: <DATASET>    
-        - class: SigAnaRecord
-          module_path: trader.tft_recorder
+        - class: PortAnaRecord
+          module_path: trader.pred_recorder
           kwargs: 
-            ana_long_short: False
-            ann_scaler: 252
+            config: *port_analysis_config
+            model: <MODEL>
+            dataset: <DATASET>  
+            pred_data_path: *pred_data_path
+            pred_data_file: *pred_data_file 

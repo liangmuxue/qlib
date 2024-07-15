@@ -11,6 +11,8 @@ import torchvision
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
+from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
+import pytorch_lightning.callbacks as pl_callbacks
 from torch.utils.data import DataLoader
 from torch.distributions import Normal
 import torch.nn.functional as F
@@ -178,9 +180,6 @@ class MlpModule(_TFTModuleBatch):
         
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
-        future_target,
-        pca_target=None,
-        target_class=None,
         optimizer_idx=-1
     ) -> torch.Tensor:
         
@@ -197,7 +196,7 @@ class MlpModule(_TFTModuleBatch):
             # 根据优化器编号匹配计算
             if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
                 x_in_item = (past_convs_item,x_in[1],x_in[2])
-                out = m(x_in_item,pca_target=pca_target[...,i],labels=target_class,epoch=self.current_epoch,mode=self.step_mode)
+                out = m(x_in_item)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
                 # 模拟数据
@@ -293,8 +292,7 @@ class MlpModule(_TFTModuleBatch):
         if self.switch_flag==1 and False:
             with torch.no_grad():
                 for i in range(len(self.past_split)):
-                    (output,vr_class,tar_class) = self(input_batch,future_target,pca_target=pca_target,
-                                                       target_class=target_class[:,:1],optimizer_idx=i)
+                    (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
                     loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,pca_target),optimizers_idx=i)
                     (corr_loss_combine,ce_loss,fds_loss,_) = detail_loss 
                     self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
@@ -305,8 +303,7 @@ class MlpModule(_TFTModuleBatch):
                     self.output_postprocess(output,target_class[:,0],i)
         else:
             for i in range(len(self.past_split)):
-                (output,vr_class,tar_class) = self(input_batch,future_target,pca_target=pca_target,
-                                                   target_class=target_class[:,:1],optimizer_idx=i)
+                (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
                 loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,pca_target),optimizers_idx=i)
                 (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
                 # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
@@ -351,8 +348,7 @@ class MlpModule(_TFTModuleBatch):
         input_batch = self._process_input_batch(inp)
         last_targets,pca_target,weighted_data = self._process_target_batch(future_target,target_class[:,0])
         scaler = [s[0] for s in scaler_tuple]
-        (output,vr_class,vr_class_list) = self(input_batch,future_target,pca_target=pca_target,target_class=target_class[:,1:],
-                                               optimizer_idx=-1)
+        (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         
         past_target = val_batch[0]
         past_covariate = val_batch[1]
@@ -471,24 +467,29 @@ class MlpModule(_TFTModuleBatch):
         pca_values = torch.stack(pca_values).cpu().numpy().transpose(1,2,0)
         smooth_values = torch.stack(smooth_values).cpu().numpy().transpose(1,2,0)
 
-        cls_0 = cls_values[...,0].squeeze()
-        cls_1 = cls_values[...,1].squeeze()
-        cls_2 = cls_values[...,2].squeeze()
-        sv_1 = smooth_values[...,1].squeeze()
+        cls_0 = cls_values[...,0]
+        cls_1 = cls_values[...,1]
+        cls_2 = cls_values[...,2]
         fea_0 = fea_values[...,0]
         fea_0_range = (fea_0[:,-1] - fea_0[:,0])/fea_0[:,0]        
         fea_1 = fea_values[...,1]
         fea_1_range = (fea_1[:,-1] - fea_1[:,0])/fea_1[:,0]
         fea_2 = fea_values[...,2]
         fea_2_range = (fea_2[:,-1] - fea_2[:,0])/fea_2[:,0]/10
-        sv_0 = smooth_values[...,0].squeeze()
-        sv_1 = smooth_values[...,1].squeeze()
-        sv_2 = smooth_values[...,2].squeeze()
+        sv_0 = smooth_values[...,0].squeeze(-1)
+        sv_1 = smooth_values[...,1].squeeze(-1)
+        sv_2 = smooth_values[...,2].squeeze(-1)
+        # pred_import_index = self.strategy_threhold((sv_0,sv_1,sv_2),(fea_0_range,fea_1_range),(cls_0,cls_1,cls_2),batch_size=cls_values.shape[0])
+        pred_import_index = self.strategy_top((sv_0,sv_1,sv_2),(fea_0_range,fea_1_range),(cls_0,cls_1,cls_2),batch_size=cls_values.shape[0])
         
-        v1 = fea_values[...,1]
-        pt = past_target[...,1]
+        return pred_import_index,(cls_values,fea_values,pca_values)       
+    
+    def strategy_threhold(self,sv,fea,cls):
+        (sv_0,sv_1,sv_2) = sv
+        (fea_0_range,fea_1_range) = fea
+        (cls_0,cls_1,cls_2) = cls
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_2<0) & (fea_0_range>0) & (fea_1_range<-1) & (sv_1>0)
+        sv_import_bool = (sv_2<0) & (fea_0_range>0) & (fea_1_range<-1)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -502,8 +503,35 @@ class MlpModule(_TFTModuleBatch):
         cls_import_bool = (np.sum(cls_1<para1[0],1)>para1[1]) # & (np.sum(cls_2<para2[0],1)>para2[0]) # & (np.sum(cls_0>para0[0],1)>para0[0]) 
         pred_import_index = np.where(cls_import_bool & sv_import_bool)[0]
         
-        return pred_import_index,(cls_values,fea_values,pca_values)       
+        return pred_import_index
 
+    def strategy_top(self,sv,fea,cls,batch_size=0):
+        """排名方式筛选候选者"""
+        
+        (sv_0,sv_1,sv_2) = sv
+        (fea_0_range,fea_1_range) = fea
+        (cls_0,cls_1,cls_2) = cls
+        
+        top_k = batch_size//4
+        # 使用2号进行sv判断（最后一段涨跌幅度），逆序
+        sv_import_index = np.argsort(sv_2)[:top_k]
+        # 使用0号进行corr判断（整体涨跌幅度），正序
+        fea0_import_index = np.argsort(-fea_0_range)[:top_k]
+        # 使用1号进行corr判断（整体涨跌幅度），逆序
+        fea1_import_index = np.argsort(fea_1_range)[:top_k]        
+        comp1_index = np.intersect1d(sv_import_index,fea0_import_index)
+        comp1_index = np.intersect1d(comp1_index,fea1_import_index)
+
+        cls_thre_para = [[0.1,8],[-0,8],[-0,7]]
+        # 包含2个参数：分数阈值以及个数阈值
+        para0 = cls_thre_para[0]
+        para1 = cls_thre_para[1]
+        para2 = cls_thre_para[2]
+        # 使用1号进行cls判断（pca数值），逆序
+        cls_import_index = np.argsort(np.sum(cls_1<para1[0],1))[:top_k] 
+        pred_import_index = np.intersect1d(comp1_index,cls_import_index)
+        return pred_import_index
+          
     def viz_results(self,output, pca_target,target_class=None,index=None):
         """可视化，显示聚合过程"""
         
@@ -555,7 +583,53 @@ class MlpModule(_TFTModuleBatch):
             os.makedirs(path)           
         plt.savefig('{}/combine_result_{}.png'.format(path,name))  
             
-    
+
+    def predict_step(
+        self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
+    ):
+        """重载原方法，服务于自定义模式"""
+        
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = batch
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)    
+        input_batch = self._process_input_batch(inp)
+        last_targets,pca_target,weighted_data = self._process_target_batch(future_target,target_class[:,0])
+        (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)        
+        past_target = batch[0]
+        past_covariate = batch[1]
+        target_class = target_class[:,:,0]
+        target_vr_class = target_class[:,0].cpu().numpy()
+        preds_combine = []
+        output_combine = (output,pca_target)
+        for i in range(pca_target.shape[-1]):
+            pred_cls = output[i][2].cpu().numpy()
+            # pred_cls = np.argmax(pred_cls)
+            # # pred,w = self.sub_models[i].predict_pca_cls(pca_output[...,i])
+            # acc_cnt = np.sum(pred_cls==target_class[:,0].cpu().numpy())
+            # acc = acc_cnt/pred_cls.shape[0]
+            # self.log("cls_acc_{}".format(i), acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
+
+        # self.pca_viz(pca_target, target_class[:,0].cpu().numpy(), output,batch_idx=batch_idx,root_path="custom/data/results/pred")
+        # 准确率的计算
+        import_price_result,values = self.compute_real_class_acc(output_data=output,past_target=past_target.cpu().numpy(),target_class=target_class,target_info=target_info)          
+        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
+        if self.total_imp_cnt==0:
+            self.total_imp_cnt = total_imp_cnt
+        else:
+            self.total_imp_cnt += total_imp_cnt
+        # 累加结果集，后续统计   
+        if self.import_price_result is None:
+            self.import_price_result = import_price_result    
+        else:
+            if import_price_result is not None:
+                import_price_result_array = import_price_result.values
+                # 修改编号，避免重复
+                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
+                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
+                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)          
+                  
+        return import_price_result
+      
     def _process_target_batch(self,future_target,target_class):
         """生成目标数据,包括降维数据以及协方差数据,类别权重数据等"""
         
@@ -593,7 +667,10 @@ class MlpModule(_TFTModuleBatch):
         dim_variable = -1
 
         # Norm his conv
-        historic_future_covariates = normalization_axis(historic_future_covariates,axis=2)
+        try:
+            historic_future_covariates = normalization_axis(historic_future_covariates,axis=2)
+        except Exception as e:
+            print("ggg")
         # 生成多组过去协变量，用于不同子模型匹配
         x_past_array = []
         for i,p_index in enumerate(self.past_split):
@@ -638,5 +715,39 @@ class MlpModule(_TFTModuleBatch):
                 future_target.cpu().numpy(),pca_target,price_target.cpu().numpy(),target_info]          
         output_combine = (output,data)
         pickle.dump(output_combine,self.valid_fout)       
-           
+
+
+    def on_validation_epoch_end(self):
+        """重载父类方法，实现自定义评分"""
+        
+        # SANITY CHECKING模式下，不进行处理
+        if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
+            return    
+        score_arr = []
+        score_total = 0
+        if self.import_price_result is not None:
+            res_group = self.import_price_result.groupby("result")
+            ins_unique = res_group.nunique()
+            total_cnt = ins_unique.values[:,1].sum()
+            for i in range(4):
+                cnt_values = ins_unique[ins_unique.index==i].values
+                if cnt_values.shape[0]==0:
+                    cnt = 0
+                else:
+                    cnt = cnt_values[0,1]
+                rate = cnt/total_cnt
+                score_arr.append(rate)
+                # print("cnt:{} with score:{},total_cnt:{},rate:{}".format(cnt,i,total_cnt,rate))
+                self.log("score_{} rate".format(i), rate, prog_bar=True) 
+            self.log("total cnt", total_cnt, prog_bar=True)  
+            # 综合评估计算总的得分情况，需要满足错误分和正确分达到一定阈值
+            if score_arr[-1]>0.2 and score_arr[0]<0.09:
+                # 正确错误分比例来决定评分
+                score_total = score_arr[-1]/score_arr[0] + score_arr[2]/score_arr[1]
+            else:
+                score_total = 0
+        self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
+        self.log("score_total", score_total, prog_bar=True) 
+                
+        
         

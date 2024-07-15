@@ -127,6 +127,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         instrument = self.ass_data[code][0]
         label_array = self.ass_data[code][1][past_start:future_end]
         price_array = self.ass_data[code][2][past_start:future_end]
+        datetime_array = self.ass_data[code][3][past_start:future_end]
         # 记录预测未来第一天的关联日期，用于后续数据对齐
         future_start_datetime = self.ass_data[code][3][past_end]
         focus1_array = self.ass_data[code][4][past_start:future_end]
@@ -136,7 +137,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
                        "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
-                       "price_array":price_array,"label_array":label_array,
+                       "price_array":price_array,"label_array":label_array,"datetime_array":datetime_array,
                        "focus1_array":focus1_array,"focus2_array":focus2_array,"focus3_array":focus3_array,
                        "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 

@@ -1,13 +1,16 @@
 import os
 
 from darts.models.forecasting.tide_model import _TideModule
+from darts.models.forecasting.torch_forecasting_model import _get_checkpoint_folder,_get_runs_folder,INIT_MODEL_NAME,_get_checkpoint_fname
 from darts.utils.data.training_dataset import TrainingDataset
 from darts.utils.likelihood_models import Likelihood, QuantileRegression
 from darts.utils.torch import random_method
 from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from darts.timeseries import TimeSeries
+from darts.utils.utils import get_single_series, seq2series, series2seq
 from cus_utils.process import create_from_cls_and_kwargs
 
+from glob import glob
 import pickle
 import sys
 import numpy as np
@@ -34,7 +37,7 @@ from darts_pro.mam.sdcn_module import SdcnModule
 from darts_pro.mam.vade_module import VaDEModule
 from darts_pro.mam.vare_module import VaREModule
 from darts_pro.mam.mlp_module import MlpModule
-from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset
+from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset,BatchInferDataset
 
 class _TFTModuleAsis(_CusModule):
     def __init__(
@@ -192,7 +195,6 @@ class _TFTModuleAsis(_CusModule):
             return None
         print("total size:{},import_index_bool size:{}".format(past_target.shape[0],np.sum(import_index_bool)))
         rtn_index = np.where(import_index_bool)[0]
-        
         data_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
                             future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
                             np.array(scaler_tuple,dtype=object)[rtn_index],target_class[rtn_index,:,:],
@@ -225,7 +227,7 @@ class _TFTModuleAsis(_CusModule):
         d_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         j_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即k线向上突破j线
-        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=6) & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
+        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=6) # & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
         # 突破的时候d线也是向上的
         j_slope = j_cov[:,1:] - j_cov[:,:-1]
         # index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)
@@ -438,6 +440,9 @@ class TFTBatchModel(TFTExtModel):
         self.pretrain_model_name = pretrain_model_name
         
         # 补充模型保存的参数
+        self.checkpoint_define()
+    
+    def checkpoint_define(self):
         for index,c in enumerate(self.trainer_params["callbacks"]):
             if isinstance(c,ModelCheckpoint):
                 # 无法直接修改，新生成并替换
@@ -451,7 +456,7 @@ class TFTBatchModel(TFTExtModel):
                 )
                 checkpoint_callback.CHECKPOINT_NAME_LAST = "last-{epoch}"        
                 self.trainer_params["callbacks"][index] = checkpoint_callback
-                
+                              
     def _build_train_dataset(
         self,
         target: Sequence[TimeSeries],
@@ -466,6 +471,22 @@ class TFTBatchModel(TFTExtModel):
         )    
         return ds    
 
+    def _build_inference_dataset(
+        self,
+        target=None,
+        n=1,
+        past_covariates=None,
+        future_covariates=None,
+        stride=0,
+        bounds=None,
+        mode="valid"
+    ) -> BatchDataset:
+        
+        ds = BatchCluDataset(
+            filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode)
+        )    
+        return ds   
+    
     def _create_model(self, train_sample: MixedCovariatesTrainTensorType) -> nn.Module:
         """重载创建模型方法，使用自定义模型"""
         
@@ -862,4 +883,174 @@ class TFTCluSerModel(TFTBatchModel):
                 # pre_static_datas=self.static_datas
             )    
         return ds
+    
+    def checkpoint_define(self):
+        """定义模型保存策略"""
+        
+        for index,c in enumerate(self.trainer_params["callbacks"]):
+            if isinstance(c,ModelCheckpoint):
+                # 使用综合评分机制触发保存
+                checkpoint_callback = pl_callbacks.ModelCheckpoint(
+                    dirpath=c.dirpath,
+                    save_last=False,
+                    monitor="score_total",
+                    filename="{epoch}-{score_total:.2f}",
+                    every_n_epochs=2,
+                    # mode="min",
+                    save_top_k = -1
+                )
+                checkpoint_callback.CHECKPOINT_NAME_LAST = "last-{epoch}"        
+                self.trainer_params["callbacks"][index] = checkpoint_callback      
+
+    @staticmethod            
+    def load_from_checkpoint(
+        model_name: str,
+        work_dir: str = None,
+        file_name: str = None,
+        best: bool = True,
+        **kwargs,
+    ):
+        """重载原方法，使用自定义模型加载策略"""
+        
+        logger = get_logger(__name__)
+        
+        checkpoint_dir = _get_checkpoint_folder(work_dir, model_name)
+        model_dir = _get_runs_folder(work_dir, model_name)
+
+        # load the base TorchForecastingModel (does not contain the actual PyTorch LightningModule)
+        base_model_path = os.path.join(model_dir, INIT_MODEL_NAME)
+        raise_if_not(
+            os.path.exists(base_model_path),
+            f"Could not find base model save file `{INIT_MODEL_NAME}` in {model_dir}.",
+            logger,
+        )
+        model = torch.load(
+            base_model_path, map_location=kwargs.get("map_location")
+        )
                
+        # 修改原方法，对best重新界定
+        if file_name is None:
+            checkpoint_dir = _get_checkpoint_folder(work_dir, model_name)
+            path = os.path.join(checkpoint_dir, "epoch=*")
+            checklist = glob(path)            
+            if len(checklist) == 0:
+                raise_log(
+                    FileNotFoundError(
+                        "There is no file matching prefix {} in {}".format(
+                            "epoch=*", checkpoint_dir
+                        )
+                    ),
+                    logger,
+                )   
+            if best:
+                # 如果查找best，则使用文件中的最高分数进行匹配
+                file_name = max(checklist, key=lambda x: x.split("=")[2][:-5])
+            else:
+                # 否则使用文件中的最大epoch进行匹配
+                file_name = max(checklist, key=lambda x: x.split("=")[1].split("-")[0])
+            file_name = os.path.basename(file_name)       
+            
+        file_path = os.path.join(checkpoint_dir, file_name)
+
+        model.model = model._load_from_checkpoint(file_path, **kwargs)
+        
+        # loss_fn is excluded from pl_forecasting_module ckpt, must be restored
+        loss_fn = model.model_params.get("loss_fn")
+        if loss_fn is not None:
+            model.model.criterion = loss_fn
+        # train and val metrics also need to be restored
+        torch_metrics = model.model.configure_torch_metrics(
+            model.model_params.get("torch_metrics")
+        )
+        model.model.train_metrics = torch_metrics.clone(prefix="train_")
+        model.model.val_metrics = torch_metrics.clone(prefix="val_")
+
+        # restore _fit_called attribute, set to False in load() if no .ckpt is found/provided
+        model._fit_called = True
+        model.load_ckpt_path = file_path
+                
+        return model
+        
+    @staticmethod           
+    def _batch_collate_fn(batch: List[Tuple]) -> Tuple:
+        """Return Samples for Predict"""
+        
+        aggregated = []
+        first_sample = batch[0]
+        for i in range(len(first_sample)):
+            elem = first_sample[i]
+            if isinstance(elem, np.ndarray):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, MinMaxScaler):
+                aggregated.append([sample[i] for sample in batch])
+            elif isinstance(elem, tuple):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+            elif isinstance(elem, TimeSeries):
+                aggregated.append([sample[i] for sample in batch])
+        return tuple(aggregated)    
+    
+    def _build_inference_dataset(
+        self,
+        target=None,
+        n=1,
+        past_covariates=None,
+        future_covariates=None,
+        stride=0,
+        bounds=None,
+        mode="valid",
+    ) -> BatchDataset:
+        
+        ds = BatchInferDataset(
+            filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode),
+            cur_date=self.cur_date # 添加当前日期参数
+        )    
+        return ds          
+               
+    @random_method
+    def predict(
+        self,
+        n: int,
+        series: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        past_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        future_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        trainer=None,
+        batch_size: Optional[int] = None,
+        verbose: Optional[bool] = None,
+        n_jobs: int = 1,
+        roll_size: Optional[int] = None,
+        num_samples: int = 1,
+        num_loader_workers: int = 0,
+        mc_dropout: bool = False,
+        predict_likelihood_parameters: bool = False,
+        show_warnings: bool = True,
+        cur_date = None, # 添加当前日期参数
+    ) -> Union[TimeSeries, Sequence[TimeSeries]]:
+        """重载父类方法"""
+        
+        self.cur_date = cur_date     
+        super().predict(
+                n=n,
+                series=series,
+                past_covariates=past_covariates,
+                future_covariates=future_covariates,
+                trainer=trainer,
+                batch_size=batch_size,
+                verbose=verbose,
+                n_jobs=n_jobs,
+                roll_size=roll_size,
+                num_samples=num_samples,
+                num_loader_workers=num_loader_workers,
+                mc_dropout=mc_dropout,
+                predict_likelihood_parameters=predict_likelihood_parameters,
+                show_warnings=show_warnings,            
+            )    
+    
+    
+    

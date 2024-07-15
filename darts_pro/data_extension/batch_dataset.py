@@ -45,6 +45,7 @@ class BatchDataset(Dataset):
         
         if self.mode=="process":
             self.batch_data = aggregated 
+            # self.agg_data_check()
         if self.mode.startswith("analysis"):
             self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
             self.target_data = self.get_df_data(fit_names,target_info=aggregated[-2][range_num[0]:range_num[1]])
@@ -143,6 +144,16 @@ class BatchDataset(Dataset):
         price_target = price_target[keep_idx]
         
         return (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target)
+    
+    def agg_data_check(self):
+        aggregated = self.batch_data
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler_tuple,target_class,target,target_info,price_target) = aggregated  
+        c_tar = []       
+        for i in range(len(target_info)):
+            if target_info[i]['future_start_datetime']==20221012:
+                c_tar.append(target_info[i])
+        print("ctar len:",len(c_tar))
         
     def cluster_compare_data(self,aggregated_data,sampler_cnt=10):
         """对目标进行聚类，选取具有代表性的数据"""
@@ -266,7 +277,6 @@ class BatchDataset(Dataset):
         if self.mode.startswith("analysis"):
             return self.range_num[1] - self.range_num[0]
             
-
 class BatchCluDataset(BatchDataset):
     
     def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None,pre_static_datas=None):
@@ -597,7 +607,42 @@ class BatchCluDataset(BatchDataset):
         return past_target,past_covariates, historic_future_covariates,future_covariates, \
             static_covariates, (scaler_tuple, None),target_class,target,target_info,rank_index,adj_target,price_target
     
-                                   
+class BatchInferDataset(BatchDataset):
+    """用于预测推理的数据集"""
+    
+    def __init__(self,filepath=None,cur_date=None,target_col=None,fit_names=None):
+        
+        self.cur_date = cur_date
+        super().__init__(filepath,target_col=target_col,fit_names=fit_names)
+                
+    def create_aggregated_data(self,batch_data):
+        """过滤为只包含指定日期的结果集"""
+        
+        aggregated_data = super().create_aggregated_data(batch_data)
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,scaler_tuple,target_class,target,target_info,price_target) = aggregated_data
+        keep_idx = []
+        for i in range(len(target_info)):
+            future_start_datetime = target_info[i]["future_start_datetime"]
+            # 数据中的未来预测开始日期需要和当前日期一致
+            if future_start_datetime!=int(self.cur_date):
+                continue
+            keep_idx.append(i)
+        keep_idx = np.array(keep_idx)
+        
+        past_target = past_target[keep_idx]  
+        past_covariates = past_covariates[keep_idx] 
+        historic_future_covariates = historic_future_covariates[keep_idx]
+        future_covariates = future_covariates[keep_idx]  
+        static_covariates = static_covariates[keep_idx] 
+        target_class = target_class[keep_idx]
+        target = target[keep_idx]
+        scaler_tuple = [scaler_tuple[i] for i in keep_idx]
+        target_info = [target_info[i] for i in keep_idx]
+        price_target = price_target[keep_idx]
+        
+        return (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target)
+                                     
 class BatchOutputDataset(BatchDataset):    
     
     def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=[0,10000]):

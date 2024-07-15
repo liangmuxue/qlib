@@ -725,9 +725,13 @@ class TFTExtModel(MixedCovariatesTorchModel):
         
     def _verify_inference_dataset_type(self, inference_dataset: InferenceDataset):
         """重载方法以规避类型检查"""
-        _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
+        return
+        # _raise_if_wrong_type(inference_dataset, CustomInferenceDataset)
     
-                
+    def _verify_predict_sample(self, predict_sample: Tuple):
+        """重载方法以规避类型检查"""
+        return
+                        
     def _batch_collate_filter(self,ori_batch: List[Tuple]) -> Tuple:
         """
         重载方法，调整数据处理模式
