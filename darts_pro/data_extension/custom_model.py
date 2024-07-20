@@ -709,6 +709,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self,
         target: Sequence[TimeSeries],
         n: int,
+        stride: int,
+        bounds: Optional[np.ndarray],
         past_covariates: Optional[Sequence[TimeSeries]],
         future_covariates: Optional[Sequence[TimeSeries]],
     ) -> CustomInferenceDataset:

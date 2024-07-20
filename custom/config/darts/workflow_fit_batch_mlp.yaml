@@ -67,7 +67,7 @@ task:
                base_lr: 0.5e-4
                max_lr: 1.5e-3
                cycle_momentum: False
-               step_size_up: 50000
+               step_size_up: 20000
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -98,7 +98,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2010-01-01, 2023-05-31]
-                valid: [2020-08-01, 2020-10-31]
+                valid: [2020-09-01, 2021-10-30]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

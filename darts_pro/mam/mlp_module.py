@@ -220,6 +220,7 @@ class MlpModule(_TFTModuleBatch):
         return self.criterion(output,(future_target,target_class,last_target,pca_target),mode=self.step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
+        self.output_result = []
         super().on_validation_start()
 
     def on_train_epoch_start(self):  
@@ -335,8 +336,8 @@ class MlpModule(_TFTModuleBatch):
         
         loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)  
         
-        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
-            self.dump_val_data(val_batch,output,detail_loss)
+        # if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
+        self.dump_val_data(val_batch,output,detail_loss)
         return loss,detail_loss
            
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
@@ -367,57 +368,8 @@ class MlpModule(_TFTModuleBatch):
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # if comb_detail_loss is not None:
-            #     self.log("val_loss_xz_{}".format(i), comb_detail_loss[1], batch_size=val_batch[0].shape[0], prog_bar=False)
-            #     self.log("val_loss_xc_{}".format(i), comb_detail_loss[2], batch_size=val_batch[0].shape[0], prog_bar=False)
-            
-            # past_convs_item = input_batch[0][i] 
-            # pred,pred_combine = self.sub_models[i].predict(past_convs_item)
-            # preds_combine.append(pred_combine)
-            # acc = self.cluster_acc(pred,target_vr_class)
-            # self.log("val_acc_{}".format(i), acc[0], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,pca_target)
-        for i in range(pca_target.shape[-1]):
-            pred_cls = output[i][2].cpu().numpy()
-            # pred_cls = np.argmax(pred_cls)
-            # # pred,w = self.sub_models[i].predict_pca_cls(pca_output[...,i])
-            # acc_cnt = np.sum(pred_cls==target_class[:,0].cpu().numpy())
-            # acc = acc_cnt/pred_cls.shape[0]
-            # self.log("cls_acc_{}".format(i), acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
-
-        # self.pca_viz(pca_target, target_class[:,0].cpu().numpy(), output,batch_idx=batch_idx,root_path="custom/data/results/pred")
-        # 准确率的计算
-        import_price_result,values = self.compute_real_class_acc(output_data=output,past_target=past_target.cpu().numpy(),target_class=target_class,target_info=target_info)          
-        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        if self.total_imp_cnt==0:
-            self.total_imp_cnt = total_imp_cnt
-        else:
-            self.total_imp_cnt += total_imp_cnt
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                # 修改编号，避免重复
-                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)        
-        
-        # PCA可视化
-        index = "{}-{}".format(self.current_epoch,batch_idx)
-        # self.viz_results(output, pca_target,target_class=target_class[:,0].cpu().numpy(),index=index)
-
-        whole_target = np.concatenate((past_target.cpu().numpy(),future_target.cpu().numpy()),axis=1)
-        target_inverse = self.get_inverse_data(whole_target,target_info=target_info,scaler=scaler)
-        output_inverse = [output_item[0] for output_item in output]
-        output_inverse = torch.stack(output_inverse,dim=2).cpu().numpy()           
-        # 预测数值可视化
-        names = ["macd","rsi","qtlu","macd_output","rsi_output","qtlu_output"] 
-        # self.val_metric_show(output_inverse,whole_target,target_vr_class,target_info=target_info,
-        #                      import_price_result=import_price_result,batch_idx=batch_idx,names=names)
-        
         return loss,detail_loss,output_combine
     
     def pca_viz(self,pca_target,target_class,output,batch_idx=0,root_path="custom/data/results/pred"):
@@ -436,18 +388,7 @@ class MlpModule(_TFTModuleBatch):
         save_file = "{}/pred_{}-{}.png".format(path,self.current_epoch,batch_idx)
         ShowClsResult(w[0].transpose(),np.expand_dims(w[1],axis=0),pca_output.cpu().numpy(),target_class,save_file=save_file)
                      
-    def compute_real_class_acc(self,output_data=None,past_target=None,target_class=None,target_info=None):
-        """计算涨跌幅分类准确度"""
-        
-        # 使用分类判断
-        import_index,values = self.build_import_index(output_data=output_data,past_target=past_target,target_class=target_class[:,0].cpu().numpy())
-        target_class = target_class.view(-1)
-        import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
-            import_price_result = self.collect_result(import_index, target_class.cpu().numpy(), target_info)
-        
-        return import_price_result,values
-           
-    def build_import_index(self,output_data=None,past_target=None,target_class=None):  
+    def build_import_index(self,output_data=None,fur_dates=None):  
         """生成涨幅达标的预测数据下标"""
         
         cls_values = []
@@ -467,27 +408,35 @@ class MlpModule(_TFTModuleBatch):
         pca_values = torch.stack(pca_values).cpu().numpy().transpose(1,2,0)
         smooth_values = torch.stack(smooth_values).cpu().numpy().transpose(1,2,0)
 
-        cls_0 = cls_values[...,0]
-        cls_1 = cls_values[...,1]
-        cls_2 = cls_values[...,2]
         fea_0 = fea_values[...,0]
         fea_0_range = (fea_0[:,-1] - fea_0[:,0])/fea_0[:,0]        
         fea_1 = fea_values[...,1]
         fea_1_range = (fea_1[:,-1] - fea_1[:,0])/fea_1[:,0]
         fea_2 = fea_values[...,2]
         fea_2_range = (fea_2[:,-1] - fea_2[:,0])/fea_2[:,0]/10
-        sv_0 = smooth_values[...,0].squeeze(-1)
-        sv_1 = smooth_values[...,1].squeeze(-1)
-        sv_2 = smooth_values[...,2].squeeze(-1)
-        # pred_import_index = self.strategy_threhold((sv_0,sv_1,sv_2),(fea_0_range,fea_1_range),(cls_0,cls_1,cls_2),batch_size=cls_values.shape[0])
-        pred_import_index = self.strategy_top((sv_0,sv_1,sv_2),(fea_0_range,fea_1_range),(cls_0,cls_1,cls_2),batch_size=cls_values.shape[0])
         
-        return pred_import_index,(cls_values,fea_values,pca_values)       
+        # 按照日期分组进行计算
+        pred_import_index_all = {}
+        if fur_dates is None:
+            pred_import_index = self.strategy_threhold(smooth_values,(fea_0_range,fea_1_range),cls_values,batch_size=cls_values.shape[0])
+            return pred_import_index,(cls_values,fea_values,pca_values)  
+            
+        for date in fur_dates.keys():
+            idx = fur_dates[date]
+            pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
+            # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=len(idx))
+            pred_import_index_all[date] = np.array(idx)[pred_import_index]
+            
+        return pred_import_index_all,(cls_values,fea_values,pca_values)       
     
-    def strategy_threhold(self,sv,fea,cls):
-        (sv_0,sv_1,sv_2) = sv
+    def strategy_threhold(self,sv,fea,cls,batch_size=0):
+        cls_0 = cls[...,0]
+        cls_1 = cls[...,1]
+        cls_2 = cls[...,2]
+        sv_0 = sv[...,0].squeeze(-1)
+        sv_1 = sv[...,1].squeeze(-1)
+        sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range) = fea
-        (cls_0,cls_1,cls_2) = cls
         # 使用回归模式，则找出接近或大于目标值的数据
         sv_import_bool = (sv_2<0) & (fea_0_range>0) & (fea_1_range<-1)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
@@ -495,12 +444,12 @@ class MlpModule(_TFTModuleBatch):
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
         # sv_import_bool = (sv_2<0) & (sv_1>0) & (fea_1_range<-1)
         # 分位数回归模式下的阈值选择
-        cls_thre_para = [[0.1,8],[-0,8],[-0,7]]
+        cls_thre_para = [[0.1,8],[-0.3,8],[-0,7]]
         # 包含2个参数：分数阈值以及个数阈值
         para0 = cls_thre_para[0]
         para1 = cls_thre_para[1]
         para2 = cls_thre_para[2]
-        cls_import_bool = (np.sum(cls_1<para1[0],1)>para1[1]) # & (np.sum(cls_2<para2[0],1)>para2[0]) # & (np.sum(cls_0>para0[0],1)>para0[0]) 
+        cls_import_bool = (np.sum(cls_1>para1[0],1)>para1[1]) # & (np.sum(cls_2<para2[0],1)>para2[0]) # & (np.sum(cls_0>para0[0],1)>para0[0]) 
         pred_import_index = np.where(cls_import_bool & sv_import_bool)[0]
         
         return pred_import_index
@@ -508,11 +457,15 @@ class MlpModule(_TFTModuleBatch):
     def strategy_top(self,sv,fea,cls,batch_size=0):
         """排名方式筛选候选者"""
         
-        (sv_0,sv_1,sv_2) = sv
+        cls_0 = cls[...,0]
+        cls_1 = cls[...,1]
+        cls_2 = cls[...,2]
+        sv_0 = sv[...,0].squeeze(-1)
+        sv_1 = sv[...,1].squeeze(-1)
+        sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range) = fea
-        (cls_0,cls_1,cls_2) = cls
         
-        top_k = batch_size//4
+        top_k = batch_size//6
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
         sv_import_index = np.argsort(sv_2)[:top_k]
         # 使用0号进行corr判断（整体涨跌幅度），正序
@@ -529,7 +482,7 @@ class MlpModule(_TFTModuleBatch):
         para2 = cls_thre_para[2]
         # 使用1号进行cls判断（pca数值），逆序
         cls_import_index = np.argsort(np.sum(cls_1<para1[0],1))[:top_k] 
-        pred_import_index = np.intersect1d(comp1_index,cls_import_index)
+        pred_import_index = comp1_index # np.intersect1d(comp1_index,cls_import_index)
         return pred_import_index
           
     def viz_results(self,output, pca_target,target_class=None,index=None):
@@ -584,52 +537,6 @@ class MlpModule(_TFTModuleBatch):
         plt.savefig('{}/combine_result_{}.png'.format(path,name))  
             
 
-    def predict_step(
-        self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
-    ):
-        """重载原方法，服务于自定义模式"""
-        
-        (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = batch
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)    
-        input_batch = self._process_input_batch(inp)
-        last_targets,pca_target,weighted_data = self._process_target_batch(future_target,target_class[:,0])
-        (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)        
-        past_target = batch[0]
-        past_covariate = batch[1]
-        target_class = target_class[:,:,0]
-        target_vr_class = target_class[:,0].cpu().numpy()
-        preds_combine = []
-        output_combine = (output,pca_target)
-        for i in range(pca_target.shape[-1]):
-            pred_cls = output[i][2].cpu().numpy()
-            # pred_cls = np.argmax(pred_cls)
-            # # pred,w = self.sub_models[i].predict_pca_cls(pca_output[...,i])
-            # acc_cnt = np.sum(pred_cls==target_class[:,0].cpu().numpy())
-            # acc = acc_cnt/pred_cls.shape[0]
-            # self.log("cls_acc_{}".format(i), acc, batch_size=val_batch[0].shape[0], prog_bar=True)       
-
-        # self.pca_viz(pca_target, target_class[:,0].cpu().numpy(), output,batch_idx=batch_idx,root_path="custom/data/results/pred")
-        # 准确率的计算
-        import_price_result,values = self.compute_real_class_acc(output_data=output,past_target=past_target.cpu().numpy(),target_class=target_class,target_info=target_info)          
-        total_imp_cnt = np.where(target_vr_class==3)[0].shape[0]
-        if self.total_imp_cnt==0:
-            self.total_imp_cnt = total_imp_cnt
-        else:
-            self.total_imp_cnt += total_imp_cnt
-        # 累加结果集，后续统计   
-        if self.import_price_result is None:
-            self.import_price_result = import_price_result    
-        else:
-            if import_price_result is not None:
-                import_price_result_array = import_price_result.values
-                # 修改编号，避免重复
-                import_price_result_array[:,0] = import_price_result_array[:,0] + batch_idx*3000
-                import_price_result_array = np.concatenate((self.import_price_result.values,import_price_result_array))
-                self.import_price_result = pd.DataFrame(import_price_result_array,columns=self.import_price_result.columns)          
-                  
-        return import_price_result
-      
     def _process_target_batch(self,future_target,target_class):
         """生成目标数据,包括降维数据以及协方差数据,类别权重数据等"""
         
@@ -667,10 +574,7 @@ class MlpModule(_TFTModuleBatch):
         dim_variable = -1
 
         # Norm his conv
-        try:
-            historic_future_covariates = normalization_axis(historic_future_covariates,axis=2)
-        except Exception as e:
-            print("ggg")
+        historic_future_covariates = normalization_axis(historic_future_covariates,axis=2)
         # 生成多组过去协变量，用于不同子模型匹配
         x_past_array = []
         for i,p_index in enumerate(self.past_split):
@@ -715,39 +619,152 @@ class MlpModule(_TFTModuleBatch):
                 future_target.cpu().numpy(),pca_target,price_target.cpu().numpy(),target_info]          
         output_combine = (output,data)
         pickle.dump(output_combine,self.valid_fout)       
+        # 同时维护一份验证结果，用于验证集统一比较
+        output_res = (output,past_target.cpu().numpy(),target_class.cpu().numpy(),target_info)
+        self.output_result.append(output_res)
+    
+    
+    def combine_output_total(self,output_result):
+        
+        target_class_total = []
+        target_info_total = []
+        past_target_total = []        
+        output_total = [[[] for _ in range(5)] for _ in range(3)]
+        for item in output_result:
+            (output,past_target,target_class,target_info) = item
+            for i in range(len(output_total)):
+                output_item = output[i]
+                x_bar,z,cls,tar_cls,x_smo = output_item 
+                output_total[i][0].append(x_bar)
+                output_total[i][1].append(z)
+                output_total[i][2].append(cls)
+                output_total[i][3].append(tar_cls)
+                output_total[i][4].append(x_smo)
+            target_info_total = target_info_total + target_info
+            target_class_total.append(target_class)
+            past_target_total.append(past_target)
+        for i in range(len(output_total)):
+            output_total[i][0] = torch.concat(output_total[i][0])
+            output_total[i][1] = torch.concat(output_total[i][1])
+            output_total[i][2] = torch.concat(output_total[i][2])
+            # output_total[i][3] = np.concatenate(output_total[i][3])
+            output_total[i][4] = torch.concat(output_total[i][4])       
+            
+        return output_total,past_target_total,target_class_total,target_info_total
 
+    def combine_output_single(self,output_data):
+        
+        output_total = [[[] for _ in range(5)] for _ in range(3)]
+        for i in range(len(output_data)):
+            output_item = output_data[i]
+            x_bar,z,cls,tar_cls,x_smo = output_item 
+            output_total[i][0].append(x_bar)
+            output_total[i][1].append(z)
+            output_total[i][2].append(cls)
+            output_total[i][3].append(tar_cls)
+            output_total[i][4].append(x_smo)
+        for i in range(len(output_total)):
+            output_total[i][0] = torch.concat(output_total[i][0])
+            output_total[i][1] = torch.concat(output_total[i][1])
+            output_total[i][2] = torch.concat(output_total[i][2])
+            # output_total[i][3] = np.concatenate(output_total[i][3])
+            output_total[i][4] = torch.concat(output_total[i][4])       
+            
+        return output_total
+            
+    def combine_result_data(self,output_result=None):
+        """计算涨跌幅分类准确度以及相关数据"""
+        
+        # 使用全部验证结果进行统一比较
+        output_total,past_target_total,target_class_total,target_info_total = self.combine_output_total(output_result)
+        target_class_total = np.concatenate(target_class_total)[:,0,0]
+        past_target_total = np.concatenate(past_target_total)
 
+        # 按照日期分组计算
+        fur_dates = {}
+        for index,ti in enumerate(target_info_total):
+            future_start_datetime = ti["future_start_datetime"]
+            if not future_start_datetime in fur_dates.keys():
+                fur_dates[future_start_datetime] = [index]
+            else:
+                fur_dates[future_start_datetime].append(index)
+        # 生成目标索引
+        import_index_all,values = self.build_import_index(output_data=output_total,fur_dates=fur_dates)
+        rate_total = {}
+        total_imp_cnt = np.where(target_class_total==3)[0].shape[0]
+        # 对每天的准确率进行统计，并累加
+        for date in import_index_all.keys():
+            import_index = import_index_all[date]
+            if len(import_index)==0:
+                continue
+            import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
+                import_price_result = self.collect_result(import_index, target_class_total, target_info_total)
+            
+            score_arr = []
+            score_total = 0
+            rate_total[date] = []
+            if import_price_result is not None:
+                res_group = import_price_result.groupby("result")
+                ins_unique = res_group.nunique()
+                total_cnt = ins_unique.values[:,1].sum()
+                for i in range(4):
+                    cnt_values = ins_unique[ins_unique.index==i].values
+                    if cnt_values.shape[0]==0:
+                        cnt = 0
+                    else:
+                        cnt = cnt_values[0,1]
+                    rate_total[date].append(cnt)
+                # 放置预测数量以及总数量
+                rate_total[date].append(total_cnt)              
+        sr = np.array(list(rate_total.values()))
+        return sr,total_imp_cnt
+        
     def on_validation_epoch_end(self):
         """重载父类方法，实现自定义评分"""
         
         # SANITY CHECKING模式下，不进行处理
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
             return    
-        score_arr = []
-        score_total = 0
-        if self.import_price_result is not None:
-            res_group = self.import_price_result.groupby("result")
-            ins_unique = res_group.nunique()
-            total_cnt = ins_unique.values[:,1].sum()
-            for i in range(4):
-                cnt_values = ins_unique[ins_unique.index==i].values
-                if cnt_values.shape[0]==0:
-                    cnt = 0
-                else:
-                    cnt = cnt_values[0,1]
-                rate = cnt/total_cnt
-                score_arr.append(rate)
-                # print("cnt:{} with score:{},total_cnt:{},rate:{}".format(cnt,i,total_cnt,rate))
-                self.log("score_{} rate".format(i), rate, prog_bar=True) 
-            self.log("total cnt", total_cnt, prog_bar=True)  
-            # 综合评估计算总的得分情况，需要满足错误分和正确分达到一定阈值
-            if score_arr[-1]>0.2 and score_arr[0]<0.09:
-                # 正确错误分比例来决定评分
-                score_total = score_arr[-1]/score_arr[0] + score_arr[2]/score_arr[1]
-            else:
-                score_total = 0
-        self.log("total_imp_cnt", self.total_imp_cnt, prog_bar=True)  
+
+        sr,total_imp_cnt = self.combine_result_data(self.output_result)      
+        if sr.shape[0]==0:
+            return
+        
+        # 汇总计算准确率
+        combine_cnt = np.sum(sr,axis=0)
+        combine_rate = []
+        for i in range(4):
+            # 统一计算准确率
+            rate = combine_cnt[i] / combine_cnt[4]
+            combine_rate.append(rate)
+            self.log("score_{} rate".format(i), rate, prog_bar=True) 
+        self.log("total cnt", combine_cnt[4], prog_bar=True)  
+        # 综合评估计算总的得分情况，需要满足错误分和正确分达到一定阈值
+        if combine_rate[-1]>0.2 and combine_rate[0]<0.09:
+            # 正确错误分比例来决定评分
+            score_total = combine_rate[-1]/combine_rate[0] + combine_rate[2]/combine_rate[1]
+        else:
+            score_total = 0
+        self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
         self.log("score_total", score_total, prog_bar=True) 
                 
+    def predict_step(
+        self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
+    ):
+        """预测阶段，复用雁阵 """
         
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = batch
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)    
+        input_batch = self._process_input_batch(inp)
+        (output_pred,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)        
+        past_target = batch[0]
+        # 生成预测结果
+        output_total = self.combine_output_single(output_pred) 
+        # 生成目标索引
+        import_index,_ = self.build_import_index(output_data=output_total)  
+        # 根据索引取得目标
+        pred_result = np.array(target_info)[import_index]   
+        
+        return pred_result
         

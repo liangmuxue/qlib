@@ -51,7 +51,7 @@ def get_tradedays_dur(start_date,duration):
     counts = 0
     # if is_holiday(start_date):  
     #     if duration>0:
-    #         counts -= 1
+    #         counts -= 
     #     else:
     #         counts += 1
     target_date = start_date

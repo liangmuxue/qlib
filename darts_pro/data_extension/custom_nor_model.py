@@ -37,7 +37,9 @@ from darts_pro.mam.sdcn_module import SdcnModule
 from darts_pro.mam.vade_module import VaDEModule
 from darts_pro.mam.vare_module import VaREModule
 from darts_pro.mam.mlp_module import MlpModule
+
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset,BatchInferDataset
+from darts_pro.data_extension.custom_dataset import CustomSequentialDataset
 
 class _TFTModuleAsis(_CusModule):
     def __init__(
@@ -397,7 +399,30 @@ class TFTAsisModel(TFTExtModel):
             device=self.device,
             **self.pl_module_params,
         )    
-    
+
+    def _build_inference_dataset(
+        self,
+        target=None,
+        n=1,
+        past_covariates=None,
+        future_covariates=None,
+        stride=0,
+        bounds=None,
+        mode="valid",
+    ):
+        # 使用训练验证数据集
+        ds = CustomSequentialDataset(
+            target_series=target,
+            past_covariates=past_covariates,
+            future_covariates=future_covariates,
+            input_chunk_length=self.input_chunk_length,
+            output_chunk_length=self.output_chunk_length,
+            max_samples_per_ts=None,
+            use_static_covariates=True,
+            mode=mode
+        )  
+        return ds   
+        
 class TFTBatchModel(TFTExtModel):
     
     def __init__(
@@ -947,7 +972,7 @@ class TFTCluSerModel(TFTBatchModel):
                 file_name = max(checklist, key=lambda x: x.split("=")[2][:-5])
             else:
                 # 否则使用文件中的最大epoch进行匹配
-                file_name = max(checklist, key=lambda x: x.split("=")[1].split("-")[0])
+                file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
             file_name = os.path.basename(file_name)       
             
         file_path = os.path.join(checkpoint_dir, file_name)
@@ -1007,10 +1032,11 @@ class TFTCluSerModel(TFTBatchModel):
         mode="valid",
     ) -> BatchDataset:
         
+        # Still using valid dataset
         ds = BatchInferDataset(
             filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode),
             cur_date=self.cur_date # 添加当前日期参数
-        )    
+        )       
         return ds          
                
     @random_method
@@ -1035,7 +1061,7 @@ class TFTCluSerModel(TFTBatchModel):
         """重载父类方法"""
         
         self.cur_date = cur_date     
-        super().predict(
+        return super().predict(
                 n=n,
                 series=series,
                 past_covariates=past_covariates,

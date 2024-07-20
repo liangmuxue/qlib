@@ -60,7 +60,7 @@ task:
             n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/KDJ_2000_202109_M2'
+            batch_file_path: 'custom/data/asis/KDJ_2000_202009_M'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -95,7 +95,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2010-01-01, 2023-05-31]
-                valid: [2021-09-01, 2022-10-30]
+                valid: [2020-09-01, 2021-10-30]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

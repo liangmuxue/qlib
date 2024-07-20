@@ -1,13 +1,13 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market test_2000
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2021-09-01
+    start_time: 2020-01-01
     end_time: 2022-12-31
-    fit_start_time: 2021-09-01
+    fit_start_time: 2020-01-01
     fit_end_time: 2022-12-31
     instruments: *market
     infer_processors:
@@ -61,7 +61,7 @@ task:
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/PRED_2000_202110'
-            ignore_exp: True
+            ignore_exp: False
             pred_data_path: &pred_data_path "custom/data/pred"   
             pred_data_file: &pred_data_file "pred_df_total.pkl"
             scheduler_config: 
@@ -69,7 +69,7 @@ task:
                base_lr: 0.5e-4
                max_lr: 1.5e-3
                cycle_momentum: False
-               step_size_up: 50000
+               step_size_up: 30000
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -79,7 +79,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MLP_QUAN_2000_202109M'
+               model_name: 'MLP_QUAN_2000_202009M'
                model_type: 'mlp'
                load_weight: True
                best_weight: True
@@ -99,9 +99,9 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2022-06-01, 2022-12-31]
-                valid: [2022-08-15, 2022-11-05]
-                test: [2022-10-19, 2022-10-25]
+                train_total: [2020-03-01, 2020-10-19]
+                valid: [2020-08-01, 2020-10-19]
+                test: [2020-10-20, 2020-10-25]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'

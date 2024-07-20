@@ -33,8 +33,14 @@ class DataFilter():
     def data_clean(self,data,step_len,valid_range=None,group_column="instrument",time_column="time_idx"):
         """"清除序列长度不够的股票"""
         
-        valid_start = int(valid_range[0].strftime('%Y%m%d'))
-        valid_end = int(valid_range[1].strftime('%Y%m%d'))        
+        if isinstance(valid_range[0],str):
+            valid_start = int(valid_range[0])
+        else:
+            valid_start = int(valid_range[0].strftime('%Y%m%d'))
+        if isinstance(valid_range[1],str):
+            valid_end = int(valid_range[1])
+        else:
+            valid_end = int(valid_range[1].strftime('%Y%m%d'))        
         thr_number = step_len
         # 清除训练中长度不够的股票数据
         df_train = data[(data["datetime_number"]<valid_start)]

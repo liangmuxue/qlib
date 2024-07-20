@@ -55,7 +55,7 @@ from darts_pro.tft_series_dataset import TFTSeriesDataset
 from cus_utils.common_compute import compute_price_class
 import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
-from trader.utils.date_util import get_tradedays,date_string_transfer
+from trader.utils.date_util import get_tradedays,date_string_transfer,get_tradedays_dur
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -275,73 +275,62 @@ class CombineProcess():
         forecast_horizon = self.optargs["forecast_horizon"]
         pred_range = dataset.kwargs["segments"]["test"] 
         
-        # 缓存全量数据
-        if self.load_dataset_file:
-            df_data_path = self.pred_data_path + "/df_all_pred.pkl"
-            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(df_data_path)   
-        else:
-            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(val_ds_filter=True)
-            if self.save_dataset_file:
-                df_data_path = self.pred_data_path + "/df_all_pred.pkl"
-                with open(df_data_path, "wb") as fout:
-                    pickle.dump(dataset.df_all, fout)  
-        
-        # 根据参数决定是否从文件中加载权重
-        load_weight = self.optargs["load_weight"]
+        expand_length = 30
+         
         emb_size = dataset.get_emb_size()
-        # 根据日期范围逐日进行预测，得到预测结果   
-        start_time = pred_range[0]
-        end_time = pred_range[1]
-        date_range = get_tradedays(start_time,end_time)
-
         batch_file_path = self.batch_file_path
-        # 生成一阶段格式化数据
-        if not ignore_exp:
-            model_exp = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1,batch_file_path=batch_file_path) 
-            model_exp.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=1,verbose=True,num_loader_workers=6)   
+        model_exp = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1,batch_file_path=batch_file_path) 
+        # 根据参数决定是否从文件中加载权重
+        load_weight = self.optargs["load_weight"]            
         if load_weight:
             best_weight = self.optargs["best_weight"]    
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
             self.model = TFTCluSerModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=best_weight)
             self.model.batch_size = self.batch_size  
             self.model.batch_file_path = self.batch_file_path   
-            self.model.mode = "train"                
-        for cur_date in date_range:        
-            # 进行第二阶段预测           
-            pred_combine = self.model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,
-                                                past_covariates=past_convariates,future_covariates=future_convariates,cur_date=cur_date)
-            pred_series_list = [item[0] for item in pred_combine]
-            pred_class_total = [item[1] for item in pred_combine]       
-            vr_class_total = [item[2] for item in pred_combine]   
-            logger.info("do predict mesure")  
-            pred_class_total = torch.stack(pred_class_total)
-            pred_class = dataset.combine_pred_class(pred_class_total)
-            vr_class_total = torch.stack(vr_class_total)
-            vr_class = self.combine_vr_class(vr_class_total)
-            # 可视化
-            result = self.predict_mesure(val_series_transformed,pred_series_list,pred_class[1],vr_class[1],vr_class[0],
-                              series_total=series_total,dataset=dataset,cur_date=cur_date)
+            self.model.mode = "train"       
+             
+        # 根据日期范围逐日进行预测，得到预测结果   
+        start_time = pred_range[0]
+        end_time = pred_range[1]
+        date_range = get_tradedays(start_time,end_time)                    
+        for cur_date in date_range:      
+  
+            # 同时需要延长集合时间
+            total_range = dataset.segments["train_total"]
+            valid_range = dataset.segments["valid"]    
+            last_day = get_tradedays_dur(total_range[1],expand_length)
+            # 以当天为数据时间终点
+            total_range[1] = cur_date
+            valid_range[1] = cur_date    
+            # 生成未扩展的真实数据
+            dataset.build_series_data_step_range(total_range,valid_range)  
+            # 为了和训练阶段保持一致处理，需要补充模拟数据
+            df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length) 
+            # 重置数据区间以满足生成第一阶段数据的足够长度
+            total_range[1] = last_day
+            valid_range[1] = last_day            
+            # 生成序列数据            
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+                dataset.build_series_data_step_range(total_range,valid_range,outer_df=df_expands)            
+            # 每次使用前置模型生成一阶段数据          
+            model_exp.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                     max_samples_per_ts=None,trainer=None,epochs=1,verbose=True,num_loader_workers=6)               
             
-            vr_imp_pred_price_acc = 0
-            vr_imp_pred_price_nag = 0
-            vr_imp_filter_acc = 0
-            vr_imp_filter_all = 0            
-            # 统计重点计算准确度
-            for item in result:
-                if not item["filter"]==1:
-                    continue
-                vr_imp_filter_all += 1
-                if item["match"]==1:
-                    vr_imp_filter_acc += 1
-                if item["correct"]==CLASS_SIMPLE_VALUE_MAX:
-                    vr_imp_pred_price_acc += 1
-                if item["correct"]==0:
-                    vr_imp_pred_price_nag += 1                
-            # vr_acc_imp_sec_mean = vr_imp_sec_pred_acc/vr_imp_sec_pred_all  
-            print("vr_imp_filter_acc:{}/{},vr_imp_price_acc:{}/{}/{}".
-                  format(vr_imp_filter_acc,vr_imp_filter_all,vr_imp_pred_price_acc,vr_imp_pred_price_nag,vr_imp_filter_all))          
-        
+            
+            # 根据时间点，取得对应的输入时间序列范围
+            total_range,val_range,missing_instruments = dataset.get_part_time_range(cur_date,ref_df=dataset.df_all)
+            # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
+            _,val_series_transformed,series_total,past_convariates,future_convariates = \
+                dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=df_expands)            
+            # 进行第二阶段预测           
+            pred_result = self.model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,cur_date=cur_date,
+                                                past_covariates=past_convariates,future_covariates=future_convariates)
+            # 对预测结果进行评估
+            if pred_result is None:
+                print("{} pred_result None".format(cur_date))
+            else:
+                print("{} res len:{}".format(cur_date,len(pred_result)))
     
         

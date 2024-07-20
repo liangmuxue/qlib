@@ -172,7 +172,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         else:
             static_covariate = None
         return past_target, covariate, static_covariate, future_target,target_info,future_covariate
-        
+
 class CustomSequentialDataset(MixedCovariatesTrainingDataset):
     """重载MixedCovariatesSequentialDataset，用于定制加工数据"""
     
@@ -225,15 +225,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
 
     def __getitem__(
         self, idx
-    ) -> Tuple[
-        np.ndarray,
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        np.ndarray,
-        np.ndarray,
-    ]:
+    ):
 
         past_target_ori, past_covariate, static_covariate, future_target_ori,target_info,future_past_covariate = self.ds_past[idx]
         
@@ -305,21 +297,27 @@ class CustomInferenceDataset(InferenceDataset):
         output_chunk_length: int = 1,
         use_static_covariates: bool = True,
     ):
-        """
-       
-        """
-        super().__init__()
+        """Custom Inference Dataset"""
 
+        super().__init__()
+        self.mode = "inference"
+        
         # This dataset is in charge of serving past covariates
-        self.ds_past = PastCovariatesInferenceDataset(
+        self.ds_past = CusGenericShiftedDataset(
             target_series=target_series,
             covariates=past_covariates,
-            n=n,
             input_chunk_length=input_chunk_length,
             output_chunk_length=output_chunk_length,
+            shift=input_chunk_length,
+            shift_covariates=False,
+            max_samples_per_ts=None,
             covariate_type=CovariateType.PAST,
             use_static_covariates=use_static_covariates,
         )
+        
+        self.output_chunk_length = output_chunk_length
+        self.input_chunk_length = input_chunk_length
+        self.transform_inner = global_var.get_value("dataset").transform_inner
 
         # This dataset is in charge of serving historic and future future covariates
         self.ds_future = DualCovariatesInferenceDataset(
@@ -336,25 +334,48 @@ class CustomInferenceDataset(InferenceDataset):
 
     def __getitem__(
         self, idx
-    ) -> Tuple[
-        np.ndarray,
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        MinMaxScaler,
-        TimeSeries,
-    ]:
+    ):
 
-        (
-            past_target,
-            past_covariate,
-            future_past_covariate,
-            static_covariate,
-            ts_target,
-        ) = self.ds_past[idx]
-        _, historic_future_covariate, future_covariate, _, _ = self.ds_future[idx]
+        # 过去数值处理
+        past_target_ori, past_covariate, static_covariate, future_target_ori,target_info,future_past_covariate = self.ds_past[idx]
+        # 使用原值衡量涨跌幅度
+        label_array = target_info["label_array"][self.input_chunk_length:]
+        price_array = target_info["price_array"][self.input_chunk_length-1:]
+        # 添加总体走势分类输出,使用原值比较最大上涨幅度与最大下跌幅度，从而决定幅度范围正还是负
+        raise_range = (price_array[-1] - price_array[0])/price_array[0]*100
+        # 添加最后一段的走势分类
+        last_raise_range = (label_array[-1] - label_array[-2])/label_array[-2]*100
+        # 先计算涨跌幅度分类，再进行归一化
+        p_target_class = get_simple_class(raise_range)
+        p_mul_target_class = get_simple_class(raise_range,range_value=CLASS_VALUES)
+        target_info["raise_range"] = raise_range # transform_slope_value(np.expand_dims(label_array,axis=0))[0]
+        target_info["last_raise_range"] = last_raise_range
+        
+        # 未来数值处理 
+        _, historic_future_covariate, future_covariate, _, _,_ = self.ds_future[idx]
+        
+        scaler = MinMaxScaler()
+        scaler_price = MinMaxScaler()
+        target_info["future_target"] = future_target_ori[:,0]
+        # 如果目标数据全都一样，会引发corr计算的NAN，在这里微调
+        for i in range(future_target_ori.shape[1]):
+            if np.sum(future_target_ori[:,i]==future_target_ori[0,i])==future_target_ori.shape[0]:
+                future_target_ori[0,i] = future_target_ori[0,i] + 0.01
+        if self.transform_inner:
+            # 因子归一化
+            past_covariate = MinMaxScaler().fit_transform(past_covariate)
+            future_covariate = MinMaxScaler().fit_transform(future_covariate)        
+            future_past_covariate = MinMaxScaler().fit_transform(future_past_covariate)         
+            # 目标值归一化
+            scaler.fit(past_target_ori)             
+            past_target = scaler.transform(past_target_ori)   
+            future_target = scaler.transform(future_target_ori)   
+            scaler_price.fit(np.expand_dims(target_info["label_array"][:self.input_chunk_length],-1)) 
+            # 增加价格目标数据
+            price_target = scaler_price.transform(np.expand_dims(target_info["label_array"],-1))   
+        else:
+            future_target = future_target_ori 
+            
         
         # 针对价格数据，进行单独归一化，扩展数据波动范围
         scaler = MinMaxScaler(feature_range=(0.01,1))
@@ -363,15 +384,16 @@ class CustomInferenceDataset(InferenceDataset):
         # 对于协变量，也进行单独的归一化    
         past_covariate = normalization(past_covariate)
         future_covariate = normalization(future_covariate)  
-            
-        # 需要返回scaler，用于后续恢复原数据
+        
         return (
             past_target,
             past_covariate,
             historic_future_covariate,
             future_covariate,
-            future_past_covariate,
             static_covariate,
-            scaler,
-            ts_target
+            (scaler,future_past_covariate),
+            None,
+            future_target,
+            target_info,
+            price_target
         )         

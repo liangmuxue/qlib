@@ -1,12 +1,15 @@
+import warnings
+
 from qlib.data.dataset import DatasetH
 from qlib.data.dataset.handler import DataHandler, DataHandlerLP
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
-from trader.utils.date_util import tradedays,get_tradedays_dur
+from trader.utils.date_util import tradedays,get_tradedays_dur,get_tradedays
 
 import pandas as pd
+from pandas.core.common import SettingWithCopyWarning
 import numpy as np
 import pickle
 import itertools
@@ -192,7 +195,7 @@ class TFTSeriesDataset(TFTDataset):
             logger.debug("emb size after p:{}".format(self.get_emb_size()))
         self.target_scalers = self._create_target_scalers(self.df_all)       
         
-    def build_series_data(self,data_file=None,no_series_data=False,val_ds_filter=False):
+    def build_series_data(self,data_file=None,outer_df=None,no_series_data=False,val_ds_filter=False):
         """从pandas数据生成时间序列类型数据"""
         
         if data_file is not None:
@@ -214,7 +217,7 @@ class TFTSeriesDataset(TFTDataset):
             
         total_range = self.segments["train_total"]
         valid_range = self.segments["valid"]
-        return self.build_series_data_step_range(total_range, valid_range,val_ds_filter=val_ds_filter,no_series_data=no_series_data)
+        return self.build_series_data_step_range(total_range, valid_range,val_ds_filter=val_ds_filter,outer_df=outer_df,no_series_data=no_series_data)
         
     def build_series_data_step_range(self,total_range,val_range,fill_future=False,outer_df=None,val_ds_filter=False,no_series_data=False):
         """根据时间点参数，从pandas数据生成时间序列类型数据
@@ -454,7 +457,7 @@ class TFTSeriesDataset(TFTDataset):
         return pred_label_df_list
 
 
-    def get_part_time_range(self,date_position,ref_df=None,offset=3):
+    def get_part_time_range(self,date_position,ref_df=None,offset=0):
         """根据给定日期，取得对应部分的数据集时间范围，需要满足预测要求"""
         
         # 首先取得总数据集范围，然后根据这个范围以及当前时间点，动态计算所需要的数据集范围以及验证集范围
@@ -463,13 +466,15 @@ class TFTSeriesDataset(TFTDataset):
         total_end = total_df_range[1]
         total_range = [None,None]
         val_range = [None,None]
-        
+        if offset==0:
+            offset = self.step_len
+            
         # 全集的开始时间就是配置中的开始时间
         total_range[0] = total_start
         # 全集的结束时间为当前分割时间点
         total_range[1] = date_position
         # 验证数据集的开始时间为分割时间点往前的n个长度，其中n为配置中的训练时间序列长度。由于不同股票数据长度不一致，因此需要根据参照数据集进行移动。
-        val_range[0],missing_instruments = self.shift_days(date_position, self.step_len,ref_df)
+        val_range[0],missing_instruments = self.shift_days(date_position, offset,ref_df)
         # 验证数据集的结束时间为当前分割时间点
         val_range[1] = total_range[1]
         # 如果计算后的结束时间超出原有数据集结束时间，则返回空用于后续异常处理
@@ -740,6 +745,41 @@ class TFTSeriesDataset(TFTDataset):
         df_target = self.df_all[(self.df_all["instrument"]==instrument)&(self.df_all["time_idx"]>=time_range[0])&(self.df_all["time_idx"]<time_range[1])]
         return df_target   
     
-    
-    
+    def expand_mock_df(self,ori_df,expand_length=10):
+        """给已有时间序列扩展添加模拟数据"""
+        
+        warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
+        
+        # 轮询每只股票，并按照时间累加虚拟数据
+        group_column = self.get_group_rank_column()
+        time_column = self.get_time_column()
+        df_expands = None
+        time_col_index = ori_df.columns.get_loc("time_idx")
+        dtNum_col_index = ori_df.columns.get_loc("datetime_number")
+        
+        # 遍历全集，找出时间序号不足的数据
+        for group_name,group_data in ori_df.groupby(group_column):
+            # 取得验证集最大时间序号，作为累加的开始时间序号
+            start_time_index = group_data[time_column].max()
+            last_datetime = group_data[group_data['time_idx']==(start_time_index)]['datetime'].values[0]
+            last_datetime = pd.to_datetime(str(last_datetime)).strftime('%Y%m%d')
+            # 原有长度需要大于扩展长度，否则无法复制虚拟值
+            assert group_data.shape[0]>expand_length
+            # 从最近的部分复制
+            df_expand = group_data[-expand_length:]
+            # 累加时间序列编号
+            df_expand["time_idx"] = np.array([start_time_index+1+i for i in range(expand_length)])
+            # 累计取得后续日期序列
+            datetime_end = get_tradedays_dur(last_datetime,expand_length)
+            datetime_range = get_tradedays(last_datetime,datetime_end)[1:]
+            df_expand["datetime_number"] = np.array(datetime_range).astype(np.int32)
+            df_expand["datetime"] = pd.to_datetime(df_expand["datetime_number"].astype(str),format="%Y%m%d")
+            if df_expands is None:
+                df_expands = df_expand
+            else:
+                df_expands = pd.concat([df_expands,df_expand])     
+        
+        df = pd.concat([ori_df,df_expands])
+        return df
+        
     
