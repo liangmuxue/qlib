@@ -187,8 +187,8 @@ class _TFTModuleAsis(_CusModule):
         # # 需要近期的牛市力度一直处于上方
         # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
         
-        # import_index_bool = self.create_signal_macd(target_info)       
-        import_index_bool = self.create_signal_rsi(target_info)  
+        import_index_bool = self.create_signal_macd(target_info)       
+        # import_index_bool = self.create_signal_rsi(target_info)  
         # import_index_bool = self.create_signal_kdj(target_info)    
         # All Data In
         # import_index_bool = np.ones(past_target.shape[0], dtype=bool)
@@ -206,9 +206,8 @@ class _TFTModuleAsis(_CusModule):
     def create_signal_macd(self,target_info):
         """macd指标判断"""
         
-        diff_cov = np.array([item["focus1_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        dea_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        macd_cov = np.array([item["focus3_array"][self.input_chunk_length-5:self.input_chunk_length] for item in target_info])
+        diff_cov = np.array([item["macd_diff"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        dea_cov = np.array([item["macd_dea"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即diff快线向上突破dea慢线
         index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=5) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=1)
         return index_bool
@@ -216,8 +215,8 @@ class _TFTModuleAsis(_CusModule):
     def create_signal_rsi(self,target_info):
         """rsi指标判断"""
         
-        rsi5_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        rsi20_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        rsi5_cov = np.array([item["rsi_5"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        rsi20_cov = np.array([item["rsi_20"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即rsi快线向上突破rsi慢线
         index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=5) & (np.sum(rsi5_cov[:,-5:]>=rsi20_cov[:,-5:],axis=1)>=1)
         return index_bool
@@ -225,11 +224,11 @@ class _TFTModuleAsis(_CusModule):
     def create_signal_kdj(self,target_info):
         """kdj指标判断"""
         
-        k_cov = np.array([item["focus1_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        d_cov = np.array([item["focus2_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        j_cov = np.array([item["focus3_array"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        # 规则为金叉，即k线向上突破j线
-        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=6) # & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
+        k_cov = np.array([item["kdj_k"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        d_cov = np.array([item["kdj_d"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        j_cov = np.array([item["kdj_j"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        # 规则为金叉，即k线向上突破d线
+        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=5) & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
         # 突破的时候d线也是向上的
         j_slope = j_cov[:,1:] - j_cov[:,:-1]
         # index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)

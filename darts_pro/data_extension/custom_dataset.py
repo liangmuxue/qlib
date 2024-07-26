@@ -20,6 +20,7 @@ from tft.class_define import CLASS_VALUES,get_simple_class,get_complex_class
 
 import cus_utils.global_var as global_var
 from cus_utils.encoder_cus import transform_slope_value
+from tushare.stock.indictor import kdj
 
 class CusGenericShiftedDataset(GenericShiftedDataset):
     def __init__(
@@ -52,13 +53,22 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                                 &(df_all["instrument_rank"]==code)]["datetime_number"].values                                
             label_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["label"].values           
-            focus1_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+            kdj_k = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["KDJ_K"].values      
-            focus2_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+            kdj_d = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["KDJ_D"].values      
-            focus3_array = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
-                                &(df_all["instrument_rank"]==code)]["KDJ_J"].values                                                                                                                     
-            self.ass_data[code] = (instrument,label_array,price_array,datetime_array,focus1_array,focus2_array,focus3_array)
+            kdj_j = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["KDJ_J"].values  
+            rsi_20 = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["RSI20"].values      
+            rsi_5 = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["RSI5"].values      
+            macd_diff = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["DIFF"].values      
+            macd_dea = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+                                &(df_all["instrument_rank"]==code)]["DEA"].values      
+                                                                                                                                                                                                                   
+            self.ass_data[code] = (instrument,label_array,price_array,datetime_array,kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea)
             
     def __getitem__(
         self, idx
@@ -130,15 +140,13 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         datetime_array = self.ass_data[code][3][past_start:future_end]
         # 记录预测未来第一天的关联日期，用于后续数据对齐
         future_start_datetime = self.ass_data[code][3][past_end]
-        focus1_array = self.ass_data[code][4][past_start:future_end]
-        focus2_array = self.ass_data[code][5][past_start:future_end]
-        focus3_array = self.ass_data[code][6][past_start:future_end]
+        kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea = self.ass_data[code][4:]
         # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
                        "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
                        "price_array":price_array,"label_array":label_array,"datetime_array":datetime_array,
-                       "focus1_array":focus1_array,"focus2_array":focus2_array,"focus3_array":focus3_array,
+                       "kdj_k":kdj_k,"kdj_d":kdj_d,"kdj_j":kdj_j,"rsi_20":rsi_20,"rsi_5":rsi_5,"macd_diff":macd_diff,"macd_dea":macd_dea,
                        "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
 
         # optionally, extract sample covariates

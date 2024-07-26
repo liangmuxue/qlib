@@ -60,7 +60,7 @@ task:
             n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/RSI_2000_202110_202112'
+            batch_file_path: 'custom/data/asis/MACD_2000_202110_202112'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
