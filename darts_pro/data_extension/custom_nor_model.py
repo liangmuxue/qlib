@@ -188,8 +188,8 @@ class _TFTModuleAsis(_CusModule):
         # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
         
         # import_index_bool = self.create_signal_macd(target_info)       
-        # import_index_bool = self.create_signal_rsi(target_info)  
-        import_index_bool = self.create_signal_kdj(target_info)    
+        import_index_bool = self.create_signal_rsi(target_info)  
+        # import_index_bool = self.create_signal_kdj(target_info)    
         # All Data In
         # import_index_bool = np.ones(past_target.shape[0], dtype=bool)
         import_index_bool = import_index_bool & price_bool
@@ -969,7 +969,16 @@ class TFTCluSerModel(TFTBatchModel):
                 )   
             if best:
                 # 如果查找best，则使用文件中的最高分数进行匹配
-                file_name = max(checklist, key=lambda x: x.split("=")[2][:-5])
+                max_score = 0
+                cadi_x = None
+                for x in checklist:
+                    score = float(x.split("=")[2][:-5])
+                    cur_epoch = int(x.split("=")[1].split("-")[0])
+                    # 大于一定的epoch才计算评分
+                    if cur_epoch>100 and score>max_score:
+                        max_score = score
+                        cadi_x = x
+                file_name = cadi_x
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))

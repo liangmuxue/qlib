@@ -14,8 +14,9 @@ import qlib
 
 import ruamel.yaml as yaml
 
+from darts_pro.data_extension.custom_nor_model import TFTCluSerModel
 from .ml_context import MlIntergrate
-from darts_pro.data_extension.custom_model import TFTExtModel
+from workflow.main_fitter import MainFitter
 from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
 from trader.busi_compute import slope_status
@@ -59,7 +60,7 @@ class MlWorkflowIntergrate(MlIntergrate):
         # 生成recorder,用于后续预测数据处理
         record_cfg = config["task"]["record"]
         optargs = self.model_cfg["kwargs"]["optargs"]
-        model = TFTExtModel.load_from_checkpoint(optargs["model_name"],work_dir=optargs["work_dir"],best=False)
+        model = TFTCluSerModel.load_from_checkpoint(optargs["model_name"],work_dir=optargs["work_dir"],best=True)
         placehorder_value = {"<MODEL>": model, "<DATASET>": dataset}
         record_cfg = fill_placeholder(record_cfg, placehorder_value)   
         rec = R.get_recorder()
@@ -72,20 +73,41 @@ class MlWorkflowIntergrate(MlIntergrate):
         self.pred_recorder = recorder
         self.kwargs = kwargs
                
+        self.pred_df = None
         self.task_id = kwargs["task_id"]
         self.task_store = WfTaskStore()
         self.dbaccess = DbAccessor({})
 
     def prepare_data(self,pred_date):   
+        """数据准备"""
         
-        # 根据日期，动态找到对应的预测文件，并加载
-        date_pred_df_file = self.task_store.get_pred_result_by_task_and_working_day(self.task_id,pred_date)
-        dump_path = self.kwargs["dump_path"]
-        total_path = "{}/{}".format(dump_path,date_pred_df_file)
-        with open(total_path, "rb") as fin:
-            self.pred_df = pickle.load(fin)      
-                 
+        columns = ["pred_date","instrument"]
+        # 根据日期，累加当前上下文的预测数据
+        # pred_data_file = self.model_cfg["kwargs"]["pred_data_file"]
+        date_pred_df_file = "{}/pred_part/pred_result_{}.pkl".format(self.pred_data_path,pred_date)
+        with open(date_pred_df_file, "rb") as fin:
+            pred_df = pickle.load(fin)     
+            inst_list = list(pred_df.values())[0] 
+            # 拼装为Dataframe形式
+            data = [[pred_date,instrument] for instrument in inst_list]
+            pred_df = pd.DataFrame(data,columns=columns)
+            
+        if self.pred_df is None:
+            self.pred_df = pred_df
+        else:
+            self.pred_df = pd.concat([self.pred_df,pred_df])
+        
     def filter_buy_candidate(self,pred_date):
+        """根据预测计算，筛选可以买入的股票"""
+
+        dump_path = self.kwargs["dump_path"]
+        date_pred_df_file = "{}/pred_part/pred_result_{}.pkl".format(self.pred_data_path,pred_date)
+        with open(date_pred_df_file, "rb") as fin:
+            pred_df = pickle.load(fin)      
+        inst_list = list(pred_df.values())[0]  
+        return inst_list
+                   
+    def filter_buy_candidate_old(self,pred_date):
         """根据预测计算，筛选可以买入的股票"""
         
         date_pred_df = self.pred_df[(self.pred_df["pred_date"]==pred_date)]

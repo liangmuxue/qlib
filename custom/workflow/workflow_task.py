@@ -338,7 +338,13 @@ class WorkflowSubTask(object):
             # 同时保留当天的配置文件           
             with open(config_file_working_day, "w") as f:
                 yaml.dump(template_real, f)  
-                
+
+    def get_asis_path(self):
+        """内部辅助文件存储路径"""
+        
+        filepath = "{}/task/{}/asis".format(self.get_main_dir(),self.main_task.task_batch) 
+        return filepath
+                  
     def get_dumpdata_path(self):
         """内部数据文件存储路径"""
         
@@ -394,7 +400,18 @@ class WorkflowSubTask(object):
         month_str = str(working_day)[:6]
         name = self.config["name"] + "_{}".format(month_str)
         return name
-     
+
+    def get_matched_batchfile_name(self,working_day=None,task_type=None):
+        """辅助存储路径名称,命名规范中添加当前日期"""
+        
+        month_str = str(working_day)[:6]
+        if task_type is not None:
+            type_name = task_type
+        else:
+            type_name = self.config["name"]
+        name = type_name + "_KDJ_{}".format(month_str)
+        return name
+         
     def get_matched_model_file_name(self,working_day,task_type=None): 
         """取得与指定工作日匹配的模型文件名称"""
         
@@ -585,6 +602,9 @@ if __name__ == "__main__":
     
     # 2023回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_review_flow_2023",resume=False)
-    task = WorkflowTask(task_batch=141,workflow_name="wf_review_flow_2023",resume=True)       
+    # task = WorkflowTask(task_batch=141,workflow_name="wf_review_flow_2023",resume=True)    
+    
+    # 2022回测工作流
+    task = WorkflowTask(task_batch=148,workflow_name="wf_review_flow_2022",resume=True)     
     task.start_task()
         

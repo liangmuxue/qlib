@@ -10,7 +10,12 @@ def is_working_day(day):
         date = datetime.strptime(day,'%Y%m%d').date()   
     else:
         date = day 
-    return not is_holiday(date)
+    # 周末倒休的工作日，大陆股市也休息
+    if date.weekday()==5 or date.weekday()==6:
+        return False
+    if is_holiday(date):
+        return False    
+    return True
      
 def tradedays(start,end):
     '''
@@ -46,7 +51,10 @@ def get_tradedays_dur(start_date,duration):
     '''
 
     if type(start_date) == str:
-        start_date = datetime.strptime(start_date,'%Y%m%d').date()
+        if len(start_date)==8:
+            start_date = datetime.strptime(start_date,'%Y%m%d').date()
+        else:
+            start_date = datetime.strptime(start_date,'%Y-%m-%d').date()
         
     counts = 0
     # if is_holiday(start_date):  

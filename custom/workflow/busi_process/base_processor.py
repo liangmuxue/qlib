@@ -61,6 +61,7 @@ class BaseProcessor(object):
         # model & dataset initiation
         model = init_instance_by_config(task_config["model"])
         dataset = init_instance_by_config(task_config["dataset"])
+        # 执行实际运行入口，具体运行内容取决于yaml配置文件中的任务type字段
         model.fit(dataset)
         # fill placehorder
         placehorder_value = {"<MODEL>": model, "<DATASET>": dataset}

@@ -60,7 +60,7 @@ task:
             n_epochs : 180
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/KDJ_2000_202109_M'
+            batch_file_path: 'custom/data/asis/KDJ_2000_202110_202112'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,7 +77,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MLP_QUAN_2000_202109M'
+               model_name: 'MLP_QUAN_2000_202112'
                model_type: 'mlp'
                load_weight: True
                best_weight: False
@@ -98,7 +98,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2010-01-01, 2023-05-31]
-                valid: [2020-09-01, 2021-10-30]
+                valid: [2022-01-01, 2022-12-31]
                 test: [2021-01-01, 2021-03-01]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

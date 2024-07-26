@@ -192,7 +192,7 @@ class WfTaskStore(BasePersistence):
     def get_pred_result_by_task_and_working_day(self,subtask_id,working_day):  
         """根据任务标号和工作日，取得之前生成的预测数据文件"""
         
-        # 通过当前任务编号，找到对应的主任务编号。在根据工作日找到对应的序号，从而得到实际的预测任务编号，进一步取得对应的预测结果
+        # 通过当前任务编号，找到对应的主任务编号。再根据工作日找到对应的序号，从而得到实际的预测任务编号，进一步取得对应的预测结果
         seq_sql = "select wc.sequence,wtd.main_task_id from workflow_calendar wc,workflow_task_detail wtd where wc.task_id=wtd.main_task_id " \
             "and wtd.id={} and wc.working_day={}".format(subtask_id,working_day)
         row = self.dbaccessor.do_query(seq_sql)[0]

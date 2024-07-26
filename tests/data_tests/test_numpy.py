@@ -666,7 +666,18 @@ def test_hist():
     plt.hist(y, bins, alpha=0.5, label='y')
     plt.legend(loc='upper right')
     plt.show()        
-       
+
+def test_dump():
+    import pickle
+    file_path = "/home/qdata/workflow/wf_review_flow_2021/task/145/dump_data/pred_part/pred_result_20210104.pkl"
+    df_result = {"20210104":[]}
+    with open(file_path, "wb") as fout:
+        pickle.dump(df_result, fout)       
+
+def test_date():    
+    day = datetime.date(2021,2,day=21)  
+    print(day.weekday())
+                
 if __name__ == "__main__":
     # test_mask()
     # test_pair_compute()
@@ -676,7 +687,9 @@ if __name__ == "__main__":
     # test_group()
     # test_mahalanobis()
     # test_pdf()
-    test_hist()
+    # test_hist()
+    # test_dump()
+    test_date()
     # test_corr()
     # test_corr_tensor()
     # test_slope()

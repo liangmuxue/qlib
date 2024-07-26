@@ -111,18 +111,19 @@ class SimStrategy(BaseStrategy):
             if not self.has_current_data(pred_date,instrument):
                 logger.warning("no data for sell:{},ignore".format(instrument))
                 continue
-            flag = context.ml_context.measure_pos(pred_date,int(instrument))
-            if flag:
-                pos_info = self.get_position(position.order_book_id)
-                amount = pos_info.quantity
-                # 以昨日收盘价格卖出
-                h_bar = history_bars(position.order_book_id,1,"1d",fields="close",adjust_type="none")
-                if h_bar is None:
-                    continue
-                sell_price = h_bar[0,0]                
-                # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）
-                order = self.create_order(position.order_book_id, amount, SIDE.SELL, sell_price,sell_reason=SellReason.PRED.value)             
-                sell_list[position.order_book_id] = order
+            # Chang by lmx,暂时不检查负向指标
+            # flag = context.ml_context.measure_pos(pred_date,int(instrument))
+            # if flag:
+            #     pos_info = self.get_position(position.order_book_id)
+            #     amount = pos_info.quantity
+            #     # 以昨日收盘价格卖出
+            #     h_bar = history_bars(position.order_book_id,1,"1d",fields="close",adjust_type="none")
+            #     if h_bar is None:
+            #         continue
+            #     sell_price = h_bar[0,0]                
+            #     # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）
+            #     order = self.create_order(position.order_book_id, amount, SIDE.SELL, sell_price,sell_reason=SellReason.PRED.value)             
+            #     sell_list[position.order_book_id] = order
         # 卖单保存到上下文    
         self.sell_list = sell_list
         # 撤单列表

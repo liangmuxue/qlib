@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_2000
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -36,8 +36,8 @@ port_analysis_config: &port_analysis_config
             topk: 50
             n_drop: 5
     backtest:
-        start_time: 2017-01-01
-        end_time: 2020-08-01
+        pred_start_time: 2017-01-01
+        pred_end_time: 2020-08-01
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -61,7 +61,7 @@ task:
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/PRED_2000_202110'
-            ignore_exp: False
+            ignore_exp: True
             pred_data_path: &pred_data_path "custom/data/pred"   
             pred_data_file: &pred_data_file "pred_df_total.pkl"
             scheduler_config: 
@@ -79,7 +79,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MLP_QUAN_2000_202009M'
+               model_name: 'MLP_QUAN_2000_202111M'
                model_type: 'mlp'
                load_weight: True
                best_weight: True
@@ -99,9 +99,9 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2020-03-01, 2020-10-19]
-                valid: [2020-08-01, 2020-10-19]
-                test: [2020-10-20, 2020-10-25]
+                train_total: [2020-03-01, 2022-10-19]
+                valid: [2021-08-01, 2022-01-04]
+                test: [2022-01-05, 2022-01-15]
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'

@@ -56,16 +56,16 @@ class ExtDataMod(AbstractMod):
         stat_df = self.build_stat_df(strategy_obj,load_trade_df=load_trade_df,load_cache=False)
         # 按照盈亏排序
         stat_df = stat_df.sort_values(by=["differ_range"],ascending=False)
+        total_gain = stat_df["gain"].sum()
+        logger.info("total_gain:{}".format(total_gain))
+        ml_context.record_results(stat_df)
+
         pred_df = ml_context.pred_df
         pred_df["instrument"] = pred_df["instrument"].astype(int)
         pred_recorder = ml_context.pred_recorder
         dataset = ml_context.dataset
         ext_length = 25
-        
-        total_gain = stat_df["gain"].sum()
-        logger.info("total_gain:{}".format(total_gain))
-        ml_context.record_results(stat_df)
-        
+               
         save_path = self.report_save_path + "/plot"
         # 取得预测数据和回测数据，并进行图形化展示
         for index,row in stat_df.iterrows():

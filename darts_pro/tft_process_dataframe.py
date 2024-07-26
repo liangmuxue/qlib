@@ -177,7 +177,7 @@ class TftDataframeModel():
         
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0)
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
 
     def build_data_asis(
         self,
@@ -267,6 +267,7 @@ class TftDataframeModel():
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
             self.model = TFTCluSerModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=best_weight)
             self.model.batch_size = self.batch_size     
+            self.model.batch_file_path = self.batch_file_path
             self.model.mode = "train"
             self.model.model.monitor = monitor
         else:
@@ -275,7 +276,7 @@ class TftDataframeModel():
             
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0)
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
                         
     def _build_model(self,dataset,emb_size=1000,use_model_name=True,mode=0):
         """生成模型"""

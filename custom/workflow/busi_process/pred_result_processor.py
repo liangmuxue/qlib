@@ -9,6 +9,7 @@ from qlib.utils import flatten_dict, get_callable_kwargs, init_instance_by_confi
 from .base_processor import BaseProcessor
 from trader.utils.date_util import get_tradedays_dur,date_string_transfer
 from persistence.common_dict import CommonDictEnum,CommonDict,CommonDictType
+from trader.utils.date_util import get_tradedays_dur
 
 class PredResultProcessor(BaseProcessor):
     
@@ -29,16 +30,16 @@ class PredResultProcessor(BaseProcessor):
         pred_len = dataset_template["kwargs"]["pred_len"]
         end_date = str(working_day)
         end_date_fmt = date_string_transfer(end_date)
-        # 总数据集定义的开始结束时间
-        real_template["data_handler_config"]["start_date"] = start_date
+        # 总数据集定义的开始结束时间,其中结束日期与当前任务日期匹配
         real_template["data_handler_config"]["end_date"] = end_date_fmt
-        
         # dataset数据集定义的开始结束时间
-        dataset_template["kwargs"]["segments"]["train_total"] = [start_date,end_date_fmt]
-        # 验证集结束日期前推3个月
+        # 完整数据集结束日期前推12个月
+        total_start_date = get_tradedays_dur(end_date,-30*12)        
+        dataset_template["kwargs"]["segments"]["train_total"] = [total_start_date,end_date_fmt]
+        # 验证集开始日期前推3个月
         valid_start_date = get_tradedays_dur(end_date,-30*3)
-        # 验证集结束日期前推1个月
-        valid_end_date = get_tradedays_dur(end_date,-30*1)
+        # 验证集结束日期为当日
+        valid_end_date = end_date_fmt
         dataset_template["kwargs"]["segments"]["valid"] = [valid_start_date,valid_end_date]
         # 预测开始和结束日期都为当天
         working_day_list = self.wf_task.get_calendar_by_seq(self.wf_task.task_entity["sequence"])
@@ -51,6 +52,12 @@ class PredResultProcessor(BaseProcessor):
             real_template["port_analysis_config"]["backtest"]["pred_end_time"] = pred_begin_date
         # 设置内部数据存储路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
+        # 辅助数据存储目录
+        asis_path = self.wf_task.get_asis_path()
+        if not os.path.exists(asis_path):
+            os.makedirs(asis_path)
+        model_template["kwargs"]["batch_file_path"] = os.path.join(asis_path,self.wf_task.get_matched_batchfile_name(working_day,
+                                                                    task_type=CommonDictEnum.WORK_TYPE__PRED.value)) 
         record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 设置模型路径
         model_template["kwargs"]["optargs"]["work_dir"] = self.wf_task.get_model_path()
@@ -80,7 +87,9 @@ class PredResultProcessor(BaseProcessor):
         df_result = results[0]
         model_template = self.config["task"]["model"]
         pred_data_file = model_template["kwargs"]["pred_data_file"]
-        file_path = self.wf_task.get_pred_data_part_filepath(pred_data_file,working_day)
+        # 生成预测数据，以下一工作日作为基准文件名
+        next_working_day = get_tradedays_dur(str(working_day),1).strftime("%Y%m%d")
+        file_path = self.wf_task.get_pred_data_part_filepath(pred_data_file,next_working_day)
         file_name = os.path.split(file_path)[1]
         # 保留每次的预测记录
         with open(file_path, "wb") as fout:

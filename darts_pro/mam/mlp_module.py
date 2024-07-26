@@ -438,13 +438,13 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_2<0) & (fea_0_range>0) & (fea_1_range<-1)
+        sv_import_bool = (sv_2<0) & (fea_1_range<-0.6)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
         # sv_import_bool = (sv_2<0) & (sv_1>0) & (fea_1_range<-1)
         # 分位数回归模式下的阈值选择
-        cls_thre_para = [[0.1,8],[-0.3,8],[-0,7]]
+        cls_thre_para = [[0.1,8],[0,8],[-0,7]]
         # 包含2个参数：分数阈值以及个数阈值
         para0 = cls_thre_para[0]
         para1 = cls_thre_para[1]
@@ -688,6 +688,8 @@ class MlpModule(_TFTModuleBatch):
                 fur_dates[future_start_datetime] = [index]
             else:
                 fur_dates[future_start_datetime].append(index)
+        # cur_date = "20220105"
+        # fur_dates = [cur_date,fur_dates[cur_date]]
         # 生成目标索引
         import_index_all,values = self.build_import_index(output_data=output_total,fur_dates=fur_dates)
         rate_total = {}

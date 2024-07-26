@@ -35,7 +35,7 @@ from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from cus_utils.common_compute import normalization,compute_series_slope,slope_classify_compute,compute_price_class,comp_max_and_rate
 from tft.class_define import SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_SEC,CLASS_SIMPLE_VALUE_MAX
-from trader.utils.date_util import get_tradedays
+from trader.utils.date_util import get_tradedays,get_tradedays_dur
 from cus_utils.log_util import AppLogger
 from trader.data_viewer import DataViewer
 logger = AppLogger()
@@ -66,7 +66,7 @@ class PortAnaRecord(TftRecorder):
         self.pred_data_path = pred_data_path
         self.pred_data_file = pred_data_file
         
-        self.df_ref = dataset.df_all     
+        # self.df_ref = dataset.df_all     
         self.pred_result_columns = ['pred_date','time_idx','instrument','trend_class','vr_class','pred_data'] 
         # self.data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
         # self.data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
@@ -104,27 +104,23 @@ class PortAnaRecord(TftRecorder):
         
         # 取得日期范围，并遍历生成预测数据
         date_range = get_tradedays(start_time,end_time)
-        data_total = None
+        date_range = [start_time.strftime('%Y%m%d')]
+        data_total = {}
+        dataset = self.dataset
         for cur_date in date_range:
-            # 动态生成数据
+            # 进行预测，取得预测结果
             logger.debug("begin predict_process")  
-            pred_combine_data = self.predict_process(cur_date,outer_df=self.df_ref)
+            pred_combine_data = self.predict_process(cur_date=cur_date)
             logger.debug("begin build_pred_data")  
-            data_pred = self.build_pred_data(cur_date,pred_combine_data,df_ref=self.df_ref)
-            if data_total is None:
-                data_total = data_pred
-            else:
-                data_total = np.concatenate((data_total,data_pred),axis=0) 
-                 
+            # # 生成加工后的预测数据
+            # data_pred = self.build_pred_data(cur_date,pred_combine_data,df_ref=dataset.df_all)
+            data_total[cur_date] = pred_combine_data
             logger.debug("build df_pred,data:{}".format(cur_date))   
              
-        # 一并生成DataFrame
-        df_total = pd.DataFrame(data_total,columns=self.pred_result_columns)
-        # 存储数据
-        pred_data_path = self.pred_data_path + "/" + self.pred_data_file
-        with open(pred_data_path, "wb") as fout:
-            pickle.dump(df_total, fout)     
-        return df_total
+        # pred_data_path = self.pred_data_path + "/" + self.pred_data_file
+        # with open(pred_data_path, "wb") as fout:
+        #     pickle.dump(data_total, fout)     
+        return data_total
     
     def build_pred_data(self,pred_date,pred_combine_data,df_ref=None):
         """预测数据生成,numpy格式"""
@@ -168,41 +164,47 @@ class PortAnaRecord(TftRecorder):
         data_path = pred_data_path + "/" + str(cur_date) + ".pkl"
         return data_path
     
-    def predict_process(self,cur_date,outer_df=None):
-        """执行预测过程"""
+    def predict_process(self,cur_date):
+        """根据日期进行预测，得到预测结果 """
+        
+        dataset = self.dataset
+        expand_length = 10
         
         # 根据时间点，取得对应的输入时间序列范围
-        total_range,val_range,missing_instruments = self.dataset.get_part_time_range(cur_date,ref_df=self.df_ref)
-        # 如果不满足预测要求，则返回空
-        if total_range is None:
-            self.log("pred series none")
-            return None
-        # 如果包含不符合的数据，再次进行过滤
-        if len(missing_instruments)>0:
-            outer_df_filter = outer_df[~outer_df[self.dataset.get_group_column()].isin(missing_instruments)]
-        else:
-            outer_df_filter = outer_df     
-        # 从执行器模型中取得已经生成好的模型变量
-        my_model = self.model.model
-        my_model.model.monitor = None
-        my_model.mode = "predict"
-        # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
+        total_range = dataset.segments["train_total"]
+        valid_range = dataset.segments["valid"]    
+        # 需要延长集合时间
+        last_day = get_tradedays_dur(total_range[1],expand_length)
+        # 以当天为数据时间终点
+        total_range[1] = cur_date
+        valid_range[1] = cur_date    
+        # 生成未扩展的真实数据
+        dataset.build_series_data_step_range(total_range,valid_range)  
+        # 为了和训练阶段保持一致处理，需要补充模拟数据
+        df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length) 
+        # 重置数据区间以满足生成第一阶段数据的足够长度
+        total_range[1] = last_day
+        valid_range[1] = last_day            
+        # 生成序列数据            
         train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
-            self.dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=outer_df_filter)
-        my_model.fit(series_total,val_series=val_series_transformed, past_covariates=past_convariates, future_covariates=future_convariates,
-                     val_past_covariates=past_convariates, val_future_covariates=future_convariates,num_loader_workers=8,verbose=True,epochs=-1)            
-        # 对验证集进行预测，得到预测结果   
-        pred_combine = my_model.predict(n=self.dataset.pred_len, series=val_series_transformed,num_samples=200,num_loader_workers=8,
+            dataset.build_series_data_step_range(total_range,valid_range,outer_df=df_expands)            
+        # 每次使用前置模型生成一阶段数据          
+        self.model.model_exp.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                 max_samples_per_ts=None,trainer=None,epochs=1,verbose=True,num_loader_workers=6)               
+        
+        
+        # 根据时间点，取得对应的输入时间序列范围
+        total_range,val_range,missing_instruments = dataset.get_part_time_range(cur_date,ref_df=dataset.df_all)
+        # 每次都需要重新生成时间序列相关数据对象，包括完整时间序列用于fit，以及测试序列，以及相关变量
+        _,val_series_transformed,series_total,past_convariates,future_convariates = \
+            dataset.build_series_data_step_range(total_range,val_range,fill_future=True,outer_df=df_expands)            
+        # 进行第二阶段预测           
+        pred_result = self.model.model.predict(n=dataset.pred_len, series=val_series_transformed,num_samples=10,cur_date=cur_date,
                                             past_covariates=past_convariates,future_covariates=future_convariates)
-        pred_series_list = [item[0] for item in pred_combine]
-        pred_class_total = [item[1] for item in pred_combine]
-        vr_class_total = [item[2] for item in pred_combine] 
-        # 归一化反置，恢复到原值
-        # pred_series_list = self.dataset.reverse_transform_preds(pred_series_list)
-        for series in pred_series_list:
-            group_rank = series.static_covariates["instrument_rank"].values[0]
-            code = self.dataset.get_group_code_by_rank(group_rank)
-        return pred_series_list,pred_class_total,vr_class_total
+        # 返回股票编码
+        instrument_rank_arr = [ts["instrument"] for ts in pred_result]
+        return instrument_rank_arr
 
     def combine_complex_df_data(self,pred_date,instrument,pred_df=None,df_ref=None,ext_length=25,type="combine"):
         """合并预测数据,实际行情数据,价格数据等
