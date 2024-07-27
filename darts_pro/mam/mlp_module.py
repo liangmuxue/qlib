@@ -86,6 +86,7 @@ class MlpModule(_TFTModuleBatch):
         self.switch_flag = 0
         # 模型训练模式
         self.step_mode=step_mode
+        self.mode = None
         # 初始化中间结果数据
         self.training_step_outputs = [[] for _ in range(self.output_data_len)]
         self.training_step_targets = [[] for _ in range(self.output_data_len)]
@@ -258,6 +259,10 @@ class MlpModule(_TFTModuleBatch):
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """重载原方法，直接使用已经加工好的数据"""
 
+        if self.mode=="pred_batch":
+            # 测试模式，不进行训练
+            print("no training for pred batch")
+            return
         (past_target,past_covariates, historic_future_covariates,future_covariates,
          static_covariates,scaler,target_class,target,target_info,price_target) = train_batch    
 
@@ -418,12 +423,12 @@ class MlpModule(_TFTModuleBatch):
         # 按照日期分组进行计算
         pred_import_index_all = {}
         if fur_dates is None:
-            pred_import_index = self.strategy_threhold(smooth_values,(fea_0_range,fea_1_range),cls_values,batch_size=cls_values.shape[0])
+            pred_import_index = self.strategy_top(smooth_values,(fea_0_range,fea_1_range),cls_values,batch_size=cls_values.shape[0])
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
             idx = fur_dates[date]
-            pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
+            pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
             # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=len(idx))
             pred_import_index_all[date] = np.array(idx)[pred_import_index]
             
@@ -438,7 +443,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_2<0) & (fea_1_range<0)
+        sv_import_bool = (sv_2<0) & (fea_1_range<-0.5)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -465,7 +470,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range) = fea
         
-        top_k = batch_size//6
+        top_k = sv_0.shape[0]//4
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
         sv_import_index = np.argsort(sv_2)[:top_k]
         # 使用0号进行corr判断（整体涨跌幅度），正序
@@ -749,6 +754,10 @@ class MlpModule(_TFTModuleBatch):
             score_total = 0
         self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
         self.log("score_total", score_total, prog_bar=True) 
+        
+        # 如果是测试模式，则在此直接退出
+        # if self.mode=="pred_batch":
+        #     exit()
                 
     def predict_step(
         self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None

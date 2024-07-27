@@ -165,34 +165,28 @@ class _TFTModuleAsis(_CusModule):
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target) = data_batch    
         
         price_bool = np.ones(past_target.shape[0], dtype=bool)
+        # import_index_bool = self.create_signal_macd(target_info)       
+        import_index_bool = self.create_signal_rsi(target_info)  
+        # import_index_bool = self.create_signal_kdj(target_info)    
+        
+        def remove_att_data(item):
+            del item["kdj_k"] 
+            del item["kdj_d"] 
+            del item["kdj_j"] 
+            del item["rsi_20"] 
+            del item["rsi_5"] 
+            del item["macd_diff"] 
+            del item["macd_dea"]             
         # 如果周期内价格不发生变化，后续统计是会NAN，在此过滤
         for i in range(len(target_info)):
             item = target_info[i]
             item_price = item["price_array"][:self.input_chunk_length]
-            price_bool[i] = (np.unique(item_price).shape[0]>=2)
-        # 当前价格不能处于下降趋势
-        # less_ret = np.subtract(recent_data.transpose(1,0),recent_data[:,-1]).transpose(1,0)
-        # import_index_bool = import_index_bool & (np.sum(less_ret>0,axis=1)<=3)
-        
-        # 通过指标筛选(配置参数里指定哪种指标)
-        # rev_cov = np.array([item["focus2_array"][:self.input_chunk_length] for item in target_info])
-        
-        # 使用cci指标，突破100后进入筛选池
-        # cci_cov = np.array([item["focus1_array"][:self.input_chunk_length] for item in target_info])
-        # # 当前记录大于100并且前一条记录明显小于100
-        # import_index_bool = (cci_cov[:,-1]>100) & (cci_cov[:,-2]<50)
-
-        # 使用bulls指标
-        # bulls_cov = np.array([item["focus2_array"][self.input_chunk_length-5:self.input_chunk_length] for item in target_info])
-        # # 需要近期的牛市力度一直处于上方
-        # import_index_bool = np.sum(bulls_cov>0,axis=1)>=4
-        
-        import_index_bool = self.create_signal_macd(target_info)       
-        # import_index_bool = self.create_signal_rsi(target_info)  
-        # import_index_bool = self.create_signal_kdj(target_info)    
-        # All Data In
-        # import_index_bool = np.ones(past_target.shape[0], dtype=bool)
-        import_index_bool = import_index_bool & price_bool
+            price_bool[i] = (np.unique(item_price).shape[0]>=2)     
+            # 清除附加数据，节约内存 
+            # print("begin rm:{}".format(target_info[i]))
+            remove_att_data(item)
+            # print("after rm:{}".format(target_info[i]))
+        import_index_bool = import_index_bool & price_bool            
         if np.sum(import_index_bool)==0:
             return None
         print("total size:{},import_index_bool size:{}".format(past_target.shape[0],np.sum(import_index_bool)))
@@ -209,7 +203,7 @@ class _TFTModuleAsis(_CusModule):
         diff_cov = np.array([item["macd_diff"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         dea_cov = np.array([item["macd_dea"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即diff快线向上突破dea慢线
-        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=5) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=1)
+        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=5) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=2)
         return index_bool
 
     def create_signal_rsi(self,target_info):
@@ -218,7 +212,7 @@ class _TFTModuleAsis(_CusModule):
         rsi5_cov = np.array([item["rsi_5"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         rsi20_cov = np.array([item["rsi_20"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即rsi快线向上突破rsi慢线
-        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=5) & (np.sum(rsi5_cov[:,-5:]>=rsi20_cov[:,-5:],axis=1)>=1)
+        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=6) & (np.sum(rsi5_cov[:,-3:]>=rsi20_cov[:,-5:],axis=1)>=2)
         return index_bool
 
     def create_signal_kdj(self,target_info):
@@ -227,14 +221,14 @@ class _TFTModuleAsis(_CusModule):
         k_cov = np.array([item["kdj_k"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         d_cov = np.array([item["kdj_d"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         j_cov = np.array([item["kdj_j"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        # 规则为金叉，即k线向上突破d线
-        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=5) & (np.sum(k_cov[:,-3:]>=d_cov[:,-3:],axis=1)>=1)
+        # 规则为金叉，即d线向上突破j线
+        index_bool = (np.sum(d_cov[:,:-2]<=j_cov[:,:-2],axis=1)>=5) & (np.sum(d_cov[:,-5:]>=j_cov[:,-5:],axis=1)>=1)
         # 突破的时候d线也是向上的
         j_slope = j_cov[:,1:] - j_cov[:,:-1]
         # index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)
         # index_bool = index_bool & (np.sum(j_cov[:,:-2]<=d_cov[:,:-2],axis=1)==8) & (np.sum(j_cov[:,-2:]>=d_cov[:,-2:],axis=1)==2)
         # 还需要满足K和D值小于一定阈值
-        index_bool = index_bool & (np.sum(k_cov[:,:-2]<20,axis=1)>=7) & (np.sum(d_cov[:,:-2]<30,axis=1)>=7)
+        # index_bool = index_bool & (np.sum(k_cov[:,:-2]<20,axis=1)>=7) & (np.sum(d_cov[:,:-2]<30,axis=1)>=7)
         # 还需要满足J线小于阈值
         # index_bool = index_bool & (np.sum(j_cov[:,:-2]<0,axis=1)>=8) & (np.sum(j_cov[:,-2:]>0,axis=1)>=1)
         return index_bool
@@ -986,6 +980,8 @@ class TFTCluSerModel(TFTBatchModel):
         file_path = os.path.join(checkpoint_dir, file_name)
 
         model.model = model._load_from_checkpoint(file_path, **kwargs)
+        model.batch_file_path = kwargs["batch_file_path"]
+        model.model.set_filepath(kwargs["batch_file_path"])
         
         # loss_fn is excluded from pl_forecasting_module ckpt, must be restored
         loss_fn = model.model_params.get("loss_fn")

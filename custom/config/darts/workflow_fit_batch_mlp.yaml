@@ -60,14 +60,14 @@ task:
             n_epochs : 180
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/MACD_2000_202110_202112'
+            batch_file_path: 'custom/data/asis/RSI_2000_202201_202203'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
                base_lr: 0.5e-4
                max_lr: 1.5e-3
                cycle_momentum: False
-               step_size_up: 3000
+               step_size_up: 10000
                # T_max: 5
                # eta_min: 0.001
             optimizer_kwargs:
@@ -77,9 +77,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MACD_MLP_QUAN_2000_202112'
+               model_name: 'RSI_MLP_QUAN_2000_202203'
                model_type: 'mlp'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'

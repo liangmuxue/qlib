@@ -970,13 +970,16 @@ class _TFTModuleBatch(_CusModule):
                                     use_weighted_loss_func=use_weighted_loss_func,train_sample=train_sample,
                                     device=device,**kwargs)  
         self.lr_freq = {"interval":"epoch","frequency":1}
-        
-        self.train_filepath = "{}/train_output_batch.pickel".format(batch_file_path)
-        self.valid_filepath = "{}/valid_output_batch.pickel".format(batch_file_path)
+        self.set_filepath(batch_file_path)
         # 使用具备梯度额参数作为聚类簇心，供聚类损失使用,形状为:类别数*预测时间步长
         self.cluster_center = [torch.nn.Parameter(torch.rand(len(CLASS_SIMPLE_VALUES.keys()), 
                                     kwargs["output_chunk_length"]).to(device)) for i in range(len(past_split))]
     
+    def set_filepath(self,batch_file_path):
+        self.batch_file_path = batch_file_path
+        self.train_filepath = "{}/train_output_batch.pickel".format(batch_file_path)
+        self.valid_filepath = "{}/valid_output_batch.pickel".format(batch_file_path)
+            
     def on_train_start(self): 
         super().on_train_start()
         self.train_output_flag = False

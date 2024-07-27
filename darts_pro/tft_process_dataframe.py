@@ -118,11 +118,16 @@ class TftDataframeModel():
             self.fit_batch(dataset)
             return  
                         
-        if self.type.startswith("pred"):
+        if self.type=="predict":
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
             self.predict(dataset)
-            return           
+            return     
+        if self.type=="pred_batch":
+            # 直接进行预测,只需要加载模型参数
+            print("do nothing for pred")
+            self.pred_batch(dataset)
+            return                
         if self.type.startswith("build_pred_result"):
             self.build_pred_result(dataset)
             return            
@@ -265,9 +270,9 @@ class TftDataframeModel():
         if load_weight:
             best_weight = self.optargs["best_weight"]    
             # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
-            self.model = TFTCluSerModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=best_weight)
+            self.model = TFTCluSerModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
+                                                             best=best_weight,batch_file_path=self.batch_file_path)
             self.model.batch_size = self.batch_size     
-            self.model.batch_file_path = self.batch_file_path
             self.model.mode = "train"
             self.model.model.monitor = monitor
         else:
@@ -277,7 +282,40 @@ class TftDataframeModel():
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
+
+    def pred_batch(
+        self,
+        dataset: TFTSeriesDataset,
+    ):
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+          
+        if self.load_dataset_file:
+            df_data_path = self.pred_data_path + "/df_all.pkl"
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data(df_data_path)   
+        else:
+            # 生成tft时间序列数据集,包括目标数据、协变量等
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+            if self.save_dataset_file:
+                df_data_path = self.pred_data_path + "/df_all.pkl"
+                with open(df_data_path, "wb") as fout:
+                    pickle.dump(dataset.df_all, fout)   
+                    
+        # 使用股票代码数量作为embbding长度
+        emb_size = dataset.get_emb_size()
+        best_weight = self.optargs["best_weight"]    
+        self.model = TFTCluSerModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
+                                                         best=best_weight,batch_file_path=self.batch_file_path)
+        self.model.batch_size = self.batch_size     
+        self.model.model.mode = "pred_batch"
+            
+        self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
                         
+                                                
     def _build_model(self,dataset,emb_size=1000,use_model_name=True,mode=0):
         """生成模型"""
         
