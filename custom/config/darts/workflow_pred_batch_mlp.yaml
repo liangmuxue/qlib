@@ -15,10 +15,10 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','RSQR5',
+              col_list: &col_list ['REV5','REV5_ORI','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','RSQR5',
               'PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5',
-              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','QTLUMA5',
-              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5']                                   
+              "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
+              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA']                                    
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -60,7 +60,7 @@ task:
             n_epochs : 200
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/RSI_2000_202201_202203'
+            batch_file_path: 'custom/data/asis/RSI_CNTP_2000_202201_202203'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,17 +77,16 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'RSI
-               _MLP_QUAN_2000_202112'
+               model_name: 'RSI_CNTP_QUAN_2000_202203'
                model_type: 'mlp'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,3],[3,5],[5,7]]
+               past_split: [[0,28],[28,56],[56,84]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -122,7 +121,9 @@ task:
                 target_column: ['RANKMA5','CNTN5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KDJ_K','KDJ_D','RSQR5','RSQR5','KLEN','RSQR5','REV5'] 
+                past_covariate_col: ['REV5','REV5_ORI','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
+                                  ,'REV5','REV5_ORI','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
+                                  ,'REV5','REV5_ORI','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'] 
                 static_covariate_col: ['industry','tradable_shares']    
 
     record: 

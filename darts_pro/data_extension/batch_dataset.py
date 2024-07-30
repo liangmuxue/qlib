@@ -1,3 +1,4 @@
+import os
 import pickle
 from typing import Dict
 import torch
@@ -12,7 +13,7 @@ from sktime.transformations.panel.pca import PCATransformer
 from sklearn.decomposition import PCA
 import time
 from darts_pro.data_extension.series_data_utils import StatDataAssis
-from cus_utils.common_compute import batch_cov,normalization_axis,eps_rebuild,same_value_eps,slope_compute
+from cus_utils.common_compute import batch_cov,normalization_axis,eps_rebuild,same_value_eps,get_trunck_index
 import cus_utils.global_var as global_var
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -20,13 +21,16 @@ logger = AppLogger()
 class BatchDataset(Dataset):
     """二次训练数据集"""
     
-    def __init__(self,filepath=None,target_col=None,fit_names=None,mode="process",range_num=None):
+    def __init__(self,filepath=None,is_training=False,trunk_mode=False,target_col=None,batch_size=0,fit_names=None,mode="process",range_num=None):
         
         self.mode = mode
         self.filepath = filepath
         self.target_col = target_col
         self.fit_names = fit_names      
-        self.range_num = range_num        
+        self.range_num = range_num    
+        self.is_training = is_training 
+        self.trunk_mode = trunk_mode
+        self.batch_size = batch_size
         
         batch_data = []
         with open(filepath, "rb") as fin:
@@ -39,12 +43,31 @@ class BatchDataset(Dataset):
         aggregated = self.create_aggregated_data(batch_data)    
         # 清除不合规数据
         aggregated = self.clear_inf_data(aggregated)
-        # 生成采样数据，用于后续度量比对
-        # imp_clu_data = self.cluster_compare_data(aggregated)
-        # global_var.set_value("imp_clu_data",imp_clu_data)
-        
+            
         if self.mode=="process":
-            self.batch_data = aggregated 
+            # 训练集数据量大，需要存储到硬盘上，以节省内存
+            if trunk_mode:
+                file_dir = os.path.dirname(filepath)
+                file_dir = os.path.join(file_dir,"trunk")
+                if not os.path.exists(file_dir):
+                    os.makedirs(file_dir)
+                total_size = aggregated[0].shape[0]
+                batch_range = total_size//batch_size
+                self.total_len = total_size
+                for i in range(batch_range+1):
+                    print("process {}".format(i))
+                    save_path = os.path.join(file_dir,"trunk_{}.pkl".format(i))
+                    if i==batch_range:
+                        index_range = [j for j in range(i*batch_size,total_size)]
+                    else:
+                        index_range = [j for j in range(i*batch_size,(i+1)*batch_size)]
+                    data = self._part_data(aggregated, index_range)
+                    with open(save_path, "wb") as trunk_out:
+                        pickle.dump(data,trunk_out)            
+            else:
+                self.batch_data = aggregated 
+                self.total_len = aggregated[0].shape[0]
+                aggregated = None
             # self.agg_data_check()
         if self.mode.startswith("analysis"):
             self.batch_data = [aggregated_item[range_num[0]:range_num[1]] for aggregated_item in aggregated]
@@ -80,16 +103,18 @@ class BatchDataset(Dataset):
         for i in range(len(first_sample)):
             elem = first_sample[i][0]
             if isinstance(elem, np.ndarray):
+                # 忽略scaler
+                if isinstance(elem[0],MinMaxScaler):
+                    s_list = []
+                    for sample in batch_data:
+                        for item in sample[i]:
+                            s_list.append(item[1])
+                    aggregated.append(s_list)       
+                    continue             
                 sample_list = np.concatenate([sample[i] for sample in batch_data],axis=0)
                 aggregated.append(
                     sample_list
                 )
-            elif isinstance(elem, MinMaxScaler):
-                s_list = []
-                for sample in batch_data:
-                    for item in sample[i]:
-                        s_list.append(item)
-                aggregated.append(s_list)
             elif isinstance(elem, StockNormalizer):
                 aggregated.append([sample[i] for sample in batch_data])    
             elif isinstance(elem, tuple):
@@ -108,6 +133,9 @@ class BatchDataset(Dataset):
                 d_list = []
                 for sample in batch_data:
                     for item in sample[i]:
+                        # 删除多余数据节省内存
+                        del item["label_array"] 
+                        del item["future_target"] 
                         d_list.append(item)    
                 aggregated.append(d_list)       
             elif elem is None:
@@ -116,8 +144,7 @@ class BatchDataset(Dataset):
     
     
     def clear_inf_data(self,agg_data):
-        (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler_tuple,target_class,target,target_info,price_target) = agg_data
+        target = agg_data[-3]
         keep_idx = []
         for i in range(target.shape[0]):
             t_item = target[i]
@@ -131,20 +158,29 @@ class BatchDataset(Dataset):
                 continue
             keep_idx.append(i)
         keep_idx = np.array(keep_idx)
-        
-        past_target = past_target[keep_idx]  
-        past_covariates = past_covariates[keep_idx] 
-        historic_future_covariates = historic_future_covariates[keep_idx]
-        future_covariates = future_covariates[keep_idx]  
-        static_covariates = static_covariates[keep_idx] 
-        target_class = target_class[keep_idx]
-        target = target[keep_idx]
-        scaler_tuple = [scaler_tuple[i] for i in keep_idx]
-        target_info = [target_info[i] for i in keep_idx]
-        price_target = price_target[keep_idx]
-        
-        return (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target)
+        part_data = self._part_data(agg_data, keep_idx)
+        if self.is_training:
+            (past_target,past_covariates, historic_future_covariates,future_covariates,
+             static_covariates,future_past_covariate,target_class,target,target_info,price_target) = part_data              
+            return past_target,past_covariates, historic_future_covariates,future_covariates, \
+                    static_covariates,target_class,target 
+        else:
+            return part_data
     
+    def _part_data(self,agg_data,index_range):
+        (past_target,past_covariates, historic_future_covariates,future_covariates,
+         static_covariates,future_past_covariate,target_class,target,target_info,price_target) = agg_data
+        past_target = past_target[index_range]  
+        past_covariates = past_covariates[index_range] 
+        historic_future_covariates = historic_future_covariates[index_range]
+        future_covariates = future_covariates[index_range]  
+        static_covariates = static_covariates[index_range] 
+        target_class = target_class[index_range]
+        target = target[index_range]
+        target_info = np.array(target_info)[index_range]
+        price_target = price_target[index_range]
+        return (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,future_past_covariate,target_class,target,target_info,price_target)
+             
     def agg_data_check(self):
         aggregated = self.batch_data
         (past_target,past_covariates, historic_future_covariates,future_covariates,
@@ -240,29 +276,22 @@ class BatchDataset(Dataset):
         np.save(ret_file,results)
         # results_df = pd.DataFrame(results,columns=result_cols)
         
-        
     def __getitem__(self, index):
         
         if self.mode=="process":
-            batch_data = [item[index] for item in self.batch_data]
-            (past_target,past_covariates, historic_future_covariates,future_covariates,
-             static_covariates,scaler_tuple,target_class,target,target_info,price_target) = batch_data
-            # 生成价位幅度目标 
-            price_array = target_info["price_array"]
-            raise_range = (price_array[-1] - price_array[-5])/price_array[-5]*10
-            # target_info["raise_range"] = raise_range
-            scaler,future_past_covariate = scaler_tuple
-            past_target_ori = scaler.inverse_transform(past_target)
-            # avoid infinite
-            mask_idx = np.where(past_target_ori<0.01)[0]
-            past_target_ori[mask_idx] = 0.01
-            past_target_slope = (past_target_ori[1:,:] - past_target_ori[:-1,:])/past_target_ori[:-1,:]*10
-            # 生成目标缩放器，用于后续归一化
-            target_range_scaler = MinMaxScaler()
-            target_range_scaler.fit(past_target_slope)
-            target_info["target_range_scaler"] = target_range_scaler
-            return past_target,past_covariates, historic_future_covariates,future_covariates, \
-                static_covariates,(scaler,future_past_covariate),target_class,target,target_info,price_target
+            # 如果是分片存储模式，则需要读取文件
+            if self.trunk_mode:
+                batch_index = index//self.batch_size
+                file_dir = os.path.dirname(self.filepath)
+                filepath = os.path.join(file_dir,"trunk","trunk_{}.pkl".format(batch_index))
+                # 计算偏移量，以取得单条数据
+                index_range = index % self.batch_size
+                with open(filepath, "rb") as fin:
+                    batch_data = pickle.load(fin) 
+                    batch_data = self._part_data(batch_data, index_range)   
+            else:             
+                batch_data = [item[index] for item in self.batch_data]
+            return batch_data
         if self.mode=="analysis":
             return self.target_data[index],self.target_class[index]
         if self.mode=="analysis_reg":
@@ -273,7 +302,7 @@ class BatchDataset(Dataset):
                 
     def __len__(self):
         if self.mode=="process":
-            return self.batch_data[0].shape[0]  
+            return self.total_len 
         if self.mode.startswith("analysis"):
             return self.range_num[1] - self.range_num[0]
             

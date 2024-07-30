@@ -24,6 +24,7 @@ from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
 from sklearn.metrics import adjusted_rand_score as ari_score
 from sklearn.manifold import MDS
 import matplotlib.pyplot as plt
+from cus_utils.tensor_viz import TensorViz
 
 from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
 from darts_pro.act_model.mlp_ts import MlpTs
@@ -47,6 +48,10 @@ MixedCovariatesTrainTensorType = Tuple[
 ]
 
 from darts_pro.data_extension.custom_module import _TFTModuleBatch
+
+viz_result_suc = TensorViz(env="train_result_suc")
+viz_result_fail = TensorViz(env="train_result_fail")
+from darts_pro.data_extension.custom_module import viz_target 
 
 class MlpModule(_TFTModuleBatch):
     """自定义基于DNN模式的时间序列模块"""
@@ -113,14 +118,11 @@ class MlpModule(_TFTModuleBatch):
             (
                 past_target,
                 past_covariates,
-                historic_future_covariates,
+                historic_future_covariate,
                 future_covariates,
                 static_covariates,
-                (scaler,future_past_covariate),
                 target_class,
-                future_target,
-                target_info,
-                price_target
+                future_target 
             ) = self.train_sample      
                   
             # 固定单目标值
@@ -238,7 +240,8 @@ class MlpModule(_TFTModuleBatch):
     def on_train_epoch_end(self):  
         """FDS模式，更新相关参数"""
         
-        self.custom_histogram_adder()
+        pass
+        # self.custom_histogram_adder()
         
         # with torch.no_grad():
         #     for i in range(len(self.sub_models)):
@@ -263,17 +266,8 @@ class MlpModule(_TFTModuleBatch):
             # 测试模式，不进行训练
             print("no training for pred batch")
             return
-        (past_target,past_covariates, historic_future_covariates,future_covariates,
-         static_covariates,scaler,target_class,target,target_info,price_target) = train_batch    
-
+        
         loss,detail_loss,output = self.training_step_real(train_batch, batch_idx) 
-        if self.train_output_flag:
-            output = [output_item.detach().cpu().numpy() for output_item in output]
-            data = [past_target.detach().cpu().numpy(),past_covariates.detach().cpu().numpy(), historic_future_covariates.detach().cpu().numpy(),
-                             future_covariates.detach().cpu().numpy(),static_covariates.detach().cpu().numpy(),scaler,target_class.cpu().detach().numpy(),
-                             target.cpu().detach().numpy(),target_info,price_target.cpu().detach().numpy()]                
-            output_combine = (output,data)
-            pickle.dump(output_combine,self.train_fout)  
         # (mse_loss,value_diff_loss,corr_loss,ce_loss,mean_threhold) = detail_loss
         return loss
     
@@ -282,9 +276,8 @@ class MlpModule(_TFTModuleBatch):
 
         # 收集目标数据用于分类
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = train_batch
+                static_covariates,target_class,future_target) = train_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)     
-        scaler = [s[0] for s in scaler_tuple] 
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
         last_targets,pca_target,weighted_data = self._process_target_batch(future_target,target_class[:,0])
@@ -294,41 +287,21 @@ class MlpModule(_TFTModuleBatch):
             self.criterion.epoch = self.epochs_trained   
         total_loss = torch.tensor(0.0).to(self.device)
         ce_loss = None
-        # 根据标志决定是否梯度回传
-        if self.switch_flag==1 and False:
-            with torch.no_grad():
-                for i in range(len(self.past_split)):
-                    (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
-                    loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,pca_target),optimizers_idx=i)
-                    (corr_loss_combine,ce_loss,fds_loss,_) = detail_loss 
-                    self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-                    self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-                    # self.log("train_fds_loss_{}".format(i), fds_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
-                    self.loss_data.append(detail_loss)
-                    total_loss += loss
-                    self.output_postprocess(output,target_class[:,0],i)
-        else:
-            for i in range(len(self.past_split)):
-                (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
-                loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,pca_target),optimizers_idx=i)
-                (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
-                # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-                self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-                self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
-                self.loss_data.append(detail_loss)
-                total_loss += loss     
-                # 手动更新参数
-                opt = self.trainer.optimizers[i]
-                opt.zero_grad()
-                self.manual_backward(loss)
-                opt.step()
-                # if i==1:
-                #     for name,params in self.sub_models[1].named_parameters():
-                #         print("{} end grad:{}".format(name,params.grad))
-                self.lr_schedulers()[i].step()                             
-            # Viz pca
-            # self.pca_viz_item(i,pca_target[...,i],output[i][1].detach(),target_class=target_class[:,0],
-            #                   batch_idx=batch_idx,root_path="custom/data/results/train")
+        for i in range(len(self.past_split)):
+            (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,pca_target),optimizers_idx=i)
+            (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
+            # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            # self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
+            self.loss_data.append(detail_loss)
+            total_loss += loss     
+            # 手动更新参数
+            opt = self.trainer.optimizers[i]
+            opt.zero_grad()
+            self.manual_backward(loss)
+            opt.step()
+            self.lr_schedulers()[i].step()                           
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("lr0",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  
         
@@ -349,11 +322,10 @@ class MlpModule(_TFTModuleBatch):
         """训练验证部分"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = val_batch
+                static_covariates,future_past_covariate,target_class,future_target,target_info,price_target) = val_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
         input_batch = self._process_input_batch(inp)
         last_targets,pca_target,weighted_data = self._process_target_batch(future_target,target_class[:,0])
-        scaler = [s[0] for s in scaler_tuple]
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         
         past_target = val_batch[0]
@@ -372,7 +344,7 @@ class MlpModule(_TFTModuleBatch):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,pca_target)
         return loss,detail_loss,output_combine
@@ -423,13 +395,14 @@ class MlpModule(_TFTModuleBatch):
         # 按照日期分组进行计算
         pred_import_index_all = {}
         if fur_dates is None:
-            pred_import_index = self.strategy_top(smooth_values,(fea_0_range,fea_1_range),cls_values,batch_size=cls_values.shape[0])
+            pred_import_index = self.strategy_threhold(smooth_values,(fea_0_range,fea_1_range,fea_2_range),cls_values,batch_size=cls_values.shape[0])
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
             idx = fur_dates[date]
-            pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
-            # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=len(idx))
+            pred_import_index = self.strategy_top(smooth_values[idx],
+                    (fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
+            # pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=len(idx))
             pred_import_index_all[date] = np.array(idx)[pred_import_index]
             
         return pred_import_index_all,(cls_values,fea_values,pca_values)       
@@ -443,7 +416,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_2<0) & (fea_1_range<-0.5)
+        sv_import_bool = (sv_1<-0.2) & (fea_1_range<-0.8)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -468,80 +441,29 @@ class MlpModule(_TFTModuleBatch):
         sv_0 = sv[...,0].squeeze(-1)
         sv_1 = sv[...,1].squeeze(-1)
         sv_2 = sv[...,2].squeeze(-1)
-        (fea_0_range,fea_1_range) = fea
+        (fea_0_range,fea_1_range,fea_2_range) = fea
         
-        top_k = sv_0.shape[0]//4
+        top_k = sv_0.shape[0]//6
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
-        sv_import_index = np.argsort(sv_2)[:top_k]
+        sv_import_index = np.intersect1d(np.argsort(-sv_0)[:top_k],np.argsort(sv_1)[:top_k])
         # 使用0号进行corr判断（整体涨跌幅度），正序
         fea0_import_index = np.argsort(-fea_0_range)[:top_k]
         # 使用1号进行corr判断（整体涨跌幅度），逆序
         fea1_import_index = np.argsort(fea_1_range)[:top_k]        
-        comp1_index = np.intersect1d(sv_import_index,fea0_import_index)
-        comp1_index = np.intersect1d(comp1_index,fea1_import_index)
+        fea2_import_index = np.argsort(-fea_0_range)[:top_k]   
+        # comp1_index = np.intersect1d(sv_import_index,fea0_import_index)
+        comp1_index =  np.intersect1d(sv_import_index,fea0_import_index)
 
-        cls_thre_para = [[0.1,8],[-0,8],[-0,7]]
-        # 包含2个参数：分数阈值以及个数阈值
-        para0 = cls_thre_para[0]
-        para1 = cls_thre_para[1]
-        para2 = cls_thre_para[2]
-        # 使用1号进行cls判断（pca数值），逆序
-        cls_import_index = np.argsort(np.sum(cls_1<para1[0],1))[:top_k] 
+        # cls_thre_para = [[0.1,8],[-0,8],[-0,7]]
+        # # 包含2个参数：分数阈值以及个数阈值
+        # para0 = cls_thre_para[0]
+        # para1 = cls_thre_para[1]
+        # para2 = cls_thre_para[2]
+        # # 使用1号进行cls判断（pca数值），逆序
+        # cls_import_index = np.argsort(np.sum(cls_0>para0[0],1))[:top_k] 
         pred_import_index = comp1_index # np.intersect1d(comp1_index,cls_import_index)
         return pred_import_index
           
-    def viz_results(self,output, pca_target,target_class=None,index=None):
-        """可视化，显示聚合过程"""
-        
-        sampler_number = 10
-        # 采样一些正负样本，查看聚合情况
-        import_index = np.where(target_class==3)[0]
-        import_index = import_index[:sampler_number]
-        neg_index = np.where(target_class==0)[0]
-        neg_index = neg_index[:sampler_number]
-        combine_index = np.concatenate((import_index,neg_index))
-        
-        
-        labels = target_class[combine_index]
-        
-        for i in range(3):
-            output_item = output[i]
-            (x_bar, z_pca,cls,_,_) = output_item
-            z_pca = z_pca.cpu().numpy()
-            output_item = z_pca[combine_index]
-            pca_target_single = pca_target[...,i][combine_index]
-            pca_target_single = pca_target_single.cpu().numpy()
-            # PCA模式下，混合输出正负样本预测结果，并与原值进行比较
-            self.matrix_results_viz(output=output_item,target=pca_target_single,
-                        sampler_number=sampler_number,target_index=i,name="{}_{}".format(index,i))
-        
-    def matrix_results_viz(self,output=None,target=None,target_index=0,sampler_number=10,name="target"):
-        plt.figure(name,figsize=(12,9))
-        
-        # 实际目标正样本
-        plt.scatter(target[:sampler_number,0],target[:sampler_number,1], marker='o',color="r", s=50)
-        # 预测目标正样本
-        plt.scatter(output[:sampler_number,0],output[:sampler_number,1], marker='o',color="b", s=50)
-        # 实际目标负样本
-        plt.scatter(target[sampler_number:,0],target[sampler_number:,1], marker='x',color="k", s=50)
-        # 预测目标负样本
-        plt.scatter(output[sampler_number:,0],output[sampler_number:,1], marker='x',color="y", s=50)
-        for i in range(target.shape[0]):
-            x_target = target[i][0]
-            y_target = target[i][1]
-            imp_target = "t_{}".format(i)
-            x_out = output[i][0]
-            y_out = output[i][1]
-            imp_out = "o_{}".format(i)         
-            plt.annotate(imp_target, xy = (x_target, y_target), xytext=(x_target+0.01, y_target+0.01))
-            plt.annotate(imp_out, xy = (x_out, y_out), xytext=(x_out+0.01, y_out+0.01))
-        # plt.show()      
-        path = "./custom/data/results/mlp/{}".format(target_index)
-        if not os.path.exists(path):
-            os.makedirs(path)           
-        plt.savefig('{}/combine_result_{}.png'.format(path,name))  
-            
-
     def _process_target_batch(self,future_target,target_class):
         """生成目标数据,包括降维数据以及协方差数据,类别权重数据等"""
         
@@ -616,16 +538,15 @@ class MlpModule(_TFTModuleBatch):
         output,pca_target = outputs
         pca_target = pca_target.cpu().numpy()
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,scaler_tuple,target_class,future_target,target_info,price_target) = val_batch
-        # for i,output_item in enumerate(output):
-        #     pred_combine = preds_combine[i]  
-        #     (yita,z,latent,cell_output) = pred_combine
+                static_covariates,future_past_covariate,target_class,future_target,target_info,price_target) = val_batch
         data = [past_target.cpu().numpy(),target_class.cpu().numpy(),
                 future_target.cpu().numpy(),pca_target,price_target.cpu().numpy(),target_info]          
         output_combine = (output,data)
-        pickle.dump(output_combine,self.valid_fout)       
-        # 同时维护一份验证结果，用于验证集统一比较
-        output_res = (output,past_target.cpu().numpy(),target_class.cpu().numpy(),target_info)
+        pickle.dump(output_combine,self.valid_fout)     
+        # 目标数据合并到一起  
+        target = np.concatenate([past_target.cpu().numpy(),future_target.cpu().numpy()],axis=1)
+        # 保存数据用于后续验证
+        output_res = (output,target,target_class.cpu().numpy(),target_info)
         self.output_result.append(output_res)
     
     
@@ -633,10 +554,10 @@ class MlpModule(_TFTModuleBatch):
         
         target_class_total = []
         target_info_total = []
-        past_target_total = []        
+        target_total = []        
         output_total = [[[] for _ in range(5)] for _ in range(3)]
         for item in output_result:
-            (output,past_target,target_class,target_info) = item
+            (output,target,target_class,target_info) = item
             for i in range(len(output_total)):
                 output_item = output[i]
                 x_bar,z,cls,tar_cls,x_smo = output_item 
@@ -647,15 +568,18 @@ class MlpModule(_TFTModuleBatch):
                 output_total[i][4].append(x_smo)
             target_info_total = target_info_total + target_info
             target_class_total.append(target_class)
-            past_target_total.append(past_target)
+            target_total.append(target)
         for i in range(len(output_total)):
             output_total[i][0] = torch.concat(output_total[i][0])
             output_total[i][1] = torch.concat(output_total[i][1])
             output_total[i][2] = torch.concat(output_total[i][2])
             # output_total[i][3] = np.concatenate(output_total[i][3])
             output_total[i][4] = torch.concat(output_total[i][4])       
-            
-        return output_total,past_target_total,target_class_total,target_info_total
+
+        target_class_total = np.concatenate(target_class_total)[:,0,0]
+        target_total = np.concatenate(target_total)
+                    
+        return output_total,target_total,target_class_total,target_info_total
 
     def combine_output_single(self,output_data):
         
@@ -681,9 +605,7 @@ class MlpModule(_TFTModuleBatch):
         """计算涨跌幅分类准确度以及相关数据"""
         
         # 使用全部验证结果进行统一比较
-        output_total,past_target_total,target_class_total,target_info_total = self.combine_output_total(output_result)
-        target_class_total = np.concatenate(target_class_total)[:,0,0]
-        past_target_total = np.concatenate(past_target_total)
+        output_total,target_total,target_class_total,target_info_total = self.combine_output_total(output_result)
 
         # 按照日期分组计算
         fur_dates = {}
@@ -724,7 +646,7 @@ class MlpModule(_TFTModuleBatch):
                 # 放置预测数量以及总数量
                 rate_total[date].append(total_cnt)              
         sr = np.array(list(rate_total.values()))
-        return sr,total_imp_cnt
+        return sr,total_imp_cnt,import_index_all
         
     def on_validation_epoch_end(self):
         """重载父类方法，实现自定义评分"""
@@ -733,7 +655,7 @@ class MlpModule(_TFTModuleBatch):
         if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
             return    
 
-        sr,total_imp_cnt = self.combine_result_data(self.output_result)      
+        sr,total_imp_cnt,import_index_all = self.combine_result_data(self.output_result)      
         if sr.shape[0]==0:
             return
         
@@ -755,10 +677,81 @@ class MlpModule(_TFTModuleBatch):
         self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
         self.log("score_total", score_total, prog_bar=True) 
         
-        # 如果是测试模式，则在此直接退出
-        # if self.mode=="pred_batch":
-        #     exit()
-                
+        # 如果是测试模式，则在此进行可视化
+        if self.mode=="pred_batch":
+            output_total,target_total,target_class_total,target_info_total = self.combine_output_total(self.output_result)
+            for date in import_index_all.keys():
+                import_index = import_index_all[date]            
+                target_info = np.array(target_info_total)[import_index]
+                target_vr_class = target_class_total[import_index]
+                target = target_total[import_index]
+                self.viz_results(output_total, target_vr_class=target_vr_class,target_info=target_info, date=date,target=target)
+
+    def viz_results(self,output_data,target_vr_class=None,target_info=None,date=None,target=None):
+        """Visualization Output and Target"""
+        
+        dataset = global_var.get_value("dataset")
+        df_all = dataset.df_all
+        names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
+        names = ["price past","price future","CNTN5_output","CNTN5_tar"]          
+        result = []
+            
+        # if date!="20220115":
+        #     return
+
+        fea_values = []
+        for i in range(len(output_data)):
+            output_item = output_data[i] 
+            x_bar,z,cls,_,x_smo =  output_item 
+            fea_values.append(x_bar)
+        fea_values = torch.stack(fea_values).cpu().numpy().transpose(1,2,0)
+        
+        target_neg_index = np.where(target_vr_class==0)[0]
+        target_suc_index = np.where(target_vr_class==3)[0]
+        pad_before = np.array([0 for i in range(self.input_chunk_length)])
+        pad_after = np.array([0 for i in range(self.output_chunk_length)])
+        
+        # CNTN5 part
+        fea1_values = fea_values[:,:,1]
+        tar1_values = target[:,:,1]
+
+        # def _viz_att_data(target_info):
+        #     names = ["price","rsi_5","rsi_20"]
+        #     for i in range(len(target_info)):
+        #         ts = target_info[i]
+        #         price_item = ts["price_array"]
+        #         rsi_5 = ts["rsi_5"]
+        #         rsi_20 = ts["rsi_20"]
+        #         view_data = np.stack([price_item,rsi_5,rsi_20]).transpose(1,0)
+        #         target_title = "fur_date:{},instrument:{}".format(ts["future_start_datetime"],ts["instrument"])
+        #         win = "win_{}".format(i)
+        #         viz_target.viz_matrix_var(view_data,win=win,title=target_title,names=names)          
+        #
+        # _viz_att_data(np.array(target_info[:5]))
+               
+        for n in range(2):
+            if n==0:
+                target_index = target_neg_index
+                tar_viz = viz_result_fail
+            else:
+                target_index = target_suc_index
+                tar_viz = viz_result_suc
+            for i in range(target_index.shape[0]):
+                s_index = target_index[i]
+                ts = target_info[s_index]
+                instrument = ts["instrument"]
+                price_data_past = ts["price_array"][:self.input_chunk_length]
+                price_data_past = np.concatenate((price_data_past,pad_after),axis=-1)
+                price_data_future = ts["price_array"][25:]
+                price_data_future = np.concatenate((pad_before,price_data_future),axis=-1)
+                view_data = np.stack((price_data_past,price_data_future)).transpose(1,0)
+                fea1_data = np.concatenate((pad_before,fea1_values[i]),axis=-1)
+                fea1_combine = np.stack([fea1_data,tar1_values[i]]).transpose(1,0)
+                view_data = np.concatenate([view_data,fea1_combine],axis=1)
+                target_title = "date:{},instrument:{}".format(date,instrument)
+                win = "{}_{}".format(date,instrument)
+                tar_viz.viz_matrix_var(view_data,win=win,title=target_title,names=names)
+                                        
     def predict_step(
         self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
     ):

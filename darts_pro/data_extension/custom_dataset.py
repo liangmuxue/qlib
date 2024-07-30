@@ -141,6 +141,13 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         # 记录预测未来第一天的关联日期，用于后续数据对齐
         future_start_datetime = self.ass_data[code][3][past_end]
         kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea = self.ass_data[code][4:]
+        kdj_k = kdj_k[past_start:future_end]
+        kdj_d = kdj_d[past_start:future_end]
+        kdj_j = kdj_j[past_start:future_end]        
+        rsi_20 = rsi_20[past_start:future_end]
+        rsi_5 = rsi_5[past_start:future_end]
+        macd_diff = macd_diff[past_start:future_end]  
+        macd_dea = macd_dea[past_start:future_end]
         # total_price_array = self.ass_data[code][past_start:future_end]
         target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
                        "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,

@@ -605,8 +605,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
 
         train_sample = train_dataset[0]
         if self.model is None:
-            # 使用future_target部分(倒数第二列)，进行输出维度判断
-            self.train_sample, self.output_dim = train_sample, train_sample[7].shape[1]
+            # 使用target部分(倒数第1列)，进行输出维度判断
+            self.train_sample, self.output_dim = train_sample, train_sample[-1].shape[1]
             model = self._init_model(trainer)
             model.monitor = self.monitor
         else:

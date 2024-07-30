@@ -41,6 +41,9 @@ from darts_pro.mam.mlp_module import MlpModule
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset,BatchInferDataset
 from darts_pro.data_extension.custom_dataset import CustomSequentialDataset
 
+from cus_utils.tensor_viz import TensorViz
+viz_target = TensorViz(env="data_target")
+
 class _TFTModuleAsis(_CusModule):
     def __init__(
         self,
@@ -165,14 +168,15 @@ class _TFTModuleAsis(_CusModule):
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target) = data_batch    
         
         price_bool = np.ones(past_target.shape[0], dtype=bool)
+        # import_index_bool = self.create_signal_all(target_info)       
         # import_index_bool = self.create_signal_macd(target_info)       
-        import_index_bool = self.create_signal_rsi(target_info)  
-        # import_index_bool = self.create_signal_kdj(target_info)    
+        # import_index_bool = self.create_signal_rsi(target_info)  
+        import_index_bool = self.create_signal_kdj(target_info)    
         
         def remove_att_data(item):
-            del item["kdj_k"] 
-            del item["kdj_d"] 
-            del item["kdj_j"] 
+            # del item["kdj_k"] 
+            # del item["kdj_d"] 
+            # del item["kdj_j"] 
             del item["rsi_20"] 
             del item["rsi_5"] 
             del item["macd_diff"] 
@@ -183,19 +187,37 @@ class _TFTModuleAsis(_CusModule):
             item_price = item["price_array"][:self.input_chunk_length]
             price_bool[i] = (np.unique(item_price).shape[0]>=2)     
             # 清除附加数据，节约内存 
-            # print("begin rm:{}".format(target_info[i]))
             remove_att_data(item)
-            # print("after rm:{}".format(target_info[i]))
         import_index_bool = import_index_bool & price_bool            
         if np.sum(import_index_bool)==0:
             return None
         print("total size:{},import_index_bool size:{}".format(past_target.shape[0],np.sum(import_index_bool)))
         rtn_index = np.where(import_index_bool)[0]
+        self._viz_att_data(np.array(target_info)[rtn_index].tolist())
         data_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
                             future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
                             np.array(scaler_tuple,dtype=object)[rtn_index],target_class[rtn_index,:,:],
                             target[rtn_index,:,:],np.array(target_info)[rtn_index].tolist(),price_target[rtn_index,:,:]]
         return data_batch_filter
+    
+    def _viz_att_data(self,target_info):
+        names = ["price","rsi_5","rsi_20"]
+        names = ["price","kdj_k","kdj_d"]
+        for i in range(5,10):
+            ts = target_info[i]
+            price_item = ts["price_array"]
+            # rsi_5 = ts["rsi_5"]
+            # rsi_20 = ts["rsi_20"]
+            kdj_k = ts["kdj_k"]
+            kdj_d = ts["kdj_d"]            
+            # view_data = np.stack([price_item,rsi_5,rsi_20]).transpose(1,0)
+            view_data = np.stack([price_item,kdj_k,kdj_d]).transpose(1,0)
+            target_title = "fur_date:{},instrument:{}".format(ts["future_start_datetime"],ts["instrument"])
+            win = "win_{}".format(i)
+            viz_target.viz_matrix_var(view_data,win=win,title=target_title,names=names)            
+    
+    def create_signal_all(self,target_info):
+        return np.ones(len(target_info), dtype=bool)
     
     def create_signal_macd(self,target_info):
         """macd指标判断"""
@@ -203,7 +225,7 @@ class _TFTModuleAsis(_CusModule):
         diff_cov = np.array([item["macd_diff"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         dea_cov = np.array([item["macd_dea"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即diff快线向上突破dea慢线
-        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=5) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=2)
+        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=5) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=1)
         return index_bool
 
     def create_signal_rsi(self,target_info):
@@ -212,7 +234,7 @@ class _TFTModuleAsis(_CusModule):
         rsi5_cov = np.array([item["rsi_5"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         rsi20_cov = np.array([item["rsi_20"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即rsi快线向上突破rsi慢线
-        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=6) & (np.sum(rsi5_cov[:,-3:]>=rsi20_cov[:,-5:],axis=1)>=2)
+        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=6) & (np.sum(rsi5_cov[:,-5:]>=rsi20_cov[:,-5:],axis=1)>=2)
         return index_bool
 
     def create_signal_kdj(self,target_info):
@@ -221,8 +243,8 @@ class _TFTModuleAsis(_CusModule):
         k_cov = np.array([item["kdj_k"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         d_cov = np.array([item["kdj_d"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         j_cov = np.array([item["kdj_j"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
-        # 规则为金叉，即d线向上突破j线
-        index_bool = (np.sum(d_cov[:,:-2]<=j_cov[:,:-2],axis=1)>=5) & (np.sum(d_cov[:,-5:]>=j_cov[:,-5:],axis=1)>=1)
+        # 规则为金叉，即k线向上突破d线
+        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=5) & (np.sum(k_cov[:,-5:]>=d_cov[:,-5:],axis=1)>=1)
         # 突破的时候d线也是向上的
         j_slope = j_cov[:,1:] - j_cov[:,:-1]
         # index_bool = index_bool &  (np.sum(j_slope[:,-3:]>0,axis=1)>=3)
@@ -514,8 +536,9 @@ class TFTBatchModel(TFTExtModel):
             historic_future_covariate,
             future_covariate,
             static_covariates,
-        ) = train_sample[:5]
-        future_target = train_sample[8]
+            target_class,
+            future_target 
+        ) = train_sample
 
         # add a covariate placeholder so that relative index will be included
         if self.add_relative_index:
@@ -891,12 +914,17 @@ class TFTCluSerModel(TFTBatchModel):
         # 训练模式下，需要多放回一个静态数据对照集合
         if mode=="train":
             ds = BatchDataset(
+                is_training = True,
+                trunk_mode = False,
+                batch_size = self.batch_size,
                 filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode)
             )    
             # self.static_datas = ds.static_datas
         # 验证模式下，需要传入之前存储的静态数据集合
         if mode=="valid":
             ds = BatchDataset(
+                is_training = False,
+                trunk_mode = False,
                 filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode),
                 # pre_static_datas=self.static_datas
             )    

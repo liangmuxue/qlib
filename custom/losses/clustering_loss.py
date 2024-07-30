@@ -318,12 +318,12 @@ class MlpLoss(UncertaintyLoss):
                 corr_loss[i] = self.ccc_loss_comp(x_bar, real_target)
                 # 计算分位数损失
                 out_cls = output_item[2].unsqueeze(-1).unsqueeze(-1).permute(0,2,3,1)
-                cls_loss[i] = self.quan_loss.compute_loss(out_cls, pca_target_item.unsqueeze(-1))
+                # cls_loss[i] = self.quan_loss.compute_loss(out_cls, pca_target_item.unsqueeze(-1))
                 # indices_tuple = self.mining_func(z, label_class)
                 # cls_loss[i] = self.triplet_loss(z, label_class, indices_tuple)
                              
                 # 降维目标之间的欧氏距离         
                 ce_loss[i] = 10 * self.mse_loss(x_smo, last_target_item)
                 # ce_loss[i] = self.quan_loss.compute_loss(x_smo.unsqueeze(1).unsqueeze(1), last_target_item)
-                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
+                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] # + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    

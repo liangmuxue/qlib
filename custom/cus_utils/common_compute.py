@@ -483,8 +483,9 @@ def same_value_eps(data):
         data = torch.where(data==0,eps_ori,data)      
     return data
 
-
-   
+def get_trunck_index(total_size,batch_size):
+    return total_size//batch_size
+    
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)
