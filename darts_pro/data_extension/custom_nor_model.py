@@ -170,15 +170,15 @@ class _TFTModuleAsis(_CusModule):
         price_bool = np.ones(past_target.shape[0], dtype=bool)
         # import_index_bool = self.create_signal_all(target_info)       
         # import_index_bool = self.create_signal_macd(target_info)       
-        # import_index_bool = self.create_signal_rsi(target_info)  
-        import_index_bool = self.create_signal_kdj(target_info)    
+        import_index_bool = self.create_signal_rsi(target_info)  
+        # import_index_bool = self.create_signal_kdj(target_info)    
         
         def remove_att_data(item):
-            # del item["kdj_k"] 
-            # del item["kdj_d"] 
-            # del item["kdj_j"] 
-            del item["rsi_20"] 
-            del item["rsi_5"] 
+            del item["kdj_k"] 
+            del item["kdj_d"] 
+            del item["kdj_j"] 
+            # del item["rsi_20"] 
+            # del item["rsi_5"] 
             del item["macd_diff"] 
             del item["macd_dea"]             
         # 如果周期内价格不发生变化，后续统计是会NAN，在此过滤
@@ -203,15 +203,17 @@ class _TFTModuleAsis(_CusModule):
     def _viz_att_data(self,target_info):
         names = ["price","rsi_5","rsi_20"]
         names = ["price","kdj_k","kdj_d"]
+        if len(target_info)<10:
+            return
         for i in range(5,10):
             ts = target_info[i]
             price_item = ts["price_array"]
-            # rsi_5 = ts["rsi_5"]
-            # rsi_20 = ts["rsi_20"]
-            kdj_k = ts["kdj_k"]
-            kdj_d = ts["kdj_d"]            
-            # view_data = np.stack([price_item,rsi_5,rsi_20]).transpose(1,0)
-            view_data = np.stack([price_item,kdj_k,kdj_d]).transpose(1,0)
+            rsi_5 = ts["rsi_5"]
+            rsi_20 = ts["rsi_20"]
+            # kdj_k = ts["kdj_k"]
+            # kdj_d = ts["kdj_d"]            
+            view_data = np.stack([price_item,rsi_5,rsi_20]).transpose(1,0)
+            # view_data = np.stack([price_item,kdj_k,kdj_d]).transpose(1,0)
             target_title = "fur_date:{},instrument:{}".format(ts["future_start_datetime"],ts["instrument"])
             win = "win_{}".format(i)
             viz_target.viz_matrix_var(view_data,win=win,title=target_title,names=names)            
@@ -939,8 +941,8 @@ class TFTCluSerModel(TFTBatchModel):
                 checkpoint_callback = pl_callbacks.ModelCheckpoint(
                     dirpath=c.dirpath,
                     save_last=False,
-                    monitor="score_total",
-                    filename="{epoch}-{score_total:.2f}",
+                    monitor="val_loss",
+                    filename="{epoch}-{val_loss:.2f}",
                     every_n_epochs=2,
                     # mode="min",
                     save_top_k = -1
@@ -1003,6 +1005,7 @@ class TFTCluSerModel(TFTBatchModel):
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
+                # file_name = "epoch=95-score_total=0.00.ckpt"
             file_name = os.path.basename(file_name)       
             
         file_path = os.path.join(checkpoint_dir, file_name)

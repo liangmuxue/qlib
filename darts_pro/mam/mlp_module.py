@@ -386,11 +386,11 @@ class MlpModule(_TFTModuleBatch):
         smooth_values = torch.stack(smooth_values).cpu().numpy().transpose(1,2,0)
 
         fea_0 = fea_values[...,0]
-        fea_0_range = (fea_0[:,-1] - fea_0[:,0])/fea_0[:,0]        
+        fea_0_range = (fea_0[:,-1] - fea_0[:,0])       
         fea_1 = fea_values[...,1]
-        fea_1_range = (fea_1[:,-1] - fea_1[:,0])/fea_1[:,0]
+        fea_1_range = (fea_1[:,-1] - fea_1[:,0])
         fea_2 = fea_values[...,2]
-        fea_2_range = (fea_2[:,-1] - fea_2[:,0])/fea_2[:,0]/10
+        fea_2_range = (fea_2[:,-1] - fea_2[:,0])
         
         # 按照日期分组进行计算
         pred_import_index_all = {}
@@ -399,10 +399,11 @@ class MlpModule(_TFTModuleBatch):
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
+            # if date!=20220114:
+            #     continue
             idx = fur_dates[date]
-            pred_import_index = self.strategy_top(smooth_values[idx],
-                    (fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
-            # pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx]),cls_values[idx],batch_size=len(idx))
+            # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
+            pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
             pred_import_index_all[date] = np.array(idx)[pred_import_index]
             
         return pred_import_index_all,(cls_values,fea_values,pca_values)       
@@ -414,9 +415,9 @@ class MlpModule(_TFTModuleBatch):
         sv_0 = sv[...,0].squeeze(-1)
         sv_1 = sv[...,1].squeeze(-1)
         sv_2 = sv[...,2].squeeze(-1)
-        (fea_0_range,fea_1_range) = fea
+        (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_1<-0.2) & (fea_1_range<-0.8)
+        sv_import_bool = (fea_1_range<0) & (sv_0>0) & (fea_2_range>0)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -443,16 +444,16 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         
-        top_k = sv_0.shape[0]//6
+        top_k = sv_0.shape[0]//4
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
-        sv_import_index = np.intersect1d(np.argsort(-sv_0)[:top_k],np.argsort(sv_1)[:top_k])
+        sv_import_index = np.intersect1d(np.argsort(-sv_0)[:top_k],np.argsort(fea_1_range)[:top_k])
         # 使用0号进行corr判断（整体涨跌幅度），正序
         fea0_import_index = np.argsort(-fea_0_range)[:top_k]
         # 使用1号进行corr判断（整体涨跌幅度），逆序
         fea1_import_index = np.argsort(fea_1_range)[:top_k]        
-        fea2_import_index = np.argsort(-fea_0_range)[:top_k]   
+        fea2_import_index = np.argsort(-fea_2_range)[:top_k]   
         # comp1_index = np.intersect1d(sv_import_index,fea0_import_index)
-        comp1_index =  np.intersect1d(sv_import_index,fea0_import_index)
+        comp1_index =  np.intersect1d(sv_import_index,fea2_import_index)
 
         # cls_thre_para = [[0.1,8],[-0,8],[-0,7]]
         # # 包含2个参数：分数阈值以及个数阈值
@@ -643,7 +644,7 @@ class MlpModule(_TFTModuleBatch):
                     else:
                         cnt = cnt_values[0,1]
                     rate_total[date].append(cnt)
-                # 放置预测数量以及总数量
+                # 预测数量以及总数量
                 rate_total[date].append(total_cnt)              
         sr = np.array(list(rate_total.values()))
         return sr,total_imp_cnt,import_index_all
@@ -679,42 +680,36 @@ class MlpModule(_TFTModuleBatch):
         
         # 如果是测试模式，则在此进行可视化
         if self.mode=="pred_batch":
+            viz_total_size = 0
             output_total,target_total,target_class_total,target_info_total = self.combine_output_total(self.output_result)
-            for date in import_index_all.keys():
+            for index,date in enumerate(import_index_all.keys()):
+                if viz_total_size>20:
+                    break
                 import_index = import_index_all[date]            
                 target_info = np.array(target_info_total)[import_index]
                 target_vr_class = target_class_total[import_index]
                 target = target_total[import_index]
-                self.viz_results(output_total, target_vr_class=target_vr_class,target_info=target_info, date=date,target=target)
+                output_data = [output_total[i][0].cpu().numpy()[import_index] for i in range(3)]
+                viz_total_size += self.viz_results(output_data, target_vr_class=target_vr_class,target_info=target_info, date=date,target=target)
 
     def viz_results(self,output_data,target_vr_class=None,target_info=None,date=None,target=None):
         """Visualization Output and Target"""
         
-        dataset = global_var.get_value("dataset")
-        df_all = dataset.df_all
         names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
         names = ["price past","price future","CNTN5_output","CNTN5_tar"]          
         result = []
             
-        # if date!="20220115":
-        #     return
-
-        fea_values = []
-        for i in range(len(output_data)):
-            output_item = output_data[i] 
-            x_bar,z,cls,_,x_smo =  output_item 
-            fea_values.append(x_bar)
-        fea_values = torch.stack(fea_values).cpu().numpy().transpose(1,2,0)
+        fea0_values,fea1_values,fea2_values = output_data
         
-        target_neg_index = np.where(target_vr_class==0)[0]
-        target_suc_index = np.where(target_vr_class==3)[0]
+        target_neg_index = np.where(target_vr_class<=1)[0]
+        target_suc_index = np.where(target_vr_class>=2)[0]
         pad_before = np.array([0 for i in range(self.input_chunk_length)])
         pad_after = np.array([0 for i in range(self.output_chunk_length)])
         
         # CNTN5 part
-        fea1_values = fea_values[:,:,1]
         tar1_values = target[:,:,1]
-
+        # Price part
+        tar2_values = target[:,:,2]
         # def _viz_att_data(target_info):
         #     names = ["price","rsi_5","rsi_20"]
         #     for i in range(len(target_info)):
@@ -736,21 +731,26 @@ class MlpModule(_TFTModuleBatch):
             else:
                 target_index = target_suc_index
                 tar_viz = viz_result_suc
-            for i in range(target_index.shape[0]):
+            size = target_index.shape[0] if target_index.shape[0]<2 else 2
+            for i in range(size):
                 s_index = target_index[i]
                 ts = target_info[s_index]
-                instrument = ts["instrument"]
+                instrument = ts["instrument"] 
                 price_data_past = ts["price_array"][:self.input_chunk_length]
                 price_data_past = np.concatenate((price_data_past,pad_after),axis=-1)
                 price_data_future = ts["price_array"][25:]
                 price_data_future = np.concatenate((pad_before,price_data_future),axis=-1)
                 view_data = np.stack((price_data_past,price_data_future)).transpose(1,0)
-                fea1_data = np.concatenate((pad_before,fea1_values[i]),axis=-1)
-                fea1_combine = np.stack([fea1_data,tar1_values[i]]).transpose(1,0)
+                fea1_data = np.concatenate((pad_before,fea1_values[s_index]),axis=-1)
+                fea1_combine = np.stack([fea1_data,tar1_values[s_index]]).transpose(1,0)
+                fea2_data = np.concatenate((pad_before,fea2_values[s_index]),axis=-1)
+                fea2_combine = np.stack([fea2_data,tar2_values[s_index]]).transpose(1,0)
                 view_data = np.concatenate([view_data,fea1_combine],axis=1)
-                target_title = "date:{},instrument:{}".format(date,instrument)
+                # view_data = np.concatenate([view_data,fea2_combine],axis=1)
+                target_title = "tar_class:{},date:{},instrument:{}".format(target_vr_class[s_index],date,instrument)
                 win = "{}_{}".format(date,instrument)
                 tar_viz.viz_matrix_var(view_data,win=win,title=target_title,names=names)
+        return size
                                         
     def predict_step(
         self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None

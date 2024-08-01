@@ -60,7 +60,7 @@ task:
             n_epochs : 200
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/RSI_CNTP_2000_202201_202203'
+            batch_file_path: 'custom/data/asis/RSI_OBV_2000_202201_202203'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,7 +77,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'RSI_CNTP_QUAN_2000_202203'
+               model_name: 'RSI_OBV_QUAN_2000_202203'
                model_type: 'mlp'
                load_weight: True
                best_weight: False
