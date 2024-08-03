@@ -1,13 +1,7 @@
-from darts.models import TFTModel
-from darts.models.forecasting.tft_model import _TFTModule
-from darts.models.forecasting.tide_model import _TideModule
 from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel
-from darts.utils.data.training_dataset import TrainingDataset
 from darts.utils.likelihood_models import Likelihood, QuantileRegression
-from darts.utils.torch import random_method
 from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from darts.timeseries import TimeSeries
-from darts_pro.data_extension.series_data_utils import get_pred_center_value,build_serices_with_ndarray,get_np_center_value
 from darts.models.forecasting.torch_forecasting_model import _raise_if_wrong_type,_get_runs_folder,INIT_MODEL_NAME
 from darts.models.forecasting.pl_forecasting_module import PLForecastingModule
 from darts.models.forecasting.tft_submodels import (
@@ -21,28 +15,15 @@ import pandas as pd
 import torch
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
-import torch.nn.functional as F
 import pytorch_lightning as pl
-from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
-from joblib import Parallel, delayed
-import joblib
 
-from .series_data_utils import StatDataAssis
-from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer,unverse_transform_slope_value
 from cus_utils.tensor_viz import TensorViz
-from cus_utils.common_compute import compute_price_class,normalization,pairwise_compare,comp_max_and_rate
-from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
-import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
-from darts_pro.data_extension.custom_tcn_model import LSTMReg,TargetDataReg
-from darts_pro.data_extension.custom_module import _CusModule
-from losses.mtl_loss import TripletLoss,UncertaintyLoss
+# from darts_pro.data_extension.custom_module import _CusModule
 
-import torchmetrics
 from sklearn.preprocessing import MinMaxScaler
-import tsaug
 import re
 import os
 

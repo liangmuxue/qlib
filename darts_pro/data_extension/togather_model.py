@@ -1,0 +1,262 @@
+from darts.timeseries import TimeSeries
+from darts.utils.timeseries_generation import _generate_new_dates
+
+import numpy as np
+import pandas as pd
+import torch
+import pickle
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+from torch import nn
+import torch.nn.functional as F
+import pytorch_lightning as pl
+from sklearn.preprocessing import MinMaxScaler
+
+from cus_utils.tensor_viz import TensorViz
+from darts_pro.data_extension.custom_nor_model import TFTBatchModel
+from darts_pro.data_extension.togather_dataset import TogeSequentialDataset
+from darts_pro.mam.mlp_module_togather import MlpTogeModule
+
+viz_result_suc = TensorViz(env="train_result_suc")
+viz_result_fail = TensorViz(env="train_result_fail")
+viz_result_nor = TensorViz(env="train_result_nor")
+viz_input_aug = TensorViz(env="data_train_aug")
+viz_target = TensorViz(env="data_target")
+
+
+"""把分阶段数据再次整合到一起"""
+
+# class _TogeModule(BaseMixModule):
+#
+#     def __init__(
+#         self,
+#         output_dim: Tuple[int, int],
+#         variables_meta_array: Tuple[Dict[str, Dict[str, List[str]]],Dict[str, Dict[str, List[str]]]],
+#         num_static_components: int,
+#         hidden_size: Union[int, List[int]],
+#         lstm_layers: int,
+#         num_attention_heads: int,
+#         full_attention: bool,
+#         feed_forward: str,
+#         hidden_continuous_size: int,
+#         categorical_embedding_sizes: Dict[str, Tuple[int, int]],
+#         dropout: float,
+#         add_relative_index: bool,
+#         norm_type: Union[str, nn.Module],
+#         use_weighted_loss_func=False,
+#         past_split=None,
+#         filter_conv_index=0,
+#         loss_number=3,
+#         device="cpu",
+#         train_sample=None,
+#         model_type="tft",
+#         **kwargs,
+#     ):
+#         super().__init__(
+#         output_dim,
+#         variables_meta_array,
+#         num_static_components,
+#         hidden_size,
+#         lstm_layers,
+#         num_attention_heads,
+#         full_attention,
+#         feed_forward,
+#         hidden_continuous_size,
+#         categorical_embedding_sizes,
+#         dropout,
+#         add_relative_index,
+#         norm_type,
+#         use_weighted_loss_func=use_weighted_loss_func,
+#         past_split=past_split,
+#         filter_conv_index=filter_conv_index,
+#         loss_number=loss_number,
+#         device=device,
+#         train_sample=train_sample,
+#         model_type=model_type,
+#         **kwargs)
+#
+
+ 
+
+class TogeModel(TFTBatchModel):
+    def __init__(
+        self,
+        input_chunk_length: int,
+        output_chunk_length: int,
+        hidden_size: Union[int, List[int]] = 16,
+        lstm_layers: int = 1,
+        num_attention_heads: int = 4,
+        full_attention: bool = False,
+        feed_forward: str = "GatedResidualNetwork",
+        dropout: float = 0.1,
+        hidden_continuous_size: int = 8,
+        categorical_embedding_sizes: Optional[
+            Dict[str, Union[int, Tuple[int, int]]]
+        ] = None,
+        add_relative_index: bool = False,
+        loss_fn: Optional[nn.Module] = None,
+        likelihood=None,
+        norm_type: Union[str, nn.Module] = "LayerNorm",
+        use_weighted_loss_func:bool = False,
+        loss_number=3,
+        monitor=None,
+        step_mode="pretrain",
+        past_split=None,
+        filter_conv_index=0,
+        batch_file_path=None,
+        pretrain_model_name=None,
+        **kwargs,
+    ):
+        """继承父类，进行数据集和模型整合"""
+        
+        super().__init__(input_chunk_length,output_chunk_length,hidden_size,lstm_layers,num_attention_heads,
+                         full_attention,feed_forward,dropout,hidden_continuous_size,categorical_embedding_sizes,add_relative_index,
+                         loss_fn,likelihood,norm_type,use_weighted_loss_func,loss_number,monitor,
+                         past_split=past_split,filter_conv_index=filter_conv_index,**kwargs)    
+    
+    def _build_train_dataset(
+        self,
+        target: Sequence[TimeSeries],
+        past_covariates: Optional[Sequence[TimeSeries]],
+        future_covariates: Optional[Sequence[TimeSeries]],
+        max_samples_per_ts: Optional[int],
+        mode="train"
+    ):
+        """使用原数据集作为训练和测试数据集"""
+        
+        # 训练模式下，需要多放回一个静态数据对照集合
+        if mode=="train":
+            ds = TogeSequentialDataset(
+                target_series=target,
+                past_covariates=past_covariates,
+                future_covariates=future_covariates,
+                input_chunk_length=self.input_chunk_length,
+                output_chunk_length=self.output_chunk_length,
+                max_samples_per_ts=None,
+                use_static_covariates=True,
+                mode=mode
+            )  
+        # 验证模式下，需要传入之前存储的静态数据集合
+        if mode=="valid":
+            ds = TogeSequentialDataset(
+                target_series=target,
+                past_covariates=past_covariates,
+                future_covariates=future_covariates,
+                input_chunk_length=self.input_chunk_length,
+                output_chunk_length=self.output_chunk_length,
+                max_samples_per_ts=None,
+                use_static_covariates=True,
+                mode=mode,
+            )
+        return ds      
+    
+    def _create_model(self, train_sample) -> nn.Module:
+        """重载创建模型方法，使用自定义模型"""
+        
+        (
+            past_target,
+            past_covariate,
+            historic_future_covariate,
+            future_covariate,
+            static_covariates,
+            _,
+            _,
+            future_target,
+            _,
+            price_target
+        ) = train_sample
+
+        # add a covariate placeholder so that relative index will be included
+        if self.add_relative_index:
+            time_steps = self.input_chunk_length + self.output_chunk_length
+
+            expand_future_covariate = np.arange(time_steps).reshape((time_steps, 1))
+
+            historic_future_covariate = np.concatenate(
+                [
+                    ts[: self.input_chunk_length]
+                    for ts in [historic_future_covariate, expand_future_covariate]
+                    if ts is not None
+                ],
+                axis=1,
+            )
+            future_covariate = np.concatenate(
+                [
+                    ts[-self.output_chunk_length :]
+                    for ts in [future_covariate, expand_future_covariate]
+                    if ts is not None
+                ],
+                axis=1,
+            )
+        
+        # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
+        self.output_dim = self.define_output_dim()
+        
+        # 根据拆分的过去协变量，生成多个配置
+        ori_tensors = [
+            past_target,
+            past_covariate,
+            historic_future_covariate,  # for time varying encoders
+            future_covariate,
+            future_target,  # for time varying decoders
+            static_covariates,  # for static encoder
+        ]          
+        variables_meta_array,categorical_embedding_sizes = self.build_variable(ori_tensors)
+        
+        n_static_components = (
+            len(static_covariates) if static_covariates is not None else 0
+        )
+
+        self.categorical_embedding_sizes = categorical_embedding_sizes
+               
+        if self.model_type=="mlp":
+            model = MlpTogeModule(
+                output_dim=self.output_dim,
+                variables_meta_array=variables_meta_array,
+                num_static_components=n_static_components,
+                hidden_size=self.hidden_size,
+                lstm_layers=self.lstm_layers,
+                dropout=self.dropout,
+                num_attention_heads=self.num_attention_heads,
+                full_attention=self.full_attention,
+                feed_forward=self.feed_forward,
+                hidden_continuous_size=self.hidden_continuous_size,
+                categorical_embedding_sizes=self.categorical_embedding_sizes,
+                add_relative_index=self.add_relative_index,
+                norm_type=self.norm_type,
+                use_weighted_loss_func=self.use_weighted_loss_func,
+                past_split=self.past_split,
+                filter_conv_index=self.filter_conv_index,
+                device=self.device,
+                batch_file_path=self.batch_file_path,
+                step_mode=self.step_mode,
+                model_type=self.model_type,
+                train_sample=self.train_sample,
+                **self.pl_module_params,
+            )                                         
+        return model               
+   
+    @staticmethod           
+    def _batch_collate_fn(batch: List[Tuple]) -> Tuple:
+        """批次整合"""
+        
+        aggregated = []
+        first_sample = batch[0]
+        for i in range(len(first_sample)):
+            elem = first_sample[i]
+            if isinstance(elem, np.ndarray):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, MinMaxScaler):
+                aggregated.append([sample[i] for sample in batch])
+            elif isinstance(elem, tuple):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+            elif isinstance(elem, TimeSeries):
+                aggregated.append([sample[i] for sample in batch])
+        return tuple(aggregated)    
+    

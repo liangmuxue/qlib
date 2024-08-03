@@ -38,8 +38,12 @@ def test_crf():
     plt.legend()
     plt.show()
     print('value',model.decode(X[:4]))
-           
+
+def test_import():
+    from darts_pro.data_extension.custom_nor_model import TFTBatchModel
+          
 if __name__ == "__main__":
     # test_days_dur()
-    test_crf()
+
+    test_import()
     

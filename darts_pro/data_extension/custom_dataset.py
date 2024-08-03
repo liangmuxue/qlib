@@ -2,6 +2,8 @@ from darts.utils.data.sequential_dataset import (
     SplitCovariatesTrainingDataset,
 )
 
+import pickle
+import os
 from typing import Optional, List, Tuple, Union
 import numpy as np
 from numba.core.types import none
@@ -34,6 +36,8 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         max_samples_per_ts: Optional[int] = None,
         covariate_type: CovariateType = CovariateType.NONE,
         use_static_covariates: bool = True,
+        load_ass_data=False,
+        mode="train"
     ):
         """
         自定义数据集，用于重载父类getitem方法
@@ -41,8 +45,13 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         super().__init__(target_series,covariates,input_chunk_length,output_chunk_length,shift,shift_covariates,
                          max_samples_per_ts,covariate_type,use_static_covariates)
         
+        load_ass_data = global_var.get_value("load_ass_data")
+        if load_ass_data:
+            # 如果配置为加载模式，则从全局变量透传数据
+            self.ass_data = global_var.get_value("ass_data_{}".format(mode))
+            return 
+          
         df_all = global_var.get_value("dataset").df_all
-        
         self.ass_data = {}
         for series in self.target_series:
             code = int(series.static_covariates["instrument_rank"].values[0])
@@ -69,7 +78,12 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                                 &(df_all["instrument_rank"]==code)]["DEA"].values      
                                                                                                                                                                                                                    
             self.ass_data[code] = (instrument,label_array,price_array,datetime_array,kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea)
-            
+
+        # 保存辅助数据
+        ass_data_path = os.path.join(global_var.get_value("ass_data_path"),"ass_data_{}.pkl".format(mode))
+        with open(ass_data_path, "wb") as fout:
+            pickle.dump(self.ass_data, fout)             
+        
     def __getitem__(
         self, idx
     ) -> Tuple[
@@ -217,6 +231,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             max_samples_per_ts=max_samples_per_ts,
             covariate_type=CovariateType.PAST,
             use_static_covariates=use_static_covariates,
+            mode=mode,
         )
 
         # This dataset is in charge of serving historical and future future covariates

@@ -1,14 +1,10 @@
 import os
 
-from darts.models.forecasting.tide_model import _TideModule
 from darts.models.forecasting.torch_forecasting_model import _get_checkpoint_folder,_get_runs_folder,INIT_MODEL_NAME,_get_checkpoint_fname
-from darts.utils.data.training_dataset import TrainingDataset
 from darts.utils.likelihood_models import Likelihood, QuantileRegression
 from darts.utils.torch import random_method
 from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from darts.timeseries import TimeSeries
-from darts.utils.utils import get_single_series, seq2series, series2seq
-from cus_utils.process import create_from_cls_and_kwargs
 
 from glob import glob
 import pickle
@@ -42,7 +38,7 @@ from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset,
 from darts_pro.data_extension.custom_dataset import CustomSequentialDataset
 
 from cus_utils.tensor_viz import TensorViz
-viz_target = TensorViz(env="data_target")
+# viz_target = TensorViz(env="data_target")
 
 class _TFTModuleAsis(_CusModule):
     def __init__(
@@ -1006,7 +1002,7 @@ class TFTCluSerModel(TFTBatchModel):
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
-                file_name = "epoch=121-val_loss=3.55.ckpt"
+                file_name = "epoch=191-val_loss=3.49.ckpt"
             file_name = os.path.basename(file_name)       
             
         file_path = os.path.join(checkpoint_dir, file_name)

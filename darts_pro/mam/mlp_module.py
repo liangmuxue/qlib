@@ -26,7 +26,6 @@ from sklearn.manifold import MDS
 import matplotlib.pyplot as plt
 from cus_utils.tensor_viz import TensorViz
 
-from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
 from darts_pro.act_model.mlp_ts import MlpTs
 from cus_utils.metrics import pca_apply
 from cus_utils.process import create_from_cls_and_kwargs
@@ -35,12 +34,9 @@ from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_dist
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_weight_with_target
 from losses.clustering_loss import MlpLoss
 from cus_utils.common_compute import target_distribution,normalization_axis,intersect2d
-from losses.hsan_metirc_util import phi,high_confidence,pseudo_matrix,comprehensive_similarity
 from cus_utils.visualization import clu_coords_viz
 from cus_utils.clustering import get_cluster_center
 from cus_utils.visualization import ShowClsResult
-import cus_utils.global_var as global_var
-from losses.fds_loss import weighted_focal_l1_loss
 from losses.quanlity_loss import QuanlityLoss
 
 MixedCovariatesTrainTensorType = Tuple[
@@ -49,8 +45,8 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from darts_pro.data_extension.custom_module import _TFTModuleBatch
 
-viz_result_suc = TensorViz(env="train_result_suc")
-viz_result_fail = TensorViz(env="train_result_fail")
+# viz_result_suc = TensorViz(env="train_result_suc")
+# viz_result_fail = TensorViz(env="train_result_fail")
 from darts_pro.data_extension.custom_module import viz_target 
 
 class MlpModule(_TFTModuleBatch):
@@ -131,7 +127,7 @@ class MlpModule(_TFTModuleBatch):
             # 只检查属于自己模型的协变量
             past_covariates_item = past_covariates[...,past_conv_index[0]:past_conv_index[1]]            
             past_covariates_shape = past_covariates_item.shape[-1]
-            historic_future_covariates_shape = len(variables_meta["input"]["historic_future_covariate"])
+            historic_future_covariates_shape = historic_future_covariate.shape[-1]
             # 记录动态数据长度，后续需要切片
             self.dynamic_conv_shape = past_target_shape + past_covariates_shape
             input_dim = (
@@ -399,8 +395,8 @@ class MlpModule(_TFTModuleBatch):
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
-            # if date>=20220401:
-            #     continue
+            if date>=20220501 or date<20220401:
+                continue
             idx = fur_dates[date]
             # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
             pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
@@ -417,7 +413,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (fea_1_range<-0.1) & (sv_0>0.2) # & (fea_2_range>0.1)
+        sv_import_bool = (fea_1_range<-0.2) & (sv_0>0.2) # & (fea_2_range>0.1)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -543,7 +539,7 @@ class MlpModule(_TFTModuleBatch):
         data = [past_target.cpu().numpy(),target_class.cpu().numpy(),
                 future_target.cpu().numpy(),pca_target,price_target.cpu().numpy(),target_info]          
         output_combine = (output,data)
-        pickle.dump(output_combine,self.valid_fout)     
+        # pickle.dump(output_combine,self.valid_fout)     
         # 目标数据合并到一起  
         target = np.concatenate([past_target.cpu().numpy(),future_target.cpu().numpy()],axis=1)
         # 保存数据用于后续验证

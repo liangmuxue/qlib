@@ -33,7 +33,7 @@ from darts_pro.data_extension.custom_nor_model import TFTAsisModel,TFTBatchModel
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
 
 import cus_utils.global_var as global_var
-from darts_pro.data_extension.custom_tcn_model import ClassifierTrainer
+from darts_pro.data_extension.togather_model import ClassifierTrainer
 
 class TftDatafAnalysis():
     

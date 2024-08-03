@@ -28,7 +28,6 @@ from cus_utils.common_compute import compute_price_class,normalization,pairwise_
 from cus_utils.metrics import compute_cross_metrics,compute_vr_metrics
 import cus_utils.global_var as global_var
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
-from darts_pro.data_extension.custom_tcn_model import LSTMReg,TargetDataReg
 from darts_pro.data_extension.custom_base_model import BaseMixModule
 from losses.mtl_loss import TripletLoss,UncertaintyLoss
 
@@ -1175,7 +1174,4 @@ class _TFTModuleBatch(_CusModule):
             output_dim： 类别数
         """
         return super()._construct_classify_layer(input_dim, output_dim)
-        # len = self.input_chunk_length + self.output_chunk_length
-        # class_layer = TSTransformerEncoderClassiregressor(input_dim, num_classes=output_dim, max_len=len,device=device)
-        # class_layer = class_layer.cuda(device)
-        # return class_layer
+
