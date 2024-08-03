@@ -60,7 +60,7 @@ task:
             n_epochs : 280
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/RSI_OBV_2000_202201_202203'
+            batch_file_path: 'custom/data/asis/ALLREC_OBV_QUAN_2000_202203_train'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,9 +77,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'RSI_OBV_QUAN_2000_202203'
+               model_name: "ALLREC_OBV_QUAN_2000_202203_train"
                model_type: 'mlp'
-               load_weight: True
+               load_weight: False
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
@@ -100,6 +100,7 @@ task:
                 train_total: [2010-01-01, 2023-05-31]
                 valid: [2021-08-01, 2021-12-31]
                 test: [2021-01-01, 2021-03-01]
+            whole_data: True
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'

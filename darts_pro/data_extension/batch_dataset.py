@@ -111,7 +111,7 @@ class BatchDataset(Dataset):
                             s_list.append(item[1])
                     aggregated.append(s_list)       
                     continue             
-                sample_list = np.concatenate([sample[i] for sample in batch_data],axis=0)
+                sample_list = np.concatenate([sample[i].astype(np.float32) for sample in batch_data],axis=0)
                 aggregated.append(
                     sample_list
                 )

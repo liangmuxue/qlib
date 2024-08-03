@@ -168,17 +168,17 @@ class _TFTModuleAsis(_CusModule):
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler_tuple,target_class,target,target_info,price_target) = data_batch    
         
         price_bool = np.ones(past_target.shape[0], dtype=bool)
-        # import_index_bool = self.create_signal_all(target_info)       
+        import_index_bool = self.create_signal_all(target_info)       
         # import_index_bool = self.create_signal_macd(target_info)       
-        import_index_bool = self.create_signal_rsi(target_info)  
+        # import_index_bool = self.create_signal_rsi(target_info)  
         # import_index_bool = self.create_signal_kdj(target_info)    
         
         def remove_att_data(item):
             del item["kdj_k"] 
             del item["kdj_d"] 
             del item["kdj_j"] 
-            # del item["rsi_20"] 
-            # del item["rsi_5"] 
+            del item["rsi_20"] 
+            del item["rsi_5"] 
             del item["macd_diff"] 
             del item["macd_dea"]             
         # 如果周期内价格不发生变化，后续统计是会NAN，在此过滤
@@ -193,7 +193,7 @@ class _TFTModuleAsis(_CusModule):
             return None
         print("total size:{},import_index_bool size:{}".format(past_target.shape[0],np.sum(import_index_bool)))
         rtn_index = np.where(import_index_bool)[0]
-        self._viz_att_data(np.array(target_info)[rtn_index].tolist())
+        # self._viz_att_data(np.array(target_info)[rtn_index].tolist())
         data_batch_filter = [past_target[rtn_index,:,:],past_covariates[rtn_index,:,:],historic_future_covariates[rtn_index,:,:],
                             future_covariates[rtn_index,:,:],static_covariates[rtn_index,:,:],
                             np.array(scaler_tuple,dtype=object)[rtn_index],target_class[rtn_index,:,:],
@@ -203,16 +203,17 @@ class _TFTModuleAsis(_CusModule):
     def _viz_att_data(self,target_info):
         names = ["price","rsi_5","rsi_20"]
         names = ["price","kdj_k","kdj_d"]
+        names = ["price","macd_diff","macd_dea"]
         if len(target_info)<10:
             return
         for i in range(5,10):
             ts = target_info[i]
             price_item = ts["price_array"]
-            rsi_5 = ts["rsi_5"]
-            rsi_20 = ts["rsi_20"]
+            macd_diff = ts["macd_diff"]
+            macd_dea = ts["macd_dea"]
             # kdj_k = ts["kdj_k"]
             # kdj_d = ts["kdj_d"]            
-            view_data = np.stack([price_item,rsi_5,rsi_20]).transpose(1,0)
+            view_data = np.stack([price_item,macd_diff,macd_dea]).transpose(1,0)
             # view_data = np.stack([price_item,kdj_k,kdj_d]).transpose(1,0)
             target_title = "fur_date:{},instrument:{}".format(ts["future_start_datetime"],ts["instrument"])
             win = "win_{}".format(i)
@@ -227,7 +228,7 @@ class _TFTModuleAsis(_CusModule):
         diff_cov = np.array([item["macd_diff"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         dea_cov = np.array([item["macd_dea"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
         # 规则为金叉，即diff快线向上突破dea慢线
-        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=5) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=1)
+        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=6) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=2)
         return index_bool
 
     def create_signal_rsi(self,target_info):
@@ -269,9 +270,9 @@ class _TFTModuleAsis(_CusModule):
         if val_batch is None:
             return fake_loss  
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,price_target) = val_batch 
-        data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
-                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),
-                         scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info,price_target.cpu().numpy()]
+        data = [past_target.cpu().numpy().astype(np.float32),past_covariates.cpu().numpy().astype(np.float32), historic_future_covariates.cpu().numpy().astype(np.float32),
+                         future_covariates.cpu().numpy().astype(np.float32),static_covariates.cpu().numpy().astype(np.float32),
+                         scaler,target_class.cpu().numpy(),target.cpu().numpy().astype(np.float32),target_info,price_target.cpu().numpy().astype(np.float32)]
         print("dump valid,batch:{},target shape:{}".format(batch_idx,past_target.shape))
         pickle.dump(data,self.valid_fout) 
         
@@ -992,20 +993,20 @@ class TFTCluSerModel(TFTBatchModel):
                 )   
             if best:
                 # 如果查找best，则使用文件中的最高分数进行匹配
-                max_score = 0
+                min_loss = 100
                 cadi_x = None
                 for x in checklist:
-                    score = float(x.split("=")[2][:-5])
+                    cur_loss = float(x.split("=")[2][:-5])
                     cur_epoch = int(x.split("=")[1].split("-")[0])
                     # 大于一定的epoch才计算评分
-                    if cur_epoch>100 and score>max_score:
-                        max_score = score
+                    if cur_epoch>100 and cur_loss<min_loss:
+                        min_loss = cur_loss
                         cadi_x = x
                 file_name = cadi_x
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
-                # file_name = "epoch=95-score_total=0.00.ckpt"
+                file_name = "epoch=121-val_loss=3.55.ckpt"
             file_name = os.path.basename(file_name)       
             
         file_path = os.path.join(checkpoint_dir, file_name)

@@ -234,7 +234,11 @@ class TFTSeriesDataset(TFTDataset):
         valid_end = val_range[1]
         # 截取训练集与测试集
         df_all = self.df_all
-        df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_start))]
+        # 根据配置决定是否验证集也用于训练
+        if self.kwargs["whole_data"]:
+            df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_end))]
+        else:
+            df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_start))]
         df_val = df_all[(df_all["datetime"]>=pd.to_datetime(str(valid_start))) & (df_all["datetime"]<pd.to_datetime(str(valid_end)))]
         # 在筛选的过程中，有可能产生股票个数不一致的情况，取交集
         df_train = df_train[df_train[self.get_group_column()].isin(df_val[self.get_group_column()])]
