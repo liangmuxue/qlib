@@ -16,13 +16,6 @@ from darts_pro.data_extension.custom_nor_model import TFTBatchModel
 from darts_pro.data_extension.togather_dataset import TogeSequentialDataset
 from darts_pro.mam.mlp_module_togather import MlpTogeModule
 
-viz_result_suc = TensorViz(env="train_result_suc")
-viz_result_fail = TensorViz(env="train_result_fail")
-viz_result_nor = TensorViz(env="train_result_nor")
-viz_input_aug = TensorViz(env="data_train_aug")
-viz_target = TensorViz(env="data_target")
-
-
 """把分阶段数据再次整合到一起"""
 
 # class _TogeModule(BaseMixModule):

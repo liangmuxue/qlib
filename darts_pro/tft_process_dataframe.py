@@ -108,7 +108,11 @@ class TftDataframeModel():
         dataset: TFTSeriesDataset,
     ):
         global_var.set_value("dataset", dataset)
-
+        viz_result_suc = TensorViz(env="train_result_suc")
+        viz_result_fail = TensorViz(env="train_result_fail")
+        global_var.set_value("viz_result_suc",viz_result_suc)
+        global_var.set_value("viz_result_fail",viz_result_fail)
+        
         if self.type.startswith("build_data_asis"):
             self.build_data_asis(dataset)
             return   
@@ -145,7 +149,8 @@ class TftDataframeModel():
             return  
              
         """对预测数据进行分类训练"""
-
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]      
@@ -272,7 +277,6 @@ class TftDataframeModel():
             global_var.set_value("ass_data_train",ass_data_train)
             global_var.set_value("ass_data_valid",ass_data_valid)
             global_var.set_value("load_ass_data",True)
-            
         else:
             # 生成tft时间序列数据集,包括目标数据、协变量等
             train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
@@ -282,6 +286,7 @@ class TftDataframeModel():
                 pickle.dump(dump_data, fout)   
             global_var.set_value("ass_data_path",self.batch_file_path)
             global_var.set_value("load_ass_data",False)
+            global_var.set_value("save_ass_data",True)
             
         # 使用股票代码数量作为embbding长度
         emb_size = dataset.get_emb_size()
@@ -306,7 +311,7 @@ class TftDataframeModel():
             
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=12)
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
         
     def fit_batch(
         self,

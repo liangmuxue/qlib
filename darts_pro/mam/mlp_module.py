@@ -38,16 +38,13 @@ from cus_utils.visualization import clu_coords_viz
 from cus_utils.clustering import get_cluster_center
 from cus_utils.visualization import ShowClsResult
 from losses.quanlity_loss import QuanlityLoss
+import cus_utils.global_var as global_var
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]
 
 from darts_pro.data_extension.custom_module import _TFTModuleBatch
-
-# viz_result_suc = TensorViz(env="train_result_suc")
-# viz_result_fail = TensorViz(env="train_result_fail")
-from darts_pro.data_extension.custom_module import viz_target 
 
 class MlpModule(_TFTModuleBatch):
     """自定义基于DNN模式的时间序列模块"""
@@ -340,7 +337,7 @@ class MlpModule(_TFTModuleBatch):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_CNTN_loss", (ce_loss[1]+corr_loss_combine[1]), batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,pca_target)
         return loss,detail_loss,output_combine
@@ -361,7 +358,7 @@ class MlpModule(_TFTModuleBatch):
         save_file = "{}/pred_{}-{}.png".format(path,self.current_epoch,batch_idx)
         ShowClsResult(w[0].transpose(),np.expand_dims(w[1],axis=0),pca_output.cpu().numpy(),target_class,save_file=save_file)
                      
-    def build_import_index(self,output_data=None,fur_dates=None):  
+    def build_import_index(self,output_data=None,target_info=None,fur_dates=None):  
         """生成涨幅达标的预测数据下标"""
         
         cls_values = []
@@ -395,15 +392,39 @@ class MlpModule(_TFTModuleBatch):
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
-            if date>=20220501 or date<20220401:
-                continue
+            # if date>=20220501 or date<20220401:
+            #     continue
             idx = fur_dates[date]
             # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
             pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
-            pred_import_index_all[date] = np.array(idx)[pred_import_index]
+            # 通过传统指标进行二次筛选
+            target_info_cur = np.array(target_info)[idx]
+            # singal_index_bool = self.create_signal_macd(target_info_cur)
+            singal_index_bool = self.create_signal_rsi(target_info_cur)
+            macd_index = np.array(idx)[np.where(singal_index_bool)[0]]
+            pred_index = np.array(idx)[pred_import_index]
+            pred_import_index_all[date] = np.intersect1d(macd_index,pred_index)
             
         return pred_import_index_all,(cls_values,fea_values,pca_values)       
-    
+
+    def create_signal_macd(self,target_info):
+        """macd指标判断"""
+        
+        diff_cov = np.array([item["macd_diff"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        dea_cov = np.array([item["macd_dea"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        # 规则为金叉，即diff快线向上突破dea慢线
+        index_bool = (np.sum(diff_cov[:,:-2]<=dea_cov[:,:-2],axis=1)>=6) & (np.sum(diff_cov[:,-5:]>=dea_cov[:,-5:],axis=1)>=2)
+        return index_bool
+
+    def create_signal_rsi(self,target_info):
+        """rsi指标判断"""
+        
+        rsi5_cov = np.array([item["rsi_5"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        rsi20_cov = np.array([item["rsi_20"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        # 规则为金叉，即rsi快线向上突破rsi慢线
+        index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=6) & (np.sum(rsi5_cov[:,-5:]>=rsi20_cov[:,-5:],axis=1)>=2)
+        return index_bool
+       
     def strategy_threhold(self,sv,fea,cls,batch_size=0):
         cls_0 = cls[...,0]
         cls_1 = cls[...,1]
@@ -413,7 +434,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (fea_1_range<-0.2) & (sv_0>0.2) # & (fea_2_range>0.1)
+        sv_import_bool = (fea_1_range<-0.2) & (sv_1<-0.1) # & (fea_2_range>0.1)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -613,7 +634,7 @@ class MlpModule(_TFTModuleBatch):
             else:
                 fur_dates[future_start_datetime].append(index)
         # 生成目标索引
-        import_index_all,values = self.build_import_index(output_data=output_total,fur_dates=fur_dates)
+        import_index_all,values = self.build_import_index(output_data=output_total,fur_dates=fur_dates,target_info=target_info_total)
         rate_total = {}
         total_imp_cnt = np.where(target_class_total==3)[0].shape[0]
         # 对每天的准确率进行统计，并累加
@@ -673,7 +694,7 @@ class MlpModule(_TFTModuleBatch):
         self.log("score_total", score_total, prog_bar=True) 
         
         # 如果是测试模式，则在此进行可视化
-        if self.mode=="pred_batch":
+        if self.mode=="pred_batch" or True:
             viz_total_size = 0
             output_total,target_total,target_class_total,target_info_total = self.combine_output_total(self.output_result)
             for index,date in enumerate(import_index_all.keys()):
@@ -684,13 +705,16 @@ class MlpModule(_TFTModuleBatch):
                 target_vr_class = target_class_total[import_index]
                 target = target_total[import_index]
                 output_data = [output_total[i][0].cpu().numpy()[import_index] for i in range(3)]
-                viz_total_size += self.viz_results(output_data, target_vr_class=target_vr_class,target_info=target_info, date=date,target=target)
+                viz_total_size += self.viz_results(output_data, target_vr_class=target_vr_class,
+                                        target_info=target_info, date=date,target=target,counter=viz_total_size)
 
-    def viz_results(self,output_data,target_vr_class=None,target_info=None,date=None,target=None):
+    def viz_results(self,output_data,target_vr_class=None,target_info=None,date=None,target=None,counter=0):
         """Visualization Output and Target"""
         
+        
         names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
-        names = ["price past","price future","CNTN5_output","CNTN5_tar"]          
+        names = ["price past","price future","CNTN5_output","CNTN5_tar"]      
+        names = ["price past","price future","CNTN5_output","CNTN5_tar","macd_diff","macd_dea"]      
         result = []
             
         fea0_values,fea1_values,fea2_values = output_data
@@ -721,30 +745,35 @@ class MlpModule(_TFTModuleBatch):
         for n in range(2):
             if n==0:
                 target_index = target_neg_index
-                tar_viz = viz_result_fail
+                tar_viz = global_var.get_value("viz_result_fail")
             else:
                 target_index = target_suc_index
-                tar_viz = viz_result_suc
+                tar_viz = global_var.get_value("viz_result_suc")
             size = target_index.shape[0] if target_index.shape[0]<2 else 2
             for i in range(size):
                 s_index = target_index[i]
                 ts = target_info[s_index]
                 instrument = ts["instrument"] 
+                # 价格部分
                 price_data_past = ts["price_array"][:self.input_chunk_length]
                 price_data_past = np.concatenate((price_data_past,pad_after),axis=-1)
                 price_data_future = ts["price_array"][25:]
                 price_data_future = np.concatenate((pad_before,price_data_future),axis=-1)
+                # 预测目标部分
                 view_data = np.stack((price_data_past,price_data_future)).transpose(1,0)
                 fea1_data = np.concatenate((pad_before,fea1_values[s_index]),axis=-1)
                 fea1_combine = np.stack([fea1_data,tar1_values[s_index]]).transpose(1,0)
                 fea2_data = np.concatenate((pad_before,fea2_values[s_index]),axis=-1)
                 fea2_combine = np.stack([fea2_data,tar2_values[s_index]]).transpose(1,0)
                 view_data = np.concatenate([view_data,fea1_combine],axis=1)
-                # view_data = np.concatenate([view_data,fea2_combine],axis=1)
+                # 辅助数据部分
+                att_data = np.stack([ts["macd_diff"],ts["macd_dea"]]).transpose(1,0)
+                view_data = np.concatenate([view_data,att_data],axis=1)
                 target_title = "tar_class:{},date:{},instrument:{}".format(target_vr_class[s_index],date,instrument)
-                win = "{}_{}".format(date,instrument)
+                counter+=1
+                win = "win_{}".format(counter)
                 tar_viz.viz_matrix_var(view_data,win=win,title=target_title,names=names)
-        return size
+        return counter
                                         
     def predict_step(
         self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None

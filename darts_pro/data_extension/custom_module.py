@@ -31,12 +31,6 @@ from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SI
 from darts_pro.data_extension.custom_base_model import BaseMixModule
 from losses.mtl_loss import TripletLoss,UncertaintyLoss
 
-viz_result_suc = TensorViz(env="train_result_suc")
-viz_result_fail = TensorViz(env="train_result_fail")
-viz_result_nor = TensorViz(env="train_result_nor")
-viz_input_aug = TensorViz(env="data_train_aug")
-viz_target = TensorViz(env="data_target")
-
 def _build_forecast_series(
      points_preds: Union[np.ndarray, Sequence[np.ndarray]],
      input_series: TimeSeries,

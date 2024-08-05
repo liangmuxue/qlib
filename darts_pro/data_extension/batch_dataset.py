@@ -32,16 +32,8 @@ class BatchDataset(Dataset):
         self.trunk_mode = trunk_mode
         self.batch_size = batch_size
         
-        batch_data = []
-        with open(filepath, "rb") as fin:
-            while True:
-                try:
-                    batch_data.append(pickle.load(fin))
-                except EOFError:
-                    break            
-                
-        aggregated = self.create_aggregated_data(batch_data)    
         # 清除不合规数据
+        aggregated = self.create_aggregated_wrapper(filepath,mode=2)
         aggregated = self.clear_inf_data(aggregated)
             
         if self.mode=="process":
@@ -97,6 +89,45 @@ class BatchDataset(Dataset):
             self.y_transform = MinMaxScaler().fit_transform(y)
             print("self.target_data shape:{}".format(self.target_data.shape))           
     
+    def create_aggregated_wrapper(self,filepath,mode=1):
+        if mode==1:
+            slide_size = 50
+            aggregated = []
+            aggregated_combine = []
+            index = 0
+            slide_index = 0
+            batch_len = 0
+            with open(filepath, "rb") as fin:
+                while True:
+                    try:
+                        # 增量模式创建训练数据
+                        index += 1
+                        slide_index+=1
+                        print("agg index:{}".format(index))
+                        if slide_index>slide_size:
+                            aggregated_combine = self.create_aggregated_data_step(aggregated,aggregated_combine)
+                            slide_index = 0
+                            aggregated = []
+                            batch_len += 1
+                            print("batch_len:{}".format(batch_len))
+                        aggregated = self.create_aggregated_data_step(pickle.load(fin),aggregated)
+                    except EOFError:
+                        break            
+            if len(aggregated)>0:
+                aggregated_combine = self.create_aggregated_data_step(aggregated,aggregated_combine)   
+            return aggregated_combine
+
+        batch_data = []
+        with open(filepath, "rb") as fin:
+            while True:
+                try:
+                    batch_data.append(pickle.load(fin))
+                except EOFError:
+                    break            
+                
+        aggregated = self.create_aggregated_data(batch_data) 
+        return aggregated   
+
     def create_aggregated_data(self,batch_data):
         first_sample = batch_data[0]
         aggregated = []
@@ -111,7 +142,7 @@ class BatchDataset(Dataset):
                             s_list.append(item[1])
                     aggregated.append(s_list)       
                     continue             
-                sample_list = np.concatenate([sample[i].astype(np.float32) for sample in batch_data],axis=0)
+                sample_list = np.concatenate([sample[i] for sample in batch_data],axis=0)
                 aggregated.append(
                     sample_list
                 )
@@ -141,7 +172,32 @@ class BatchDataset(Dataset):
             elif elem is None:
                 aggregated.append(None)  
         return aggregated
-    
+         
+    def create_aggregated_data_step(self,batch_data,aggregated):
+        if len(aggregated)==0:
+            aggregated = [None for _ in range(len(batch_data))]
+        for i in range(len(batch_data)):
+            elem = batch_data[i]
+            if isinstance(elem, np.ndarray):
+                # 忽略scaler
+                if isinstance(elem[0][0],MinMaxScaler):
+                    if aggregated[i] is None:
+                        aggregated[i] = elem[:,1]
+                    else:
+                        aggregated[i] = np.concatenate([aggregated[i],elem[:,1]])
+                    continue            
+                if aggregated[i] is None:
+                    aggregated[i] = elem
+                else:
+                    aggregated[i] = np.concatenate([aggregated[i],elem])
+            elif isinstance(elem, list):
+                if aggregated[i] is None:
+                    aggregated[i] = elem
+                else:
+                    aggregated[i] += elem
+            elif elem is None:
+                aggregated.append(None)  
+        return aggregated
     
     def clear_inf_data(self,agg_data):
         target = agg_data[-3]

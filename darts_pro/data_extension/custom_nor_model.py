@@ -183,7 +183,7 @@ class _TFTModuleAsis(_CusModule):
             item_price = item["price_array"][:self.input_chunk_length]
             price_bool[i] = (np.unique(item_price).shape[0]>=2)     
             # 清除附加数据，节约内存 
-            remove_att_data(item)
+            # remove_att_data(item)
         import_index_bool = import_index_bool & price_bool            
         if np.sum(import_index_bool)==0:
             return None
@@ -213,7 +213,7 @@ class _TFTModuleAsis(_CusModule):
             # view_data = np.stack([price_item,kdj_k,kdj_d]).transpose(1,0)
             target_title = "fur_date:{},instrument:{}".format(ts["future_start_datetime"],ts["instrument"])
             win = "win_{}".format(i)
-            viz_target.viz_matrix_var(view_data,win=win,title=target_title,names=names)            
+            # viz_target.viz_matrix_var(view_data,win=win,title=target_title,names=names)            
     
     def create_signal_all(self,target_info):
         return np.ones(len(target_info), dtype=bool)
@@ -1002,7 +1002,7 @@ class TFTCluSerModel(TFTBatchModel):
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
-                file_name = "epoch=191-val_loss=3.49.ckpt"
+                # file_name = "epoch=191-val_loss=3.49.ckpt"
             file_name = os.path.basename(file_name)       
             
         file_path = os.path.join(checkpoint_dir, file_name)

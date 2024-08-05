@@ -20,7 +20,6 @@ from sklearn.metrics import adjusted_rand_score as ari_score
 from sklearn.manifold import MDS
 import matplotlib.pyplot as plt
 
-from darts_pro.data_extension.custom_module import viz_target,viz_result_suc,viz_result_fail,viz_result_nor
 from darts_pro.act_model.cov_cnn import CovCnn,PcaCnn
 from cus_utils.metrics import pca_apply
 from cus_utils.process import create_from_cls_and_kwargs

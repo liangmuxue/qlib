@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_2000
+market: &market test_1000
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -60,7 +60,7 @@ task:
             n_epochs : 1
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/ALLREC_OBV_QUAN_2000_train'
+            batch_file_path: 'custom/data/asis/ALL2018_RANKMA_1000_202203'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -96,9 +96,9 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2018-01-01, 2023-05-31]
-                valid: [2021-11-01, 2022-02-28]
+                valid: [2021-11-01, 2022-03-31]
                 test: [2021-01-01, 2021-03-01]
-            whole_data: True
+            whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
@@ -117,7 +117,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['REV5','CNTN5','OBV5']
+                target_column: ['REV5','CNTN5','RANKMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['REV5','REV5_ORI','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'

@@ -79,10 +79,12 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                                                                                                                                                                                                                    
             self.ass_data[code] = (instrument,label_array,price_array,datetime_array,kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea)
 
-        # 保存辅助数据
-        ass_data_path = os.path.join(global_var.get_value("ass_data_path"),"ass_data_{}.pkl".format(mode))
-        with open(ass_data_path, "wb") as fout:
-            pickle.dump(self.ass_data, fout)             
+        save_ass_data = global_var.get_value("save_ass_data")
+        if save_ass_data:
+            # 保存辅助数据
+            ass_data_path = os.path.join(global_var.get_value("ass_data_path"),"ass_data_{}.pkl".format(mode))
+            with open(ass_data_path, "wb") as fout:
+                pickle.dump(self.ass_data, fout)             
         
     def __getitem__(
         self, idx
