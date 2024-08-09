@@ -33,9 +33,9 @@ from darts_pro.mam.sdcn_module import SdcnModule
 from darts_pro.mam.vade_module import VaDEModule
 from darts_pro.mam.vare_module import VaREModule
 from darts_pro.mam.mlp_module import MlpModule
-
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchCluDataset,BatchInferDataset
 from darts_pro.data_extension.custom_dataset import CustomSequentialDataset
+from cus_utils.common_compute import target_distribution,normalization_axis
 
 from cus_utils.tensor_viz import TensorViz
 # viz_target = TensorViz(env="data_target")
@@ -75,6 +75,8 @@ class _TFTModuleAsis(_CusModule):
         self.train_filepath = "{}/train_batch.pickel".format(batch_file_path)
         self.train_part_filepath = "{}/train_part_batch.pickel".format(batch_file_path)
         self.valid_filepath = "{}/valid_batch.pickel".format(batch_file_path)
+        self.static_train_filepath = "{}/static_train_batch.pickel".format(batch_file_path)
+        self.static_valid_filepath = "{}/static_valid_batch.pickel".format(batch_file_path)
         
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """use to export data"""
@@ -89,7 +91,7 @@ class _TFTModuleAsis(_CusModule):
         data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
                          future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),
                          scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info,price_target.cpu().numpy()]        
-        pickle.dump(data,self.train_fout) 
+        self.pkl_dump(data,self.train_fout,is_training=True) 
         return fake_loss
 
     def dynamic_build_training_data(self,data_batch,rev_threhold=1):
@@ -266,27 +268,59 @@ class _TFTModuleAsis(_CusModule):
         if val_batch is None:
             return fake_loss  
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,scaler,target_class,target,target_info,price_target) = val_batch 
-        data = [past_target.cpu().numpy().astype(np.float32),past_covariates.cpu().numpy().astype(np.float32), historic_future_covariates.cpu().numpy().astype(np.float32),
-                         future_covariates.cpu().numpy().astype(np.float32),static_covariates.cpu().numpy().astype(np.float32),
-                         scaler,target_class.cpu().numpy(),target.cpu().numpy().astype(np.float32),target_info,price_target.cpu().numpy().astype(np.float32)]
+        data = [past_target.cpu().numpy(),past_covariates.cpu().numpy(), historic_future_covariates.cpu().numpy(),
+                         future_covariates.cpu().numpy(),static_covariates.cpu().numpy(),
+                         scaler,target_class.cpu().numpy(),target.cpu().numpy(),target_info,price_target.cpu().numpy()]
         print("dump valid,batch:{},target shape:{}".format(batch_idx,past_target.shape))
-        pickle.dump(data,self.valid_fout) 
-        
+        self.pkl_dump(data,self.valid_fout,is_training=False)
         self.log("val_loss", fake_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         return fake_loss     
-     
+    
+    def pkl_dump(self,data,out_file,is_training=True):
+        """导出到文件"""
+        
+        # 累加所有静态变量，后续统一进行归一化
+        (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,
+         scaler,target_class,target,target_info,price_target) = data
+        if is_training:
+            if self.static_covariates_train is None:
+                self.static_covariates_train = static_covariates
+            else:
+                self.static_covariates_train = np.concatenate((self.static_covariates_train,static_covariates))
+        else:
+            if self.static_covariates_valid is None:
+                self.static_covariates_valid = static_covariates
+            else:
+                self.static_covariates_valid = np.concatenate((self.static_covariates_valid,static_covariates))        
+        # 转换为float16，节省空间
+        data_final = (past_target.astype(np.float16),past_covariates.astype(np.float16), historic_future_covariates.astype(np.float16),
+                      future_covariates.astype(np.float16),static_covariates,
+                      scaler,target_class,target.astype(np.float16),target_info,price_target.astype(np.float16))                     
+        pickle.dump(data,out_file) 
+    
     def on_train_start(self):  
         self.total_target_cnt = 0
         torch.set_grad_enabled(True)
         self.train_fout = open(self.train_filepath, "wb")
         self.train_part_fout = open(self.train_part_filepath, "wb")  
         self.valid_fout = open(self.valid_filepath, "wb")
+        
+        self.static_covariates_train = None
+        self.static_covariates_valid = None
                                      
     def on_train_epoch_end(self):
         print("self.total_target_cnt:{}".format(self.total_target_cnt))
         self.train_fout.close()
         self.train_part_fout.close()
         self.valid_fout.close()
+        
+        # 统一进行静态变量归一化,并存储
+        self.static_covariates_train = normalization_axis(self.static_covariates_train,axis=0)
+        with open(self.static_train_filepath, "wb") as fout:
+            pickle.dump(self.static_covariates_train,fout) 
+        self.static_covariates_valid = normalization_axis(self.static_covariates_valid,axis=0)
+        with open(self.static_valid_filepath, "wb") as fout:
+            pickle.dump(self.static_covariates_valid,fout)             
         
     def on_validation_epoch_end(self):
         print("pass")
@@ -488,8 +522,8 @@ class TFTBatchModel(TFTExtModel):
                 checkpoint_callback = pl_callbacks.ModelCheckpoint(
                     dirpath=c.dirpath,
                     save_last=True,
-                    monitor="val_loss",
-                    filename="{epoch}-{val_loss:.2f}",
+                    monitor="val_CNTN_loss",
+                    filename="{epoch}-{val_CNTN_loss:.2f}",
                     every_n_epochs=2,
                     save_top_k = -1
                 )
@@ -916,7 +950,7 @@ class TFTCluSerModel(TFTBatchModel):
                 is_training = True,
                 trunk_mode = False,
                 batch_size = self.batch_size,
-                filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode)
+                filepath = self.batch_file_path
             )    
             # self.static_datas = ds.static_datas
         # 验证模式下，需要传入之前存储的静态数据集合
@@ -924,7 +958,7 @@ class TFTCluSerModel(TFTBatchModel):
             ds = BatchDataset(
                 is_training = False,
                 trunk_mode = False,
-                filepath = "{}/{}_batch.pickel".format(self.batch_file_path,mode),
+                filepath = self.batch_file_path,
                 # pre_static_datas=self.static_datas
             )    
         return ds
@@ -938,8 +972,8 @@ class TFTCluSerModel(TFTBatchModel):
                 checkpoint_callback = pl_callbacks.ModelCheckpoint(
                     dirpath=c.dirpath,
                     save_last=False,
-                    monitor="val_loss",
-                    filename="{epoch}-{val_loss:.2f}",
+                    monitor="val_CNTN_loss",
+                    filename="{epoch}-{val_CNTN_loss:.2f}",
                     every_n_epochs=2,
                     # mode="min",
                     save_top_k = -1
@@ -1002,7 +1036,7 @@ class TFTCluSerModel(TFTBatchModel):
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
-                # file_name = "epoch=191-val_loss=3.49.ckpt"
+                # file_name = "epoch=117-val_CNTN_loss=0.75.ckpt"
             file_name = os.path.basename(file_name)       
             
         file_path = os.path.join(checkpoint_dir, file_name)

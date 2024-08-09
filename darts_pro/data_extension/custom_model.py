@@ -360,6 +360,10 @@ class TFTExtModel(MixedCovariatesTorchModel):
         if np.issubdtype(dtype, np.float32):
             logger.info("Time series values are 32-bits; casting model to float32.")
             precision = "32" if not pl_200_or_above else "32-true"
+        elif np.issubdtype(dtype, np.float16):
+            # Tirck for mock float 16
+            logger.info("Time series values are 64-bits; casting model to float16.")
+            precision = "32" if not pl_200_or_above else "32-true"           
         elif np.issubdtype(dtype, np.float64):
             logger.info("Time series values are 64-bits; casting model to float64.")
             precision = "64" if not pl_200_or_above else "64-true"

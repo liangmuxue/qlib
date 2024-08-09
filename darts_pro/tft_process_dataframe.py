@@ -112,7 +112,9 @@ class TftDataframeModel():
         viz_result_fail = TensorViz(env="train_result_fail")
         global_var.set_value("viz_result_suc",viz_result_suc)
         global_var.set_value("viz_result_fail",viz_result_fail)
-        
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)
+                
         if self.type.startswith("build_data_asis"):
             self.build_data_asis(dataset)
             return   
@@ -149,8 +151,6 @@ class TftDataframeModel():
             return  
              
         """对预测数据进行分类训练"""
-        global_var.set_value("load_ass_data",False)
-        global_var.set_value("save_ass_data",False)
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]      
@@ -383,6 +383,8 @@ class TftDataframeModel():
         best_weight = self.optargs["best_weight"]    
         self.model = TFTCluSerModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
                                                          best=best_weight,batch_file_path=self.batch_file_path)
+        # self.model.log_tensorboard = False
+        self.model.save_checkpoints = False
         self.model.batch_size = self.batch_size     
         self.model.model.mode = "pred_batch"
             

@@ -392,18 +392,19 @@ class MlpModule(_TFTModuleBatch):
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
-            # if date>=20220501 or date<20220401:
-            #     continue
+            if date>=20220901 or date<20220801:
+                continue
             idx = fur_dates[date]
             # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
             pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
             # 通过传统指标进行二次筛选
             target_info_cur = np.array(target_info)[idx]
-            # singal_index_bool = self.create_signal_macd(target_info_cur)
-            singal_index_bool = self.create_signal_rsi(target_info_cur)
-            macd_index = np.array(idx)[np.where(singal_index_bool)[0]]
+            singal_index_bool = self.create_signal_macd(target_info_cur)
+            # singal_index_bool = self.create_signal_rsi(target_info_cur)
+            # singal_index_bool = self.create_signal_kdj(target_info_cur)
+            singal_index = np.array(idx)[np.where(singal_index_bool)[0]]
             pred_index = np.array(idx)[pred_import_index]
-            pred_import_index_all[date] = np.intersect1d(macd_index,pred_index)
+            pred_import_index_all[date] = np.intersect1d(singal_index,pred_index)
             
         return pred_import_index_all,(cls_values,fea_values,pca_values)       
 
@@ -424,7 +425,19 @@ class MlpModule(_TFTModuleBatch):
         # 规则为金叉，即rsi快线向上突破rsi慢线
         index_bool = (np.sum(rsi5_cov[:,:-2]<=rsi20_cov[:,:-2],axis=1)>=6) & (np.sum(rsi5_cov[:,-5:]>=rsi20_cov[:,-5:],axis=1)>=2)
         return index_bool
-       
+
+    def create_signal_kdj(self,target_info):
+        """kdj指标判断"""
+        
+        k_cov = np.array([item["kdj_k"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        d_cov = np.array([item["kdj_d"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        j_cov = np.array([item["kdj_j"][self.input_chunk_length-10:self.input_chunk_length] for item in target_info])
+        # 规则为金叉，即k线向上突破d线
+        index_bool = (np.sum(k_cov[:,:-2]<=d_cov[:,:-2],axis=1)>=5) & (np.sum(k_cov[:,-5:]>=d_cov[:,-5:],axis=1)>=1)
+        # 突破的时候d线也是向上的
+        j_slope = j_cov[:,1:] - j_cov[:,:-1]
+        return index_bool
+           
     def strategy_threhold(self,sv,fea,cls,batch_size=0):
         cls_0 = cls[...,0]
         cls_1 = cls[...,1]
@@ -434,7 +447,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (fea_1_range<-0.2) & (sv_1<-0.1) # & (fea_2_range>0.1)
+        sv_import_bool = (fea_1_range<-0.1)  & (sv_2>0)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -519,7 +532,7 @@ class MlpModule(_TFTModuleBatch):
         dim_variable = -1
 
         # Norm his conv
-        historic_future_covariates = normalization_axis(historic_future_covariates,axis=2)
+        historic_future_covariates = normalization_axis(historic_future_covariates,axis=0)
         # 生成多组过去协变量，用于不同子模型匹配
         x_past_array = []
         for i,p_index in enumerate(self.past_split):
@@ -539,9 +552,7 @@ class MlpModule(_TFTModuleBatch):
                 dim=dim_variable,
             )
             x_past_array.append(x_past)
-        # 静态协变量归一化
-        static_covariates_norm = normalization_axis(static_covariates,axis=0)
-        return x_past_array, future_covariates, static_covariates_norm     
+        return x_past_array, future_covariates, static_covariates     
 
     def custom_histogram_adder(self):
         # iterating through all parameters
@@ -694,7 +705,7 @@ class MlpModule(_TFTModuleBatch):
         self.log("score_total", score_total, prog_bar=True) 
         
         # 如果是测试模式，则在此进行可视化
-        if self.mode=="pred_batch" or True:
+        if self.mode=="pred_batch":
             viz_total_size = 0
             output_total,target_total,target_class_total,target_info_total = self.combine_output_total(self.output_result)
             for index,date in enumerate(import_index_all.keys()):
@@ -705,7 +716,7 @@ class MlpModule(_TFTModuleBatch):
                 target_vr_class = target_class_total[import_index]
                 target = target_total[import_index]
                 output_data = [output_total[i][0].cpu().numpy()[import_index] for i in range(3)]
-                viz_total_size += self.viz_results(output_data, target_vr_class=target_vr_class,
+                viz_total_size = self.viz_results(output_data, target_vr_class=target_vr_class,
                                         target_info=target_info, date=date,target=target,counter=viz_total_size)
 
     def viz_results(self,output_data,target_vr_class=None,target_info=None,date=None,target=None,counter=0):

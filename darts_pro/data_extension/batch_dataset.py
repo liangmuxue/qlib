@@ -117,21 +117,35 @@ class BatchDataset(Dataset):
                 aggregated_combine = self.create_aggregated_data_step(aggregated,aggregated_combine)   
             return aggregated_combine
 
+        if self.is_training:
+            mode_str = "train"
+        else:
+            mode_str = "valid"
         batch_data = []
-        with open(filepath, "rb") as fin:
+        # 加载主要数据文件
+        main_filepath = "{}/{}_batch.pickel".format(self.filepath,mode_str)
+        with open(main_filepath, "rb") as fin:
             while True:
                 try:
                     batch_data.append(pickle.load(fin))
                 except EOFError:
                     break            
-                
         aggregated = self.create_aggregated_data(batch_data) 
+        # 加载静态变量数据文件，并替换
+        static_filepath = "{}/static_{}_batch.pickel".format(self.filepath,mode_str)
+        with open(static_filepath, "rb") as fin:
+            static_covariates = pickle.load(fin)
+            aggregated[4] = static_covariates
         return aggregated   
 
     def create_aggregated_data(self,batch_data):
         first_sample = batch_data[0]
         aggregated = []
         for i in range(len(first_sample)):
+            # 忽略静态协变量转换
+            if i==4:
+                aggregated.append(None) 
+                continue
             elem = first_sample[i][0]
             if isinstance(elem, np.ndarray):
                 # 忽略scaler
@@ -146,8 +160,6 @@ class BatchDataset(Dataset):
                 aggregated.append(
                     sample_list
                 )
-            elif isinstance(elem, StockNormalizer):
-                aggregated.append([sample[i] for sample in batch_data])    
             elif isinstance(elem, tuple):
                 t_list = []
                 for sample in batch_data:
@@ -345,7 +357,7 @@ class BatchDataset(Dataset):
                 with open(filepath, "rb") as fin:
                     batch_data = pickle.load(fin) 
                     batch_data = self._part_data(batch_data, index_range)   
-            else:             
+            else:   
                 batch_data = [item[index] for item in self.batch_data]
             return batch_data
         if self.mode=="analysis":

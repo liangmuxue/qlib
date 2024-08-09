@@ -60,8 +60,8 @@ task:
             n_epochs : 100
             save_dataset_file: False 
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/PRED_2000_202110'
-            ignore_exp: True
+            batch_file_path: 'custom/data/asis/ALL2018_RANKMA_1000_202203'
+            ignore_exp: False
             pred_data_path: &pred_data_path "custom/data/pred"   
             pred_data_file: &pred_data_file "pred_df_total.pkl"
             scheduler_config: 
@@ -79,10 +79,10 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: 'MLP_QUAN_2000_202111M'
+               model_name: 'ALL2018_RANKMA_1000_202203'
                model_type: 'mlp'
                load_weight: True
-               best_weight: True
+               best_weight: Fakse
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30

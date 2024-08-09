@@ -76,7 +76,8 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
                                 &(df_all["instrument_rank"]==code)]["DIFF"].values      
             macd_dea = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
                                 &(df_all["instrument_rank"]==code)]["DEA"].values      
-                                                                                                                                                                                                                   
+            # open = df_all[(df_all["time_idx"]>=series.time_index.start)&(df_all["time_idx"]<series.time_index.stop)
+            #                     &(df_all["instrument_rank"]==code)]["OPEN"].values                                                                                                                                                                                                                      
             self.ass_data[code] = (instrument,label_array,price_array,datetime_array,kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea)
 
         save_ass_data = global_var.get_value("save_ass_data")
