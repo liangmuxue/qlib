@@ -158,11 +158,6 @@ class TFTDataset(DatasetH):
         group_column = self.get_group_column()
         data["label"] = data.groupby(group_column)["label"].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
         
-        def rl_apply(df_values):
-            values = df_values.values
-            return (values[1] - values[0])/values[0]*100 
-        # 计算涨跌幅度
-        data["label_range"] = data.groupby(group_column)["label"].rolling(window=2).apply(rl_apply).reset_index(0,drop=True)         
         # 生成KDJ指标
         self.compute_kdj(data)    
         self.compute_atr(data)     
@@ -273,11 +268,25 @@ class TFTDataset(DatasetH):
         feature_columns = self.col_def["future_covariate_col"]    
         return feature_columns
     
+    def get_future_scale_columns(self):
+        feature_columns = self.col_def["future_covariate_col"]
+        scale_columns = [col+"_scale" for col in feature_columns]
+        return scale_columns
+        
     def get_static_columns(self):
         """取得静态协变量字段名"""
-        static_columns = self.col_def["static_covariate_col"]    
+        static_columns = self.col_def["static_covariate_col"] 
         return static_columns
-       
+    
+    def get_static_scale_columns(self):
+        static_columns = self.col_def["static_covariate_col"]    
+        scale_columns = [col+"_scale" for col in static_columns]
+        # 还需要添加索引对应的归一化静态协变量
+        group_col = self.get_group_rank_column()
+        group_col_scale = group_col + "_scale"  
+        scale_columns += [group_col_scale]        
+        return scale_columns
+              
     def get_group_column_index(self):
         """取得分组变量段对应下标"""
         columns = self.get_seq_columns()

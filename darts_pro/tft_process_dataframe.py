@@ -126,7 +126,10 @@ class TftDataframeModel():
             return  
         if self.type.startswith("fit_togather"):
             self.fit_togather(dataset)
-            return                          
+            return      
+        if self.type.startswith("pred_togather"):
+            self.fit_togather(dataset)
+            return                                
         if self.type=="predict":
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
@@ -154,7 +157,7 @@ class TftDataframeModel():
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]      
-        dataset_file_name = self.kwargs["dataset_file_name"]  
+        dataset_file_name = self.kwargs["dataset_file_name"]
         df_data_path = os.path.join(self.pred_data_path,dataset_file_name)  
         
         if self.load_dataset_file:
@@ -305,6 +308,8 @@ class TftDataframeModel():
             self.model.batch_size = self.batch_size     
             self.model.mode = "train"
             self.model.model.monitor = monitor
+            if self.type=="pred_togather":
+                self.model.model.mode = "pred_batch"
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=3) 
             self.model.monitor = monitor        

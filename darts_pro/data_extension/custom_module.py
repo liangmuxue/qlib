@@ -868,9 +868,6 @@ class _CusModule(BaseMixModule):
                 pred_second_data = pred_data[:,1]
                 target_item = target[s_index]
                 pred_third_data = pred_data[:,2]
-                # 可以从全局变量中，通过索引获得实际价格
-                # df_target = df_all[(df_all["time_idx"]>=ts["start"])&(df_all["time_idx"]<ts["end"])&
-                #                         (df_all["instrument_rank"]==ts["item_rank_code"])]            
                 win = "win{}_{}".format(ts["instrument"],ts["future_start"])
                 win = "win_{}".format(r_index)
                 if r_index>15:

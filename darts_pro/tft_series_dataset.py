@@ -99,6 +99,16 @@ class TFTSeriesDataset(TFTDataset):
         df = df.drop(['min_time'], axis=1)
         # 放入数据库中的股票基础信息
         df = pd.merge(df,ext_info,on=["instrument"])        
+        
+        # 静态协变量和未来协变量提前进行归一化
+        for conv_col in self.get_static_columns():
+            conv_col_scale = conv_col + "_scale"
+            df[conv_col_scale] = (df[conv_col] - df[conv_col].min()) / (df[conv_col].max() - df[conv_col].min())    
+        future_covariate_col = self.get_future_columns()          
+        for conv_col in future_covariate_col:
+            conv_col_scale = conv_col + "_scale"
+            df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).min()) / (df[conv_col].astype(int).max() - df[conv_col].astype(int).min())
+                    
         logger.debug("end group process")
         # group字段需要转换为数值型
         df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')   
@@ -109,6 +119,10 @@ class TFTSeriesDataset(TFTDataset):
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
         self.build_group_rank_map(df)
+        # 对index进行归一化，后续替换原index生成的静态协变量
+        group_col_scale = rank_group_column + "_scale"   
+        df[group_col_scale] = (df[rank_group_column].astype(int) - df[rank_group_column].astype(int).min()) / (df[rank_group_column].astype(int).max() - df[rank_group_column].astype(int).min())
+                
         return df    
     
     def filter_by_indicator(self,df):
@@ -261,8 +275,9 @@ class TFTSeriesDataset(TFTDataset):
         target_column = self.get_target_column()
         time_column = self.col_def["time_column"]
         past_columns = self.get_past_columns()
-        future_columns = self.get_future_columns()
-        static_columns = self.get_static_columns()
+        # 直接使用经过归一化的未来协变量和静态协变量
+        future_columns = self.get_future_scale_columns()
+        static_columns = self.get_static_scale_columns()
         
         # 分别生成训练和测试序列数据
         train_series = TimeSeries.from_group_dataframe(df_train,

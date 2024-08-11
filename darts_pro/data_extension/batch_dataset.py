@@ -90,6 +90,8 @@ class BatchDataset(Dataset):
             print("self.target_data shape:{}".format(self.target_data.shape))           
     
     def create_aggregated_wrapper(self,filepath,mode=1):
+        
+        # 分片加载模式，似乎没有起到节省内存的作用
         if mode==1:
             slide_size = 50
             aggregated = []
@@ -117,12 +119,13 @@ class BatchDataset(Dataset):
                 aggregated_combine = self.create_aggregated_data_step(aggregated,aggregated_combine)   
             return aggregated_combine
 
+        # 直接加载模式，可以兼容float16数据
         if self.is_training:
             mode_str = "train"
         else:
             mode_str = "valid"
         batch_data = []
-        # 加载主要数据文件
+        # 加载主要数据文件,需要加载多次文件分片
         main_filepath = "{}/{}_batch.pickel".format(self.filepath,mode_str)
         with open(main_filepath, "rb") as fin:
             while True:
@@ -131,12 +134,17 @@ class BatchDataset(Dataset):
                 except EOFError:
                     break            
         aggregated = self.create_aggregated_data(batch_data) 
-        # 加载静态变量数据文件，并替换
-        static_filepath = "{}/static_{}_batch.pickel".format(self.filepath,mode_str)
-        with open(static_filepath, "rb") as fin:
-            static_covariates = pickle.load(fin)
-            aggregated[4] = static_covariates
-        return aggregated   
+        # # 加载静态变量数据文件，并替换
+        # static_filepath = "{}/static_{}_batch.pickel".format(self.filepath,mode_str)
+        # with open(static_filepath, "rb") as fin:
+        #     static_covariates = pickle.load(fin)
+        #     aggregated[4] = static_covariates
+        # # 加载历史未来协变量数据文件，并替换
+        # his_fur_convs_filepath = "{}/his_furture_{}_batch.pickel".format(self.filepath,mode_str)
+        # with open(his_fur_convs_filepath, "rb") as fin:
+        #     his_fur_covariates = pickle.load(fin)
+        #     aggregated[2] = his_fur_covariates            
+        # return aggregated   
 
     def create_aggregated_data(self,batch_data):
         first_sample = batch_data[0]

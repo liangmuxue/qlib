@@ -140,7 +140,7 @@ class MlpModule(_TFTModuleBatch):
             )
             
             static_cov_dim = (
-                static_covariates.shape[-2] * static_covariates.shape[-1]
+                static_covariates.shape[-2] * static_covariates.shape[-1] - 1
                 if static_covariates is not None
                 else 0
             )
@@ -392,8 +392,8 @@ class MlpModule(_TFTModuleBatch):
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
-            if date>=20220901 or date<20220801:
-                continue
+            # if date>=20220901 or date<20220801:
+            #     continue
             idx = fur_dates[date]
             # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
             pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
@@ -447,7 +447,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (fea_1_range<-0.1)  & (sv_2>0)
+        sv_import_bool = (sv_1<-0.1) & (sv_2>0)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -531,8 +531,6 @@ class MlpModule(_TFTModuleBatch):
         ) = input_batch
         dim_variable = -1
 
-        # Norm his conv
-        historic_future_covariates = normalization_axis(historic_future_covariates,axis=0)
         # 生成多组过去协变量，用于不同子模型匹配
         x_past_array = []
         for i,p_index in enumerate(self.past_split):
@@ -552,6 +550,9 @@ class MlpModule(_TFTModuleBatch):
                 dim=dim_variable,
             )
             x_past_array.append(x_past)
+            
+        # 忽略静态协变量第一列(索引列),后边的都是经过归一化的
+        static_covariates = static_covariates[...,1:]
         return x_past_array, future_covariates, static_covariates     
 
     def custom_histogram_adder(self):

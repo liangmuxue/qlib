@@ -131,7 +131,8 @@ class MlpTogeModule(MlpModule):
             )
             
             static_cov_dim = (
-                static_covariates.shape[-2] * static_covariates.shape[-1]
+                # 由于前期增加了归一化字段用于后续替换，因此在这里减1维
+                static_covariates.shape[-2] * static_covariates.shape[-1] - 1
                 if static_covariates is not None
                 else 0
             )

@@ -82,7 +82,8 @@ class MlpTs(nn.Module):
         self.target_classify = LineClassify(input_dim=pca_dim,output_dim=n_cluster)    
         # 使用分位数回归模式，所以输出维度为分位数数量
         self.z_classify = LineClassify(input_dim=hidden_size,output_dim=enc_nr_params)   
-        self.regressor = nn.Linear(pca_dim, 1)
+        # self.regressor = nn.Linear(pca_dim, 1)
+        self.regressor = LineClassify(input_dim=pca_dim,output_dim=1)  
         self.FDS = FDS(feature_dim=pca_dim,bucket_num=n_cluster,bucket_start=0)
         # 降维后拟合高斯分布的均值和方差
         # self.mu_c = nn.Parameter(torch.FloatTensor([0.2,0,-0.08,-0.2]),requires_grad=False)

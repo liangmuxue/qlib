@@ -77,6 +77,8 @@ class _TFTModuleAsis(_CusModule):
         self.valid_filepath = "{}/valid_batch.pickel".format(batch_file_path)
         self.static_train_filepath = "{}/static_train_batch.pickel".format(batch_file_path)
         self.static_valid_filepath = "{}/static_valid_batch.pickel".format(batch_file_path)
+        self.his_furture_covariates_train_filepath = "{}/his_furture_train_batch.pickel".format(batch_file_path)
+        self.his_furture_covariates_valid_filepath = "{}/his_furture_valid_batch.pickel".format(batch_file_path)
         
     def training_step(self, train_batch, batch_idx) -> torch.Tensor:
         """use to export data"""
@@ -279,7 +281,7 @@ class _TFTModuleAsis(_CusModule):
     def pkl_dump(self,data,out_file,is_training=True):
         """导出到文件"""
         
-        # 累加所有静态变量，后续统一进行归一化
+        # 累加所有静态变量以及过去未来协变量，后续统一进行归一化
         (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,
          scaler,target_class,target,target_info,price_target) = data
         if is_training:
@@ -287,11 +289,19 @@ class _TFTModuleAsis(_CusModule):
                 self.static_covariates_train = static_covariates
             else:
                 self.static_covariates_train = np.concatenate((self.static_covariates_train,static_covariates))
+            if self.his_furture_covariates_train is None:
+                self.his_furture_covariates_train = historic_future_covariates
+            else:
+                self.his_furture_covariates_train = np.concatenate((self.his_furture_covariates_train,historic_future_covariates))                
         else:
             if self.static_covariates_valid is None:
                 self.static_covariates_valid = static_covariates
             else:
-                self.static_covariates_valid = np.concatenate((self.static_covariates_valid,static_covariates))        
+                self.static_covariates_valid = np.concatenate((self.static_covariates_valid,static_covariates))     
+            if self.his_furture_covariates_valid is None:
+                self.his_furture_covariates_valid = historic_future_covariates
+            else:
+                self.his_furture_covariates_valid = np.concatenate((self.his_furture_covariates_valid,historic_future_covariates))                       
         # 转换为float16，节省空间
         data_final = (past_target.astype(np.float16),past_covariates.astype(np.float16), historic_future_covariates.astype(np.float16),
                       future_covariates.astype(np.float16),static_covariates,
@@ -307,6 +317,8 @@ class _TFTModuleAsis(_CusModule):
         
         self.static_covariates_train = None
         self.static_covariates_valid = None
+        self.his_furture_covariates_train = None
+        self.his_furture_covariates_valid = None
                                      
     def on_train_epoch_end(self):
         print("self.total_target_cnt:{}".format(self.total_target_cnt))
@@ -321,7 +333,18 @@ class _TFTModuleAsis(_CusModule):
         self.static_covariates_valid = normalization_axis(self.static_covariates_valid,axis=0)
         with open(self.static_valid_filepath, "wb") as fout:
             pickle.dump(self.static_covariates_valid,fout)             
-        
+
+        # 统一进行未来协变量归一化,并存储
+        ori_shape = self.his_furture_covariates_train.shape
+        scaler = MinMaxScaler()
+        self.his_furture_covariates_train = scaler.fit_transform(self.his_furture_covariates_train.reshape(ori_shape[0],ori_shape[1]*ori_shape[2])).reshape(ori_shape)
+        with open(self.his_furture_covariates_train_filepath, "wb") as fout:
+            pickle.dump(self.his_furture_covariates_train,fout) 
+        ori_shape = self.his_furture_covariates_valid.shape
+        self.his_furture_covariates_valid = scaler.transform(self.his_furture_covariates_valid.reshape(ori_shape[0],ori_shape[1]*ori_shape[2])).reshape(ori_shape)
+        with open(self.his_furture_covariates_valid_filepath, "wb") as fout:
+            pickle.dump(self.his_furture_covariates_valid,fout)  
+                    
     def on_validation_epoch_end(self):
         print("pass")
             
