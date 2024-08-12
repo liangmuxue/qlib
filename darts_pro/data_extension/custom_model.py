@@ -545,7 +545,14 @@ class TFTExtModel(MixedCovariatesTorchModel):
             if future_covariates is not None:
                 self._expect_future_covariates = True
         self._fit_called = True
-
+        
+        # 如果是预测模式，则不执行实际的fit,只返回trainer
+        if self.mode=="pred_togather":
+            # 预测模式，不使用tensorboard
+            self.trainer_params["logger"] = False
+            trainer,model,train_loader,val_loader = self._setup_for_train(train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers)
+            return trainer,model,train_loader,val_loader
+        
         return self.fit_from_dataset(
             train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers
         )
@@ -652,7 +659,6 @@ class TFTExtModel(MixedCovariatesTorchModel):
         # setup trainer
         trainer = self._setup_trainer(trainer,model, verbose, train_num_epochs)
 
-        # TODO: multiple training without loading from checkpoint is not trivial (I believe PyTorch-Lightning is still
         #  working on that, see https://github.com/PyTorchLightning/pytorch-lightning/issues/9636)
         if self.epochs_trained > 0 and not self.load_ckpt_path:
             logger.warning(

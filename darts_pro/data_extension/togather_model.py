@@ -1,6 +1,9 @@
 from darts.timeseries import TimeSeries
 from darts.utils.timeseries_generation import _generate_new_dates
+from darts.models.forecasting.torch_forecasting_model import _get_checkpoint_folder,_get_runs_folder,INIT_MODEL_NAME,_get_checkpoint_fname
 
+import os
+from glob import glob
 import numpy as np
 import pandas as pd
 import torch
@@ -10,7 +13,7 @@ from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from sklearn.preprocessing import MinMaxScaler
-
+from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from cus_utils.tensor_viz import TensorViz
 from darts_pro.data_extension.custom_nor_model import TFTBatchModel
 from darts_pro.data_extension.togather_dataset import TogeSequentialDataset
@@ -252,4 +255,84 @@ class TogeModel(TFTBatchModel):
             elif isinstance(elem, TimeSeries):
                 aggregated.append([sample[i] for sample in batch])
         return tuple(aggregated)    
-    
+
+    @staticmethod            
+    def load_from_checkpoint(
+        model_name: str,
+        work_dir: str = None,
+        file_name: str = None,
+        best: bool = True,
+        **kwargs,
+    ):
+        """重载原方法，使用自定义模型加载策略"""
+        
+        logger = get_logger(__name__)
+        
+        checkpoint_dir = _get_checkpoint_folder(work_dir, model_name)
+        model_dir = _get_runs_folder(work_dir, model_name)
+
+        # load the base TorchForecastingModel (does not contain the actual PyTorch LightningModule)
+        base_model_path = os.path.join(model_dir, INIT_MODEL_NAME)
+        raise_if_not(
+            os.path.exists(base_model_path),
+            f"Could not find base model save file `{INIT_MODEL_NAME}` in {model_dir}.",
+            logger,
+        )
+        model = torch.load(
+            base_model_path, map_location=kwargs.get("map_location")
+        )
+               
+        # 修改原方法，对best重新界定
+        if file_name is None:
+            checkpoint_dir = _get_checkpoint_folder(work_dir, model_name)
+            path = os.path.join(checkpoint_dir, "epoch=*")
+            checklist = glob(path)            
+            if len(checklist) == 0:
+                raise_log(
+                    FileNotFoundError(
+                        "There is no file matching prefix {} in {}".format(
+                            "epoch=*", checkpoint_dir
+                        )
+                    ),
+                    logger,
+                )   
+            if best:
+                # 如果查找best，则使用文件中的最高分数进行匹配
+                min_loss = 100
+                cadi_x = None
+                for x in checklist:
+                    cur_loss = float(x.split("=")[2][:-5])
+                    cur_epoch = int(x.split("=")[1].split("-")[0])
+                    # 大于一定的epoch才计算评分
+                    if cur_epoch>100 and cur_loss<min_loss:
+                        min_loss = cur_loss
+                        cadi_x = x
+                file_name = cadi_x
+            else:
+                # 否则使用文件中的最大epoch进行匹配
+                file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
+                # file_name = "epoch=117-val_CNTN_loss=0.75.ckpt"
+            file_name = os.path.basename(file_name)       
+        
+        file_path = os.path.join(checkpoint_dir, file_name)
+        print("weights file_path:",file_path) 
+        model.model = model._load_from_checkpoint(file_path, **kwargs)
+        model.batch_file_path = kwargs["batch_file_path"]
+        model.model.set_filepath(kwargs["batch_file_path"])
+        
+        # loss_fn is excluded from pl_forecasting_module ckpt, must be restored
+        loss_fn = model.model_params.get("loss_fn")
+        if loss_fn is not None:
+            model.model.criterion = loss_fn
+        # train and val metrics also need to be restored
+        torch_metrics = model.model.configure_torch_metrics(
+            model.model_params.get("torch_metrics")
+        )
+        model.model.train_metrics = torch_metrics.clone(prefix="train_")
+        model.model.val_metrics = torch_metrics.clone(prefix="val_")
+
+        # restore _fit_called attribute, set to False in load() if no .ckpt is found/provided
+        model._fit_called = True
+        model.load_ckpt_path = file_path
+                
+        return model 

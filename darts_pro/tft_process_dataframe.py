@@ -309,14 +309,22 @@ class TftDataframeModel():
             self.model.mode = "train"
             self.model.model.monitor = monitor
             if self.type=="pred_togather":
-                self.model.model.mode = "pred_batch"
+                self.model.mode = "pred_togather"
+                self.model.model.mode = "pred_togather"
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=3) 
             self.model.monitor = monitor        
-            
-        self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
+        
+        if self.type=="pred_togather":  
+            # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
+            trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)
+            trainer.validate(model=model,dataloaders=val_loader)
+        else:
+            self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)            
         
     def fit_batch(
         self,
@@ -407,7 +415,8 @@ class TftDataframeModel():
         scheduler_config = self.kwargs["scheduler_config"]
         optimizer_kwargs = self.kwargs["optimizer_kwargs"]
         
-        scheduler = torch.optim.lr_scheduler.CyclicLR
+        # scheduler = torch.optim.lr_scheduler.CyclicLR
+        scheduler = torch.optim.lr_scheduler.LinearLR
         categorical_embedding_sizes = {"dayofweek": 5,dataset.get_group_rank_column(): emb_size}
         # categorical_embedding_sizes = None    
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]

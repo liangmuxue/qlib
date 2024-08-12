@@ -447,7 +447,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_1<-0.1) & (sv_2>0)
+        sv_import_bool =  (sv_1<-0.2) & (fea_1_range<-0.1)  # & (fea_2_range<-0.1)  #  
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
