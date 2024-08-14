@@ -77,7 +77,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "TOTAL_STEPLR_2000_202209"
+               model_name: "TOTAL_LINELR_2000_20220630_train"
                model_type: 'mlp'
                load_weight: True
                best_weight: False
