@@ -304,7 +304,7 @@ class TogeModel(TFTBatchModel):
                     cur_loss = float(x.split("=")[2][:-5])
                     cur_epoch = int(x.split("=")[1].split("-")[0])
                     # 大于一定的epoch才计算评分
-                    if cur_epoch>100 and cur_loss<min_loss:
+                    if cur_epoch>50 and cur_loss<=min_loss:
                         min_loss = cur_loss
                         cadi_x = x
                 file_name = cadi_x

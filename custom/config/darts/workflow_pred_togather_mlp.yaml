@@ -60,7 +60,7 @@ task:
             n_epochs : 280
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/TOTAL_2000_202209'
+            batch_file_path: 'custom/data/asis/TOTAL_PRICE_2000_202209'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -98,7 +98,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2018-01-01, 2023-05-31]
-                valid: [2022-09-01, 2022-12-30]
+                valid: [2022-06-01, 2022-09-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

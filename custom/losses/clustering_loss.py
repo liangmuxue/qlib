@@ -292,7 +292,7 @@ class MlpLoss(UncertaintyLoss):
         """Multiple Loss Combine"""
 
         (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,last_target,pca_target) = target_ori
+        (target,target_class,last_target,price_target) = target_ori
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
         fds_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
@@ -302,28 +302,20 @@ class MlpLoss(UncertaintyLoss):
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 相关系数损失,多个目标R
         label_class = target_class[:,0].long()
-        pca_mean = torch.zeros(len(CLASS_SIMPLE_VALUES)).to(self.device)
-        pca_std = torch.zeros(len(CLASS_SIMPLE_VALUES)).to(self.device)
-        cls_mean = torch.zeros(len(CLASS_SIMPLE_VALUES)).to(self.device)
-        cls_var = torch.zeros(len(CLASS_SIMPLE_VALUES)).to(self.device)
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[...,i]
                 last_target_item = last_target[...,i:i+1]
-                pca_target_item = pca_target[...,i]
                 # pca_target_item = normalization(pca_target_item, mode="torch")
                 output_item = output[i] 
                 x_bar,z,cls,tar_cls,x_smo = output_item  
                 # 预测值的一致性损失
                 corr_loss[i] = self.ccc_loss_comp(x_bar, real_target)
-                # 计算分位数损失
-                out_cls = output_item[2].unsqueeze(-1).unsqueeze(-1).permute(0,2,3,1)
-                # cls_loss[i] = self.quan_loss.compute_loss(out_cls, pca_target_item.unsqueeze(-1))
-                # indices_tuple = self.mining_func(z, label_class)
-                # cls_loss[i] = self.triplet_loss(z, label_class, indices_tuple)
+                # 计算价格区间损失
+                # cls_loss[i] = 100 * self.mse_loss(cls, price_target)
                              
                 # 降维目标之间的欧氏距离         
                 ce_loss[i] = 10 * self.mse_loss(x_smo, last_target_item)
                 # ce_loss[i] = self.quan_loss.compute_loss(x_smo.unsqueeze(1).unsqueeze(1), last_target_item)
-                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] # + cls_loss[i]
+                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    

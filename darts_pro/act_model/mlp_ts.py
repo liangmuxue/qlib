@@ -81,7 +81,7 @@ class MlpTs(nn.Module):
         # 目标数据分类层，用于对降维后的预测目标进行分类
         self.target_classify = LineClassify(input_dim=pca_dim,output_dim=n_cluster)    
         # 使用分位数回归模式，所以输出维度为分位数数量
-        self.z_classify = LineClassify(input_dim=hidden_size,output_dim=enc_nr_params)   
+        self.z_classify = LineClassify(input_dim=hidden_size,output_dim=10)   
         # self.regressor = nn.Linear(pca_dim, 1)
         self.regressor = LineClassify(input_dim=pca_dim,output_dim=1)  
         self.FDS = FDS(feature_dim=pca_dim,bucket_num=n_cluster,bucket_start=0)
@@ -100,7 +100,8 @@ class MlpTs(nn.Module):
         x_bar,z,encoded,encoded_input_data = self.emb_layer(x)
         x_bar = x_bar.squeeze(-1).squeeze(-1)
         encoding_s = z
-        cls = self.z_classify(encoded)
+        # cls = self.z_classify(encoded)
+        cls = torch.zeros([x_bar.shape[0],1])
         x_smo = self.regressor(z)
         # 执行目标分类，用于辅助输出分类
         # tar_cls = self.target_classify(pca_target)

@@ -184,11 +184,12 @@ class MlpTogeModule(MlpModule):
             static_covariates,
             _,
             target_class,
-            future_target,
             target_info,
-            price_target
+            price_target,
+            future_target
         ) = train_batch
         
-        return super().training_step_real((past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,target_class,future_target),batch_idx)     
+        return super().training_step_real((past_target,past_covariates, historic_future_covariates,future_covariates,
+                                           static_covariates,target_class,price_target,future_target),batch_idx)     
         
                

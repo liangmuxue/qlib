@@ -295,7 +295,7 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             future_target = scaler.transform(future_target_ori)   
             scaler_price.fit(np.expand_dims(target_info["label_array"][:self.input_chunk_length],-1)) 
             # 增加价格目标数据
-            price_target = scaler_price.transform(np.expand_dims(target_info["label_array"],-1))   
+            price_target = np.array([raise_range/100])
         else:
             future_target = future_target_ori     
             
@@ -314,9 +314,9 @@ class CustomSequentialDataset(MixedCovariatesTrainingDataset):
             static_covariate,
             (scaler,future_past_covariate),
             target_class,
-            future_target,
             target_info,
-            price_target
+            price_target,
+            future_target
         )
         
 class CustomInferenceDataset(InferenceDataset):

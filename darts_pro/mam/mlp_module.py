@@ -212,8 +212,8 @@ class MlpModule(_TFTModuleBatch):
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
 
-        (future_target,target_class,last_target,pca_target) = target   
-        return self.criterion(output,(future_target,target_class,last_target,pca_target),mode=self.step_mode,optimizers_idx=optimizers_idx)
+        (future_target,target_class,last_target,price_target) = target   
+        return self.criterion(output,(future_target,target_class,last_target,price_target),mode=self.step_mode,optimizers_idx=optimizers_idx)
 
     def on_validation_start(self): 
         self.output_result = []
@@ -269,7 +269,7 @@ class MlpModule(_TFTModuleBatch):
 
         # 收集目标数据用于分类
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,target_class,future_target) = train_batch
+                static_covariates,target_class,price_target,future_target) = train_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
@@ -282,11 +282,11 @@ class MlpModule(_TFTModuleBatch):
         ce_loss = None
         for i in range(len(self.past_split)):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,pca_target),optimizers_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,price_target),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            # self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
+            # self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append(detail_loss)
             total_loss += loss     
             # 手动更新参数
@@ -315,7 +315,7 @@ class MlpModule(_TFTModuleBatch):
         """训练验证部分"""
         
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,future_past_covariate,target_class,future_target,target_info,price_target) = val_batch
+                static_covariates,future_past_covariate,target_class,target_info,price_target,future_target) = val_batch
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
         input_batch = self._process_input_batch(inp)
         last_targets,pca_target,weighted_data = self._process_target_batch(future_target,target_class[:,0])
@@ -328,7 +328,7 @@ class MlpModule(_TFTModuleBatch):
         
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,last_targets,pca_target),optimizers_idx=-1)
+                    (future_target,target_class,last_targets,price_target),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -336,7 +336,7 @@ class MlpModule(_TFTModuleBatch):
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_CNTN_loss", (ce_loss[1]+corr_loss_combine[1]), batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,pca_target)
@@ -399,10 +399,10 @@ class MlpModule(_TFTModuleBatch):
             pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
             # 通过传统指标进行二次筛选
             target_info_cur = np.array(target_info)[idx]
-            singal_index_bool = self.create_signal_macd(target_info_cur)
-            # singal_index_bool = self.create_signal_rsi(target_info_cur)
-            # singal_index_bool = self.create_signal_kdj(target_info_cur)
-            singal_index = np.array(idx)[np.where(singal_index_bool)[0]]
+            singal_index_bool_macd = self.create_signal_macd(target_info_cur)
+            singal_index_bool_rsi = self.create_signal_rsi(target_info_cur)
+            singal_index_bool_kdj = self.create_signal_kdj(target_info_cur)
+            singal_index = np.array(idx)[np.where(singal_index_bool_rsi)[0]]
             pred_index = np.array(idx)[pred_import_index]
             pred_import_index_all[date] = np.intersect1d(singal_index,pred_index)
             
@@ -447,7 +447,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool =  (sv_1<-0.2) & (fea_1_range<-0.1)  # & (fea_2_range<-0.1)  #  
+        sv_import_bool =  (sv_1<-0.2) & (sv_0<-0.1) # (cls_0>0.03) # & (sv_2>0.1)
         # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -568,7 +568,7 @@ class MlpModule(_TFTModuleBatch):
         output,pca_target = outputs
         pca_target = pca_target.cpu().numpy()
         (past_target,past_covariates, historic_future_covariates,future_covariates,
-                static_covariates,future_past_covariate,target_class,future_target,target_info,price_target) = val_batch
+                static_covariates,future_past_covariate,target_class,target_info,price_target,future_target) = val_batch
         data = [past_target.cpu().numpy(),target_class.cpu().numpy(),
                 future_target.cpu().numpy(),pca_target,price_target.cpu().numpy(),target_info]          
         output_combine = (output,data)
