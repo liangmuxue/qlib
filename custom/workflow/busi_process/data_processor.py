@@ -12,6 +12,9 @@ from workflow.constants_enum import LocalDataSourceType
 from data_extract.his_data_extractor import get_period_value
 from trader.utils.date_util import get_tradedays_dur
 
+import warnings
+from pandas.core.common import SettingWithCopyWarning
+
 class DataProcessor(BaseProcessor):
     
     def __init__(self, workflow_subtask):
@@ -19,6 +22,7 @@ class DataProcessor(BaseProcessor):
         self.db_accessor = DbAccessor({})
         # 设置全量导入完成标志
         self.has_finish_complete_import = False
+        warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
      
     def build_real_template(self,template,working_day=None,config=None):
         """根据原配置模板，生成实际配置文件"""
