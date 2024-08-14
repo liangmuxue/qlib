@@ -590,7 +590,7 @@ if __name__ == "__main__":
     
     # auto导入
     # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_auto",resume=False)
-    # task = WorkflowTask(task_batch=119,workflow_name="wf_data_import_auto",resume=True)
+    task = WorkflowTask(task_batch=119,workflow_name="wf_data_import_auto",resume=True)
 
     # 回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="wf_backtest_flow",resume=False)
@@ -605,6 +605,6 @@ if __name__ == "__main__":
     # task = WorkflowTask(task_batch=141,workflow_name="wf_review_flow_2023",resume=True)    
     
     # 2022回测工作流
-    task = WorkflowTask(task_batch=148,workflow_name="wf_review_flow_2022",resume=True)     
+    # task = WorkflowTask(task_batch=148,workflow_name="wf_review_flow_2022",resume=True)     
     task.start_task()
         

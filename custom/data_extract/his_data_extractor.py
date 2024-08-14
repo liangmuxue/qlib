@@ -9,6 +9,8 @@ import numpy as np
 import datetime
 from tqdm import tqdm
 import pandas as pd
+
+
 import pickle
 
 from cus_utils.db_accessor import DbAccessor
@@ -210,6 +212,7 @@ class HisDataExtractor:
                 end_date 导入数据的结束日期
                 period 频次类别
                 contain_institution 是否包含复权数据
+                no_total_file 没有全量文件
                 auto_import 是否自动计算日期
                 ori_data 原数据
         """
@@ -246,21 +249,28 @@ class HisDataExtractor:
             if not no_total_file:
                 # 从全量文件里摘出当前股票数据
                 ori_data_item = ori_data[ori_data["code"]==code]
+                # 转换相关字段为datetime格式
+                ori_data_item["datetime"] = pd.to_datetime(ori_data_item["datetime"])                 
                 if contain_institution:
                     ori_data_item_institution = ori_data_institution[ori_data_institution["code"]==code]   
+                    ori_data_item_institution["datetime"] = pd.to_datetime(ori_data_item_institution["datetime"])    
             else:
                 # 从单独数据文件中加载
                 try:
                     ori_data_item = self.load_item_df(code, period=period) 
+                    # 转换相关字段为datetime格式
+                    ori_data_item["datetime"] = pd.to_datetime(ori_data_item["datetime"])                     
                 except Exception as e:
                     logger.warning("load_item_df fail:{}".format(e)) 
                     ori_data_item = None
                 if contain_institution:
                     try:
                         ori_data_item_institution = self.load_item_df(code, period=period,institution=True)   
+                        ori_data_item_institution["datetime"] = pd.to_datetime(ori_data_item_institution["datetime"])   
                     except Exception as e:
                         logger.warning("load_item_df institution fail:{}".format(e)) 
-                        ori_data_item_institution = None                    
+                        ori_data_item_institution = None          
+            
             # 单个股票数据抽取         
             item_data = self.data_part_auto_process(code,end_date=end_date,period=period,market=market,savepath=savepath,
                                                      institution=False,ori_data_item=ori_data_item)
@@ -303,7 +313,7 @@ class HisDataExtractor:
         # 取得相关数据，子类实现
         item_data = self.extract_item_data(code,start_date=start_date,end_date=end_date,period=period,market=market,institution=institution)
         if item_data is None:
-            logger.info("item_data None:{}".format(code))
+            logger.info("item_data None:{},start_date:{}".format(code,start_date))
             return origin_data
         if ori_data_item is None:    
             total_data = item_data
