@@ -60,7 +60,7 @@ task:
             n_epochs : 280
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/TOTAL_PRICE_2000_202209'
+            batch_file_path: 'custom/data/asis/TOTAL_PRICE_all_20220331_train'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                # gamma: 0.8  
@@ -77,7 +77,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "TOTAL_LINELR_2000_20220630_train"
+               model_name: "TOTAL_LINELR_all_20220228_train"
                model_type: 'mlp'
                load_weight: True
                best_weight: False
@@ -98,9 +98,9 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train_total: [2018-01-01, 2023-05-31]
-                valid: [2022-06-01, 2022-09-30]
+                valid: [2022-05-01, 2022-09-30]
                 test: [2021-01-01, 2021-03-01]
-            whole_data: False
+            whole_data: True
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
