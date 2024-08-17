@@ -1,5 +1,6 @@
-from pytdx.hq import TdxHq_API
 from .his_data_extractor import HisDataExtractor,PeriodType,MarketType
+from mootdx.quotes import Quotes
+
 
 import numpy as np
 import pandas as pd
@@ -7,34 +8,24 @@ import datetime
 
 from trader.utils.date_util import tradedays,get_trade_min_dur
 from trader.utils.date_util import get_tradedays_dur,date_string_transfer
+import baostock as bs
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-class TdxExtractor(HisDataExtractor):
-    """通达信数据源"""
+class BaoExtractor(HisDataExtractor):
+    """BaoStock数据源"""
 
-    def __init__(self, backend_channel="tdx",savepath=None,**kwargs):
+    def __init__(self, backend_channel="bao",savepath=None,**kwargs):
         
         super().__init__(backend_channel=backend_channel,savepath=savepath,kwargs=kwargs)
-        # 初始化pytdx的调用接口对象
-        self.api = TdxHq_API(auto_retry=True,raise_exception=True)
-        self.host = '119.147.212.81'
-        self.port = 7709
-        # 一次性查询最大限额
-        self.maxcnt_once_call = 800
+        self.connect()
     
     def connect(self):
-        self.api.connect(self.host,self.port)  
+        self.lg = bs.login()
         
     def reconnect(self):
-        try:
-            self.api = TdxHq_API(auto_retry=True,raise_exception=True)
-            self.connect()
-            return True
-        except Exception as e:
-            logger.error("reconnect fail:{}".format(e))
-            return False
+        self.connect()
             
     def load_code_data(self):  
         """取得所有股票代码"""
@@ -51,8 +42,6 @@ class TdxExtractor(HisDataExtractor):
                 period 频次类别
         """
         
-        # 任务开始时初始化连接，后续保持使用此连接
-        self.connect()    
         results = None  
         flag = False
         cnt = 0
@@ -72,7 +61,7 @@ class TdxExtractor(HisDataExtractor):
                 logger.info("reconnect time:{}".format(cnt)) 
                 continue                        
         # 任务结束时关闭连接
-        self.api.disconnect()
+        self.bs.logout()
         return results
         
     def extract_item_data(self,instrument_code,start_date=None,end_date=None,period=None,market=MarketType.SH.value,institution=False):   
@@ -83,57 +72,29 @@ class TdxExtractor(HisDataExtractor):
             logger.warnning("not support period:{}".format(period))
             return
         
-        # 此接口只支持2004年以后的数据
-        if int(str(start_date)[:4])<2004:
-            start_date = 20040101
-        # 分钟级别数据，最早只能从2022年开始
-        if int(str(start_date)[:4])<2022 and period>=PeriodType.MIN1.value:
-            start_date = 20220101            
-        if int(str(end_date)[:4])>2023:
-            today = datetime.date.today().strftime('%Y%m%d')
-            end_date = int(today)
-                        
-        if period==PeriodType.MIN5.value:
-            category = 0
-        if period==PeriodType.MIN15.value:
-            category = 1            
-        # 计算开始节点编号（前推多少个数量），以及需要查询的K线数量
-        before_number,range_number = self.compute_period_space(str(start_date), str(end_date), period)
-        exceed_number = before_number - range_number
-        # 计算每个轮次，请求多少个批次的K线
-        loop_call_number = range_number if self.maxcnt_once_call>range_number else self.maxcnt_once_call
-        # 注意，由于api接口规定的单批次查询数量是往前查，因此这里需要把before_number减去单次查询数
-        before_number = before_number - loop_call_number 
-        api = self.api
-        inner_batch = 0
-        item_data = None
-        while(True):
-            # 滚动查询，每次减少前推间隔.
-            try:
-                # category：0--为5分钟K线 market：0深圳 1上海
-                data = api.get_security_bars(category,market, instrument_code, before_number, loop_call_number)
-            except Exception as e:
-                logger.warning("get_security_bars fail:{}".format(e))
-                self.reconnect()
-                continue
-            if data is None or len(data)==0:
-                logger.warning("data none,instrument_code:{},inner_batch:{}".format(instrument_code,inner_batch))
-                break
-            df_data = api.to_df(data)
-            # 附加股票代码
-            df_data["code"] = instrument_code
-            df_data["volume"] = df_data["vol"] 
-            if item_data is None:
-                item_data = df_data   
-            else:
-                item_data = pd.concat([item_data,df_data])
-            if before_number<=exceed_number:
-                break                
-            # 如果与结束间隔不足一次循环，则把其余的补上并退出
-            if before_number-exceed_number<loop_call_number:
-                loop_call_number = before_number-exceed_number                
-            before_number -= loop_call_number
-        return item_data
+        if not institution:
+            adjustflag = "3"
+        else:
+            adjustflag = "1"
+        
+        start_date = str(datetime.datetime.strptime(str(start_date),'%Y%m%d').date())
+        end_date = str(datetime.datetime.strptime(str(end_date),'%Y%m%d').date())
+        # 生成符合baostock规范的股票编号
+        if market==MarketType.SH.value:
+            real_code = "sh." + instrument_code
+        else:
+            real_code = "sz." + instrument_code
+        rs = bs.query_history_k_data_plus(real_code,
+            "date,time,code,open,high,low,close,volume,amount,adjustflag",
+            start_date=start_date, end_date=end_date,
+            frequency=str(PeriodType.MIN5.value), adjustflag=adjustflag)
+        
+        data_list = []
+        while (rs.error_code == '0') & rs.next():
+            data_list.append(rs.get_row_data())
+        result = pd.DataFrame(data_list, columns=rs.fields)
+            
+        return result
     
     def compute_period_space(self,start_date=None,end_date=None,period=None):
         """取得指定日期下的间隔数
@@ -159,14 +120,14 @@ class TdxExtractor(HisDataExtractor):
         # 前推数量为天数乘以每天K线数
         start_number = int(day_item_number * days_to_begin)
         # 根据结束日期，计算需要查询的K线数量
-        days_to_end = tradedays(start_date,end_date)
-        range_number = int(day_item_number * days_to_end)
+        days_to_end = tradedays(end_date,today)
+        end_number = int(day_item_number * days_to_end)
         # 计算当日时间差值，并补齐
         dur_time = get_trade_min_dur(now_time,min_number)
-        range_number = range_number + dur_time - day_item_number
+        end_number = end_number + dur_time - day_item_number
         start_number = start_number + dur_time
         # exceed_number = before_number - item_number
-        return start_number,range_number
+        return start_number,end_number
 
     def get_real_data(self,instrument_code,market):  
         """取得实时数据"""

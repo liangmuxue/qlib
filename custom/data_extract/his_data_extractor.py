@@ -202,7 +202,7 @@ class HisDataExtractor:
                         (DataTaskType.DataImport.value,task_batch,self.backend_channel,start_date,end_date,DataTaskStatus.Start.value,period))
         return task_batch
  
-    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,is_complet=False,
+    def import_data(self,task_batch=0,start_date=19700101,end_date=20500101,period=PeriodType.DAY.value,is_complete=False,
                     contain_institution=False,resume=False,no_total_file=False,auto_import=False):
         """
             取得所有股票历史行情数据
@@ -222,7 +222,7 @@ class HisDataExtractor:
         if auto_import:
             return self.import_data_auto(task_batch=task_batch,end_date=end_date,period=period,
                                      contain_institution=contain_institution,no_total_file=no_total_file)
-        return self.import_data_part(task_batch=task_batch,start_date=start_date,end_date=end_date,period=period,is_complet=is_complet,
+        return self.import_data_part(task_batch=task_batch,start_date=start_date,end_date=end_date,period=period,is_complete=is_complete,
                                      contain_institution=contain_institution,resume=resume,no_total_file=no_total_file)
 
     def import_data_auto(self,task_batch=0,end_date=20500101,period=PeriodType.DAY.value,
@@ -308,6 +308,9 @@ class HisDataExtractor:
         else:
             # 根据原有数据，取得最近日期，并从下一天作为开始日期
             start_date = self.get_last_data_date(ori_data_item,period)
+            # 如果结束日期小于开始日期，则不进行
+            if int(start_date)>int(end_date):
+                return None
             # 清除原来数据冗余的部分
             origin_data = self.clear_redun_data(ori_data_item,start_date)
         # 取得相关数据，子类实现
@@ -352,6 +355,9 @@ class HisDataExtractor:
         savepath = "{}/{}".format(self.item_savepath,get_period_name(period))
         if not os.path.exists(savepath):
             os.makedirs(savepath) 
+            # 同时创建下级目录
+            os.makedirs(os.path.join(savepath,"origin"))
+            os.makedirs(os.path.join(savepath,"institution"))
             
         # 恢复模式下，需要先加载之前的已生成数据
         if resume and not no_total_file:
@@ -396,12 +402,13 @@ class HisDataExtractor:
         if no_total_file:
             try:
                 item_df = self.load_item_df(code,period=period,institution=institution) 
-                # 去重，如果之前的日期和之后导入的数据有日期有重合，则删除之前的重复部分
-                item_filter_df = item_df[~item_df["datetime"].isin(item_data["datetime"])]
-                item_data = pd.concat([item_filter_df,item_data])
+                # 如果没有原来的存储文件，则直接使用当前数据
+                if item_df is not None:
+                    # 去重，如果之前的日期和之后导入的数据有日期有重合，则删除之前的重复部分
+                    item_filter_df = item_df[~item_df["datetime"].isin(item_data["datetime"])]
+                    item_data = pd.concat([item_filter_df,item_data])
             except Exception as e:
                 logger.error("load_item_df fail:{},err:{}".format(code,e))
-            
         if item_data is not None:
             # 每个股票分别保存csv到本地
             self.export_item_data(code,item_data,is_complete=True,savepath=savepath,period=period,institution=institution)  
@@ -453,6 +460,9 @@ class HisDataExtractor:
             f = "{}/institution/{}.csv".format(item_savepath,instrument)
         else:
             f = "{}/origin/{}.csv".format(item_savepath,instrument)
+        # 文件不存在则返回空
+        if not os.path.exists(f):
+            return None
         item_df = pd.read_csv(f,dtype=self.col_data_types)  
         # 对时间字段进行检查及清洗
         if self.backend_channel=="tdx":

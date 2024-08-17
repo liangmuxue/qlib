@@ -39,11 +39,17 @@ def test_crf():
     plt.show()
     print('value',model.decode(X[:4]))
 
+def test_date():
+    start_date = 20220801
+    start_date = datetime.strptime(str(start_date),'%Y%m%d').date()    
+    print(start_date)
+    
 def test_import():
     from darts_pro.data_extension.custom_nor_model import TFTBatchModel
           
 if __name__ == "__main__":
     # test_days_dur()
 
-    test_import()
+    # test_import()
+    test_date()
     

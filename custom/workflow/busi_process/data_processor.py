@@ -74,9 +74,9 @@ class DataProcessor(BaseProcessor):
                     is_complete = False
                     fill_history = False
                 if is_complete:
-                    # 如果是全量导入，则根据配置项，取得导入开始日期，并使用当前工作日期为结束日期，进行导入
+                    # 如果是全量导入，则根据配置项，取得导入开始日期，和结束日期，进行导入
                     start_date = config["kwargs"]["start_date"]
-                    end_date = working_day
+                    end_date = config["kwargs"]["end_date"]
                 elif fill_history:
                     # 根据标志,追加以前没有导入的记录
                     start_date = config["kwargs"]["start_date"]  
