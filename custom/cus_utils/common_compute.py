@@ -237,7 +237,7 @@ def compute_price_class(price_array,mode="max_range"):
     if mode=="first_last":
         raise_range = (price_array[-1] - cur_price)/cur_price*100             
     if mode=="fast":
-        raise_range = (price_array[2] - cur_price)/cur_price*100                
+        raise_range = (price_array[3] - cur_price)/cur_price*100                
     p_taraget_class = get_simple_class(raise_range)     
     return p_taraget_class
 

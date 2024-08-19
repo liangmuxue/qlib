@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-
+import os
 import matplotlib
 import matplotlib.pyplot as plt
 import mplfinance as mpf
@@ -8,6 +8,7 @@ import matplotlib.animation as animation
 
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.tensor_viz import TensorViz
+import cus_utils.global_var as global_var
 
 matplotlib.use('TkAgg')
 
@@ -18,7 +19,6 @@ class DataViewer():
         
         if env_name is None:
             env_name = "stat_pred_classify"
-        self.viz_input = TensorViz(env=env_name) 
 
     def show_single_complex_pred_data(self,single_data,correct=0,dataset=None,save_path=None):
         """预测数据单条显示"""
@@ -92,19 +92,45 @@ class DataViewer():
         ymin = view_data[view_data>0].min()*(1-ytick_range)
         self.viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,x_range=x_range,names=names,ytickmax=ymax,ytickmin=ymin)
                 
-    def market_price(self,df_ref,date_range,instrument,dataset=None):
+    def market_price(self,df_ref,date_range,instrument,dataset=None,viz_target=None,att_cols=[]):
         """显示某个股票在指定日期范围内的行情走势"""
         
         time_column = dataset.get_time_column()
+        time_column = "datetime_number"
         group_column = dataset.get_group_column()
         
         time_begin = date_range[0]
         time_end = date_range[1]
         df_item = df_ref[(df_ref[time_column]>=time_begin)&(df_ref[time_column]<time_end)&(df_ref[group_column]==instrument)]
-        x_range = df_item["time_idx"].values
+        x_range = df_item[time_column].values
         target_title = "{}".format(instrument)
-        view_data = df_item["label_ori"].values
-        self.viz_input.viz_matrix_var(view_data,win=target_title,title=target_title,x_range=x_range)  
+        names = ["price"]
+        view_data = np.expand_dims(df_item["label_ori"].values,-1)
+        for col in att_cols:
+            att_view_data = np.expand_dims(df_item[col].values,-1)
+            view_data = np.concatenate([view_data,att_view_data],-1)
+            names = names + [col]
+        viz_target.viz_matrix_var(view_data,win=target_title,title=target_title,names=names,x_range=x_range)  
         
+    def market_price_mpl(self,df_ref,date_range,instrument,dataset=None,save_path=None):
+
+        time_column = dataset.get_time_column()
+        time_column = "datetime_number"
+        group_column = dataset.get_group_column()
         
+        time_begin = date_range[0]
+        time_end = date_range[1]
+               
+        df_item = df_ref[(df_ref[time_column]>=time_begin)&(df_ref[time_column]<time_end)&(df_ref[group_column]==instrument)]
+        target_data = df_item
+        target_data = target_data.set_index("datetime")
+        target_data.index.name = "Time Index"
+        # 修改为mpf的标准字段名
+        target_data = target_data.rename(columns={'OPEN':'open','CLOSE':'close','HIGH':'high','LOW':'low','VOLUME_CLOSE':'volume'})
+        title = "date:{},instrument:{}".format(time_begin,instrument)
+        mav = (5, 10, 20)
+        mav = ()
+        apds = []
+        file_path = os.path.join(save_path,"{}.png".format(instrument))
+        mpf.plot(target_data, title=title,type='candle',addplot=apds, mav=mav,volume=True,savefig=file_path,figsize=(12, 8))        
                       

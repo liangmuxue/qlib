@@ -3,6 +3,8 @@
 from __future__ import division
 from __future__ import print_function
 
+from sklearn.preprocessing import MinMaxScaler
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 import os
 import numpy as np
 from collections import Counter
@@ -24,7 +26,9 @@ from darts.metrics import mape
 from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 
+from cus_utils.tensor_viz import TensorViz
 from cus_utils.common_compute import compute_price_class,compute_price_class_batch
+from darts_pro.data_extension.custom_dataset import CustomSequentialDataset
 from darts_pro.data_extension.batch_dataset import BatchDataset,BatchOutputDataset
 from darts_pro.data_extension.clustering_dataset import ClustringBatchOutputDataset,VareBatchOutputDataset
 from darts_pro.data_extension.series_data_utils import StatDataAssis
@@ -33,7 +37,6 @@ from darts_pro.data_extension.custom_nor_model import TFTAsisModel,TFTBatchModel
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,CLASS_SIMPLE_VALUE_SEC,SLOPE_SHAPE_SMOOTH,CLASS_LAST_VALUE_MAX
 
 import cus_utils.global_var as global_var
-from darts_pro.data_extension.togather_model import ClassifierTrainer
 
 class TftDatafAnalysis():
     
@@ -85,7 +88,17 @@ class TftDatafAnalysis():
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]     
-                
+
+        global_var.set_value("dataset", dataset)
+        viz_result_suc = TensorViz(env="train_result_suc")
+        viz_result_fail = TensorViz(env="train_result_fail")
+        viz_target = TensorViz(env="viz_target")
+        global_var.set_value("viz_target",viz_target)
+        global_var.set_value("viz_result_suc",viz_result_suc)
+        global_var.set_value("viz_result_fail",viz_result_fail)
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)    
+                    
         if self.load_dataset_file:
             df_data_path = self.pred_data_path + "/df_all.pkl"
             dataset.build_series_data(df_data_path,no_series_data=True)  
@@ -103,6 +116,8 @@ class TftDatafAnalysis():
             self.data_lstm(dataset)
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)
+        if self.type.startswith("data_view"):
+            self.data_view(dataset)            
         if self.type.startswith("output_corr"):
             self.output_corr(dataset)               
         if self.type.startswith("data_linear_reg"):
@@ -130,24 +145,139 @@ class TftDatafAnalysis():
         ret_file = "{}/pca_ret_cci.npy".format(batch_file_path)
         ds.analysis_df_pca(fit_names=col_list,range_num=3000,ret_file=ret_file)     
         
-    def data_lstm(
+    def data_corr(
         self,
         dataset: TFTSeriesDataset,
     ):
-        """对数据进行主成分分析"""
-         
-        batch_file_path = self.kwargs["batch_file_path"]
-        batch_file = "{}/train_part_batch.pickel".format(batch_file_path)
-        col_list = dataset.col_def["col_list"]
-        col_list.remove("label_ori")
-        col_list.remove("REV5_ORI")
-        col_list = ["CCI5"]
-        train_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
-        valid_ds = BatchDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[10000,12000])
-        trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=len(col_list))
-        trainer.training()
+        """对数据进行相关性分析"""
         
-    def data_corr(
+        batch_file_path = self.kwargs["batch_file_path"] 
+            
+        df_data_path = os.path.join(batch_file_path,"main_data.pkl")
+        ass_train_path = os.path.join(batch_file_path,"ass_data_train.pkl")
+        ass_valid_path = os.path.join(batch_file_path,"ass_data_valid.pkl")        
+        # 加载主要序列数据和辅助数据
+        with open(df_data_path, "rb") as fin:
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+                pickle.load(fin)   
+        with open(ass_train_path, "rb") as fin:
+            ass_data_train = pickle.load(fin)  
+        with open(ass_valid_path, "rb") as fin:
+            ass_data_valid = pickle.load(fin) 
+        global_var.set_value("ass_data_train",ass_data_train)
+        global_var.set_value("ass_data_valid",ass_data_valid)
+        global_var.set_value("load_ass_data",True)
+
+        output_chunk_length = self.optargs["forecast_horizon"]
+        input_chunk_length = self.optargs["wave_period"] - output_chunk_length
+        past_split = self.optargs["past_split"] 
+        
+        custom_dataset_valid = CustomSequentialDataset(
+                    target_series=val_series_transformed,
+                    past_covariates=past_convariates,
+                    future_covariates=future_convariates,
+                    input_chunk_length=input_chunk_length,
+                    output_chunk_length=output_chunk_length,
+                    max_samples_per_ts=None,
+                    use_static_covariates=True,
+                    mode="valid"
+                )            
+        data_assis = StatDataAssis()
+        col_list = dataset.col_def["col_list"] + ["label"]
+        analysis_columns = ["label_ori","REV5","IMAX5","QTLUMA5","OBV5","CCI5","KMID","KLEN","KMID2","KUP","KUP2",
+                            "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
+            'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
+        analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
+        analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5",'RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5']
+        # 利用dataloader进行数据拼装
+        val_loader = DataLoader(
+                custom_dataset_valid,
+                batch_size=1024,
+                shuffle=False,
+                num_workers=8,
+                pin_memory=True,
+                drop_last=False,
+                collate_fn=self._batch_collate_filter,
+            )
+        past_conv_index = past_split[0]
+        past_columns = dataset.get_past_columns()
+        past_columns = past_columns[past_conv_index[0]:past_conv_index[1]]       
+        combine_columns = ["price"] + past_columns + dataset.get_target_column() 
+        analysis_data = None
+        print("total len：",len(val_loader))
+        # 遍历数据集，并按照批次进行计算，汇总后取得平均值
+        for index,batch_data in enumerate(val_loader):
+            (past_target,past_covariates, historic_future_covariates,future_covariates,
+                    static_covariates,scaler_future_past_covariate,target_class,target_info,price_target,future_target) = batch_data
+            target_class = target_class[:,0,0]
+            # if index>5:
+            #     break
+            index_filter = []
+            # 筛选指定日期数据
+            for i,ti in enumerate(target_info):
+                future_start_datetime = ti["future_start_datetime"]
+                if future_start_datetime<20220401 and future_start_datetime>=20220301 or True:
+                    index_filter.append(i)    
+            
+            # 计算价格差的时候，把前一日期也包括进来
+            price_array = np.array([ts["price_array"][-6:] for ts in target_info])  
+            price_range = ((price_array[:,1:] - price_array[:,:-1])/price_array[:,:-1])*10
+            price_range = np.expand_dims(price_range,-1)
+            # 对价格归一化后进行比较
+            price_array_scale = MinMaxScaler().fit_transform(price_array[:,1:].transpose(1,0)).transpose(1,0)
+            price_array_scale = np.expand_dims(price_array_scale,-1)
+            future_past_covariate = np.array([item[1] for item in scaler_future_past_covariate])
+            future_past_covariate_item = future_past_covariate[...,past_conv_index[0]:past_conv_index[1]]  
+            analysis_batch = np.concatenate([price_array_scale,future_past_covariate_item,future_target],-1)   
+            analysis_batch = analysis_batch[index_filter]
+            price_range = price_range[index_filter]
+            # 计算单个批次的数据
+            df_corr_batch,df_price_batch,range_cls_stat = data_assis.custom_data_corr_analysis(analysis_batch,fit_columns=combine_columns,
+                            analysis_columns=analysis_columns,target_class=target_class[index_filter],price_range=price_range)
+            # 汇总所有批次的数据
+            if analysis_data is None:
+                analysis_data = [df_corr_batch,df_price_batch,[range_cls_stat]]
+            else:
+                analysis_data[0] = pd.concat([analysis_data[0],df_corr_batch])
+                analysis_data[1] = pd.concat([analysis_data[1],df_price_batch])
+                analysis_data[2] = analysis_data[2] + [range_cls_stat]
+            print("process index:{}".format(index))           
+         
+        analysis_data_mean = [analysis_data[0].mean(),analysis_data[1].mean()]
+        analysis_data[2] = np.stack(analysis_data[2])
+        hitrate_mean = np.mean(analysis_data[2],axis=0)
+        hitrate_mean = pd.DataFrame(hitrate_mean,columns=["cls_{}".format(k) for k in range(4)],index=analysis_columns[1:])
+                
+        print("corr normal:\n",analysis_data_mean[0])
+        print("corr price:\n",analysis_data_mean[1])
+        print("hitrate price:\n",hitrate_mean)
+        
+    def _batch_collate_filter(self,ori_batch):
+        """
+        重载方法，调整数据处理模式
+        """
+        
+        batch = ori_batch
+        aggregated = []
+        first_sample = ori_batch[0]
+        for i in range(len(first_sample)):
+            elem = first_sample[i]
+            if isinstance(elem, np.ndarray):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, MinMaxScaler):
+                aggregated.append([sample[i] for sample in batch])
+            elif isinstance(elem, tuple):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+        return tuple(aggregated)
+    
+    def data_corr_old(
         self,
         dataset: TFTSeriesDataset,
     ):
@@ -172,7 +302,7 @@ class TftDatafAnalysis():
         train_ds = BatchOutputDataset(batch_file,fit_names=col_list,mode="analysis",range_num=[0,10000])
         data_assis.data_corr_analysis(train_ds,analysis_columns=analysis_columns)
         # data_assis.est_thredhold(train_ds)
-        
+                
     def output_corr(
         self,
         dataset: TFTSeriesDataset,
@@ -195,37 +325,6 @@ class TftDatafAnalysis():
         train_ds = BatchOutputDataset(batch_file,target_col=target_col,fit_names=fit_names,mode="analysis_output",range_num=range_num)
         data_assis.output_corr_analysis(train_ds,analysis_columns=analysis_columns,fit_names=fit_names,target_col=target_col,diff_columns=diff_columns)
         # data_assis.output_target_viz(train_ds,fit_names=fit_names)
-        
-    def data_linear_reg(
-        self,
-        dataset: TFTSeriesDataset,
-    ):
-        """线性回归任务"""
-        
-        batch_file_path = self.kwargs["batch_file_path"]
-        batch_file = "{}/train_batch.pickel".format(batch_file_path)
-        col_list = ['MASCOPE5','OBV5','RSI5']
-        col_list = ['MASCOPE5','RSI5']
-        target_col = ['PRICE_SCOPE']
-
-        base_size = 10000
-        mode = "analysis_reg_ota"
-        # mode = "analysis_reg"
-        if mode=="analysis_reg_ota":
-            input_index = [1,4]
-            input_dim = input_index[1] - input_index[0] 
-            fit_names = input_index
-            file_name = "reg_conv.pth"
-        if mode=="analysis_reg":
-            fit_names = col_list
-            input_dim = len(col_list)
-            file_name = "reg.pth"
-        range_num_train = [0,base_size]
-        range_num_valid = [base_size,int(base_size*1.2)]
-        train_ds = BatchDataset(batch_file,target_col=target_col,fit_names=fit_names,mode=mode,range_num=range_num_train)
-        valid_ds = BatchDataset(batch_file,target_col=target_col,fit_names=fit_names,mode=mode,range_num=range_num_valid)
-        trainer = ClassifierTrainer(train_ds,valid_ds,input_dim=input_dim)
-        trainer.reg_training(load_model=False,file_name=file_name)
                
     def batch_data_ana(
         self,
@@ -291,4 +390,22 @@ class TftDatafAnalysis():
         data_assis = StatDataAssis()
         data_assis.analysis_compare_output(ds)
                 
+     
+    def data_view(self,dataset):
+        from trader.data_viewer import DataViewer
+        
+        dataset.build_series_data(no_series_data=True)   
+        df_ref = dataset.df_all
+        viz_target = global_var.get_value("viz_target")
+        
+        viewer = DataViewer(env_name="data_price")
+        instrument = 603711
+        instrument = 603817
+        date_range = (20220301,20220331)
+        att_cols = ["QTLUMA5"]
+        viewer.market_price(df_ref, date_range, instrument, dataset,viz_target=viz_target,att_cols=att_cols)    
+        save_path = "custom/data/viz"   
+        viewer.market_price_mpl(df_ref, date_range, instrument, dataset,save_path=save_path)   
+        
+        
         

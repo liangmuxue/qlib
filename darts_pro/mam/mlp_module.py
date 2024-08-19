@@ -337,7 +337,7 @@ class MlpModule(_TFTModuleBatch):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_CNTN_loss", (ce_loss[1]+corr_loss_combine[1]), batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_QTLU_loss", (ce_loss[0]+corr_loss_combine[0]), batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,pca_target)
         return loss,detail_loss,output_combine
@@ -392,8 +392,6 @@ class MlpModule(_TFTModuleBatch):
             return pred_import_index,(cls_values,fea_values,pca_values)  
             
         for date in fur_dates.keys():
-            if date>=20220401 or date<20220301:
-                continue
             idx = fur_dates[date]
             # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
             pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
@@ -447,8 +445,8 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_0<-0.3) # & (sv_2>0.1)  # (cls_0>0.03) # & (sv_2>0.1)
-        # ce_thre_para = [[0.1,6],[-0.1,7],[-0.1,6]]
+        sv_import_bool = (sv_0<-0.1) & (sv_1<-0.03) & (sv_2>0.1)
+        # ce_thre_para = [[0.<,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
         # sv_import_bool = (sv_2<0) & (sv_1>0) & (fea_1_range<-1)
@@ -503,6 +501,7 @@ class MlpModule(_TFTModuleBatch):
         weight_targets = []
         for i in range(future_target.shape[-1]):
             real_target = future_target[...,i]
+            # 取最后一段的差值
             last_target = real_target[:,-1] - real_target[:,-2]
             last_targets.append(last_target)
             # Only 1 pca dim
@@ -645,6 +644,12 @@ class MlpModule(_TFTModuleBatch):
                 fur_dates[future_start_datetime] = [index]
             else:
                 fur_dates[future_start_datetime].append(index)
+        fur_dates_filter = {}
+        for date in fur_dates.keys():
+            if date>=20220401 or date<20220301:
+                continue    
+            fur_dates_filter[date] = fur_dates[date]   
+        fur_dates = fur_dates_filter  
         # 生成目标索引
         import_index_all,values = self.build_import_index(output_data=output_total,fur_dates=fur_dates,target_info=target_info_total)
         rate_total = {}
@@ -706,7 +711,7 @@ class MlpModule(_TFTModuleBatch):
         self.log("score_total", score_total, prog_bar=True) 
         
         # 如果是测试模式，则在此进行可视化
-        if self.mode=="pred_batch":
+        if self.mode.startswith("pred_") and False:
             viz_total_size = 0
             output_total,target_total,target_class_total,target_info_total = self.combine_output_total(self.output_result)
             for index,date in enumerate(import_index_all.keys()):
@@ -726,7 +731,7 @@ class MlpModule(_TFTModuleBatch):
         
         names = ["pred","label","price","obv_output","obv_tar","cci_output","cci_tar"]        
         names = ["price past","price future","CNTN5_output","CNTN5_tar"]      
-        names = ["price past","price future","CNTN5_output","CNTN5_tar","macd_diff","macd_dea"]      
+        names = ["price past","price future","QTLUMA5_output","QTLUMA5_tar","rsi_5","rsi_20"]      
         result = []
             
         fea0_values,fea1_values,fea2_values = output_data
@@ -736,23 +741,12 @@ class MlpModule(_TFTModuleBatch):
         pad_before = np.array([0 for i in range(self.input_chunk_length)])
         pad_after = np.array([0 for i in range(self.output_chunk_length)])
         
+        # QTLU part
+        tar0_values = target[:,:,0]
         # CNTN5 part
         tar1_values = target[:,:,1]
-        # Price part
+        # SUMP part
         tar2_values = target[:,:,2]
-        # def _viz_att_data(target_info):
-        #     names = ["price","rsi_5","rsi_20"]
-        #     for i in range(len(target_info)):
-        #         ts = target_info[i]
-        #         price_item = ts["price_array"]
-        #         rsi_5 = ts["rsi_5"]
-        #         rsi_20 = ts["rsi_20"]
-        #         view_data = np.stack([price_item,rsi_5,rsi_20]).transpose(1,0)
-        #         target_title = "fur_date:{},instrument:{}".format(ts["future_start_datetime"],ts["instrument"])
-        #         win = "win_{}".format(i)
-        #         viz_target.viz_matrix_var(view_data,win=win,title=target_title,names=names)          
-        #
-        # _viz_att_data(np.array(target_info[:5]))
                
         for n in range(2):
             if n==0:
@@ -773,13 +767,15 @@ class MlpModule(_TFTModuleBatch):
                 price_data_future = np.concatenate((pad_before,price_data_future),axis=-1)
                 # 预测目标部分
                 view_data = np.stack((price_data_past,price_data_future)).transpose(1,0)
+                fea0_data = np.concatenate((pad_before,fea0_values[s_index]),axis=-1)
+                fea0_combine = np.stack([fea0_data,tar0_values[s_index]]).transpose(1,0)                
                 fea1_data = np.concatenate((pad_before,fea1_values[s_index]),axis=-1)
                 fea1_combine = np.stack([fea1_data,tar1_values[s_index]]).transpose(1,0)
                 fea2_data = np.concatenate((pad_before,fea2_values[s_index]),axis=-1)
                 fea2_combine = np.stack([fea2_data,tar2_values[s_index]]).transpose(1,0)
-                view_data = np.concatenate([view_data,fea1_combine],axis=1)
+                view_data = np.concatenate([view_data,fea0_combine],axis=1)
                 # 辅助数据部分
-                att_data = np.stack([ts["macd_diff"],ts["macd_dea"]]).transpose(1,0)
+                att_data = np.stack([ts["rsi_5"],ts["rsi_20"]]).transpose(1,0)
                 view_data = np.concatenate([view_data,att_data],axis=1)
                 target_title = "tar_class:{},date:{},instrument:{}".format(target_vr_class[s_index],date,instrument)
                 counter+=1

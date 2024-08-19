@@ -677,7 +677,8 @@ def test_dump():
 def test_date():    
     day = datetime.date(2021,2,day=21)  
     print(day.weekday())
-                
+  
+              
 if __name__ == "__main__":
     # test_mask()
     # test_pair_compute()

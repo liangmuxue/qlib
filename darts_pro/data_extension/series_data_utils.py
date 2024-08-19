@@ -294,12 +294,6 @@ class StatDataAssis():
         return predicted_labels,X,y
 
     def data_corr_analysis(self,ds_data,analysis_columns = ["PRICE_SCOPE","MASCOPE5","OBV5","RSI5","MACD"]):
-        # df_expirement = df_all[["label","CLOSE"]]
-        # df_expirement = df_expirement.iloc[:3000]
-        # df_corr = df_expirement.corr(method="spearman")
-        # print(df_corr)
-        # sns.heatmap(df_corr, vmax=1, vmin=-1, center=0)
-        fit_names = ds_data.fit_names
         np_target = ds_data.np_data
         # np_target = normalization_axis(np_target,axis=1)         
         # df_target = df_target.apply(lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)))
@@ -333,7 +327,47 @@ class StatDataAssis():
             concat = np.stack([price_range,fit_last_values[:,i]])
             corr = np.corrcoef(concat)[0,1]
             print("{}:{}".format(col,corr))
+
+
+    def custom_data_corr_analysis(self,analysis_batch,fit_columns=[],analysis_columns=[],price_range=None,target_class=None):
+        """分析相关性，从训练及预测数据集中取数"""
         
+        
+        df_combine = None
+        size = analysis_batch.shape[0]
+        fit_last_values = np.zeros((size,len(analysis_columns)-1))
+        # 分析预测时段内的相关性
+        for i in range(size):
+            target_data = analysis_batch[i]         
+            df_item = pd.DataFrame(target_data,columns=fit_columns)
+            tar_data = df_item[analysis_columns]        
+            fit_last_values[i] = tar_data.values[-1,1:] - tar_data.values[-2,1:]     
+            df_corr = tar_data.corr(method="spearman").iloc[[0]]
+            if df_combine is None:
+                df_combine = df_corr
+            else:
+                df_combine = pd.concat([df_combine,df_corr])      
+            # print("do iter:{}".format(i))  
+        df_combine_mean = pd.DataFrame(np.expand_dims(df_combine.mean().values,0),columns=analysis_columns)
+        # print("corr value:{}".format(df_combine_mean))
+        
+        # 衡量序列末尾数值，与价格涨幅的关系
+        price_range_tar = np.sum(price_range[:,:3,0],axis=1)
+        price_combine = []
+        range_cls_stat = []
+        for i in range(len(analysis_columns)-1):
+            col = analysis_columns[i+1]
+            concat = np.stack([price_range_tar,fit_last_values[:,i]])
+            corr = np.corrcoef(concat)[0,1]
+            # print("{}:{}".format(col,corr))
+            price_combine.append(corr)
+            # 统计不同涨跌幅度类别下的各个指标的均值
+            range_cls_stat.append([fit_last_values[np.where(target_class==j)[0],i].mean() for j in range(4)])
+        range_cls_stat = np.array(range_cls_stat)   
+        price_combine = np.expand_dims(np.array(price_combine),0)
+        df_price_combine = pd.DataFrame(price_combine,columns=analysis_columns[1:]) 
+        return df_combine_mean,df_price_combine,range_cls_stat
+                   
     def output_corr_analysis(self,ds_data,analysis_columns=None,fit_names=None,target_col=None,diff_columns=None):
         size = len(ds_data)
         df_combine = None
