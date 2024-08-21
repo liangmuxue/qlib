@@ -1,6 +1,7 @@
 from loguru import logger as lg
 import os
 import sys
+import json
 
 BASE_LOG_DIR = "custom/data/logs"
 
@@ -88,3 +89,11 @@ class AppLogger:
 logger = AppLogger()
 logger.set_logger('error.log', filter_type='ERROR')
 logger.set_logger('service.log', filter_type='INFO', level='INFO')
+
+
+def write_json(text_data,file_path):
+    with open(file_path, 'w') as f:
+        b = json.dumps(text_data)
+        f.write(b)    
+    
+    

@@ -39,6 +39,7 @@ from cus_utils.clustering import get_cluster_center
 from cus_utils.visualization import ShowClsResult
 from losses.quanlity_loss import QuanlityLoss
 import cus_utils.global_var as global_var
+from cus_utils.log_util import write_json
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -393,16 +394,16 @@ class MlpModule(_TFTModuleBatch):
             
         for date in fur_dates.keys():
             idx = fur_dates[date]
-            # pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=cls_values.shape[0])
-            pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
+            pred_import_index = self.strategy_top(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
+            # pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
             # 通过传统指标进行二次筛选
             target_info_cur = np.array(target_info)[idx]
             singal_index_bool_macd = self.create_signal_macd(target_info_cur)
             singal_index_bool_rsi = self.create_signal_rsi(target_info_cur)
             singal_index_bool_kdj = self.create_signal_kdj(target_info_cur)
-            singal_index = np.array(idx)[np.where(singal_index_bool_rsi)[0]]
+            singal_index = np.array(idx)[np.where(singal_index_bool_macd)[0]]
             pred_index = np.array(idx)[pred_import_index]
-            pred_import_index_all[date] = np.intersect1d(singal_index,pred_index)
+            pred_import_index_all[date] = pred_index # np.intersect1d(singal_index,pred_index)
             
         return pred_import_index_all,(cls_values,fea_values,pca_values)       
 
@@ -445,7 +446,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2].squeeze(-1)
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_0<-0.1) & (sv_1<-0.03) & (sv_2>0.1)
+        sv_import_bool = (sv_0<-0.1) & (sv_1<-0.02) #  & (sv_2>0.1)
         # ce_thre_para = [[0.<,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -473,15 +474,15 @@ class MlpModule(_TFTModuleBatch):
         (fea_0_range,fea_1_range,fea_2_range) = fea
         
         top_k = sv_0.shape[0]//4
+        top_k = 320
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
-        sv_import_index = np.intersect1d(np.argsort(-sv_0)[:top_k],np.argsort(fea_1_range)[:top_k])
+        sv_import_index = np.intersect1d(np.argsort(-sv_0)[:top_k],np.argsort(sv_2)[:top_k])
         # 使用0号进行corr判断（整体涨跌幅度），正序
         fea0_import_index = np.argsort(-fea_0_range)[:top_k]
         # 使用1号进行corr判断（整体涨跌幅度），逆序
         fea1_import_index = np.argsort(fea_1_range)[:top_k]        
         fea2_import_index = np.argsort(-fea_2_range)[:top_k]   
         # comp1_index = np.intersect1d(sv_import_index,fea0_import_index)
-        comp1_index =  np.intersect1d(sv_import_index,fea2_import_index)
 
         # cls_thre_para = [[0.1,8],[-0,8],[-0,7]]
         # # 包含2个参数：分数阈值以及个数阈值
@@ -490,7 +491,7 @@ class MlpModule(_TFTModuleBatch):
         # para2 = cls_thre_para[2]
         # # 使用1号进行cls判断（pca数值），逆序
         # cls_import_index = np.argsort(np.sum(cls_0>para0[0],1))[:top_k] 
-        pred_import_index = comp1_index # np.intersect1d(comp1_index,cls_import_index)
+        pred_import_index = sv_import_index # np.intersect1d(comp1_index,cls_import_index)
         return pred_import_index
           
     def _process_target_batch(self,future_target,target_class):
@@ -639,7 +640,7 @@ class MlpModule(_TFTModuleBatch):
         # 按照日期分组计算
         fur_dates = {}
         for index,ti in enumerate(target_info_total):
-            future_start_datetime = ti["future_start_datetime"]
+            future_start_datetime = ti["future_start_datetime"].item()
             if not future_start_datetime in fur_dates.keys():
                 fur_dates[future_start_datetime] = [index]
             else:
@@ -655,7 +656,8 @@ class MlpModule(_TFTModuleBatch):
         rate_total = {}
         total_imp_cnt = np.where(target_class_total==3)[0].shape[0]
         # 对每天的准确率进行统计，并累加
-        for date in import_index_all.keys():
+        for date in np.sort(np.array(list(import_index_all.keys()))):
+            date = date.item()
             import_index = import_index_all[date]
             if len(import_index)==0:
                 continue
@@ -674,11 +676,16 @@ class MlpModule(_TFTModuleBatch):
                     if cnt_values.shape[0]==0:
                         cnt = 0
                     else:
-                        cnt = cnt_values[0,1]
+                        cnt = cnt_values[0,1].item()
                     rate_total[date].append(cnt)
                 # 预测数量以及总数量
-                rate_total[date].append(total_cnt)              
+                rate_total[date].append(total_cnt.item())              
         sr = np.array(list(rate_total.values()))
+        
+        with open("custom/data/pred/import_index_all.pkl", "wb") as fout:
+            pickle.dump(import_index_all, fout)          
+        write_json(rate_total,"custom/data/pred/rate_total.json")
+        
         return sr,total_imp_cnt,import_index_all
         
     def on_validation_epoch_end(self):
@@ -711,19 +718,19 @@ class MlpModule(_TFTModuleBatch):
         self.log("score_total", score_total, prog_bar=True) 
         
         # 如果是测试模式，则在此进行可视化
-        if self.mode.startswith("pred_") and False:
-            viz_total_size = 0
-            output_total,target_total,target_class_total,target_info_total = self.combine_output_total(self.output_result)
-            for index,date in enumerate(import_index_all.keys()):
-                if viz_total_size>20:
-                    break
-                import_index = import_index_all[date]            
-                target_info = np.array(target_info_total)[import_index]
-                target_vr_class = target_class_total[import_index]
-                target = target_total[import_index]
-                output_data = [output_total[i][0].cpu().numpy()[import_index] for i in range(3)]
-                viz_total_size = self.viz_results(output_data, target_vr_class=target_vr_class,
-                                        target_info=target_info, date=date,target=target,counter=viz_total_size)
+        # if self.mode.startswith("pred_") and False:
+        #     viz_total_size = 0
+        #     output_total,target_total,target_class_total,target_info_total = self.combine_output_total(self.output_result)
+        #     for index,date in enumerate(import_index_all.keys()):
+        #         if viz_total_size>20:
+        #             break
+        #         import_index = import_index_all[date]            
+        #         target_info = np.array(target_info_total)[import_index]
+        #         target_vr_class = target_class_total[import_index]
+        #         target = target_total[import_index]
+        #         output_data = [output_total[i][0].cpu().numpy()[import_index] for i in range(3)]
+        #         viz_total_size = self.viz_results(output_data, target_vr_class=target_vr_class,
+        #                                 target_info=target_info, date=date,target=target,counter=viz_total_size)
 
     def viz_results(self,output_data,target_vr_class=None,target_info=None,date=None,target=None,counter=0):
         """Visualization Output and Target"""

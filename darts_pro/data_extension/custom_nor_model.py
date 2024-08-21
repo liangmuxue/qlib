@@ -545,8 +545,8 @@ class TFTBatchModel(TFTExtModel):
                 checkpoint_callback = pl_callbacks.ModelCheckpoint(
                     dirpath=c.dirpath,
                     save_last=True,
-                    monitor="val_CNTN_loss",
-                    filename="{epoch}-{val_CNTN_loss:.2f}",
+                    monitor="val_QTLU_loss",
+                    filename="{epoch}-{val_QTLU_loss:.2f}",
                     every_n_epochs=2,
                     save_top_k = -1
                 )
@@ -995,8 +995,8 @@ class TFTCluSerModel(TFTBatchModel):
                 checkpoint_callback = pl_callbacks.ModelCheckpoint(
                     dirpath=c.dirpath,
                     save_last=False,
-                    monitor="val_CNTN_loss",
-                    filename="{epoch}-{val_CNTN_loss:.2f}",
+                    monitor="val_QTLU_loss",
+                    filename="{epoch}-{val_QTLU_loss:.2f}",
                     every_n_epochs=2,
                     # mode="min",
                     save_top_k = -1
@@ -1059,7 +1059,7 @@ class TFTCluSerModel(TFTBatchModel):
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
-                file_name = "epoch=117-val_CNTN_loss=0.75.ckpt"
+                file_name = "epoch=117-val_QTLU_loss=0.75.ckpt"
             file_name = os.path.basename(file_name)       
             
         file_path = os.path.join(checkpoint_dir, file_name)

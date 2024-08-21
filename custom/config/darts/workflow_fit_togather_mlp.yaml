@@ -81,7 +81,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "TOTAL_CCI_all_20220228_train"
                model_type: 'mlp'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
