@@ -26,7 +26,8 @@ from sklearn.manifold import MDS
 import matplotlib.pyplot as plt
 from cus_utils.tensor_viz import TensorViz
 
-from darts_pro.act_model.mlp_ts import MlpTs
+import cus_utils.global_var as global_var
+from darts_pro.act_model.mlp_ts import MlpTs,MlpTs3D
 from cus_utils.metrics import pca_apply
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
@@ -191,5 +192,3 @@ class MlpTogeModule(MlpModule):
         
         return super().training_step_real((past_target,past_covariates, historic_future_covariates,future_covariates,
                                            static_covariates,target_class,price_target,future_target),batch_idx)     
-        
-               

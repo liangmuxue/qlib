@@ -476,7 +476,7 @@ class MlpModule(_TFTModuleBatch):
         top_k = sv_0.shape[0]//4
         top_k = 320
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
-        sv_import_index = np.intersect1d(np.argsort(-sv_0)[:top_k],np.argsort(sv_2)[:top_k])
+        sv_import_index = np.intersect1d(np.argsort(sv_0)[:top_k],np.argsort(-sv_2)[:top_k])
         # 使用0号进行corr判断（整体涨跌幅度），正序
         fea0_import_index = np.argsort(-fea_0_range)[:top_k]
         # 使用1号进行corr判断（整体涨跌幅度），逆序

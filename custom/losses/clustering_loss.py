@@ -319,3 +319,50 @@ class MlpLoss(UncertaintyLoss):
                 # ce_loss[i] = self.quan_loss.compute_loss(x_smo.unsqueeze(1).unsqueeze(1), last_target_item)
                 loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
+
+
+class Mlp3DLoss(UncertaintyLoss):
+    """基于MLP的损失函数，以日期维度进行整合的3D版本"""
+    
+    def __init__(self,ins_dim,ref_model=None,device=None):
+        super(Mlp3DLoss, self).__init__(ref_model=ref_model,device=device)
+        
+        # 股票数量维度
+        self.ins_dim = ins_dim
+        self.ref_model = ref_model
+        self.device = device  
+        
+        reducer = reducers.ThresholdReducer(low=0)
+        self.triplet_loss = losses.TripletMarginLoss(margin=0.03, reducer=reducer)
+        self.mining_func = miners.TripletMarginMiner(
+            margin=0.03,type_of_triplets="semihard"
+        )     
+        self.quan_loss = QuanlityLoss(device=device)   
+        
+    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
+        """Multiple Loss Combine"""
+
+        (output,vr_combine_class,vr_classes) = output_ori
+        (target,target_class,last_target) = target_ori
+        corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        fds_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        ce_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        # 指标分类
+        loss_sum = torch.tensor(0.0).to(self.device) 
+        # 忽略目标缺失值的损失计算,找出符合比较的索引
+        keep_index = torch.where(target_class>=0)[0]
+        # 多个目标损失
+        for i in range(len(output)):
+            if optimizers_idx==i or optimizers_idx==-1:
+                real_target = target[...,i]
+                last_target_item = last_target[...,i:i+1]
+                output_item = output[i] 
+                x_bar,z,cls,tar_cls,x_smo = output_item  
+                # 预测值的一致性损失,忽略目标缺失值的损失计算
+                corr_loss[i] = self.ccc_loss_comp(x_bar[keep_index], real_target[keep_index])
+                # 降维目标之间的欧氏距离   ,忽略目标缺失值的损失计算      
+                ce_loss[i] = 10 * self.mse_loss(x_smo[keep_index], last_target_item[keep_index])
+                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
+        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
+    

@@ -597,8 +597,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
 
         train_sample = train_dataset[0]
         if self.model is None:
-            # 使用target部分(倒数第1列)，进行输出维度判断
-            self.train_sample, self.output_dim = train_sample, train_sample[-1].shape[1]
+            # 使用target部分(倒数第1列)，进行输出维度判断--default output dim 1
+            self.train_sample, self.output_dim = train_sample, 1
             model = self._init_model(trainer)
             model.monitor = self.monitor
         else:
@@ -611,20 +611,6 @@ class TFTExtModel(MixedCovariatesTorchModel):
                     len(self.train_sample), len(train_sample)
                 ),
             )          
-            # same_dims = tuple(
-            #     s.shape[1] if (s is not None and isinstance(s, np.ndarray)) else None for s in train_sample
-            # ) == tuple(s.shape[1] if (s is not None and isinstance(s, np.ndarray)) else None for s in self.train_sample)
-            # raise_if_not(
-            #     same_dims,
-            #     "The dimensionality of the series in the training set do not match the dimensionality"
-            #     " of the series the model has previously been trained on. "
-            #     "Model input/output dimensions = {}, provided input/ouptput dimensions = {}".format(
-            #         tuple(
-            #             s.shape[1] if (s is not None and isinstance(s, np.ndarray)) else None for s in self.train_sample
-            #         ),
-            #         tuple(s.shape[1] if (s is not None and isinstance(s, np.ndarray)) else None for s in train_sample),
-            #     ),
-            # )
 
         # Setting drop_last to False makes the model see each sample at least once, and guarantee the presence of at
         # least one batch no matter the chosen batch size
