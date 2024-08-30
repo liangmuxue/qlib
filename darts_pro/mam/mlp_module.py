@@ -378,6 +378,7 @@ class MlpModule(_TFTModuleBatch):
         fea_values = torch.stack(fea_values).cpu().numpy().transpose(1,2,0)
         pca_values = torch.stack(pca_values).cpu().numpy().transpose(1,2,0)
         smooth_values = torch.stack(smooth_values).cpu().numpy().transpose(1,2,0)
+        smooth_values = smooth_values.squeeze()
 
         fea_0 = fea_values[...,0]
         fea_0_range = (fea_0[:,-1] - fea_0[:,0])       
@@ -441,9 +442,9 @@ class MlpModule(_TFTModuleBatch):
         cls_0 = cls[...,0]
         cls_1 = cls[...,1]
         cls_2 = cls[...,2]
-        sv_0 = sv[...,0].squeeze(-1)
-        sv_1 = sv[...,1].squeeze(-1)
-        sv_2 = sv[...,2].squeeze(-1)
+        sv_0 = sv[...,0]
+        sv_1 = sv[...,1]
+        sv_2 = sv[...,2]
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
         sv_import_bool = (sv_0<-0.1) & (sv_1<-0.02) #  & (sv_2>0.1)
@@ -468,15 +469,15 @@ class MlpModule(_TFTModuleBatch):
         cls_0 = cls[...,0]
         cls_1 = cls[...,1]
         cls_2 = cls[...,2]
-        sv_0 = sv[...,0].squeeze(-1)
-        sv_1 = sv[...,1].squeeze(-1)
-        sv_2 = sv[...,2].squeeze(-1)
+        sv_0 = sv[...,0]
+        sv_1 = sv[...,1]
+        sv_2 = sv[...,2]
         (fea_0_range,fea_1_range,fea_2_range) = fea
         
         top_k = sv_0.shape[0]//4
         top_k = 320
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
-        sv_import_index = np.intersect1d(np.argsort(sv_0)[:top_k],np.argsort(-sv_2)[:top_k])
+        sv_import_index = np.intersect1d(np.argsort(sv_1)[:top_k],np.argsort(-sv_2)[:top_k])
         # 使用0号进行corr判断（整体涨跌幅度），正序
         fea0_import_index = np.argsort(-fea_0_range)[:top_k]
         # 使用1号进行corr判断（整体涨跌幅度），逆序

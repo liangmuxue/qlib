@@ -21,7 +21,7 @@ from darts_pro.data_extension.custom_nor_model import TFTBatchModel
 from darts_pro.data_extension.togather_dataset import TogeSequentialDataset
 from darts_pro.data_extension.date_align_dataset import DateShiftedDataset
 from darts_pro.mam.mlp_module_togather import MlpTogeModule
-from darts_pro.mam.date_module_togather import MlpDateAlignModule
+from darts_pro.mam.date_togather_module import MlpDateAlignModule
 from darts_pro.data_extension.custom_model import logger
 
 """把分阶段数据再次整合到一起"""
@@ -376,6 +376,7 @@ class DateTogeModel(TogeModel):
             static_covariates,
             _,
             future_target,
+            _,
             _,
             _
         ) = train_sample

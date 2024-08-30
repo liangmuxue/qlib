@@ -75,6 +75,7 @@ class MlpDateAlignModule(MlpModule):
         **kwargs,
     ):
         self.ins_dim = ins_dim
+        self.mode = None
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
@@ -108,6 +109,7 @@ class MlpDateAlignModule(MlpModule):
                 static_covariates,
                 _,
                 future_target,
+                _,
                 _,
                 _
             ) = self.train_sample
@@ -184,18 +186,6 @@ class MlpDateAlignModule(MlpModule):
         self.total_imp_cnt = 0
                     
     def training_step_real(self, train_batch, batch_idx): 
-        (
-            past_target,
-            past_covariates,
-            historic_future_covariates,
-            future_covariates,
-            static_covariates,
-            past_future_covariates,
-            future_target,
-            target_class,
-            target_info
-        ) = train_batch
-        
         # 全部转换为2维模式进行网络计算
         (
             past_target,
@@ -206,13 +196,13 @@ class MlpDateAlignModule(MlpModule):
             past_future_covariates,
             future_target,
             target_class,
+            last_targets,
             target_info
         ) = self.transfer_to_2d(train_batch)
                 
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
-        last_targets,pca_target,weighted_data = self._process_target_batch(future_target,target_class)
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained   
@@ -248,8 +238,9 @@ class MlpDateAlignModule(MlpModule):
                 
         loss,detail_loss,output = self.validation_step_real(val_batch_transfer, batch_idx)  
        
-        # if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag:
-        self.dump_val_data(val_batch_transfer,output,detail_loss)
+        if self.trainer.state.stage!=RunningStage.SANITY_CHECKING and self.valid_output_flag or True:
+            self.dump_val_data(val_batch_transfer,output,detail_loss)
+            
         return loss,detail_loss
            
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
@@ -265,12 +256,12 @@ class MlpDateAlignModule(MlpModule):
             past_future_covariates,
             future_target,
             target_class,
+            last_targets,
             target_info
         ) = val_batch
               
         inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates) 
         input_batch = self._process_input_batch(inp)
-        last_targets,pca_target,_ = self._process_target_batch(future_target,target_class)
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         
         # 全部损失
@@ -286,7 +277,7 @@ class MlpDateAlignModule(MlpModule):
             # self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         self.log("val_QTLU_loss", (ce_loss[0]+corr_loss_combine[0]), batch_size=val_batch[0].shape[0], prog_bar=True)
         
-        output_combine = (output,pca_target)
+        output_combine = (output,last_targets)
         return loss,detail_loss,output_combine
             
     def transfer_to_2d(self,batch_data):
@@ -301,6 +292,7 @@ class MlpDateAlignModule(MlpModule):
             past_future_covariates,
             future_target,
             target_class,
+            last_targets,
             target_info
         ) = batch_data    
         
@@ -312,18 +304,89 @@ class MlpDateAlignModule(MlpModule):
         past_future_covariates_2d = past_future_covariates.reshape(-1,past_future_covariates.shape[-2],past_future_covariates.shape[-1])
         future_target_2d = future_target.reshape(-1,future_target.shape[-2],future_target.shape[-1])
         target_class_2d = target_class.reshape(-1)
-        target_info_2d = [i for k in target_info for i in k]
-
+        last_targets_2d = last_targets.reshape(-1,last_targets.shape[-1])
+        
+        # 转换后只使用可用数据
+        keep_index = torch.where(target_class_2d>=0)[0]
+        if self.trainer.state.stage==RunningStage.TRAINING:
+            target_info_2d = None
+        else:
+            target_info_2d = [i for k in target_info for i in k]
+            target_info_2d = np.array(target_info_2d)
         return (
-            past_target_2d,
-            past_covariates_2d,
-            historic_future_covariates_2d,
-            future_covariates_2d,
-            static_covariates_2d,
-            past_future_covariates_2d,
+            past_target_2d[keep_index],
+            past_covariates_2d[keep_index],
+            historic_future_covariates_2d[keep_index],
+            future_covariates_2d[keep_index],
+            static_covariates_2d[keep_index],
+            past_future_covariates_2d[keep_index],
+            # 目标值不忽略空数据
             future_target_2d,
             target_class_2d,
+            last_targets_2d,
             target_info_2d
+        )
+
+    def transfer_to_3d(self,output,target,target_class,last_targets,target_info):
+        """把相关变量转换回3维模式
+           Params:
+               output 输出值
+               target 目标值
+               target_class 目标涨幅类别
+               target_info 辅助数据
+        """
+        
+        batch_size = int(target_class.shape[0]/self.ins_dim)
+        
+        # 对目标值进行还原
+        target_3d = target.reshape(batch_size,self.ins_dim,target.shape[-2],target.shape[-1])
+        target_class_3d =  target_class.reshape(batch_size,self.ins_dim)
+        last_targets_3d =  last_targets.reshape(batch_size,self.ins_dim,last_targets.shape[-1])
+        target_info_3d = target_info.reshape(batch_size,self.ins_dim)
+
+        # 对输出值进行还原
+        cls_values = []
+        fea_values = []
+        pca_values = []
+        smooth_values = []
+        for i in range(len(output)):
+            output_item = output[i] 
+            x_bar,z,cls,_,x_smo =  output_item 
+            cls_values.append(cls)
+            fea_values.append(x_bar)
+            pca_values.append(z)
+            smooth_values.append(x_smo)
+        cls_values = torch.stack(cls_values).cpu().numpy().transpose(1,2,0)
+        fea_values = torch.stack(fea_values).cpu().numpy().transpose(1,2,0)
+        pca_values = torch.stack(pca_values).cpu().numpy().transpose(1,2,0)
+        smooth_values = torch.stack(smooth_values).cpu().numpy().transpose(1,2,0)
+        
+        # 分别针对每批次反向计算出当前有效数量
+        continue_index = 0
+        keep_size_mapping = [0]
+        for j in range(batch_size):
+            ingore_index_inner = np.where(target_class_3d[j]<0)[0]
+            keep_num = self.ins_dim - ingore_index_inner.shape[0]
+            continue_index = continue_index + keep_num   
+            keep_size_mapping.append(continue_index)
+        # 使用数组承载，每个数组元素里的shape是不同的
+        cls_3d,fea_3d,sv_3d = [],[],[]
+        for j in range(batch_size):
+            cls_3d_inner = cls_values[keep_size_mapping[j]:keep_size_mapping[j+1]].squeeze()
+            cls_3d.append(cls_3d_inner)
+            fea_3d_inner = fea_values[keep_size_mapping[j]:keep_size_mapping[j+1]]
+            fea_3d.append(fea_3d_inner)
+            sv_3d_inner = smooth_values[keep_size_mapping[j]:keep_size_mapping[j+1]].squeeze()
+            sv_3d.append(sv_3d_inner)
+                      
+        output_3d = (sv_3d,fea_3d,cls_3d)
+                
+        return (
+            output_3d,
+            target_3d,
+            target_class_3d,
+            last_targets_3d,
+            target_info_3d,
         )
     
     def _compute_loss(self, output, target,optimizers_idx=0):
@@ -332,51 +395,112 @@ class MlpDateAlignModule(MlpModule):
         (future_target,target_class,last_target) = target   
         return self.criterion(output,(future_target,target_class,last_target),mode=self.step_mode,optimizers_idx=optimizers_idx)        
 
+    def on_validation_epoch_end(self):
+        """重载父类方法，修改指标计算部分"""
+        # SANITY CHECKING模式下，不进行处理
+        # if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
+        #     return    
+
+        rate_total,total_imp_cnt,target_top_match = self.combine_result_data(self.output_result)  
+        sr = []
+        for item in list(rate_total.values()):
+            if len(item)==0:
+                continue
+            item = np.array(item)
+            sr.append(item)
+        sr = np.stack(sr)      
+        for i in range(3):
+            self.log("target_match_{}".format(i), target_top_match[:,i].mean(), prog_bar=True) 
+        
+        if sr.shape[0]==0:
+            return
+        
+        # 汇总计算准确率,取平均数
+        sum_v = sr[:,-1]
+        sr_rate = sr/sum_v[:, np.newaxis]
+        combine_rate = np.mean(sr_rate,axis=0)
+        # 按照日期计算最小准确率
+        combine_rate_min = np.min(sr_rate,axis=0)
+        for i in range(len(CLASS_SIMPLE_VALUES.keys())):
+            self.log("score_{} rate".format(i), combine_rate[i], prog_bar=True) 
+            # self.log("score_{} min rate".format(i), combine_rate_min[i], prog_bar=True) 
+        self.log("total cnt", sr[:,-1].sum(), prog_bar=True)  
+        self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
+        if self.mode is not None and self.mode.startswith("pred"):
+            for date in rate_total.keys():
+                stat_data = rate_total[date]
+                print("date_{} stat:{}".format(date,stat_data))
+
+        # 如果是测试模式，则在此进行可视化
+        if self.mode.startswith("pred_"):
+            tar_viz = global_var.get_value("viz_data")
+            viz_total_size = 0
+            output_total,past_target_total,future_target_total,target_class_total,last_targets_total,target_info_total = \
+                self.combine_output_total(self.output_result)
+            output_3d,future_target_3d,target_class_3d,last_targets_3d,target_info_3d = \
+                self.transfer_to_3d(output_total,future_target_total,target_class_total,last_targets_total,target_info_total)      
+            size = 3          
+            for index in range(target_class_3d.shape[0]):
+                if viz_total_size>10:
+                    break
+                viz_total_size+=1
+                sub_index = np.random.randint(100,size=size)
+                keep_index = np.where(target_class_3d[index]>=0)[0]
+                sub_index = np.intersect1d(sub_index,keep_index)
+                real_size = sub_index.shape[0]
+                target_info = target_info_3d[index][sub_index]
+                target_vr_class = target_class_3d[index][sub_index]
+                future_target = future_target_3d[index][sub_index]
+                last_targets = last_targets_3d[index][sub_index]
+                names = ["{}_{}_{}".format(target_info[k]["instrument"],target_vr_class[k],last_targets[k]) for k in range(real_size)]
+                date = target_info[0]["future_start_datetime"]
+                price_target = [target_info[k]["price_array"][-5:] for k in range(real_size)]
+                price_target = np.stack(price_target).transpose(1,0)
+                target_title = "price compare,date:{}".format(date)
+                win = "price_comp_{}".format(viz_total_size)
+                # tar_viz.viz_matrix_var(price_target,win=win,title=target_title,names=names)
+                for j in range(3):
+                    win = "target_comp_{}_{}".format(j,viz_total_size)
+                    target_title = "target_{} compare,date:{}".format(j,date)
+                    names = ["{}_{}_{}".format(target_info[k]["instrument"],target_vr_class[k],np.around(last_targets[k,j],3)) for k in range(real_size)]
+                    tar_viz.viz_matrix_var(future_target[...,j].transpose(1,0),win=win,title=target_title,names=names)                
+                
     def dump_val_data(self,val_batch,outputs,detail_loss):
-        output,_ = outputs
+        output,last_targets = outputs
         (past_target,past_covariates,historic_future_covariates,future_covariates,
-            static_covariates,past_future_covariates,future_target,target_class,target_info) = val_batch
-        # 目标数据合并到一起  
-        target = np.concatenate([past_target.cpu().numpy(),future_target.cpu().numpy()],axis=1)
+            static_covariates,past_future_covariates,future_target,target_class,last_targets,target_info) = val_batch
         # 保存数据用于后续验证
-        output_res = (output,target,target_class.cpu().numpy(),target_info)
+        output_res = (output,past_target.cpu().numpy(),future_target.cpu().numpy(),target_class.cpu().numpy(),last_targets.cpu().numpy(),target_info)
         self.output_result.append(output_res)
 
     def combine_result_data(self,output_result=None):
         """计算涨跌幅分类准确度以及相关数据"""
         
         # 使用全部验证结果进行统一比较
-        output_total,target_total,target_class_total,target_info_total = self.combine_output_total(output_result)
-
-        # 按照日期分组计算
-        fur_dates = {}
-        for index,ti in enumerate(target_info_total):
-            if ti is None:
-                continue
-            future_start_datetime = ti["future_start_datetime"].item()
-            if not future_start_datetime in fur_dates.keys():
-                fur_dates[future_start_datetime] = [index]
-            else:
-                fur_dates[future_start_datetime].append(index)
-        fur_dates_filter = {}
-        for date in fur_dates.keys():
-            # if date>=20220401 or date<20220301:
-            #     continue    
-            fur_dates_filter[date] = fur_dates[date]   
-        fur_dates = fur_dates_filter  
-        # 生成目标索引
-        import_index_all,values = self.build_import_index(output_data=output_total,fur_dates=fur_dates,target_info=target_info_total)
-        rate_total = {}
+        output_total,past_target_total,future_target_total,target_class_total,last_targets_total,target_info_total = self.combine_output_total(output_result)
+        # 转换为3d模式
+        output_3d,future_target_3d,target_class_3d,last_targets_3d,target_info_3d = \
+            self.transfer_to_3d(output_total,future_target_total,target_class_total,last_targets_total,target_info_total)
+        
         total_imp_cnt = np.where(target_class_total==3)[0].shape[0]
-        # 对每天的准确率进行统计，并累加
-        for date in np.sort(np.array(list(import_index_all.keys()))):
-            date = date.item()
-            import_index = import_index_all[date]
-            if len(import_index)==0:
-                continue
+        rate_total = {}
+        target_top_match_total = {}
+        # 遍历按日期进行评估
+        for i in range(target_class_3d.shape[0]):
+            target_info_list = target_info_3d[i]
+            target_class_list = target_class_3d[i]
+            # 有一些空值，找出对应索引后续做忽略处理
+            keep_index = np.where(target_class_list>=0)[0]
+            output_list = [output_3d[j][i] for j in range(3)]
+            sv_list = output_list[0]
+            future_target_list = future_target_3d[i]
+            last_target_list = last_targets_3d[i]
+            date = target_info_list[0]["future_start_datetime"]
+            # 生成目标索引
+            import_index = self.build_import_index(output_data=output_list,target_info_list=target_info_list[keep_index])
+            # Compute Acc Result
             import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
-                import_price_result = self.collect_result(import_index, target_class_total, target_info_total)
-            
+                import_price_result = self.collect_result(import_index, target_class_list[keep_index], target_info_list[keep_index])
             score_arr = []
             score_total = 0
             rate_total[date] = []
@@ -384,7 +508,7 @@ class MlpDateAlignModule(MlpModule):
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
-                for i in range(4):
+                for i in range(len(CLASS_SIMPLE_VALUES.keys())):
                     cnt_values = ins_unique[ins_unique.index==i].values
                     if cnt_values.shape[0]==0:
                         cnt = 0
@@ -392,24 +516,44 @@ class MlpDateAlignModule(MlpModule):
                         cnt = cnt_values[0,1].item()
                     rate_total[date].append(cnt)
                 # 预测数量以及总数量
-                rate_total[date].append(total_cnt.item())              
-        sr = np.array(list(rate_total.values()))
+                rate_total[date].append(total_cnt.item())    
+                # 追加计算目标值排序靠前的命中率，忽略缺失值
+                target_top_match = self.compute_top_acc(sv_list,last_target_list[keep_index])
+                target_top_match_total[date] = target_top_match 
+                
+        target_top_match_total = np.array(list(target_top_match_total.values()))
         
-        # with open("custom/data/pred/import_index_all.pkl", "wb") as fout:
-        #     pickle.dump(import_index_all, fout)          
-        # write_json(rate_total,"custom/data/pred/rate_total.json")
+        return rate_total,total_imp_cnt,target_top_match_total
+    
+    def compute_top_acc(self,sv_list,last_target_list,keep_index=None,topk=100):
         
-        return sr,total_imp_cnt,import_index_all
+        acc = []
+        # 排序正反参数
+        sort_flag = [1,1,-1]
+        # 分别计算每个指标的top率
+        for i in range(last_target_list.shape[-1]):
+            sv = sv_list[...,i]*sort_flag[i]
+            # 取得输出值top索引
+            top_sv = np.argsort(sv)[:topk]
+            last_target = last_target_list[...,i]*sort_flag[i]
+            # 找出对应的目标top索引，并比较命中率
+            top_target = np.argsort(last_target)[:topk]
+            match_idx = np.intersect1d(top_sv,top_target)
+            match_rate = match_idx.shape[0]/topk
+            acc.append(match_rate)
+        return acc
             
     def combine_output_total(self,output_result):
         """重载父类方法，以适应整合数据"""
         
         target_class_total = []
         target_info_total = []
-        target_total = []        
+        past_target_total = []   
+        future_target_total = []  
+        last_targets_total = []    
         output_total = [[[] for _ in range(5)] for _ in range(len(self.past_split))]
         for item in output_result:
-            (output,target,target_class,target_info) = item
+            (output,past_target,future_target,target_class,last_targets,target_info) = item
             for i in range(len(output_total)):
                 output_item = output[i]
                 x_bar,z,cls,tar_cls,x_smo = output_item 
@@ -418,9 +562,12 @@ class MlpDateAlignModule(MlpModule):
                 output_total[i][2].append(cls)
                 output_total[i][3].append(tar_cls)
                 output_total[i][4].append(x_smo)
-            target_info_total = target_info_total + target_info
+            target_info_total.append(target_info)
             target_class_total.append(target_class)
-            target_total.append(target)
+            past_target_total.append(past_target)
+            future_target_total.append(future_target)
+            last_targets_total.append(last_targets)
+            
         for i in range(len(output_total)):
             output_total[i][0] = torch.concat(output_total[i][0])
             output_total[i][1] = torch.concat(output_total[i][1])
@@ -429,7 +576,35 @@ class MlpDateAlignModule(MlpModule):
             output_total[i][4] = torch.concat(output_total[i][4])       
 
         target_class_total = np.concatenate(target_class_total)
-        target_total = np.concatenate(target_total)
+        past_target_total = np.concatenate(past_target_total)
+        future_target_total = np.concatenate(future_target_total)
+        last_targets_total = np.concatenate(last_targets_total)
+        target_info_total = np.concatenate(target_info_total)
                     
-        return output_total,target_total,target_class_total,target_info_total        
-                 
+        return output_total,past_target_total,future_target_total,target_class_total,last_targets_total,target_info_total        
+
+    def build_import_index(self,output_data=None,target_info_list=None):  
+        """生成涨幅达标的预测数据下标"""
+        
+        (sv_values,fea_values,cls_values) = output_data
+        
+        fea_0 = fea_values[...,0]
+        fea_0_range = (fea_0[:,-1] - fea_0[:,0])       
+        fea_1 = fea_values[...,1]
+        fea_1_range = (fea_1[:,-1] - fea_1[:,0])
+        fea_2 = fea_values[...,2]
+        fea_2_range = (fea_2[:,-1] - fea_2[:,0])
+        
+        pred_import_index = self.strategy_top(sv_values,(fea_0_range,fea_1_range,fea_2_range),cls_values,batch_size=self.ins_dim)
+        # pred_import_index = self.strategy_threhold(smooth_values[idx],(fea_0_range[idx],fea_1_range[idx],fea_2_range[idx]),cls_values[idx],batch_size=len(idx))
+        # 通过传统指标进行二次筛选
+        # target_info_cur = np.array(target_info)
+        # singal_index_bool_macd = self.create_signal_macd(target_info_cur)
+        # singal_index_bool_rsi = self.create_signal_rsi(target_info_cur)
+        # singal_index_bool_kdj = self.create_signal_kdj(target_info_cur)
+        # singal_index = np.where(singal_index_bool_macd)[0]
+        
+        pred_import_index_combine = pred_import_index
+            
+        return pred_import_index_combine
+        

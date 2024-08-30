@@ -67,8 +67,8 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         date_list = df_data[datetime_col].unique()
         date_list = np.sort(date_list)
         cut_len = input_chunk_length + output_chunk_length
-        # 需要留出计算日期范围，因此截取多余部分
-        date_list = date_list[:-cut_len]
+        # 由于使用future_datetime方式对齐，因此从前面截取input序列长度,后面截取output序列长度用于预测长度预留
+        date_list = date_list[input_chunk_length:-output_chunk_length]
         # 根据排序号进行日期分组映射数据的初始化
         rank_num_max = len(target_series)
         date_mappings = np.ones([date_list.shape[0],rank_num_max])*(-1)
@@ -93,6 +93,7 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         self.future_covariates_shape = [self.total_instrument_num,output_chunk_length,future_covariates[0].n_components]
         self.historic_future_covariates_shape = [self.total_instrument_num,input_chunk_length,future_covariates[0].n_components]
         self.static_covariate_shape = [self.total_instrument_num,target_series[0].static_covariates_values(copy=False).shape[-1]]
+        self.last_targets_shape = [self.total_instrument_num,target_series[0].n_components]
         
     def __getitem__(
         self, idx
@@ -111,23 +112,28 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         historic_future_covariates_total = np.zeros(self.historic_future_covariates_shape)
         target_class_total = np.ones(self.total_instrument_num)*-1
         target_class_total = target_class_total.astype(np.int8)
+        last_targets_total = np.zeros(self.last_targets_shape)
         
         for index,ser_idx in enumerate(date_mapping):
             # 如果当日没有记录则相关变量保持为0或空
             if ser_idx==-1:
                 continue
             target_series = self.target_series[index]
-            # 如果最后的序列号与当前序列号的差值不足序列要求长度，则忽略
-            offset = target_series.time_index[-1] + 1 - ser_idx
-            if offset<(self.input_chunk_length + self.output_chunk_length):
+            # 如果最后的序列号与当前序列号的差值不足序列输出长度，则忽略
+            offset_end = target_series.time_index[-1] + 1 - ser_idx
+            if offset_end<self.output_chunk_length:
                 continue
+            # 如果开始的序列号与当前序列号的差值不足序列输入长度，则忽略
+            offset_begin = ser_idx - target_series.time_index[0]
+            if offset_begin<self.input_chunk_length:
+                continue            
             # 目标序列
             target_vals = target_series.random_component_values(copy=False)
-            
+            # 对应的起始索引号属于future_datetime,因此减去序列输入长度，即为计算序列起始索引
+            past_start = ser_idx - self.input_chunk_length
             # 需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量
-            ser_idx = ser_idx - target_series.time_index[0]
-            # 取出对应的起始索引号,并对相关索引赋值
-            past_start = ser_idx
+            past_start = past_start - target_series.time_index[0]
+            # 后续索引计算都以past_start为基准
             past_end = past_start + self.input_chunk_length
             future_start = past_end
             future_end = future_start + self.output_chunk_length
@@ -145,19 +151,24 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             datetime_array = self.ass_data[code][3][past_start:future_end]
             # 记录预测未来第一天的关联日期，用于后续数据对齐
             future_start_datetime = self.ass_data[code][3][past_end]
+            
+            # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
+            past_start_real = past_start+target_series.time_index[0]
+            future_start_real = future_start+target_series.time_index[0]
+            future_end_real = future_end+target_series.time_index[0]
+            # 存储辅助指标
             kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea = self.ass_data[code][4:]
-            kdj_k = kdj_k[past_start:future_end]
-            kdj_d = kdj_d[past_start:future_end]
-            kdj_j = kdj_j[past_start:future_end]        
-            rsi_20 = rsi_20[past_start:future_end]
-            rsi_5 = rsi_5[past_start:future_end]
-            macd_diff = macd_diff[past_start:future_end]  
-            macd_dea = macd_dea[past_start:future_end]
-            # total_price_array = self.ass_data[code][past_start:future_end]
-            target_info = {"item_rank_code":code,"instrument":instrument,"start":target_series.time_index[past_start],
-                               "end":target_series.time_index[future_end-1]+1,"past_start":past_start,"past_end":past_end,
-                               "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
-                               "price_array":price_array,"label_array":label_array,"datetime_array":datetime_array,
+            kdj_k = kdj_k[past_start_real:future_end_real]
+            kdj_d = kdj_d[past_start_real:future_end_real]
+            kdj_j = kdj_j[past_start_real:future_end_real]        
+            rsi_20 = rsi_20[past_start_real:future_end_real]
+            rsi_5 = rsi_5[past_start_real:future_end_real]
+            macd_diff = macd_diff[past_start_real:future_end_real]  
+            macd_dea = macd_dea[past_start_real:future_end_real]
+            # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
+            target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
+                               "future_start_datetime":future_start_datetime,"future_start":future_start_real,"future_end":future_end_real,
+                               "price_array":price_array,"datetime_array":datetime_array,
                                "kdj_k":kdj_k,"kdj_d":kdj_d,"kdj_j":kdj_j,"rsi_20":rsi_20,"rsi_5":rsi_5,"macd_diff":macd_diff,"macd_dea":macd_dea,
                                "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
             
@@ -206,37 +217,29 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             raise_range = (price_array[-1] - price_array[0])/price_array[0]*100
             p_target_class = get_simple_class(raise_range)
             target_class_total[index] = p_target_class
-            
+
         # 分别对目标值和协变量，以日期为单位实现整体归一化
-        target_scaler = MinMaxScaler()
-        future_covariates_scaler = MinMaxScaler()
         # 忽略没有数值的部分
-        real_index = np.where(date_mapping>=0)[0]
-        # 目标值需要共用scaler
-        real_past_target = past_target_total[real_index]
-        past_target_total[real_index] = target_scaler.fit_transform(real_past_target.reshape(-1, real_past_target.shape[-1])).reshape(real_past_target.shape)
+        real_index = np.where(target_class_total>=0)[0]
+        # 最后一段涨幅的归一化处理
         real_future_target = future_target_total[real_index]
+        real_past_target = past_target_total[real_index]
+        last_target = real_future_target[:,-1,:] - real_future_target[:,-2,:]
+        last_targets_total[real_index] = MinMaxScaler().fit_transform(last_target.reshape(-1, last_target.shape[-1])).reshape(last_target.shape)  
+        # 目标值需要共用scaler         
+        target_scaler = MinMaxScaler()
+        past_target_total[real_index] = target_scaler.fit_transform(real_past_target.reshape(-1, real_past_target.shape[-1])).reshape(real_past_target.shape)
         future_target_total[real_index] = target_scaler.transform(real_future_target.reshape(-1, real_future_target.shape[-1])).reshape(real_future_target.shape)
-        # 未来协变量共用scaler
-        real_historic = historic_future_covariates_total[real_index]
-        historic_future_covariates_total[real_index] = future_covariates_scaler.fit_transform(
-            real_historic.reshape(-1, real_historic.shape[-1])).reshape(real_historic.shape)
-        real_future = future_covariates_total[real_index]
-        future_covariates_total[real_index] = future_covariates_scaler.transform(
-            real_future.reshape(-1, real_future.shape[-1])).reshape(real_future.shape)        
-        # 过去协变量和静态协变量不需要共用scaler
+        # 过去协变量的归一化处理
         real_past_conv = past_covariate_total[real_index]
         past_covariate_total[real_index] = MinMaxScaler().fit_transform(
             real_past_conv.reshape(-1, real_past_conv.shape[-1])).reshape(real_past_conv.shape)
-        real_static = static_covariate_total[real_index]
-        static_covariate_total[real_index] = MinMaxScaler().fit_transform(
-            real_static.reshape(-1, real_static.shape[-1])).reshape(real_static.shape)
-                                           
+        # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
+                             
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,target_info_total
+                covariate_future_total,future_target_total,target_class_total,last_targets_total,target_info_total
 
     def __len__(self):
         return self.date_list.shape[0]
-        
         
         

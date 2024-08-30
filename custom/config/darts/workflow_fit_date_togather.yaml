@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market test_500
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -52,15 +52,15 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 8
+            batch_size: 16
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
             type: 'fit_date_togather'
             n_epochs : 180
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/TOTAL_all_202201'
+            load_dataset_file: &load_dataset_file False
+            batch_file_path: 'custom/data/asis/TOTAL_DateAlign_500_202201'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
@@ -79,7 +79,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "TOTAL_datealign_all_202201"
+               model_name: "TOTAL_DateAlign_500_202201"
                model_type: 'mlp'
                load_weight: True
                best_weight: False
@@ -88,7 +88,7 @@ task:
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,28],[28,56],[56,84]]
+               past_split: [[0,24],[24,48],[48,72]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -124,7 +124,7 @@ task:
                 target_column: ['QTLUMA5','CCI5','SUMPMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['REV5','KMID','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
-                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
-                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'] 
+                past_covariate_col: ['REV5','KMID','MACD','RSI5','RSI20','OBV5','VOLUME_CLOSE','TURNOVER_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
+                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','VOLUME_CLOSE','TURNOVER_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
+                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','VOLUME_CLOSE','TURNOVER_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'] 
                 static_covariate_col: ['industry','tradable_shares']    

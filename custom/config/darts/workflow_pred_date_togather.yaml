@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_100
+market: &market test_5
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -52,26 +52,20 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 1024
+            batch_size: 16
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'pred_togather'
+            type: 'pred_date_togather'
             n_epochs : 280
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/TOTAL_PRICE_all_20220331_train'
+            load_dataset_file: &load_dataset_file True
+            batch_file_path: 'custom/data/asis/TOTAL_DateAlign_500_202201'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
                total_iters: 2e4
-               # base_lr: 0.5e-4
-               # max_lr: 1.5e-3
-               # cycle_momentum: False
-               # step_size_up: 100000
-               # T_max: 5
-               # eta_min: 0.001
             optimizer_kwargs:
                lr: 1e-3
                weight_decay: 0.001
@@ -79,16 +73,16 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "TOTAL_CCI_all_20220228_train"
+               model_name: "TOTAL_DateAlign_500_202201"
                model_type: 'mlp'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,28],[28,56],[56,84]]
+               past_split: [[0,24],[24,48],[48,72]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -99,10 +93,10 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2018-01-01, 2023-05-31]
-                valid: [2021-12-01, 2022-04-30]
+                train_total: [2010-01-01, 2023-05-31]
+                valid: [2022-01-01, 2022-05-31]
                 test: [2021-01-01, 2021-03-01]
-            whole_data: True
+            whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
@@ -124,7 +118,7 @@ task:
                 target_column: ['QTLUMA5','CCI5','SUMPMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['REV5','KMID','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
-                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
-                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','label_ori','TURNOVER_CLOSE','VOLUME_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'] 
+                past_covariate_col: ['REV5','KMID','MACD','RSI5','RSI20','OBV5','VOLUME_CLOSE','TURNOVER_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
+                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','VOLUME_CLOSE','TURNOVER_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'
+                                  ,'REV5','KMID','MACD','RSI5','RSI20','OBV5','VOLUME_CLOSE','TURNOVER_CLOSE','MASCOPE5','WVMA5','BETA5','PRICE_SCOPE','RESI5','KSFT','OPEN','HIGH', 'LOW','RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5'] 
                 static_covariate_col: ['industry','tradable_shares']    

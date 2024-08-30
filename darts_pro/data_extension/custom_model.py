@@ -547,7 +547,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self._fit_called = True
         
         # 如果是预测模式，则不执行实际的fit,只返回trainer
-        if self.mode=="pred_togather":
+        if self.mode.startswith("pred"):
             # 预测模式，不使用tensorboard
             self.trainer_params["logger"] = False
             trainer,model,train_loader,val_loader = self._setup_for_train(train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers)

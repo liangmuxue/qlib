@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from cus_utils.tensor_viz import TensorViz
 
 import cus_utils.global_var as global_var
-from darts_pro.act_model.mlp_ts import MlpTs,MlpTs3D
+from darts_pro.act_model.mlp_ts import MlpTs
 from cus_utils.metrics import pca_apply
 from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer

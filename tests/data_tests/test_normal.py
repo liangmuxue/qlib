@@ -1,5 +1,6 @@
 from trader.utils.date_util import tradedays
 from datetime import datetime
+import pickle
 
 def test_days_dur():
     trade_date = 20230508
@@ -46,10 +47,19 @@ def test_date():
     
 def test_import():
     from darts_pro.data_extension.custom_nor_model import TFTBatchModel
-          
+
+
+def debug_data():    
+    
+    data_path = "custom/data/asis/debug/rate_total.pkl"
+    with open(data_path, "rb") as fin:
+        rate_total = pickle.load(fin)      
+    print(rate_total) 
+     
 if __name__ == "__main__":
     # test_days_dur()
 
     # test_import()
-    test_date()
+    # test_date()
+    debug_data()
     

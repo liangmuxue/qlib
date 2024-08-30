@@ -108,8 +108,10 @@ class TftDataframeModel():
         dataset: TFTSeriesDataset,
     ):
         global_var.set_value("dataset", dataset)
+        viz_data = TensorViz(env="viz_data")
         viz_result_suc = TensorViz(env="train_result_suc")
         viz_result_fail = TensorViz(env="train_result_fail")
+        global_var.set_value("viz_data",viz_data)
         global_var.set_value("viz_result_suc",viz_result_suc)
         global_var.set_value("viz_result_fail",viz_result_fail)
         global_var.set_value("load_ass_data",False)
@@ -132,7 +134,10 @@ class TftDataframeModel():
             return             
         if self.type.startswith("pred_togather"):
             self.fit_togather(dataset)
-            return                                
+            return    
+        if self.type.startswith("pred_date_togather"):
+            self.fit_date_togather(dataset)
+            return                                     
         if self.type=="predict":
             # 直接进行预测,只需要加载模型参数
             print("do nothing for pred")
@@ -315,13 +320,14 @@ class TftDataframeModel():
             self.model.batch_size = self.batch_size     
             self.model.mode = "train"
             self.model.model.monitor = monitor
-            if self.type=="pred_togather":
-                self.model.mode = "pred_togather"
-                self.model.model.mode = "pred_togather"
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=3) 
             self.model.monitor = monitor        
-        
+            
+        if self.type=="pred_togather":
+            self.model.mode = "pred_togather"
+            self.model.model.mode = "pred_togather"     
+               
         if self.type=="pred_togather":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
@@ -403,18 +409,18 @@ class TftDataframeModel():
             self.model.batch_size = self.batch_size     
             self.model.mode = "train"
             self.model.model.monitor = monitor
-            if self.type=="pred_date_togather":
-                self.model.mode = "pred_date_togather"
-                self.model.model.mode = "pred_date_togather"
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=6) 
             self.model.monitor = monitor        
-        
+
+                    
         if self.type=="pred_date_togather":  
+            self.model.mode = "pred_date_togather"
+            self.model.model.mode = "pred_date_togather"            
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)
+                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)
             trainer.validate(model=model,dataloaders=val_loader)
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
