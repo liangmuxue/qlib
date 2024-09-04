@@ -102,6 +102,9 @@ class DataViewer():
         time_begin = date_range[0]
         time_end = date_range[1]
         df_item = df_ref[(df_ref[time_column]>=time_begin)&(df_ref[time_column]<time_end)&(df_ref[group_column]==instrument)]
+        if df_item.shape[0]==0:
+            print("no data!")
+            return
         x_range = df_item[time_column].values
         target_title = "{}".format(instrument)
         names = ["price"]
@@ -122,6 +125,9 @@ class DataViewer():
         time_end = date_range[1]
                
         df_item = df_ref[(df_ref[time_column]>=time_begin)&(df_ref[time_column]<time_end)&(df_ref[group_column]==instrument)]
+        if df_item.shape[0]==0:
+            print("no data!")
+            return        
         target_data = df_item
         target_data = target_data.set_index("datetime")
         target_data.index.name = "Time Index"

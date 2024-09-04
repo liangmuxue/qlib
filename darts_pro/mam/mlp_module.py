@@ -184,7 +184,7 @@ class MlpModule(_TFTModuleBatch):
         
         out_total = []
         out_class_total = []
-        (batch_size,_,_) = x_in[1].shape
+        batch_size = x_in[1].shape[0]
         
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
@@ -447,7 +447,7 @@ class MlpModule(_TFTModuleBatch):
         sv_2 = sv[...,2]
         (fea_0_range,fea_1_range,fea_2_range) = fea
         # 使用回归模式，则找出接近或大于目标值的数据
-        sv_import_bool = (sv_0<-0.1) & (sv_1<-0.02) #  & (sv_2>0.1)
+        sv_import_bool = (sv_0<-0.1) # & (sv_1<-0.02) #  & (sv_2>0.1)
         # ce_thre_para = [[0.<,6],[-0.1,7],[-0.1,6]]
         # ce_para2 = ce_thre_para[2]
         # sv_import_bool = (np.sum(sv_2<ce_para2[0],1)>ce_para2[0])
@@ -477,7 +477,7 @@ class MlpModule(_TFTModuleBatch):
         top_k = sv_0.shape[0]//4
         top_k = 320
         # 使用2号进行sv判断（最后一段涨跌幅度），逆序
-        sv_import_index = np.intersect1d(np.argsort(sv_1)[:top_k],np.argsort(-sv_2)[:top_k])
+        sv_import_index = np.intersect1d(np.argsort(fea_0_range)[:top_k],np.argsort(sv_0)[:top_k])
         # 使用0号进行corr判断（整体涨跌幅度），正序
         fea0_import_index = np.argsort(-fea_0_range)[:top_k]
         # 使用1号进行corr判断（整体涨跌幅度），逆序

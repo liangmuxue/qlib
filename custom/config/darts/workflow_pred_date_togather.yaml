@@ -60,7 +60,7 @@ task:
             n_epochs : 280
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/TOTAL_DateAlign_500_202201'
+            batch_file_path: 'custom/data/asis/TOTAL_DateAlign_2000_202201'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
@@ -73,7 +73,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "TOTAL_DateAlign_500_202201"
+               model_name: "TOTAL_DateAlign_2000_202201"
                model_type: 'mlp'
                load_weight: True
                best_weight: False
@@ -82,7 +82,7 @@ task:
                wave_period : &wave_period 30
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,24],[24,48],[48,72]]
+               past_split: [[0,24],[24,48]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset

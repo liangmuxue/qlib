@@ -350,6 +350,7 @@ class DateTogeModel(TogeModel):
                 output_chunk_length=self.output_chunk_length,
                 max_samples_per_ts=None,
                 use_static_covariates=True,
+                target_num=len(self.past_split),
                 mode=mode
             )  
         if mode=="valid":
@@ -361,6 +362,7 @@ class DateTogeModel(TogeModel):
                 output_chunk_length=self.output_chunk_length,
                 max_samples_per_ts=None,
                 use_static_covariates=True,
+                target_num=len(self.past_split),
                 mode=mode,
             )
         return ds      
@@ -376,6 +378,7 @@ class DateTogeModel(TogeModel):
             static_covariates,
             _,
             future_target,
+            _,
             _,
             _,
             _

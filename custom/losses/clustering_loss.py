@@ -343,7 +343,7 @@ class Mlp3DLoss(UncertaintyLoss):
         """Multiple Loss Combine"""
 
         (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,last_target) = target_ori
+        (target,target_class,last_target,rank_data) = target_ori
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
         fds_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
@@ -351,38 +351,26 @@ class Mlp3DLoss(UncertaintyLoss):
         # 指标分类
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 忽略目标缺失值的损失计算,找出符合比较的索引
-        keep_index = torch.where(target_class>=0)[0]
-        target_class_3d = target_class.reshape(int(target_class.shape[0]/self.ins_dim),self.ins_dim)
-        batch_size = target_class_3d.shape[0]
+        keep_index = torch.where(target_class.reshape(-1)>=0)[0]
+        rank_data = rank_data.reshape(-1)[keep_index]
         # 多个目标损失
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[...,i]
-                last_target_item = last_target[...,i:i+1]
+                real_target = real_target.reshape(-1,real_target.shape[-1])[keep_index]
+                last_target_item = last_target[...,i].reshape(-1)[keep_index]
                 output_item = output[i] 
-                x_bar,z,cls,tar_cls,x_smo = output_item  
+                x_bar,sv_combine = output_item  
+                x_bar = x_bar.squeeze(-1)
+                x_bar = x_bar.reshape(-1,x_bar.shape[-1])[keep_index]
+                sv = sv_combine[...,0].reshape(-1)[keep_index]
+                rank_v = sv_combine[...,1].reshape(-1)[keep_index]
                 # 预测值的一致性损失,忽略目标缺失值的损失计算
-                corr_loss[i] = self.ccc_loss_comp(x_bar, real_target[keep_index])
-                # 降维目标之间的欧氏距离   ,忽略目标缺失值的损失计算      
-                ce_loss[i] = 10 * self.mse_loss(x_smo, last_target_item[keep_index])
+                corr_loss[i] = self.ccc_loss_comp(x_bar.unsqueeze(-1), real_target.unsqueeze(-1))
+                # 分别计算排名损失，以及总体数据损失     
+                ce_loss[i] = 10 * self.mse_loss(sv.unsqueeze(-1), last_target_item.unsqueeze(-1))
+                cls_loss[i] = 10 * self.mse_loss(rank_v.unsqueeze(-1), rank_data.unsqueeze(-1))
                 
-                # last_target_item_3d = last_target_item.reshape(batch_size,self.ins_dim)
-                # whole_cls = torch.tensor(0.0).to(self.device) 
-                # continue_index = 0
-                # # 分别针对每批次反向计算出当前有效数量
-                # keep_size_mapping = [0]
-                # for j in range(batch_size):
-                #     ingore_index_inner = torch.where(target_class_3d[j]<0)[0]
-                #     keep_num = self.ins_dim - ingore_index_inner.shape[0]
-                #     continue_index = continue_index + keep_num   
-                #     keep_size_mapping.append(continue_index)               
-                # # 计算总体比较的一致性损失,需要剔除缺失值后比较
-                # for j in range(batch_size):
-                #     keep_index_inner = torch.where(target_class_3d[j]>=0)[0]
-                #     x_smo_inner = x_smo[keep_size_mapping[j]:keep_size_mapping[j+1]]
-                #     last_target_inner = last_target_item_3d[j]
-                #     whole_cls += self.ccc_loss_comp(x_smo_inner.squeeze(), last_target_inner[keep_index_inner])
-                # cls_loss[i] = whole_cls/batch_size
                 loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
     

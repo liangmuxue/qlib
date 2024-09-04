@@ -99,15 +99,37 @@ class TftDatafAnalysis():
         global_var.set_value("load_ass_data",False)
         global_var.set_value("save_ass_data",False)    
                     
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        if not os.path.exists(self.batch_file_path):
+            os.mkdir(self.batch_file_path)
+            
+        df_data_path = os.path.join(self.batch_file_path,"main_data.pkl")
+        df_train_path = os.path.join(self.batch_file_path,"df_train.pkl")
+        df_valid_path = os.path.join(self.batch_file_path,"df_valid.pkl")
+        ass_train_path = os.path.join(self.batch_file_path,"ass_data_train.pkl")
+        ass_valid_path = os.path.join(self.batch_file_path,"ass_data_valid.pkl")
+            
         if self.load_dataset_file:
-            df_data_path = self.pred_data_path + "/df_all.pkl"
-            dataset.build_series_data(df_data_path,no_series_data=True)  
-        else:         
-            dataset.build_series_data(no_series_data=True)
-            if self.save_dataset_file:
-                df_data_path = self.pred_data_path + "/df_all.pkl"
-                with open(df_data_path, "wb") as fout:
-                    pickle.dump(dataset.df_all, fout)  
+            # 加载主要序列数据和辅助数据
+            with open(df_data_path, "rb") as fin:
+                train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+                    pickle.load(fin)   
+            with open(ass_train_path, "rb") as fin:
+                ass_data_train = pickle.load(fin)  
+            with open(ass_valid_path, "rb") as fin:
+                ass_data_valid = pickle.load(fin) 
+            with open(df_train_path, "rb") as fin:
+                dataset.df_train = pickle.load(fin)       
+            with open(df_valid_path, "rb") as fin:
+                dataset.df_val = pickle.load(fin)      
+            dataset.df_all = pd.concat([dataset.df_train,dataset.df_val])   
+              
+            global_var.set_value("ass_data_train",ass_data_train)
+            global_var.set_value("ass_data_valid",ass_data_valid)
+            global_var.set_value("load_ass_data",True)
                                 
         global_var.set_value("dataset", dataset)  
         if self.type.startswith("data_pca"):
@@ -394,14 +416,14 @@ class TftDatafAnalysis():
     def data_view(self,dataset):
         from trader.data_viewer import DataViewer
         
-        dataset.build_series_data(no_series_data=True)   
         df_ref = dataset.df_all
         viz_target = global_var.get_value("viz_target")
         
         viewer = DataViewer(env_name="data_price")
         instrument = 603711
         instrument = 603817
-        date_range = (20220301,20220331)
+        instrument = 399006
+        date_range = (20220301,20220315)
         att_cols = ["QTLUMA5"]
         viewer.market_price(df_ref, date_range, instrument, dataset,viz_target=viz_target,att_cols=att_cols)    
         save_path = "custom/data/viz"   

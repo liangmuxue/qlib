@@ -38,6 +38,7 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         future_covariates=None,
         input_chunk_length: int = 12,
         output_chunk_length: int = 1,
+        target_num=0,
         shift: int = 1,
         shift_covariates: bool = False,
         max_samples_per_ts: Optional[int] = None,
@@ -86,21 +87,21 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         self.date_list = date_list
         # 预先定义数据形状
         self.total_instrument_num = rank_num_max
-        self.past_target_shape = [self.total_instrument_num,input_chunk_length,target_series[0].n_components]
-        self.future_target_shape = [self.total_instrument_num,output_chunk_length,target_series[0].n_components]
+        self.target_num = target_num
+        self.past_target_shape = [self.total_instrument_num,input_chunk_length,target_num]
+        self.future_target_shape = [self.total_instrument_num,output_chunk_length,target_num]
         self.covariates_shape = [self.total_instrument_num,input_chunk_length,covariates[0].n_components]
         self.covariates_future_shape = [self.total_instrument_num,output_chunk_length,covariates[0].n_components]
         self.future_covariates_shape = [self.total_instrument_num,output_chunk_length,future_covariates[0].n_components]
         self.historic_future_covariates_shape = [self.total_instrument_num,input_chunk_length,future_covariates[0].n_components]
         self.static_covariate_shape = [self.total_instrument_num,target_series[0].static_covariates_values(copy=False).shape[-1]]
-        self.last_targets_shape = [self.total_instrument_num,target_series[0].n_components]
+        self.last_targets_shape = [self.total_instrument_num,target_num]
         
     def __getitem__(
         self, idx
     ):
         """以日期为单位,整合当日所有股票数据"""
         
-        # logger.info("__getitem__ in,index:{}".format(idx))
         date_mapping = self.date_mappings[idx]
         past_target_total = np.zeros(self.past_target_shape)
         past_covariate_total = np.zeros(self.covariates_shape)
@@ -112,7 +113,9 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         historic_future_covariates_total = np.zeros(self.historic_future_covariates_shape)
         target_class_total = np.ones(self.total_instrument_num)*-1
         target_class_total = target_class_total.astype(np.int8)
-        last_targets_total = np.zeros(self.last_targets_shape)
+        raise_range_total = np.zeros(self.total_instrument_num)
+        prev_raise_range_total = np.zeros(self.total_instrument_num)
+        rank_data = np.zeros([self.total_instrument_num,2])
         
         for index,ser_idx in enumerate(date_mapping):
             # 如果当日没有记录则相关变量保持为0或空
@@ -128,7 +131,7 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             if offset_begin<self.input_chunk_length:
                 continue            
             # 目标序列
-            target_vals = target_series.random_component_values(copy=False)
+            target_vals = target_series.random_component_values(copy=False)[...,:self.target_num]
             # 对应的起始索引号属于future_datetime,因此减去序列输入长度，即为计算序列起始索引
             past_start = ser_idx - self.input_chunk_length
             # 需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量
@@ -213,31 +216,60 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             historic_future_covariates_total[index] = historic_future_covariate
             
             # 计算涨跌幅类别
-            price_array = target_info["price_array"][self.input_chunk_length-1:]
-            raise_range = (price_array[-1] - price_array[0])/price_array[0]*100
+            price_array = target_info["price_array"]
+            # 缩短未来计算周期，使用倒数第三天计算涨跌幅
+            raise_range = (price_array[-3] - price_array[0])/price_array[0]*100
             p_target_class = get_simple_class(raise_range)
             target_class_total[index] = p_target_class
-
-        # 分别对目标值和协变量，以日期为单位实现整体归一化
-        # 忽略没有数值的部分
+            # 同时记录涨幅数据，后续用于排名
+            raise_range_total[index] = raise_range
+            # 计算过去一段时间的价格涨跌幅度，用于后续网络残差计算
+            prev_raise_range = (price_array[self.input_chunk_length-1] - price_array[self.input_chunk_length-3])/price_array[self.input_chunk_length-3]*100
+            prev_raise_range_total[index] = prev_raise_range
+                                    
+        # 分别对目标值和协变量，还是在单独股票范围内进行归一化
         real_index = np.where(target_class_total>=0)[0]
-        # 最后一段涨幅的归一化处理
-        real_future_target = future_target_total[real_index]
         real_past_target = past_target_total[real_index]
-        last_target = real_future_target[:,-1,:] - real_future_target[:,-2,:]
-        last_targets_total[real_index] = MinMaxScaler().fit_transform(last_target.reshape(-1, last_target.shape[-1])).reshape(last_target.shape)  
+        real_future_target = future_target_total[real_index]
         # 目标值需要共用scaler         
-        target_scaler = MinMaxScaler()
-        past_target_total[real_index] = target_scaler.fit_transform(real_past_target.reshape(-1, real_past_target.shape[-1])).reshape(real_past_target.shape)
-        future_target_total[real_index] = target_scaler.transform(real_future_target.reshape(-1, real_future_target.shape[-1])).reshape(real_future_target.shape)
+        past_target_scale = []
+        future_target_scale = []
+        for i in range(real_past_target.shape[-1]):
+            target_scaler = MinMaxScaler()
+            target_scaler.fit(real_past_target[:,:,i].transpose(1,0))
+            scale_data_past = target_scaler.transform(real_past_target[:,:,i].transpose(1,0)).transpose(1,0)
+            scale_data_future = target_scaler.transform(real_future_target[:,:,i].transpose(1,0)).transpose(1,0)
+            past_target_scale.append(scale_data_past)
+            future_target_scale.append(scale_data_future)
+        past_target_scale = np.stack(past_target_scale).transpose(1,2,0)
+        future_target_scale = np.stack(future_target_scale).transpose(1,2,0)
+        past_target_total[real_index] = past_target_scale
+        future_target_total[real_index] = future_target_scale
+        # 最后一段涨幅的归一化处理
+        last_targets_total = future_target_total[:,-1,:] - future_target_total[:,-2,:]
+        last_targets_total[real_index] = MinMaxScaler().fit_transform(last_targets_total[real_index])  
+        # 收集最近一段涨幅数据，用于后续残差计算
+        prev_last_targets_total = past_target_total[:,-1,:] - past_target_total[:,-2,:]   
+        prev_last_targets_total[real_index] = MinMaxScaler().fit_transform(prev_last_targets_total[real_index])     
+        last_targets_total = np.stack([last_targets_total,prev_last_targets_total]).transpose(1,0,2)
+        
         # 过去协变量的归一化处理
         real_past_conv = past_covariate_total[real_index]
-        past_covariate_total[real_index] = MinMaxScaler().fit_transform(
-            real_past_conv.reshape(-1, real_past_conv.shape[-1])).reshape(real_past_conv.shape)
+        past_conv_scale = []
+        for i in range(real_past_conv.shape[-1]):
+            scale_data = MinMaxScaler().fit_transform(real_past_conv[:,:,i].transpose(1,0)).transpose(1,0)
+            past_conv_scale.append(scale_data)
+        past_conv_scale = np.stack(past_conv_scale).transpose(1,2,0)
+        past_covariate_total[real_index] = past_conv_scale
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
+        
+        # 增加排名信息,并归一化
+        rank_data[real_index,0] = np.argsort(raise_range_total[real_index])
+        rank_data[real_index,1] = np.argsort(prev_raise_range_total[real_index])
+        rank_data[real_index] = MinMaxScaler().fit_transform(rank_data[real_index])
                              
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,last_targets_total,target_info_total
+                covariate_future_total,future_target_total,target_class_total,last_targets_total,rank_data,target_info_total
 
     def __len__(self):
         return self.date_list.shape[0]
