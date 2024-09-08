@@ -2,10 +2,14 @@ from .his_data_extractor import HisDataExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
 from .his_data_extractor import HisDataExtractor,PeriodType,MarketType
 
+import pickle
+import os
+
 import akshare as ak
 from akshare.stock_feature.stock_hist_em import (
     code_id_map_em
 )
+from bs4 import BeautifulSoup
 
 import numpy as np
 import pandas as pd
@@ -238,5 +242,210 @@ class AkExtractor(HisDataExtractor):
         
         data_item = ori_data_item[ori_data_item["datetime"]<date]
         return data_item  
-            
+
+
+    def sw_index_second_info(self) -> pd.DataFrame:
+        """手工解析乐股网二级行业分类数据 https://legulegu.com/stockdata/sw-industry-overview"""
+    
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/114.0.0.0 Safari/537.36"
+        }       
+        url = "https://legulegu.com/stockdata/sw-industry-overview"
+        r = requests.get(url, headers=headers)
+        soup = BeautifulSoup(r.text, features="lxml")
+        code_raw = soup.find(name="div", attrs={"id": "level2Items"}).find_all(
+            name="div", attrs={"class": "lg-industries-item-chinese-title"}
+        )
+        name_raw = soup.find(name="div", attrs={"id": "level2Items"}).find_all(
+            name="div", attrs={"class": "lg-industries-item-number"}
+        )
+        parent_name_raw = soup.find(name="div", attrs={"id": "level2Items"}).find_all(
+            name="span", attrs={"class": "parent-industry-name"}
+        )     
+        value_raw = soup.find(name="div", attrs={"id": "level2Items"}).find_all(
+            name="div", attrs={"class": "lg-sw-industries-item-value"}
+        )
+        code = [item.get_text() for item in code_raw]
+        name = [item.get_text().split("(")[0] for item in name_raw]
+        parent_name = [item.get_text()[1:-1] for item in parent_name_raw]
+        num = [item.get_text().split("(")[1].split(")")[0] for item in name_raw]
+        num_1 = [
+            item.find_all("span", attrs={"class": "value"})[0].get_text().strip()
+            for item in value_raw
+        ]
+        num_2 = [
+            item.find_all("span", attrs={"class": "value"})[1].get_text().strip()
+            for item in value_raw
+        ]
+        num_3 = [
+            item.find_all("span", attrs={"class": "value"})[2].get_text().strip()
+            for item in value_raw
+        ]
+        num_4 = [
+            item.find_all("span", attrs={"class": "value"})[3].get_text().strip()
+            for item in value_raw
+        ]
+        temp_df = pd.DataFrame([code, name,parent_name, num, num_1, num_2, num_3, num_4]).T
+        temp_df.columns = [
+            "行业代码",
+            "行业名称",
+            "上级行业名称",
+            "成份个数",
+            "静态市盈率",
+            "TTM(滚动)市盈率",
+            "市净率",
+            "静态股息率",
+        ]
+        temp_df["成份个数"] = pd.to_numeric(temp_df["成份个数"], errors="coerce")
+        temp_df["静态市盈率"] = pd.to_numeric(temp_df["静态市盈率"], errors="coerce")
+        temp_df["TTM(滚动)市盈率"] = pd.to_numeric(
+            temp_df["TTM(滚动)市盈率"], errors="coerce"
+        )
+        temp_df["市净率"] = pd.to_numeric(temp_df["市净率"], errors="coerce")
+        temp_df["静态股息率"] = pd.to_numeric(temp_df["静态股息率"], errors="coerce")
+        return temp_df
+    
+    def sw_index_third_info(self) -> pd.DataFrame:
+        """手工解析乐股网三级行业分类数据 https://legulegu.com/stockdata/sw-industry-overview"""
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/114.0.0.0 Safari/537.36"
+        }        
+        url = "https://legulegu.com/stockdata/sw-industry-overview"
+        r = requests.get(url, headers=headers)
+        soup = BeautifulSoup(r.text, features="lxml")
+        code_raw = soup.find(name="div", attrs={"id": "level3Items"}).find_all(
+            name="div", attrs={"class": "lg-industries-item-chinese-title"}
+        )
+        name_raw = soup.find(name="div", attrs={"id": "level3Items"}).find_all(
+            name="div", attrs={"class": "lg-industries-item-number"}
+        )
+        parent_name_raw = soup.find(name="div", attrs={"id": "level3Items"}).find_all(
+            name="span", attrs={"class": "parent-industry-name"}
+        )        
+        value_raw = soup.find(name="div", attrs={"id": "level3Items"}).find_all(
+            name="div", attrs={"class": "lg-sw-industries-item-value"}
+        )
+        code = [item.get_text() for item in code_raw]
+        name = [item.get_text().split("(")[0] for item in name_raw]
+        parent_name = [item.get_text()[1:-1] for item in parent_name_raw]
+        num = [item.get_text().split("(")[1].split(")")[0] for item in name_raw]
+        num_1 = [
+            item.find_all("span", attrs={"class": "value"})[0].get_text().strip()
+            for item in value_raw
+        ]
+        num_2 = [
+            item.find_all("span", attrs={"class": "value"})[1].get_text().strip()
+            for item in value_raw
+        ]
+        num_3 = [
+            item.find_all("span", attrs={"class": "value"})[2].get_text().strip()
+            for item in value_raw
+        ]
+        num_4 = [
+            item.find_all("span", attrs={"class": "value"})[3].get_text().strip()
+            for item in value_raw
+        ]
+        temp_df = pd.DataFrame([code, name,parent_name, num, num_1, num_2, num_3, num_4]).T
+        temp_df.columns = [
+            "行业代码",
+            "行业名称",
+            "上级行业名称",
+            "成份个数",
+            "静态市盈率",
+            "TTM(滚动)市盈率",
+            "市净率",
+            "静态股息率",
+        ]
+        temp_df["成份个数"] = pd.to_numeric(temp_df["成份个数"], errors="coerce")
+        temp_df["静态市盈率"] = pd.to_numeric(temp_df["静态市盈率"], errors="coerce")
+        temp_df["TTM(滚动)市盈率"] = pd.to_numeric(
+            temp_df["TTM(滚动)市盈率"], errors="coerce"
+        )
+        temp_df["市净率"] = pd.to_numeric(temp_df["市净率"], errors="coerce")
+        temp_df["静态股息率"] = pd.to_numeric(temp_df["静态股息率"], errors="coerce")
+        return temp_df
+    
+    def download_industry_data(self):   
+        """生成行业分类数据（申银万国）"""
+     
+        # 分别下载3级分类，并合并到一个数据文件
+        sw_index_first_info_df = ak.sw_index_first_info()
+        # 二级和三级使用自定义解析，用于补充上级分类
+        sw_index_second_info_df = self.sw_index_second_info()
+        sw_index_third_info_df = self.sw_index_third_info()  
+        # 手动添加级别数 
+        sw_index_first_info_df['level'] = 1    
+        sw_index_first_info_df['上级行业名称'] = 0
+        sw_index_second_info_df['level'] = 2    
+        sw_index_third_info_df['level'] = 3  
+        # 合并
+        total_df = pd.concat([sw_index_first_info_df,sw_index_second_info_df,sw_index_third_info_df])
+        # 保存到数据库
+        insert_sql = "insert into sw_industry(code,name,parent_name,level,cons_num,static_pe,dynamic_pe,pb,yield) values(%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+        for idx,row in total_df.iterrows():
+            self.dbaccessor.do_inserto_withparams(insert_sql, 
+                        (row['行业代码'],row['行业名称'],row['上级行业名称'],row['level'],row['成份个数'],row['静态市盈率'],row['TTM(滚动)市盈率'],row['市净率'],row['静态股息率']))     
+        # 统一挂接上级行业
+        upt_sql = "update sw_industry swi,sw_industry sw_ass set swi.parent_code=sw_ass.code where swi.parent_name=sw_ass.name and swi.level=2"
+        self.dbaccessor.do_updateto(upt_sql)
+        upt_sql = "update sw_industry swi,sw_industry sw_ass set swi.parent_code=sw_ass.code where swi.parent_name=sw_ass.name and swi.level=3"
+        self.dbaccessor.do_updateto(upt_sql)
+                
+    def create_industry_cons_data(self,indus_file_path=None):   
+        """下载生成行业分类成分股数据（申银万国）"""
+     
+        # 从之前存储中取得行业类别数据，第三级别
+        sql = "select code,name,level,cons_num,static_pe,dynamic_pe,pb,yield from sw_industry where level=3"
+        result_rows = self.dbaccessor.do_query(sql)        
+        
+        # 遍历第三级分类，并逐个获取对应成分股
+        upt_sql = "update instrument_info set sw_industry=%s where code=%s"
+        code_stats = []
+        for result in result_rows:
+            code = result[0]
+            print("process code:{}".format(code))
+            # 调用api，获取当前行业类别下的成分股
+            try:
+                sw_index_third_cons_df = ak.sw_index_third_cons(symbol=code)
+            except Exception:
+                print("api fail for:{}".format(code))
+                continue
+            # 去除后缀，使股票代码保持一致
+            for idx,row in sw_index_third_cons_df.iterrows():
+                instrument_code = row['股票代码']
+                # 去除前缀，和本地编码保持一致
+                instrument_code = instrument_code[:-3]
+                code_stats.append(int(instrument_code))
+                self.dbaccessor.do_inserto_withparams(upt_sql, (code,instrument_code))      
+                        
+        code_stats_unique = list(set(code_stats))  
+        print("code_stats len:{},code_stats_unique len:{}".format(len(code_stats),len(code_stats_unique)))
+        
+    def get_industry_day_data(self,indus_file_path=None):   
+        """取得申万行业的历史交易数据"""
+     
+        # 从之前存储中取得行业类别数据
+        sql = "select code,name,level,cons_num,static_pe,dynamic_pe,pb,yield from sw_industry"
+        result_rows = self.dbaccessor.do_query(sql)        
+        
+        # 遍历各类别，并逐个获取对应日K数据
+        upt_sql = "update instrument_info set sw_industry=%s where code=%s"
+        code_stats = []
+        for result in result_rows:
+            code = result[0]
+            code = code[:-3]
+            print("process code:{}".format(code))
+            # 调用api，获取当前行业类别下的成分股
+            try:
+                index_hist_sw_df = ak.index_hist_sw(symbol=code, period="day")
+            except Exception:
+                print("index_hist_sw api fail for:{}".format(code))
+                continue
+            file_path = os.path.join(indus_file_path,code+".csv")   
+            # 中文标题改英文 
+            index_hist_sw_df.columns = self.sw_indus_k_columns            
+            index_hist_sw_df.to_csv(file_path,index=False)            
             

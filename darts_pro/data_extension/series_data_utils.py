@@ -341,7 +341,7 @@ class StatDataAssis():
             target_data = analysis_batch[i]         
             df_item = pd.DataFrame(target_data,columns=fit_columns)
             tar_data = df_item[analysis_columns]        
-            fit_last_values[i] = tar_data.values[-1,1:] - tar_data.values[-2,1:]     
+            fit_last_values[i] = tar_data.values[2,1:] - tar_data.values[0,1:]     
             df_corr = tar_data.corr(method="spearman").iloc[[0]]
             if df_combine is None:
                 df_combine = df_corr
@@ -351,7 +351,7 @@ class StatDataAssis():
         df_combine_mean = pd.DataFrame(np.expand_dims(df_combine.mean().values,0),columns=analysis_columns)
         # print("corr value:{}".format(df_combine_mean))
         
-        # 衡量序列末尾数值，与价格涨幅的关系
+        # 衡量序列未来3段涨跌幅度，与价格涨幅的关系
         price_range_tar = np.sum(price_range[:,:3,0],axis=1)
         price_combine = []
         range_cls_stat = []

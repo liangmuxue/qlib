@@ -26,7 +26,31 @@ def test_trade_date():
     prev_date = get_tradedays_dur(dt,-1) 
     print("prev_date:",prev_date)
 
-
+def test_industry():
+    # stock_industry_clf_hist_sw_df = ak.stock_industry_clf_hist_sw()
+    # print(stock_industry_clf_hist_sw_df)
+    sw_index_first_info_df = ak.sw_index_first_info()
+    print(sw_index_first_info_df)
+    sw_index_first_info_df.to_csv("custom/data/results/sw_index_first_info_df.csv", encoding="gbk", index=False)    
+    # sw_index_second_info_df = ak.sw_index_second_info()
+    # print(sw_index_second_info_df)
+    # sw_index_second_info_df.to_csv("custom/data/results/sw_index_second_info_df.csv", encoding="gbk", index=False)
+    # sw_index_third_info_df = ak.sw_index_third_info()
+    # print(sw_index_third_info_df)    
+    # sw_index_third_info_df.to_csv("custom/data/results/sw_index_third_info_df.csv", encoding="gbk", index=False)
+    # sw_index_third_cons_df = ak.sw_index_third_cons(symbol="801016.SI")
+    # print(sw_index_third_cons_df)
+    # sw_index_third_cons_df.to_csv("custom/data/results/sw_index_third_cons_df.csv", encoding="gbk", index=False)
+    # stock_industry_category_cninfo_df = ak.stock_industry_category_cninfo(symbol="申银万国行业分类标准")
+    # print(stock_industry_category_cninfo_df)    
+    # stock_industry_category_cninfo_df.to_csv("custom/data/results/shenyin_industry.csv", encoding="gbk", index=False)
+    # stock_industry_clf_hist_sw_df = ak.stock_industry_clf_hist_sw()
+    # print(stock_industry_clf_hist_sw_df)
+ 
+def test_his_shenwan():
+    index_hist_sw_df = ak.index_hist_sw(symbol="801193", period="day")
+    print(index_hist_sw_df)   
+    
 def test_bao():
     import baostock as bs
     
@@ -34,26 +58,36 @@ def test_bao():
     print('login respond error_code:'+lg.error_code)
     print('login respond  error_msg:'+lg.error_msg)
     
-    rs = bs.query_history_k_data_plus("sz.000001",
-        "date,time,code,open,high,low,close,volume,amount,adjustflag",
-        start_date='2017-07-01', end_date='2023-12-31',
-        frequency="5", adjustflag="3")
-    print('query_history_k_data_plus respond error_code:'+rs.error_code)
-    print('query_history_k_data_plus respond  error_msg:'+rs.error_msg)
-    
-    data_list = []
-    while (rs.error_code == '0') & rs.next():
-        data_list.append(rs.get_row_data())
-    result = pd.DataFrame(data_list, columns=rs.fields)
+    # rs = bs.query_history_k_data_plus("sz.000001",
+    #     "date,time,code,open,high,low,close,volume,amount,adjustflag",
+    #     start_date='2017-07-01', end_date='2023-12-31',
+    #     frequency="5", adjustflag="3")
+    # print('query_history_k_data_plus respond error_code:'+rs.error_code)
+    # print('query_history_k_data_plus respond  error_msg:'+rs.error_msg)
+    #
+    # data_list = []
+    # while (rs.error_code == '0') & rs.next():
+    #     data_list.append(rs.get_row_data())
+    # result = pd.DataFrame(data_list, columns=rs.fields)
     
     # result.to_csv("D:\\history_A_stock_k_data.csv", index=False)
-    print(result)
+    # print(result)
+    
+    rs = bs.query_stock_industry()
+    industry_list = []
+    while (rs.error_code == '0') & rs.next():
+        industry_list.append(rs.get_row_data())
+    result = pd.DataFrame(industry_list, columns=rs.fields)
+    result.to_csv("custom/data/results/bao_stock_industry.csv", encoding="gbk", index=False)
+    print(result)    
     
     bs.logout()
     
 if __name__ == "__main__":
     # test_minute()
-    test_bao()
+    # test_bao()
+    # test_industry()
+    test_his_shenwan()
     # test_base_info()
     # test_day()
     # test_trade_date()

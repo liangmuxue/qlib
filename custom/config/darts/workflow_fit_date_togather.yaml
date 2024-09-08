@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market test_100
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -59,7 +59,7 @@ task:
             type: 'fit_date_togather'
             n_epochs : 180
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
+            load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/TOTAL_DateAlign_2000_202201'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 

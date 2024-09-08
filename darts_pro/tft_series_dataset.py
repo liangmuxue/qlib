@@ -79,6 +79,15 @@ class TFTSeriesDataset(TFTDataset):
             tradable_shares = item[2]
             instrument_base_info[code] = {"industry":industry,"tradable_shares":tradable_shares}
             ext_info_arr.append([code,industry,tradable_shares])
+        # 加入申万行业分类数据，后两项放置负值
+        sw_industry_list = self.dbaccessor.do_query("select code,-1,-1 from sw_industry")
+        for item in sw_industry_list:
+            # 统一编码
+            code = item[0][:-3]
+            industry = item[1]
+            tradable_shares = item[2]
+            instrument_base_info[code] = {"industry":industry,"tradable_shares":tradable_shares}
+            ext_info_arr.append([code,industry,tradable_shares])            
         ext_info = pd.DataFrame(np.array(ext_info_arr),columns=["instrument","industry","tradable_shares"]).astype(
             {"instrument":str,"industry":int,"tradable_shares":float})   
         data_filter = DataFilter()

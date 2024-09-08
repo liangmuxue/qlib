@@ -210,7 +210,7 @@ class TftDatafAnalysis():
                             "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
         analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
-        analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5",'RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5']
+        analysis_columns = ["price","QTLUMA5","SUMPMA5",'RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5']
         # 利用dataloader进行数据拼装
         val_loader = DataLoader(
                 custom_dataset_valid,

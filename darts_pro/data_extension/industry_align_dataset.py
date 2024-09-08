@@ -6,6 +6,7 @@ import pickle
 import os
 from typing import Optional, List, Tuple, Union
 import numpy as np
+import pandas as pd
 from numba.core.types import none
 import torch
 from typing import Optional, Sequence, Tuple, Union
@@ -20,16 +21,18 @@ from darts import TimeSeries
 from cus_utils.common_compute import normalization,slope_last_classify_compute
 from tft.class_define import CLASS_VALUES,get_simple_class,get_complex_class
 
+from cus_utils.db_accessor import DbAccessor
 import cus_utils.global_var as global_var
 from cus_utils.encoder_cus import transform_slope_value
 from tushare.stock.indictor import kdj
-from .custom_dataset import CusGenericShiftedDataset
+from .date_align_dataset import DateShiftedDataset
 
 from cus_utils.log_util import AppLogger
+from torch._jit_internal import ignore
 logger = AppLogger()
 
-class DateShiftedDataset(CusGenericShiftedDataset):
-    """基于日期对齐的滚动数据集"""
+class IndustryShiftedDataset(DateShiftedDataset):
+    """基于日期对齐并按照行业分类的滚动数据集"""
     
     def __init__(
         self,
@@ -47,22 +50,35 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         load_ass_data=False,
         mode="train"
     ):
-        """数据初始化，基于日期进行数据对齐"""
+        """数据初始化，基于日期以及行业进行数据对齐"""
+        
+        self.dbaccessor = DbAccessor({})
         
         super().__init__(target_series,covariates,input_chunk_length,output_chunk_length,shift,shift_covariates,
                          max_samples_per_ts,covariate_type,use_static_covariates,load_ass_data=load_ass_data,mode=mode)
         self.future_covariates = future_covariates
-        
         # 取得DataFrame数据，统一评估日期
         dataset = global_var.get_value("dataset")
+        # 生成股票目标索引，以及申万分类目标索引        
+        keep_index,instrument_df,sw_industry_index,sw_indus_df = self.build_accord_instrument_mapping(target_series,dataset=dataset)
+        self.instrument_df = instrument_df
+        self.keep_index = keep_index
+
         if mode=="train":
-            df_data = dataset.df_train          
+            df_data_total = dataset.df_train          
         else:
-            df_data = dataset.df_val        
-        
-        datetime_col = dataset.get_datetime_index_column()
+            df_data_total = dataset.df_val        
+        # 只使用在股票目标索引中的目标数据
+        df_data = df_data_total[df_data_total["instrument"].isin(instrument_df["code"].values)]
         g_col = dataset.get_group_rank_column()
-        time_column = dataset.get_time_column()
+        time_column = dataset.get_time_column()     
+        datetime_col = dataset.get_datetime_index_column()   
+        # 把新的排序号关联更新到原来的数据集
+        df_data.set_index('instrument',inplace=True)
+        instrument_df.set_index('code',inplace=True)
+        instrument_df.rename(columns={'rank_code':g_col}, inplace=True)
+        df_data.update(instrument_df)
+        df_data.reset_index(inplace=True)       
         
         # 通过最小最大日期，生成所有交易日期列表
         date_list = df_data[datetime_col].unique()
@@ -70,7 +86,7 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         # 由于使用future_datetime方式对齐，因此从前面截取input序列长度,后面截取output序列长度用于预测长度预留
         date_list = date_list[input_chunk_length:-output_chunk_length]
         # 根据排序号进行日期分组映射数据的初始化
-        rank_num_max = len(target_series)
+        rank_num_max = instrument_df.shape[0]
         date_mappings = np.ones([date_list.shape[0],rank_num_max])*(-1)
         # 循环每个日期，并查询填充对应的股票索引信息
         logger.info("process date_list begin,mode:{}".format(mode))
@@ -83,6 +99,18 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             date_mappings[index,instrument_rank_nums[:,0]] = instrument_rank_nums[:,1]
         logger.info("process date_list end,mode:{}".format(mode))
         self.date_mappings = date_mappings.astype(np.int16)
+        # 行业类别映射处理
+        sw_date_mappings = np.ones([date_list.shape[0],len(sw_industry_index)])
+        df_sw_indus_data = df_data_total[df_data_total["instrument"].isin(sw_indus_df["code"].values)]
+        for index,date in enumerate(date_list):
+            instrument_rank_nums = df_sw_indus_data[df_sw_indus_data[datetime_col]==date][[time_column]].values[:,0]
+            # 分类指数不会有缺失值，直接赋值
+            sw_date_mappings[index] = instrument_rank_nums
+        self.sw_date_mappings = sw_date_mappings.astype(np.int16)   
+        # 生成行业分类和股票之间的映射关系,使用二级分类
+        sw_ins_mappings = instrument_df.groupby("sw_second_code").apply(lambda data:data["rank_code"].values)
+        self.sw_ins_mappings = sw_ins_mappings
+        
         self.date_list = date_list
         # 预先定义数据形状
         self.total_instrument_num = rank_num_max
@@ -94,8 +122,66 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         self.future_covariates_shape = [self.total_instrument_num,output_chunk_length,future_covariates[0].n_components]
         self.historic_future_covariates_shape = [self.total_instrument_num,input_chunk_length,future_covariates[0].n_components]
         self.static_covariate_shape = [self.total_instrument_num,target_series[0].static_covariates_values(copy=False).shape[-1]]
-        self.last_targets_shape = [self.total_instrument_num,target_num]
+        self.last_targets_shape = [self.total_instrument_num,target_num]  
+        self.sw_indus_shape = [len(sw_industry_index),input_chunk_length+output_chunk_length]     
+    
+    def build_accord_instrument_mapping(self,target_series,dataset=None):
+        """筛选出符合条件的股票，以及分类映射关系"""
         
+        # 只关注具备申万分类的股票
+        instrument_df = self.get_instrument_with_swindus()     
+        sw_indus = self.get_sw_industry()
+        sw_indus_df = pd.DataFrame(sw_indus,columns=["code","level"])
+        # 同时找出申万分类数据索引
+        keep_index = []
+        target_codes = []
+        rank_codes = []
+        sw_industry_index = []
+        for index,ts in enumerate(target_series):
+            rank_code = ts.static_convariates['instrument_rank']
+            code = dataset.get_group_code_by_rank(rank_code)
+            # 匹配后记录索引值
+            if np.any(instrument_df["code"]==code):
+                keep_index.append(index)
+                target_codes.append(code)
+                rank_codes.append(rank_code)
+            # 同时记录类别序号   
+            if np.any(sw_indus[:,0]==code):
+                sw_industry_index.append(index)
+                
+        # 同时从股票及分类列表中删除不在数据集范围的数据
+        instrument_df = instrument_df[~instrument_df["code"].isin(target_codes)]
+        # 补充原排序号用于后续数据对齐匹配
+        instrument_df["ori_rank_code"] = rank_codes
+        # 生成自身排序号
+        instrument_df["rank_code"] = instrument_df["ori_rank_code"].rank(method='dense',ascending=False).astype("int")  
+        return keep_index,instrument_df,sw_industry_index,sw_indus_df
+    
+    def get_instrument_with_swindus(self):       
+        """取得包含申万行业分类的股票列表"""
+        
+        # 同时取得二级和一级的对应编码
+        sql = "select ins.code as code,swi.code as sw_third_code,swi.parent_code as sw_second_code,swp.parent_code as sw_first_code " \
+            "from instrument_info ins left join sw_industry swi on ins.sw_industry=swi.code left join sw_industry swp " \
+            "on swi.parent_code=swp.code where ins.sw_industry is not null"
+            
+        result_rows = self.dbaccessor.do_query(sql)   
+        columns = "code,sw_third_code,sw_second_code,sw_first_code" 
+        result = pd.DataFrame(np.array(result_rows),columns=columns)
+        return result
+
+    def get_sw_industry(self):       
+        """取得申万行业分类列表"""
+        
+        # 只使用行业分类二级以上数据
+        sql = "select code,level from sw_industry where level>=2 order by code asc"
+        result_rows = self.dbaccessor.do_query(sql)    
+        results = []
+        for row in result_rows:
+            code = row[0][:-3]
+            results.append([int(code),row[1]])
+        return np.array(results)
+            
     def __getitem__(
         self, idx
     ):
@@ -120,7 +206,9 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             # 如果当日没有记录则相关变量保持为0或空
             if ser_idx==-1:
                 continue
-            target_series = self.target_series[index]
+            # 取得原序列索引进行series取数
+            ori_index = self.keep_index[index]
+            target_series = self.target_series[ori_index]
             # 如果最后的序列号与当前序列号的差值不足序列输出长度，则忽略
             offset_end = target_series.time_index[-1] + 1 - ser_idx
             if offset_end<self.output_chunk_length:
@@ -158,23 +246,14 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             past_start_real = past_start+target_series.time_index[0]
             future_start_real = future_start+target_series.time_index[0]
             future_end_real = future_end+target_series.time_index[0]
-            # 存储辅助指标
-            kdj_k,kdj_d,kdj_j,rsi_20,rsi_5,macd_diff,macd_dea = self.ass_data[code][4:]
-            kdj_k = kdj_k[past_start_real:future_end_real]
-            kdj_d = kdj_d[past_start_real:future_end_real]
-            kdj_j = kdj_j[past_start_real:future_end_real]        
-            rsi_20 = rsi_20[past_start_real:future_end_real]
-            rsi_5 = rsi_5[past_start_real:future_end_real]
-            macd_diff = macd_diff[past_start_real:future_end_real]  
-            macd_dea = macd_dea[past_start_real:future_end_real]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start_real,"future_end":future_end_real,
                                "price_array":price_array,"datetime_array":datetime_array,
-                               "kdj_k":kdj_k,"kdj_d":kdj_d,"kdj_j":kdj_j,"rsi_20":rsi_20,"rsi_5":rsi_5,"macd_diff":macd_diff,"macd_dea":macd_dea,
                                "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
             
-            covariate_series = self.covariates[index] 
+            # 过去协变量序列数据
+            covariate_series = self.covariates[ori_index] 
             raise_if_not(
                 covariate_end <= len(covariate_series),
                 f"The dataset contains covariates "
@@ -201,7 +280,7 @@ class DateShiftedDataset(CusGenericShiftedDataset):
             # 静态协变量
             static_covariate = target_series.static_covariates_values(copy=False)
             # 未来协变量的过去值和未来值
-            f_conv_values = self.future_covariates[index].random_component_values(copy=False)
+            f_conv_values = self.future_covariates[ori_index].random_component_values(copy=False)
             future_covariate = f_conv_values[future_start:future_end]
             historic_future_covariate = f_conv_values[past_start:past_end]
             # 填充到总体数据中
@@ -244,11 +323,11 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         future_target_scale = np.stack(future_target_scale).transpose(1,2,0)
         past_target_total[real_index] = past_target_scale
         future_target_total[real_index] = future_target_scale
-        # 最后一段涨幅的归一化处理
-        last_targets_total = future_target_total[:,-1,:] - future_target_total[:,-2,:]
+        # 衡量未来值3段内涨跌差值，并做归一化处理
+        last_targets_total = future_target_total[:,2,:] - future_target_total[:,0,:]
         last_targets_total[real_index] = MinMaxScaler().fit_transform(last_targets_total[real_index])  
         # 收集最近一段涨幅数据，用于后续残差计算
-        prev_last_targets_total = past_target_total[:,-1,:] - past_target_total[:,-2,:]   
+        prev_last_targets_total = past_target_total[:,self.input_chunk_length+2,:] - past_target_total[:,self.input_chunk_length,:]   
         prev_last_targets_total[real_index] = MinMaxScaler().fit_transform(prev_last_targets_total[real_index])     
         last_targets_total = np.stack([last_targets_total,prev_last_targets_total]).transpose(1,0,2)
         
@@ -266,9 +345,35 @@ class DateShiftedDataset(CusGenericShiftedDataset):
         rank_data[real_index,0] = np.argsort(raise_range_total[real_index])
         rank_data[real_index,1] = np.argsort(prev_raise_range_total[real_index])
         rank_data[real_index] = MinMaxScaler().fit_transform(rank_data[real_index])
-                             
+        
+        ########### 生成行业数据 #########
+        sw_date_mapping = self.sw_date_mappings[idx]
+        sw_indus_targets_total = np.zeros(self.sw_indus_shape)
+        for index,ser_idx in enumerate(sw_date_mapping):
+            # 取得原序列索引进行series取数
+            ori_index = self.sw_industry_index[index]
+            target_series = self.target_series[ori_index]
+            # 目标序列
+            target_vals = target_series.random_component_values(copy=False)[...,:1]
+            # 对应的起始索引号属于future_datetime,因此减去序列输入长度，即为计算序列起始索引
+            past_start = ser_idx - self.input_chunk_length
+            # 需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量
+            past_start = past_start - target_series.time_index[0]
+            # 后续索引计算都以past_start为基准
+            past_end = past_start + self.input_chunk_length
+            future_end = future_start + self.output_chunk_length 
+            # 取得过去未来全部目标数据  
+            whole_target = target_vals[past_start:future_end]         
+            sw_indus_targets_total[index] = whole_target
+        # 归一化        
+        target_scaler = MinMaxScaler()
+        target_scaler.fit(sw_indus_targets_total[:,:self.input_chunk_length].transpose(1,0))
+        scale_data_past = target_scaler.transform(sw_indus_targets_total[:,:self.input_chunk_length].transpose(1,0)).transpose(1,0)
+        scale_data_future = target_scaler.transform(sw_indus_targets_total[:,self.input_chunk_length:].transpose(1,0)).transpose(1,0)
+        sw_indus_targets_total = np.concatenate([np.stack(scale_data_past),np.stack(scale_data_future)],axis=-1)
+                                                 
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,last_targets_total,rank_data,target_info_total
+                covariate_future_total,future_target_total,target_class_total,last_targets_total,sw_indus_targets_total,target_info_total
 
     def __len__(self):
         return self.date_list.shape[0]

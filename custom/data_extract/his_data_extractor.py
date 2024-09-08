@@ -93,6 +93,7 @@ class HisDataExtractor:
         self.common_dict = CommonDict()
         
         self.busi_columns = ["code","datetime","open","close","high","low","volume","amount","amplitude","flu_range","flu_amount","turnover"]
+        self.sw_indus_k_columns = ["code","datetime","close","open","high","low","volume","amount"]
         self.col_data_types = {"code":str}
            
     def create_code_data(self):
@@ -164,10 +165,13 @@ class HisDataExtractor:
             return "{}/item/{}/institution".format(self.savepath,period_name)
         return "{}/item/{}/origin".format(self.savepath,period_name)
     
-    def export_to_qlib(self,qlib_dir,period,file_name="all.txt",institution=False):
+    def export_to_qlib(self,qlib_dir,period,type="item",file_name="all.txt",institution=False):
         """csv格式的单独文件导入到qlib"""
         
-        source_path = self.get_whole_item_datapath(period,institution=institution)
+        if type=="item":
+            source_path = self.get_whole_item_datapath(period,institution=institution)
+        if type=="sw_industry":
+            source_path = "{}/sw_industry/{}".format(self.savepath,period)        
         dump_all = DumpDataAll(csv_path=source_path,qlib_dir=qlib_dir,date_field_name="datetime")
         # 设置文件名
         dump_all.INSTRUMENTS_FILE_NAME = file_name
@@ -514,17 +518,31 @@ if __name__ == "__main__":
     from data_extract.akshare_extractor import AkExtractor
     from data_extract.tdx_extractor import TdxExtractor
     
-    # 导入股票代码
-    # extractor = AkExtractor()   
+    extractor = AkExtractor(savepath="/home/qdata/stock_data")   
+    # 股票代码数据
     # extractor.create_code_data()
+    # 导入股票代码
     # extractor.import_data(task_batch=0,period=PeriodType.MIN5.value,start_date=20220101,end_date=20221231)
     # 导入分钟数据
-    extractor = TdxExtractor(savepath="/home/qdata/stock_data")
-    extractor.connect()
-    extractor.import_data_auto(task_batch=0,period=PeriodType.MIN5.value,end_date=20230526,no_total_file=True)
+    # extractor = TdxExtractor(savepath="/home/qdata/stock_data")
+    # extractor.connect()
+    # extractor.import_data_auto(task_batch=0,period=PeriodType.MIN5.value,end_date=20230526,no_total_file=True)
     # 导入日K数据
     # extractor = AkExtractor(savepath="./custom/data/stock_data")
     # extractor.import_data(task_batch=0,period=PeriodType.DAY.value,start_date=20220101,end_date=20221231)    
+    
     # 导入基础信息
     # extractor.create_base_info()
-        
+    # 申万行业分类数据
+    # extractor.download_industry_data()
+    # 申万行业成分股票数据
+    # extractor.create_industry_cons_data(indus_file_path="/home/qdata/stock_data/ak/sw_industry")
+    # 申万行业分类日K数据
+    # extractor.get_industry_day_data(indus_file_path="/home/qdata/stock_data/ak/sw_industry/day")    
+    # 导出行业分类日线数据到qlib
+    qlib_dir = "/home/qdata/qlib_data/custom_cn_data"
+    # extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,type="sw_industry",file_name="sw_industry.txt",institution=False)
+    extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=True)
+    
+    
+                
