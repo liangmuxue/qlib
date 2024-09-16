@@ -446,6 +446,8 @@ class AkExtractor(HisDataExtractor):
                 continue
             file_path = os.path.join(indus_file_path,code+".csv")   
             # 中文标题改英文 
-            index_hist_sw_df.columns = self.sw_indus_k_columns            
+            index_hist_sw_df.columns = self.sw_indus_k_columns    
+            # 统一顺序
+            index_hist_sw_df = index_hist_sw_df[self.busi_columns[:8]]     
             index_hist_sw_df.to_csv(file_path,index=False)            
             

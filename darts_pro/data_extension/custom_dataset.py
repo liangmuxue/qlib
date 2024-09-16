@@ -44,7 +44,7 @@ class CusGenericShiftedDataset(GenericShiftedDataset):
         """
         super().__init__(target_series,covariates,input_chunk_length,output_chunk_length,shift,shift_covariates,
                          max_samples_per_ts,covariate_type,use_static_covariates)
-        
+        self.mode = mode
         load_ass_data = global_var.get_value("load_ass_data")
         if load_ass_data:
             # 如果配置为加载模式，则从全局变量透传数据

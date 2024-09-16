@@ -22,6 +22,7 @@ from darts_pro.act_model.indus3d_ts import Indus3D
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_weight_with_target
 from losses.clustering_loss import Indus3DLoss
 from cus_utils.common_compute import target_distribution,normalization_axis,intersect2d
+from darts_pro.data_extension.industry_mapping_util import IndustryMappingUtil
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -53,12 +54,14 @@ class IndustryTogeModule(MlpModule):
         past_split=None,
         batch_file_path=None,
         device="cpu",
-        sw_ins_mappings=None,
+        train_sw_ins_mappings=None,
+        valid_sw_ins_mappings=None,
         **kwargs,
     ):
         self.ins_dim = ins_dim
         self.mode = None
-        self.sw_ins_mappings = sw_ins_mappings
+        self.train_sw_ins_mappings = train_sw_ins_mappings
+        self.valid_sw_ins_mappings = valid_sw_ins_mappings
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
@@ -132,7 +135,8 @@ class IndustryTogeModule(MlpModule):
                 future_cov_dim=future_cov_dim,
                 static_cov_dim=static_cov_dim,
                 ins_dim=self.ins_dim,
-                sw_ins_mappings=self.sw_ins_mappings, # 新增行业分类和股票映射关系
+                train_sw_ins_mappings=self.train_sw_ins_mappings, # 新增行业分类和股票映射关系,需要分为训练和验证两组
+                valid_sw_ins_mappings=self.valid_sw_ins_mappings,
                 num_encoder_layers=3,
                 num_decoder_layers=3,
                 decoder_output_dim=16,
@@ -149,7 +153,7 @@ class IndustryTogeModule(MlpModule):
             return model
 
     def create_loss(self,model,device="cpu"):
-        return Indus3DLoss(self.ins_dim,device=device,ref_model=model,sw_ins_mappings=self.sw_ins_mappings) 
+        return Indus3DLoss(self.ins_dim,device=device,ref_model=model) 
 
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
@@ -325,7 +329,7 @@ class IndustryTogeModule(MlpModule):
         past_indus_targets = sw_indus_targets[...,:self.input_chunk_length]
         # 行业分类未来数值幅度区间,计算3个交易日的差值
         future_indus_targets = sw_indus_targets[...,self.input_chunk_length:]
-        future_indus_targets = future_indus_targets[...,3] - future_indus_targets[...,0]
+        future_indus_targets = future_indus_targets[...,2] - future_indus_targets[...,0]
         # 整合相关数据，分为输入值和目标值两组
         return (x_past_array, future_covariates, static_covariates,past_indus_targets),future_indus_targets
                
@@ -333,7 +337,9 @@ class IndustryTogeModule(MlpModule):
         """重载父类方法"""
 
         (future_target,target_class,last_target,future_indus_targets) = target   
-        return self.criterion(output,(future_target,target_class,last_target,future_indus_targets),mode=self.step_mode,optimizers_idx=optimizers_idx)        
+        # 根据阶段使用不同的映射集合
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
+        return self.criterion(output,(future_target,target_class,last_target,future_indus_targets),sw_ins_mappings=sw_ins_mappings,mode=self.step_mode,optimizers_idx=optimizers_idx)        
 
     def on_validation_epoch_end(self):
         """重载父类方法，修改指标计算部分"""
@@ -349,8 +355,8 @@ class IndustryTogeModule(MlpModule):
             item = np.array(item)
             sr.append(item)
         sr = np.stack(sr)      
-        for i in range(len(self.past_split)):
-            self.log("target_match_{}".format(i), target_top_match[:,i].mean(), prog_bar=True) 
+        # for i in range(len(self.past_split)):
+        #     self.log("target_match_{}".format(i), target_top_match[:,i].mean(), prog_bar=True) 
         
         if sr.shape[0]==0:
             return
@@ -433,15 +439,16 @@ class IndustryTogeModule(MlpModule):
             target_class_list = target_class_3d[i]
             # 有一些空值，找出对应索引后续做忽略处理
             keep_index = np.where(target_class_list>=0)[0]
-            output_list = [output_3d[j][i][keep_index] for j in range(3)]
-            sv_list = output_list[1]
+            sv_list = [[output_3d[1][k][j][i] for j in range(output_3d[2].shape[1])] for k in range(len(self.past_split))]
+            output_list = [output_3d[0][i][keep_index],sv_list,output_3d[2][i]]
             last_target_list = last_targets_3d[i]
-            date = target_info_list[0]["future_start_datetime"]
+            date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
             # 生成目标索引
             import_index,indus_top_index = self.build_import_index(output_data=output_list,target_info_list=target_info_list[keep_index])
+            import_index = np.intersect1d(import_index,keep_index)
             # Compute Acc Result
             import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
-                import_price_result = self.collect_result(import_index, target_class_list[keep_index], target_info_list[keep_index])
+                import_price_result = self.collect_result(import_index, target_class_list, target_info_list)
             score_arr = []
             score_total = 0
             rate_total[date] = []
@@ -459,8 +466,8 @@ class IndustryTogeModule(MlpModule):
                 # 预测数量以及总数量
                 rate_total[date].append(total_cnt.item())    
                 # 追加计算目标值排序靠前的命中率，忽略缺失值
-                target_top_match = self.compute_top_acc(sv_list,last_target_list[keep_index][:,0,:])
-                target_top_match_total[date] = target_top_match 
+                # target_top_match = self.compute_top_acc(sv_list,last_target_list[keep_index][:,0,:])
+                # target_top_match_total[date] = target_top_match 
                 
         target_top_match_total = np.array(list(target_top_match_total.values()))
         
@@ -494,7 +501,7 @@ class IndustryTogeModule(MlpModule):
         last_targets_total = []    
         indus_targets_total = []
         x_bar_total = []
-        sv_total = []
+        sv_total = [[] for _ in range(len(self.past_split))]
         cls_total = []
         for item in output_result:
             (output,past_target,future_target,target_class,last_targets,indus_targets,target_info) = item
@@ -505,13 +512,17 @@ class IndustryTogeModule(MlpModule):
                 output_item = output[i]
                 x_bar,sv_instru,sv_indus = output_item 
                 x_bar_inner.append(x_bar.cpu().numpy().squeeze(-1))
-                sv_inner.append(sv_instru.cpu().numpy())
-                cls_inner.append(sv_indus.cpu().numpy())
+                sv_item = [item.squeeze(-1).cpu().numpy() for item in sv_instru]
+                # 由于长度不一致，所以只能从里面取数对齐
+                if len(sv_total[i])==0:
+                    sv_total[i] = sv_item
+                else:
+                    for j in range(len(sv_item)):
+                        sv_total[i][j] = np.concatenate([sv_total[i][j],sv_item[j]],axis=0)
+                cls_inner.append(sv_indus.cpu().numpy().squeeze(-1))
             x_bar_inner = np.stack(x_bar_inner).transpose(1,2,3,0)
-            sv_inner = np.stack(sv_inner).transpose(1,2,0)
             cls_inner = np.stack(cls_inner).transpose(1,2,0)
             x_bar_total.append(x_bar_inner)
-            sv_total.append(sv_inner)
             cls_total.append(cls_inner)
             
             target_info_total.append(target_info)
@@ -522,7 +533,6 @@ class IndustryTogeModule(MlpModule):
             indus_targets_total.append(indus_targets)
             
         x_bar_total = np.concatenate(x_bar_total)
-        sv_total = np.concatenate(sv_total)
         cls_total = np.concatenate(cls_total)
 
         target_class_total = np.concatenate(target_class_total)
@@ -557,23 +567,23 @@ class IndustryTogeModule(MlpModule):
     def strategy_top(self,sv,fea,cls,batch_size=0):
         """排名方式筛选候选者"""
         
+        sw_ins_mappings = self.valid_sw_ins_mappings
+        
         cls_0 = cls[...,0]
         cls_1 = cls[...,1]
-        sv_0 = sv[...,0]
-        sv_1 = sv[...,1]
+        sv_0 = sv[0]
+        sv_1 = sv[1]
         
-        indus_top_k = 3
-        ins_top_k = 3
+        indus_top_k = 6
+        ins_top_k = 6
         # 先查找排名靠前的行业
         indus_top_index = np.argsort(cls_0)[:indus_top_k]
         # 然后从行业中找到排名靠前的股票
-        ins_index_mapping = self.sw_ins_mappings[indus_top_index]
         ins_top_index = []
-        for ins_arr in ins_index_mapping:
-            sv_top = sv_0[ins_arr]
-            idx = np.argsort(sv_top)[:ins_top_k]
-            match_index = ins_arr[idx]
-            ins_top_index.append(match_index)
+        for idx in indus_top_index:
+            ins_arr = sv_0[idx]
+            match_index = np.argsort(ins_arr)[:ins_top_k]
+            ins_top_index.append(IndustryMappingUtil.get_instrument_with_industry(sw_ins_mappings,idx,[match_index]))
         ins_top_index = np.concatenate(ins_top_index)
         pred_import_index = ins_top_index 
         return pred_import_index,indus_top_index

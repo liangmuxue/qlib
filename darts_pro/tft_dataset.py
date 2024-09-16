@@ -131,8 +131,9 @@ class TFTDataset(DatasetH):
         # 重建字段名，添加日期和股票字段
         new_cols_idx = np.concatenate((np.array(["datetime","instrument"]),self.reals_cols))
         data.columns = pd.Index(new_cols_idx)    
-        # 清除NAN,INF数据
-        data = data.replace([np.inf, -np.inf], np.nan).dropna()
+        # 清除NAN,INF数据(不处理辅助类别数据)
+        data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int) 
+        data[data.instrument<'800000'] = data[data.instrument<'800000'].replace([np.inf, -np.inf], np.nan).dropna()
         # 价格不能为负数
         data = data[data["label"]>0]
         # 清除极值数据
@@ -141,8 +142,6 @@ class TFTDataset(DatasetH):
         data["month"] = data.datetime.astype("str").str.slice(0,7)
         data["time_idx"] = data.datetime.dt.year * 365 + data.datetime.dt.dayofyear
         data["time_idx"] -= data["time_idx"].min() 
-        # 特例处理
-        data["REV5_ORI"] = data["REV5"]
         # 重新编号,解决节假日以及相关日期不连续问题
         data = data.groupby("instrument").apply(lambda df: self._reindex_inner(df))        
         # 补充商品指数数据,按照月份合并

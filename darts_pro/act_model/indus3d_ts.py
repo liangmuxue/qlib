@@ -12,6 +12,7 @@ from cus_utils.common_compute import eps_rebuild,corr_compute,batch_cov
 from torchmetrics.regression import ConcordanceCorrCoef
 from darts.models.forecasting.tide_model import _ResidualBlock,Dense
 from .fds import FDS
+from darts_pro.data_extension.industry_mapping_util import IndustryMappingUtil
 
 class _Residual3DBlock(nn.Module):
     def __init__(
@@ -76,7 +77,8 @@ class Indus3D(nn.Module):
         use_layer_norm=True,
         dropout=0.3,
         ins_dim=0,
-        sw_ins_mappings=None,
+        train_sw_ins_mappings=None,
+        valid_sw_ins_mappings=None,
         **kwargs
        ):    
         """整合行业数据形成多层次网络输出
@@ -110,7 +112,8 @@ class Indus3D(nn.Module):
         self.input_chunk_length = input_chunk_length
         self.output_chunk_length = output_chunk_length
         self.ins_dim = ins_dim
-        self.sw_ins_mappings = sw_ins_mappings
+        self.train_sw_ins_mappings = train_sw_ins_mappings
+        self.valid_sw_ins_mappings = valid_sw_ins_mappings
         
         # past covariates handling: either feature projection, raw features, or no features
         self.past_cov_projection = None
@@ -223,13 +226,15 @@ class Indus3D(nn.Module):
         ###### 整合行业分类，形成分类预测和类内成份股票走势预测的多重输出网络 ######
         industry_layer = []
         ins_ind_layer = []
+        # 训练和验证阶段，需要不同的映射表
+        sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
         for i in range(len(sw_ins_mappings)):
-            ins_num = len(sw_ins_mappings[i])
+            ins_num = len(IndustryMappingUtil.get_sw_industry_instrument(sw_ins_mappings[i]))
             ins_decoder = _Residual3DBlock(
-                        input_dim=decoder_input_dim,
+                        input_dim=hidden_size,
                         output_dim=1,
                         ins_dim=ins_num, # 使用当前分类内的成份数量作为横向全连接数量
-                        hidden_size=temporal_decoder_hidden,
+                        hidden_size=hidden_size//2,
                         use_layer_norm=True,
                         dropout=dropout,
                     )     
@@ -338,22 +343,24 @@ class Indus3D(nn.Module):
         
         map_size = len(self.ins_ind_layer)
         # 切分成每个行业分类，在分类内对成份股票进行解码
-        ins_decoded_data = torch.zeros([y.shape[0],y.shape[1]]).to(self.device)
+        ins_decoded_data = []
         industry_decoded_data = []
+        sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
         for i in range(map_size):
             m = self.ins_ind_layer[i]
-            idx_list = self.sw_ins_mappings[i]
+            idx_list = torch.Tensor(IndustryMappingUtil.get_sw_industry_instrument(sw_ins_mappings[i])).to(x.device).long()
             # 通过索引映射到实际行业内股票组合
             ins_data = encoded[:,idx_list,...]
             ins_decoded = m(ins_data)
-            ins_decoded_data[:,idx_list] = ins_decoded
+            # 形成多个解码序列，每个序列长度不同
+            ins_decoded_data.append(ins_decoded)
             # 进一步进行整体行业计算
             m = self.industry_layer[i]
-            industry_decoded_data.append(m(ins_decoded))
+            industry_decoded_data.append(m(ins_decoded.squeeze(-1)))
             
-        industry_decoded_data = torch.cat(industry_decoded_data,dim=1)
+        industry_decoded_data = torch.cat(industry_decoded_data,dim=1).unsqueeze(-1)
         # 使用行业分类的过去数值范围进行残差计算
-        skip = self.industry_lookback_skip(x_industry_past_values.transpose(1, 2)).transpose(1, 2)
+        skip = self.industry_lookback_skip(x_industry_past_values)
         indus_sv = industry_decoded_data + skip
         
         return y,ins_decoded_data,indus_sv

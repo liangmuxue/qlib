@@ -674,7 +674,11 @@ def test_dump():
 def test_date():    
     day = datetime.date(2021,2,day=21)  
     print(day.weekday())
-  
+
+def test_where():
+    x = np.array([3,4,5])
+    y = np.array([4,6,7,8])
+    print(x==y)
               
 if __name__ == "__main__":
     # test_mask()
@@ -698,7 +702,8 @@ if __name__ == "__main__":
     # test_copy()
     # test_copy_torch()
     # test_compute()
-    test_temp()
+    # test_temp()
+    test_where()
     # test_pd_ser()
     # test_torch_vision()
     # torch_comp()

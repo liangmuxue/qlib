@@ -524,7 +524,10 @@ class _CusModule(BaseMixModule):
     def collect_result(self,import_index,target_vr_class=None,target_info=None): 
           
         # 重点类别的准确率
-        import_acc_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
+        try:
+            import_acc_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
+        except Exception:
+            print("eee")
         import_price_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
         if import_index.shape[0]==0:
             import_acc = torch.tensor(0.0)

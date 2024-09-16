@@ -69,25 +69,25 @@ class TFTSeriesDataset(TFTDataset):
     def _pre_process_df(self,df,val_range=None):
         """数据预处理"""
         
-        # 从数据库表中读取股票基础信息
-        instrument_list = self.dbaccessor.do_query("select code,industry,tradable_shares from instrument_info where delete_flag=0")
+        # 从数据库表中读取股票基础信息，加入申万行业分类数据，后两项放置负值
+        instrument_list = self.dbaccessor.do_query("(select code,sw_industry,tradable_shares from instrument_info where delete_flag=0)" \
+            " union (select code,-1,-1 from sw_industry)")
         instrument_base_info = {}
         ext_info_arr = []
         for item in instrument_list:
-            code = item[0]
+            # 对于行业分类数据，需要统一编码
+            if len(item[0])>6:
+                code = item[0][:-3]      
+            else:
+                code = item[0]      
             industry = item[1]
+            if industry is None:
+                industry = -1
+            elif len(industry)>6:
+                industry = industry[:-3]
             tradable_shares = item[2]
             instrument_base_info[code] = {"industry":industry,"tradable_shares":tradable_shares}
             ext_info_arr.append([code,industry,tradable_shares])
-        # 加入申万行业分类数据，后两项放置负值
-        sw_industry_list = self.dbaccessor.do_query("select code,-1,-1 from sw_industry")
-        for item in sw_industry_list:
-            # 统一编码
-            code = item[0][:-3]
-            industry = item[1]
-            tradable_shares = item[2]
-            instrument_base_info[code] = {"industry":industry,"tradable_shares":tradable_shares}
-            ext_info_arr.append([code,industry,tradable_shares])            
         ext_info = pd.DataFrame(np.array(ext_info_arr),columns=["instrument","industry","tradable_shares"]).astype(
             {"instrument":str,"industry":int,"tradable_shares":float})   
         data_filter = DataFilter()
@@ -97,9 +97,6 @@ class TFTSeriesDataset(TFTDataset):
         df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)        
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
-                
-        # 删除空值，并重新编号
-        df = df.dropna()    
         logger.debug("begin group process")
         columns = df.columns.values.tolist()
         columns = columns + ["industry","tradable_shares"]
@@ -119,11 +116,7 @@ class TFTSeriesDataset(TFTDataset):
             df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).min()) / (df[conv_col].astype(int).max() - df[conv_col].astype(int).min())
                     
         logger.debug("end group process")
-        # group字段需要转换为数值型
-        df[group_column] = df[group_column].apply(pd.to_numeric,errors='coerce')   
-        # 归一化指定字段
-        df_rev = df.groupby(group_column,as_index=False).apply(lambda x: (x["REV5"] - x["REV5"].mean()) / x["REV5"].std()).reindex()
-        df["REV5"] = df_rev.reset_index(level=0, drop=True)
+
         # 按照股票代码，新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=False).astype("int")  
@@ -131,7 +124,6 @@ class TFTSeriesDataset(TFTDataset):
         # 对index进行归一化，后续替换原index生成的静态协变量
         group_col_scale = rank_group_column + "_scale"   
         df[group_col_scale] = (df[rank_group_column].astype(int) - df[rank_group_column].astype(int).min()) / (df[rank_group_column].astype(int).max() - df[rank_group_column].astype(int).min())
-                
         return df    
     
     def filter_by_indicator(self,df):

@@ -50,6 +50,7 @@ def test_industry():
 def test_his_shenwan():
     index_hist_sw_df = ak.index_hist_sw(symbol="801193", period="day")
     print(index_hist_sw_df)   
+    index_hist_sw_df.to_csv("custom/data/results/801193.csv", encoding="gbk", index=False)
     
 def test_bao():
     import baostock as bs

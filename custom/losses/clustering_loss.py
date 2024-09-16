@@ -6,13 +6,11 @@ import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss
 from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normalization
 from tft.class_define import CLASS_SIMPLE_VALUES
-from cus_utils.metrics import pca_apply,guass_cdf,sampler_normal
-from .fds_loss import weighted_mse_loss
+from darts_pro.data_extension.industry_mapping_util import IndustryMappingUtil
 import geomloss
 from .quanlity_loss import QuanlityLoss
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
-from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 
 def calculate_gaussian_kl_divergence(m1,m2,std1,std2):
     v1 = torch.square(std1)
@@ -377,17 +375,16 @@ class Mlp3DLoss(UncertaintyLoss):
 class Indus3DLoss(UncertaintyLoss):
     """基于行业分类整合的损失函数，以日期维度进行整合的3D版本"""
     
-    def __init__(self,ins_dim,sw_ins_mappings=None,ref_model=None,device=None):
+    def __init__(self,ins_dim,ref_model=None,device=None):
         super(Indus3DLoss, self).__init__(ref_model=ref_model,device=device)
         
         # 股票数量维度
         self.ins_dim = ins_dim
-        self.sw_ins_mappings = sw_ins_mappings
         self.ref_model = ref_model
         self.device = device  
         
         
-    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
+    def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,mode="pretrain"):
         """Multiple Loss Combine"""
 
         (output,_,_) = output_ori
@@ -399,36 +396,62 @@ class Indus3DLoss(UncertaintyLoss):
         # 指标分类
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 忽略目标缺失值的损失计算,找出符合比较的索引
-        keep_index = torch.where(target_class.reshape(-1)>=0)[0]
+        keep_index_bool_flatten = target_class.reshape(-1)>=0
+        keep_index_flatten = torch.where(keep_index_bool_flatten)[0]
+        # 缺失值长度，需要在分类内部按照批次区分
+        keep_index_bool = keep_index_bool_flatten.reshape(target_class.shape[0],-1)
         # 多个目标损失
-        map_size = len(self.sw_ins_mappings)
+        map_size = len(sw_ins_mappings)
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[...,i]
-                real_target = real_target.reshape(-1,real_target.shape[-1])[keep_index]
+                real_target = real_target.reshape(-1,real_target.shape[-1])[keep_index_flatten]
                 output_item = output[i] 
-                # 输入分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
+                # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
                 x_bar,sv_instru,sv_indus = output_item  
                 x_bar = x_bar.squeeze(-1)
-                x_bar = x_bar.reshape(-1,x_bar.shape[-1])[keep_index]
+                x_bar = x_bar.reshape(-1,x_bar.shape[-1])[keep_index_flatten]
                 # 预测值的一致性损失,忽略目标缺失值的损失计算
                 corr_loss[i] = self.ccc_loss_comp(x_bar.unsqueeze(-1), real_target.unsqueeze(-1))                
                 # 遍历行业分类，对每个分类下的股票列表预测损失进行计算
-                loss_total = []
+                loss_total = [[] for _ in range(map_size)]
+                loss_combine = None
                 ins_indus_targets = last_targets[...,i]
                 for j in range(map_size):
                     # 取得索引对照，并映射到输出值和结果集上
-                    idx_list = self.sw_ins_mappings[j]
-                    # 还需要忽略缺失值
-                    idx_list = np.intersect1d(idx_list,keep_index)
-                    sv_item = sv_instru[:,idx_list]    
-                    ins_indus_target = ins_indus_targets[:,idx_list]
-                    # 计算相关性损失
-                    loss_item = self.ccc_loss_comp(sv_item,ins_indus_target)      
-                    loss_total.append(loss_item)   
-                ce_loss[i] = torch.concat(loss_total).mean()
+                    idx_list = torch.Tensor(IndustryMappingUtil.get_sw_industry_instrument(sw_ins_mappings[j])).to(ins_indus_targets.device).long()
+                    # 还需要忽略缺失值,需要按照批次分别衡量
+                    for k in range(keep_index_bool.shape[0]):
+                        keep_index = torch.where(keep_index_bool[k])[0]
+                        idx_list_bool = torch.isin(idx_list,keep_index)
+                        idx_list = idx_list[idx_list_bool]
+                        # 有可能对应目标当天全部没有数据，则跳过
+                        if idx_list.shape[0]==0:
+                            continue
+                        sv_item = sv_instru[j][k].squeeze(-1)
+                        # 输出结果也需要同步过滤
+                        sv_item = sv_item[torch.where(idx_list_bool)[0]]
+                        ins_indus_target = ins_indus_targets[k,idx_list,0]
+                        # 计算相关性损失
+                        if idx_list.shape[0]==1:
+                            # 如果只有一个值，无法进行相关性损失计算，改为mse损失
+                            loss_item = self.mse_loss(sv_item.unsqueeze(0),ins_indus_target.unsqueeze(0))
+                        else:
+                            loss_item = self.ccc_loss_comp(sv_item.unsqueeze(0),ins_indus_target.unsqueeze(0))      
+                        loss_total[j].append(loss_item)   
+                    if len(loss_total[j])>0:
+                        loss_total[j] = torch.stack(loss_total[j])
+                        if loss_combine is None:
+                            loss_combine = loss_total[j]
+                        else:
+                            loss_combine = torch.concat([loss_combine,loss_total[j]])
+                ce_loss[i] = loss_combine.mean()
                 # 行业分类总体损失，使用相关性损失
-                cls_loss[i] = self.ccc_loss_comp(sv_indus,indus_targets)  
+                ava_index = torch.where(torch.all(indus_targets>-1,dim=-1))[0]
+                # 如果存在缺失值，则忽略，不比较
+                indus_targets_real = indus_targets[ava_index]
+                sv_indus = sv_indus[ava_index,:,0]
+                cls_loss[i] = self.ccc_loss_comp(sv_indus,indus_targets_real)  
                 
                 loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]     

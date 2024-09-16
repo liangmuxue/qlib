@@ -4,13 +4,12 @@
 import os
 import glob
 import shutil  
+from pathlib import Path
 
 import numpy as np
 import datetime
 from tqdm import tqdm
 import pandas as pd
-
-
 import pickle
 
 from cus_utils.db_accessor import DbAccessor
@@ -165,18 +164,25 @@ class HisDataExtractor:
             return "{}/item/{}/institution".format(self.savepath,period_name)
         return "{}/item/{}/origin".format(self.savepath,period_name)
     
-    def export_to_qlib(self,qlib_dir,period,type="item",file_name="all.txt",institution=False):
+    def export_single_to_qlib(self,qlib_dir,csv_path=None):
         """csv格式的单独文件导入到qlib"""
+        
+        csv_path = Path(csv_path).expanduser()
+        dump_all = DumpDataAll(csv_path=csv_path,qlib_dir=qlib_dir,date_field_name="datetime")
+        dump_all.dump_single(csv_path)
+        
+    def export_to_qlib(self,qlib_dir,period,type="item",file_name="all.txt",institution=False):
+        """csv格式的文件导入到qlib"""
         
         if type=="item":
             source_path = self.get_whole_item_datapath(period,institution=institution)
         if type=="sw_industry":
-            source_path = "{}/sw_industry/{}".format(self.savepath,period)        
+            source_path = "{}/sw_industry/{}".format(self.savepath,get_period_name(period))        
         dump_all = DumpDataAll(csv_path=source_path,qlib_dir=qlib_dir,date_field_name="datetime")
         # 设置文件名
         dump_all.INSTRUMENTS_FILE_NAME = file_name
         dump_all.dump()
-                    
+                           
     def get_last_local_data_date(self,code,savepath=None,period=None):            
         """取得本地数据里最后一天"""
         
@@ -537,12 +543,13 @@ if __name__ == "__main__":
     # extractor.download_industry_data()
     # 申万行业成分股票数据
     # extractor.create_industry_cons_data(indus_file_path="/home/qdata/stock_data/ak/sw_industry")
-    # 申万行业分类日K数据
-    # extractor.get_industry_day_data(indus_file_path="/home/qdata/stock_data/ak/sw_industry/day")    
+    # 申万行业分类日K数据,和股票数据放在一起
+    # extractor.get_industry_day_data(indus_file_path="/home/qdata/stock_data/ak/item/day/institution")    
     # 导出行业分类日线数据到qlib
-    qlib_dir = "/home/qdata/qlib_data/custom_cn_data"
+    # qlib_dir = "/home/qdata/qlib_data/sw_industry"
     # extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,type="sw_industry",file_name="sw_industry.txt",institution=False)
-    extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=True)
-    
+    qlib_dir = "/home/qdata/qlib_data/custom_cn_data"
+    # extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=True)
+    extractor.export_single_to_qlib(qlib_dir,csv_path="/home/qdata/stock_data/ak/item/day/institution/801193.csv")
     
                 

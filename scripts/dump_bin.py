@@ -317,7 +317,11 @@ class DumpDataAll(DumpDataBase):
         self._dump_calendars()
         self._dump_instruments()
         self._dump_features()
-
+    
+    def dump_single(self,filepath):
+        calendars_list = self._read_calendars(self._calendars_dir.joinpath(f"{self.freq}.txt"))
+        self._dump_bin(filepath, calendars_list)
+        
 
 class DumpDataFix(DumpDataAll):
     def _dump_instruments(self):
