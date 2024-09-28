@@ -69,10 +69,9 @@ class TFTSeriesDataset(TFTDataset):
     def _pre_process_df(self,df,val_range=None):
         """数据预处理"""
         
-        # 从数据库表中读取股票基础信息，加入申万行业分类数据，后两项放置负值
-        instrument_list = self.dbaccessor.do_query("(select code,sw_industry,tradable_shares from instrument_info where delete_flag=0)" \
-            " union (select code,-1,-1 from sw_industry)")
-        instrument_base_info = {}
+        # 从数据库表中读取股票基础信息，并加入申万行业分类数据，需要填充相互的缺失值
+        instrument_list = self.dbaccessor.do_query("(select code,sw_industry,tradable_shares,-1,-1,-1 from instrument_info where delete_flag=0)" \
+            " union (select code,-1,-1,cons_num,static_pe,yield from sw_industry)")
         ext_info_arr = []
         for item in instrument_list:
             # 对于行业分类数据，需要统一编码
@@ -86,10 +85,9 @@ class TFTSeriesDataset(TFTDataset):
             elif len(industry)>6:
                 industry = industry[:-3]
             tradable_shares = item[2]
-            instrument_base_info[code] = {"industry":industry,"tradable_shares":tradable_shares}
-            ext_info_arr.append([code,industry,tradable_shares])
-        ext_info = pd.DataFrame(np.array(ext_info_arr),columns=["instrument","industry","tradable_shares"]).astype(
-            {"instrument":str,"industry":int,"tradable_shares":float})   
+            ext_info_arr.append([code,industry,tradable_shares,item[3],item[4],item[5]])
+        ext_info = pd.DataFrame(np.array(ext_info_arr),columns=["instrument","industry","tradable_shares","cons_num","static_pe","yield"]).astype(
+            {"instrument":str,"industry":int,"tradable_shares":float,"cons_num":int,"static_pe":float,"yield":float})   
         data_filter = DataFilter()
         # 清除序列长度不够的股票
         group_column = self.get_group_column()
@@ -317,7 +315,7 @@ class TFTSeriesDataset(TFTDataset):
                 val_series_transformed.append(vs_transformed)
                 total_series_transformed.append(total_transformed)
             
-        def build_covariates(column_names,transform_columns=None):
+        def build_covariates(column_names):
             covariates_array = []
             for index,series in enumerate(train_series):
                 group_col_val = series.static_covariates[group_column].values[0]
@@ -343,6 +341,13 @@ class TFTSeriesDataset(TFTDataset):
                 covariates_array.append(covariates_transformed)
             return covariates_array            
 
+        # 在series中植入业务编号，以便后续调试排查
+        def inset_codes(target_series):
+            for index,series in enumerate(target_series):
+                group_col_val = series.static_covariates[group_column].values[0]
+                instrument_code = self.get_group_code_by_rank(group_col_val)
+                series.instrument_code = instrument_code
+
         # 生成过去协变量，并归一化
         logger.info("begin build_covariates")
         # 在过去协变量的数据中加入目标值原值，借用此协变量带入后续dataset中，用于原值分类计算--cancel
@@ -350,8 +355,9 @@ class TFTSeriesDataset(TFTDataset):
         past_convariates = build_covariates(past_columns)      
         # 生成未来协变量，并归一化
         future_convariates = build_covariates(future_columns)    
-        # 生成静态协变量，并归一化
-        # static_convariates = build_covariates(static_columns)   
+        # 在series中植入业务编号，以便后续调试排查
+        inset_codes(train_series)
+        inset_codes(val_series)
         
         # 补充未来协变量数据,与验证数据相对应    
         if fill_future:           

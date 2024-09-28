@@ -119,10 +119,19 @@ class TensorViz(object):
                     update='append',
                 )
                 
-    def viz_line_compare(self,line_pair,win="compare",names=None):    
-        """比较两条线段"""  
-        
-        print("do nothing")    
+    def viz_bar_compare(self,data,win="compare",rownames=None,title=None,legends=None):    
+        """柱状图（多柱并列）"""
+
+        opts=dict(
+            stacked=False,
+            legend=legends,
+            rownames=rownames,
+            title=title,
+            ylabel='',
+            xtickmin=0.4, 
+            xtickstep=0.4
+        )
+        self.viz.bar(X=data,opts=opts,win=win)
      
     def viz_data_hist(self,data,numbins=10,win="histogram",title="histogram"):     
         """绘制柱状比较图"""

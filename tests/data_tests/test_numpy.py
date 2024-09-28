@@ -676,9 +676,11 @@ def test_date():
     print(day.weekday())
 
 def test_where():
-    x = np.array([3,4,5])
-    y = np.array([4,6,7,8])
-    print(x==y)
+    x = [3,4,5]
+    y = np.array([4,5,7,8])
+    flag = np.isin(x,y)
+    ret = [np.where(y==x[i])[0][0] for i in range(len(x))]
+    print(ret)
               
 if __name__ == "__main__":
     # test_mask()

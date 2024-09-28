@@ -110,9 +110,11 @@ class TftDataframeModel():
     ):
         global_var.set_value("dataset", dataset)
         viz_data = TensorViz(env="viz_data")
+        viz_result = TensorViz(env="viz_result")
         viz_result_suc = TensorViz(env="train_result_suc")
         viz_result_fail = TensorViz(env="train_result_fail")
         global_var.set_value("viz_data",viz_data)
+        global_var.set_value("viz_result",viz_result)
         global_var.set_value("viz_result_suc",viz_result_suc)
         global_var.set_value("viz_result_fail",viz_result_fail)
         global_var.set_value("load_ass_data",False)
@@ -135,7 +137,10 @@ class TftDataframeModel():
             return    
         if self.type.startswith("fit_industry_togather"):
             self.fit_industry_togather(dataset)
-            return                   
+            return                
+        if self.type.startswith("pred_industry_togather"):
+            self.fit_industry_togather(dataset)
+            return                 
         if self.type.startswith("pred_togather"):
             self.fit_togather(dataset)
             return    
@@ -165,50 +170,7 @@ class TftDataframeModel():
             self.classify_train(dataset)
             return  
              
-        """对预测数据进行分类训练"""
-        self.pred_data_path = self.kwargs["pred_data_path"]
-        self.load_dataset_file = self.kwargs["load_dataset_file"]
-        self.save_dataset_file = self.kwargs["save_dataset_file"]      
-        dataset_file_name = self.kwargs["dataset_file_name"]
-        df_data_path = os.path.join(self.pred_data_path,dataset_file_name)  
-        
-        if self.load_dataset_file:
-            # 加载所有数据
-            with open(df_data_path, "rb") as fin:
-                train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
-                    pickle.load(fin)   
-        else:
-            # 生成tft时间序列数据集,包括目标数据、协变量等
-            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
-            # 保存所有变量
-            if self.save_dataset_file:
-                dump_data = (train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates)
-                with open(df_data_path, "wb") as fout:
-                    pickle.dump(dump_data, fout)    
-        
-        self.series_data_view(dataset,train_series_transformed,past_convariates=past_convariates,title="train_target")
-        self.series_data_view(dataset,val_series_transformed,past_convariates=None,title="val_target")
-        
-        # 使用股票代码数量作为embbding长度
-        emb_size = dataset.get_emb_size()
-        load_weight = self.optargs["load_weight"]
-        if "monitor" in self.optargs:
-            monitor = dataset
-        else:
-            monitor = None
-        if load_weight:
-            # self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=False)
-            self.model = TFTExtModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],best=False)
-            self.model.batch_size = self.batch_size     
-            self.model.mode = "train"
-            self.model.model.monitor = monitor
-        else:
-            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True) 
-            self.model.monitor = monitor
-        
-        self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=6)
+        print("Do Nothing")
 
     def build_data_asis(
         self,
@@ -822,7 +784,7 @@ class TftDataframeModel():
             my_model = IndustryModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
-                    hidden_size=64,
+                    hidden_size=self.optargs["hidden_size"],
                     lstm_layers=1,
                     num_attention_heads=4,
                     dropout=self.optargs["dropout"],

@@ -10,6 +10,7 @@ from collections import Counter
 from sklearn.preprocessing import MinMaxScaler
 
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
+from pip._internal.models import candidate
 
 def slope_compute(target_ori):
     target = target_ori
@@ -485,7 +486,34 @@ def same_value_eps(data):
 
 def get_trunck_index(total_size,batch_size):
     return total_size//batch_size
+
+
+def compute_average_precision(candidate,target,topk=10):
     
+    top_cls = np.argsort(-candidate)[:topk]
+    top_ret = []
+    target_sort = np.argsort(-target)[:topk]
+    for i in range(topk):
+        if i>=top_cls.shape[0]:
+            continue
+        result = np.where(target_sort==top_cls[i])[0]
+        if len(result)>0:
+            top_ret.append(result[0])    
+    top_ret = np.sort(np.array(top_ret))
+    top_ret = top_ret + 1
+    total_score = 0
+    for i in range(1,top_ret.shape[0]+1):
+        total_score += i/top_ret[i-1]
+    return total_score
+
+
+def softmax(x):
+    """ Softmax function """
+    
+    x -= np.max(x, axis = 1, keepdims = True) 
+    x = np.exp(x) / np.sum(np.exp(x), axis = 1, keepdims = True)
+    return x
+
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)

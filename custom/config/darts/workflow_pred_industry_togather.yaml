@@ -52,13 +52,13 @@ task:
         module_path: darts_pro.tft_process_dataframe
         kwargs:
             GPU: 0
-            batch_size: 16
+            batch_size: 8
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'fit_industry_togather'
+            type: 'pred_industry_togather'
             n_epochs : 180
-            save_dataset_file:  False
+            save_dataset_file: False
             load_dataset_file: &load_dataset_file True
             batch_file_path: 'custom/data/asis/Industry_Alone_202201'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
@@ -79,13 +79,13 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Industry_FirstSw_PatchTST_LayerNorm_202201"
+               model_name: "Industry_FirstSw_PatchTST_202201"
                model_type: 'mlp'
-               load_weight: False
+               load_weight: True
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
-               wave_period : &wave_period 30
+               wave_period : &wave_period 60
                hidden_size: 32
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
@@ -100,8 +100,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train_total: [2010-01-01, 2023-05-31]
-                valid: [2022-01-01, 2022-05-31]
+                train_total: [2015-01-01, 2023-05-31]
+                valid: [2021-11-01, 2022-05-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

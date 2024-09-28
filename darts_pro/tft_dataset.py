@@ -133,7 +133,7 @@ class TFTDataset(DatasetH):
         data.columns = pd.Index(new_cols_idx)    
         # 清除NAN,INF数据(不处理辅助类别数据)
         data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int) 
-        data[data.instrument<'800000'] = data[data.instrument<'800000'].replace([np.inf, -np.inf], np.nan).dropna()
+        data = data.replace([np.inf, -np.inf], np.nan).dropna()
         # 价格不能为负数
         data = data[data["label"]>0]
         # 清除极值数据

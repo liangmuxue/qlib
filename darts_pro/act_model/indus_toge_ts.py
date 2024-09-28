@@ -23,24 +23,15 @@ class _Residual3DBlock(nn.Module):
         dropout: float,
         use_layer_norm: bool,
         ins_dim: int, # 横向数量维度
-        ins_hidden_size=128, # 横向全连接的隐含层维度     
     ):
         """增加一个维度，拓展全连接方向"""
         super().__init__()
 
-        # 标准含残差的mlp单元
+        # 标准含残差的mlp单元，尺寸需要乘以横向数量
         self.forward_block = _ResidualBlock(
-            input_dim=input_dim,
-            output_dim=output_dim,
-            hidden_size=hidden_size,
-            use_layer_norm=use_layer_norm,
-            dropout=dropout,
-        )
-        # 用于横向计算的含残差的mlp单元 
-        self.cross_block = _ResidualBlock(
-            input_dim=ins_dim,
-            output_dim=ins_dim,
-            hidden_size=ins_hidden_size,
+            input_dim=input_dim*ins_dim,
+            output_dim=output_dim*ins_dim,
+            hidden_size=hidden_size*ins_dim,
             use_layer_norm=use_layer_norm,
             dropout=dropout,
         )
@@ -48,19 +39,10 @@ class _Residual3DBlock(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         
         x = self.forward_block(x)
-        if len(x.shape)==3:
-            x = x.permute(0,2,1)
-        else:
-            x = x.permute(0,2,3,1)
-        x = self.cross_block(x)
-        if len(x.shape)==3:
-            x = x.permute(0,2,1)
-        else:
-            x = x.permute(0,3,1,2)        
         return x
 
-class Indus3D(nn.Module):
-    """整合行业数据，形成包含整合时间维度的3D版本的MLP网络"""
+class IndusToge(nn.Module):
+    """整合行业数据，形成包含整合时间维度的3D版本的只包含行业数据的网络"""
     
     def __init__(self, 
         input_dim: int,
@@ -75,8 +57,8 @@ class Indus3D(nn.Module):
         temporal_width_past=None,
         temporal_width_future=None,
         use_layer_norm=True,
-        dropout=0.3,
-        ins_dim=0,
+        dropout=0.5,
+        indus_dim=0,
         train_sw_ins_mappings=None,
         valid_sw_ins_mappings=None,
         **kwargs
@@ -90,7 +72,7 @@ class Indus3D(nn.Module):
                sw_ins_mappings: 行业分类和股票的映射关系,数组类型，数组内长度为行业分类数量，每个分类包含所属成份股票索引列表
         """
         
-        super(Indus3D, self).__init__()
+        super(IndusToge, self).__init__()
         
         output_chunk_length = kwargs["output_chunk_length"]
         input_chunk_length = kwargs["input_chunk_length"]
@@ -111,7 +93,7 @@ class Indus3D(nn.Module):
         self.temporal_width_future = temporal_width_future
         self.input_chunk_length = input_chunk_length
         self.output_chunk_length = output_chunk_length
-        self.ins_dim = ins_dim
+        self.indus_dim = indus_dim
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
         
@@ -165,7 +147,8 @@ class Indus3D(nn.Module):
         self.encoder_dim = encoder_dim
         
         self.encoders = nn.Sequential(
-            _ResidualBlock(
+            _Residual3DBlock(
+                ins_dim=indus_dim,
                 input_dim=encoder_dim,
                 output_dim=hidden_size,
                 hidden_size=hidden_size,
@@ -173,7 +156,8 @@ class Indus3D(nn.Module):
                 dropout=dropout,
             ),
             *[
-                _ResidualBlock(
+                _Residual3DBlock(
+                    ins_dim=indus_dim,
                     input_dim=hidden_size,
                     output_dim=hidden_size,
                     hidden_size=hidden_size,
@@ -183,10 +167,11 @@ class Indus3D(nn.Module):
                 for _ in range(num_encoder_layers - 1)
             ],
         )
-        # 标准未来数据解码器
+        # 未来数据解码器
         self.decoders = nn.Sequential(
             *[
-                _ResidualBlock(
+                _Residual3DBlock(
+                    ins_dim=indus_dim,
                     input_dim=hidden_size,
                     output_dim=hidden_size,
                     hidden_size=hidden_size,
@@ -196,10 +181,10 @@ class Indus3D(nn.Module):
                 for _ in range(num_decoder_layers - 1)
             ],
             # add decoder output layer
-            _ResidualBlock(
+            _Residual3DBlock(
+                ins_dim=indus_dim,
                 input_dim=hidden_size,
-                output_dim=decoder_output_dim
-                * self.output_chunk_length,
+                output_dim=decoder_output_dim*self.output_chunk_length,
                 hidden_size=hidden_size,
                 use_layer_norm=use_layer_norm,
                 dropout=dropout,
@@ -215,7 +200,8 @@ class Indus3D(nn.Module):
         elif future_cov_dim:
             decoder_input_dim += future_cov_dim
         # 解码器投影单元
-        self.temporal_decoder = _ResidualBlock(
+        self.temporal_decoder = _Residual3DBlock(
+            ins_dim=indus_dim,
             input_dim=decoder_input_dim,
             output_dim=output_dim,
             hidden_size=temporal_decoder_hidden,
@@ -223,59 +209,29 @@ class Indus3D(nn.Module):
             dropout=dropout,
         )
         
-        ###### 整合行业分类，形成分类预测和类内成份股票走势预测的多重输出网络 ######
-        industry_layer = []
-        ins_ind_layer = []
-        # 训练和验证阶段，需要不同的映射表
-        sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
-        for i in range(len(sw_ins_mappings)):
-            ins_num = len(IndustryMappingUtil.get_sw_industry_instrument(sw_ins_mappings[i]))
-            ins_decoder = _Residual3DBlock(
-                        input_dim=hidden_size,
-                        output_dim=1,
-                        ins_dim=ins_num, # 使用当前分类内的成份数量作为横向全连接数量
-                        hidden_size=hidden_size//2,
-                        use_layer_norm=True,
-                        dropout=dropout,
-                    )     
-            # 每个行业内的股票成份走势
-            ins_ind_layer.append(ins_decoder)
-            # 行业整体走势
-            indus_layer = nn.Sequential(
-                _ResidualBlock(
-                    input_dim=ins_num*hidden_size,
+        # 总体走向数据解码器
+        self.trend_decoders = nn.Sequential(
+            *[
+                _Residual3DBlock(
+                    ins_dim=indus_dim,
+                    input_dim=hidden_size,
                     output_dim=hidden_size,
                     hidden_size=hidden_size,
                     use_layer_norm=use_layer_norm,
                     dropout=dropout,
-                ),                
-                *[
-                    _ResidualBlock(
-                        input_dim=hidden_size,
-                        output_dim=hidden_size,
-                        hidden_size=hidden_size,
-                        use_layer_norm=use_layer_norm,
-                        dropout=dropout,
-                    )
-                    for _ in range(num_decoder_layers - 1)
-                ],
-            )
-            industry_layer.append(indus_layer)
-        self.ins_ind_layer = nn.ModuleList(ins_ind_layer)
-        # 股票对应生成行业分类特征
-        self.industry_layer = nn.ModuleList(industry_layer)
-        # 行业分类整合特征
-        self.industry_toge_layer = _ResidualBlock(
-            input_dim=hidden_size*len(sw_ins_mappings),
-            output_dim=len(sw_ins_mappings),
-            hidden_size=hidden_size,
-            use_layer_norm=False,
-            dropout=dropout,
+                )
+                for _ in range(num_decoder_layers - 1)
+            ],
+            # 输出维度为1，对应的是每个行业分类的近期趋势范围数值
+            _Residual3DBlock(
+                ins_dim=indus_dim,
+                input_dim=hidden_size,
+                output_dim=1,
+                hidden_size=hidden_size,
+                use_layer_norm=use_layer_norm,
+                dropout=dropout,
+            ),
         )
-        # 行业总体走势残差单元，使用行业过去数值映射未来走势（1段）
-        self.industry_lookback_skip = nn.Linear(
-            self.input_chunk_length, 1
-        )  
                 
     def forward(self, x_in):
         """包括多个不同维度的传播"""
@@ -331,11 +287,13 @@ class Indus3D(nn.Module):
         ]
         encoded = [t.flatten(start_dim=2) for t in encoded if t is not None]
         encoded = torch.cat(encoded, dim=2)
+        # 维度展开
+        encoded = encoded.reshape(encoded.shape[0],-1)
         # 编码器使用标准模式，对后续的解码器共用
         for i in range(len(self.encoders)):
             encoded = self.encoders[i](encoded)    
         
-        # 解码器分为2个分支，分别对应未来输出目标（多段），以及未来数据统一评判（1段）  
+        ### 解码器分为2个分支，分别对应未来输出目标（多段），以及未来数据统一评判（1段）  
         
         # 这里为标准输出解码，时间段和特征维度混合在一起
         decoded_flatten = self.decoders(encoded)
@@ -353,44 +311,21 @@ class Indus3D(nn.Module):
         temporal_decoder_input = [t for t in temporal_decoder_input if t is not None]
 
         temporal_decoder_input = torch.cat(temporal_decoder_input, dim=-1)
+        temporal_decoder_input = temporal_decoder_input.reshape(temporal_decoder_input.shape[0],self.output_chunk_length,-1)
         temporal_decoded = self.temporal_decoder(temporal_decoder_input)
+        temporal_decoded = temporal_decoded.reshape(temporal_decoded.shape[0],self.indus_dim,self.output_chunk_length)
 
         # 走势残差计算
         skip = self.lookback_skip(x_lookback.transpose(2, 3)).transpose(2, 3)
-
-        # add skip connection
-        y = temporal_decoded + skip.reshape_as(
-            temporal_decoded
-        )
+        # y = temporal_decoded + skip.reshape_as(
+        #     temporal_decoded
+        # )
+        y = temporal_decoded 
         y = y.view(-1, x.shape[1],self.output_chunk_length, self.output_dim)
         
-        ### 行业整合解码部分 ###
-        
-        map_size = len(self.ins_ind_layer)
-        # 切分成每个行业分类，在分类内对成份股票进行解码
+        ### 行业横向整合解码部分 ###
+        indus_sv = self.trend_decoders(encoded)
         ins_decoded_data = []
-        industry_decoded_data = None
-        sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
-        for i in range(map_size):
-            m = self.ins_ind_layer[i]
-            idx_list = torch.Tensor(IndustryMappingUtil.get_sw_industry_instrument(sw_ins_mappings[i])).to(x.device).long()
-            # 通过索引映射到实际行业内股票组合
-            ins_data = encoded[:,idx_list,...]
-            ins_data = ins_data.reshape(ins_data.shape[0],-1)
-            # ins_decoded = m(ins_data)
-            # # 形成多个解码序列，每个序列长度不同
-            # ins_decoded_data.append(ins_decoded)
-            # 进一步进行整体行业计算
-            ind_decoded = self.industry_layer[i](ins_data)
-            if industry_decoded_data is None:
-                industry_decoded_data = ind_decoded
-            else:
-                industry_decoded_data = torch.cat([industry_decoded_data,ind_decoded],dim=1)
-            
-        # 使用行业分类的过去数值范围进行残差计算
-        # skip = self.industry_lookback_skip(x_industry_past_values)
-        indus_sv = self.industry_toge_layer(industry_decoded_data)
-        
         return y,ins_decoded_data,indus_sv
                                       
                                       

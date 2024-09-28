@@ -6,7 +6,11 @@ import pandas as pd
 from numba.core.types import none
 import torch
 
+from cus_utils.db_accessor import DbAccessor
 from darts.logging import raise_if_not
+from httpx._status_codes import codes
+
+code_level = "sw_first_code"
 
 class IndustryMappingUtil:
     """用于行业分类的功能类"""
@@ -63,11 +67,11 @@ class IndustryMappingUtil:
         # 同时从股票及分类列表中删除不在数据集范围的数据
         instrument_df = instrument_df[instrument_df["code"].isin(target_codes)]
         # 联合筛选行业数据集，取得交集，去掉不在真正序列中的部分
-        sec_codes = instrument_df['sw_second_code'].unique()
+        sec_codes = instrument_df[code_level].unique()
         sec_codes = np.array([code[:-3] for code in sec_codes])
         sw_industry_codes = np.intersect1d(sec_codes,sw_industry_codes)
-        instrument_df["sw_second_code"] = instrument_df["sw_second_code"].str[:-3]
-        instrument_df = instrument_df[instrument_df["sw_second_code"].isin(sw_industry_codes)]
+        instrument_df[code_level] = instrument_df[code_level].str[:-3]
+        instrument_df = instrument_df[instrument_df[code_level].isin(sw_industry_codes)]
         # 生成股票数据自身排序号
         instrument_df[g_col] = instrument_df["code"].rank(method='dense',ascending=False).astype("int")  
         # 生成行业数据最终结果      
@@ -82,8 +86,8 @@ class IndustryMappingUtil:
         instrument_df[g_col] = instrument_df["code"].rank(method='dense',ascending=False).astype("int") 
         instrument_df[g_col] = instrument_df[g_col] - 1 
         # 排序保证后续对应关系不变if
-        instrument_df = instrument_df.sort_values(by=['sw_second_code', 'code'], ascending=[True, True])
-        for sw_code,group in instrument_df.groupby("sw_second_code"):
+        instrument_df = instrument_df.sort_values(by=[code_level, 'code'], ascending=[True, True])
+        for sw_code,group in instrument_df.groupby(code_level):
             sw_code = int(sw_code)
             # 关联之前的数据，按照规范逐个生成
             industry_index = sw_industry_index[sw_industry_index[:,0]==sw_code][0,1]
@@ -147,7 +151,11 @@ class IndustryMappingUtil:
     @staticmethod
     def get_instrument_with_industry(sw_ins_mapping,indus_rank,ins_rank):
         return sw_ins_mapping[indus_rank,2][ins_rank].astype(np.int32)
-           
+
+    @staticmethod
+    def get_instruments_in_industry(sw_ins_mapping,indus_rank):
+        return sw_ins_mapping[indus_rank,2].astype(np.int32)
+               
     @staticmethod
     def get_sw_industry_codes(sw_ins_mappings):
         return sw_ins_mappings[:,1].astype(np.int32)
@@ -194,4 +202,48 @@ class IndustryMappingUtil:
         else:
             ori_data = None
         return ori_data 
-                
+    
+    @staticmethod
+    def get_industry_info(sw_ins_mappings,dataset=None):
+        """关联查询行业分类信息"""
+        
+        codes = sw_ins_mappings[:,1].astype(str)
+        result_df = IndustryMappingUtil.get_industry_info_with_code(codes)
+        
+        return result_df    
+
+    @staticmethod
+    def get_industry_info_with_code(codes,dataset=None):
+        """关联查询行业分类信息"""
+        
+        codes = ",".join(codes)
+        dbaccessor = DbAccessor({})
+        sql = "select code,name,level,cons_num,yield from sw_industry where left(code, 6) in ({})".format(codes)
+        result_rows = dbaccessor.do_query(sql)   
+        results = []
+        for row in result_rows:
+            results.append([row[0],row[1],row[2],row[3],row[4]])
+        result_df = pd.DataFrame(results,columns=['code','name','level','cons_num','yield'])
+        
+        return result_df  
+       
+    @staticmethod
+    def assc_series_and_codes(codes,target_series,dataset=None):
+        """关联业务编号和序列排序号
+            Params:
+               codes： 业务编号数据（1维）
+               target_series： 目标序列列表
+        """
+        
+        g_col = dataset.get_group_rank_column()
+        combine_codes = np.zeros([codes.shape[0],2])
+        combine_codes[:,0] = codes
+        for index,ts in enumerate(target_series):
+            rank_code = int(ts.static_covariates[g_col].values[0])
+            code = int(dataset.get_group_code_by_rank(rank_code))
+            match_index = np.where(combine_codes[:,0]==code)[0]
+            if match_index.shape[0]>0:
+                combine_codes[match_index,1] = index
+        
+        return combine_codes.astype(np.int64)  
+                    

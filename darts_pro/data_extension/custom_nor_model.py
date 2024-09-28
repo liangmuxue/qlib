@@ -545,9 +545,9 @@ class TFTBatchModel(TFTExtModel):
                 checkpoint_callback = pl_callbacks.ModelCheckpoint(
                     dirpath=c.dirpath,
                     save_last=True,
-                    monitor="val_QTLU_loss",
-                    filename="{epoch}-{val_QTLU_loss:.2f}",
-                    every_n_epochs=2,
+                    monitor="val_loss",
+                    filename="{epoch}-{val_loss:.2f}",
+                    every_n_epochs=1,
                     save_top_k = -1
                 )
                 checkpoint_callback.CHECKPOINT_NAME_LAST = "last-{epoch}"        

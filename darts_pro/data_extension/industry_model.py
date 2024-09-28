@@ -19,6 +19,7 @@ from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from cus_utils.tensor_viz import TensorViz
 from darts_pro.data_extension.togather_model import DateTogeModel
 from darts_pro.data_extension.industry_align_dataset import IndustryShiftedDataset
+from darts_pro.data_extension.industry_togather_dataset import IndustryTogatherDataset
 from darts_pro.data_extension.date_align_dataset import DateShiftedDataset
 from darts_pro.mam.industry_togather_module import IndustryTogeModule
 from darts_pro.data_extension.custom_model import logger
@@ -70,7 +71,7 @@ class IndustryModel(DateTogeModel):
         
         # 训练模式下，需要多放回一个静态数据对照集合
         if mode=="train":
-            ds = IndustryShiftedDataset(
+            ds = IndustryTogatherDataset(
                 target_series=target,
                 covariates=past_covariates,
                 future_covariates=future_covariates,
@@ -85,7 +86,7 @@ class IndustryModel(DateTogeModel):
             self.train_sw_ins_mappings = ds.sw_ins_mappings            
         # 验证模式下，需要传入之前存储的静态数据集合
         if mode=="valid":
-            ds = IndustryShiftedDataset(
+            ds = IndustryTogatherDataset(
                 target_series=target,
                 covariates=past_covariates,
                 future_covariates=future_covariates,
@@ -162,7 +163,7 @@ class IndustryModel(DateTogeModel):
         self.categorical_embedding_sizes = categorical_embedding_sizes
                
         model = IndustryTogeModule(
-               ins_dim=past_target.shape[0],
+               indus_dim=past_target.shape[0],
                 output_dim=self.output_dim,
                 variables_meta_array=variables_meta_array,
                 num_static_components=n_static_components,
