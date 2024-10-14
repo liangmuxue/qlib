@@ -147,7 +147,7 @@ class TFTDataset(DatasetH):
         # 补充商品指数数据,按照月份合并
         # data = data.merge(self.qyspjg_data,on="month",how="left",indicator=True)
         # month重新编号为1到12
-        data["month"] = data["month"].str.slice(5,7)
+        data["month"] = data["month"].str.slice(5,7).astype(int) - 1
         data["dayofweek"] = data.datetime.dt.dayofweek    
         data["dayofmonth"] = data.datetime.dt.day  
         # 保留时间戳

@@ -473,7 +473,7 @@ class IndusAloneLoss(UncertaintyLoss):
         """Multiple Loss Combine"""
 
         (output,_,_) = output_ori
-        (target,target_class,last_targets,indus_targets) = target_ori
+        (target,target_class,future_round_targets,future_sw_index_target) = target_ori
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
         fds_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
@@ -487,21 +487,26 @@ class IndusAloneLoss(UncertaintyLoss):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[...,i]
                 real_target = real_target.reshape(-1,real_target.shape[-1])[keep_index_flatten]
+                index_target_item = future_sw_index_target[:,i]
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
-                x_bar,sv = output_item  
+                x_bar,sv,sw_index_data = output_item  
                 x_bar = x_bar.squeeze(-1)
                 x_bar_flatten = x_bar.reshape(-1,x_bar.shape[-1])[keep_index_flatten]
                 # 预测值的一致性损失,忽略目标缺失值的损失计算
-                corr_loss[i] = self.ccc_loss_comp(x_bar_flatten.unsqueeze(-1), real_target.unsqueeze(-1))                
+                corr_loss[i] = self.ccc_loss_comp(x_bar_flatten, real_target)                
                 # 行业分类总体损失，使用相关性损失
                 for j in range(target_class.shape[0]):
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
-                    last_targets_item = last_targets[j,keep_index,i]
+                    round_targets_item = future_round_targets[j,keep_index,i]
                     sv_indus = sv[j,keep_index]
-                    cls_loss[i] += self.ccc_loss_comp(sv_indus,last_targets_item.unsqueeze(-1))  
-                
+                    cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
+                    # cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
+                # 指标整体数值损失
+                ce_loss[i] = torch.sum(torch.abs(sw_index_data.squeeze(-1)-index_target_item))
                 loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
-        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]         
+        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]     
+    
+        

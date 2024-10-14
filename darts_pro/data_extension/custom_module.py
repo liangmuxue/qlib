@@ -547,7 +547,7 @@ class _CusModule(BaseMixModule):
         for i,imp_idx in enumerate(import_index):
             ts = target_info[imp_idx]
             price_array = ts["price_array"][self.input_chunk_length:]
-            p_taraget_class = compute_price_class(price_array,mode="fast")
+            p_taraget_class = compute_price_class(price_array,mode="first_last")
             import_price_result.append([imp_idx,ts["item_rank_code"],p_taraget_class])
         import_price_result = np.array(import_price_result)        
         price_class = np.array(price_class)

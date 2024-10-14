@@ -541,15 +541,17 @@ if __name__ == "__main__":
     # extractor.create_base_info()
     # 申万行业分类数据
     # extractor.download_industry_data()
+    # 申万指数数据
+    # extractor.download_sw_index()
     # 申万行业成分股票数据
     # extractor.create_industry_cons_data(indus_file_path="/home/qdata/stock_data/ak/sw_industry")
     # 申万行业分类日K数据,和股票数据放在一起
     # extractor.get_industry_day_data(indus_file_path="/home/qdata/stock_data/ak/item/day/institution")    
-    # 导出行业分类日线数据到qlib
-    # qlib_dir = "/home/qdata/qlib_data/sw_industry"
-    # extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,type="sw_industry",file_name="sw_industry.txt",institution=False)
+    # 申万指数日K数据,和股票数据放在一起
+    # extractor.get_sw_index_day_data(indus_file_path="/home/qdata/stock_data/ak/item/day/institution") 
+    # 结合其他股票数据一起导入，不单独导入了
     qlib_dir = "/home/qdata/qlib_data/custom_cn_data"
-    # extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=True)
-    extractor.export_single_to_qlib(qlib_dir,csv_path="/home/qdata/stock_data/ak/item/day/institution/801193.csv")
+    extractor.export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=True)
+    # extractor.export_single_to_qlib(qlib_dir,csv_path="/home/qdata/stock_data/ak/item/day/institution/801193.csv")
     
                 

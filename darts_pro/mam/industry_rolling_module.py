@@ -14,8 +14,7 @@ from pytorch_lightning.trainer.states import RunningStage
 from sklearn.preprocessing import MinMaxScaler
 
 import cus_utils.global_var as global_var
-from darts_pro.act_model.indus_toge_ts import IndusToge
-from darts_pro.act_model.patch_tst import PatchTST
+from darts_pro.act_model.mixer_ts import TimeMixer
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_weight_with_target
 from losses.clustering_loss import IndusAloneLoss
 from cus_utils.common_compute import compute_average_precision,normalization
@@ -28,7 +27,7 @@ MixedCovariatesTrainTensorType = Tuple[
 from .mlp_module import MlpModule
 
 
-class IndustryTogeModule(MlpModule):
+class IndustryRollingModule(MlpModule):
     """聚合行业数据一起预测的模型"""
     
     def __init__(
@@ -95,6 +94,7 @@ class IndustryTogeModule(MlpModule):
                 _,
                 _,
                 _,
+                _,
                 _
             ) = self.train_sample
                   
@@ -104,40 +104,21 @@ class IndustryTogeModule(MlpModule):
             # 只检查属于自己模型的协变量
             past_covariates_item = past_covariate[...,past_conv_index[0]:past_conv_index[1]]            
             past_covariates_shape = past_covariates_item.shape[-1]
-            historic_future_covariates_shape = historic_future_covariate.shape[-1]
-            # 记录动态数据长度，后续需要切片
-            self.dynamic_conv_shape = past_target_shape + past_covariates_shape
+            
+            # 过去协变量维度计算,不使用时间协变量
             input_dim = (
                 past_target_shape
                 + past_covariates_shape
-                + historic_future_covariates_shape
             )
-    
-            output_dim = 1
-    
-            future_cov_dim = (
-                future_covariate.shape[-1] if future_covariate is not None else 0
-            )
-            
-            static_cov_dim = (
-                # 只保留归一化字段
-                static_covariates.shape[-1] - 1
-                if static_covariates is not None
-                else 0
-            )
-    
-            # 使用patch tst模型
-            model = PatchTST(
-                c_in=self.indus_dim, # 对应多变量数量（行业分类数量）
-                context_window=self.input_chunk_length,
-                target_window=self.output_chunk_length,
-                patch_len=self.input_chunk_length, # 对应协变量维度
-                patch_num=input_dim+static_cov_dim,
+           
+            # 使用TimeMixer模型
+            model = TimeMixer(
+                num_nodes=self.indus_dim, # 对应多变量数量（行业分类数量）
+                seq_len=self.input_chunk_length,
+                pred_len=self.output_chunk_length,
+                past_cov_dim=input_dim,
                 dropout=dropout,
-                past_cov_dim=past_covariates_shape,
-                future_cov_dim=future_cov_dim,
-                static_cov_dim=static_cov_dim,                
-                **kwargs
+                device=device
             )           
             
             return model
@@ -159,10 +140,12 @@ class IndustryTogeModule(MlpModule):
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据配置，不同的模型使用不同的过去协变量
-            past_convs_item = x_in[0][i]            
+            past_convs_item = x_in[0][i]    
+            round_target =  x_in[4][...,i]        
+            past_index_target = x_in[5][...,i]   
             # 根据优化器编号匹配计算
             if optimizer_idx==i or optimizer_idx>=len(self.sub_models) or optimizer_idx==-1:
-                x_in_item = (past_convs_item,x_in[1],x_in[2])
+                x_in_item = (past_convs_item,x_in[1],x_in[2],round_target,past_index_target)
                 out = m(x_in_item)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
@@ -196,14 +179,15 @@ class IndustryTogeModule(MlpModule):
             past_future_covariates,
             future_target,
             target_class,
-            last_targets,
-            sw_indus_targets_total,
+            past_round_targets,
+            future_round_targets,
+            sw_index_target,
             target_info
         ) = train_batch
                 
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,sw_indus_targets_total)     
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,past_round_targets,sw_index_target)     
         past_target = train_batch[0]
-        input_batch,future_indus_targets = self._process_input_batch(inp)
+        input_batch = self._process_input_batch(inp)
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained   
@@ -211,10 +195,10 @@ class IndustryTogeModule(MlpModule):
         ce_loss = None
         for i in range(len(self.past_split)):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
-            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,last_targets,future_indus_targets),optimizers_idx=i)
+            loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,future_round_targets,sw_index_target),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
             self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            # self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append(detail_loss)
             total_loss += loss     
@@ -254,28 +238,29 @@ class IndustryTogeModule(MlpModule):
             past_future_covariates,
             future_target,
             target_class,
-            last_targets,
-            sw_indus_targets_total,
+            past_round_targets,
+            future_round_targets,
+            sw_index_target,
             target_info
         ) = val_batch
               
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,sw_indus_targets_total) 
-        input_batch,future_indus_targets = self._process_input_batch(inp)
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,past_round_targets,sw_index_target) 
+        input_batch = self._process_input_batch(inp)
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,last_targets,future_indus_targets),optimizers_idx=-1)
+                    (future_target,target_class,future_round_targets,sw_index_target),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         preds_combine = []
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
-        output_combine = (output,last_targets,future_indus_targets)
+        output_combine = (output,past_round_targets,future_round_targets)
         return loss,detail_loss,output_combine
 
     def _process_input_batch(
@@ -288,7 +273,8 @@ class IndustryTogeModule(MlpModule):
             historic_future_covariates,
             future_covariates,
             static_covariates,
-            sw_indus_targets,
+            past_round_targets,
+            sw_index_target
         ) = input_batch
         dim_variable = -1
 
@@ -297,11 +283,10 @@ class IndustryTogeModule(MlpModule):
         for i,p_index in enumerate(self.past_split):
             past_conv_index = self.past_split[i]
             past_covariates_item = past_covariates[...,past_conv_index[0]:past_conv_index[1]]
-            # 修改协变量生成模式，只取自相关目标作为协变量
+            # 修改协变量生成模式，只取自相关目标作为协变量，不使用时间协变量
             conv_defs = [
                         past_target[...,i:i+1],
                         past_covariates_item,
-                        historic_future_covariates,
                 ]            
             x_past = torch.cat(
                 [
@@ -314,21 +299,21 @@ class IndustryTogeModule(MlpModule):
             
         # 忽略静态协变量第一列(索引列),后边的都是经过归一化的
         static_covariates = static_covariates[...,1:]
-        # 行业分类过去目标值
-        past_indus_targets = sw_indus_targets[...,:self.input_chunk_length]
-        # 行业分类未来数值幅度区间,计算3个交易日的差值
-        future_indus_targets = sw_indus_targets[...,self.input_chunk_length:]
-        future_indus_targets = torch.sum(future_indus_targets[...,:3],dim=-1)
+        
+        # 使用指标过去数据作为输入一部分
+        past_index_target = sw_index_target[:,:self.input_chunk_length,:]                
         # 整合相关数据，分为输入值和目标值两组
-        return (x_past_array, future_covariates, static_covariates,past_indus_targets),future_indus_targets
+        return (x_past_array, historic_future_covariates,future_covariates, static_covariates,past_round_targets,past_index_target)
                
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
 
-        (future_target,target_class,last_target,future_indus_targets) = target   
+        (future_target,target_class,future_round_targets,sw_index_target) = target   
+        # 整体指数数据，只需要一个值
+        future_sw_index_target = sw_index_target[:,self.input_chunk_length,:]
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        return self.criterion(output,(future_target,target_class,last_target,future_indus_targets),sw_ins_mappings=sw_ins_mappings,mode=self.step_mode,optimizers_idx=optimizers_idx)        
+        return self.criterion(output,(future_target,target_class,future_round_targets,future_sw_index_target),sw_ins_mappings=sw_ins_mappings,mode=self.step_mode,optimizers_idx=optimizers_idx)        
 
     def on_validation_epoch_end(self):
         """重载父类方法，修改指标计算部分"""
@@ -373,16 +358,17 @@ class IndustryTogeModule(MlpModule):
             tar_viz = global_var.get_value("viz_data")
             viz_result = global_var.get_value("viz_result")
             viz_total_size = 0
-            output_3d,past_target_3d,future_target_3d,target_class_3d,last_targets_3d,future_indus_targets,target_info_3d = self.combine_output_total(self.output_result)
+            output_3d,past_target_3d,future_target_3d,target_class_3d,past_round_targets_total,future_round_targets_total,round_index_targets_total,target_info_3d = self.combine_output_total(self.output_result)
             for index in range(target_class_3d.shape[0]):
                 # if viz_total_size>3:
                 #     break
                 viz_total_size+=1
                 keep_index = np.where(target_class_3d[index]>=0)[0]
-                indus_targets = last_targets_3d[index]
+                indus_targets = future_round_targets_total[index]
+                index_target = round_index_targets_total[index,self.input_chunk_length,:]
                 ts_arr = target_info_3d[index][keep_index]
                 date = ts_arr[0]["future_start_datetime"]
-                if date!=20220310:
+                if date!=20220421:
                     continue
                 codes = [ts["instrument"] for ts in ts_arr]
                 result_df = IndustryMappingUtil.get_industry_info_with_code(codes)
@@ -391,16 +377,21 @@ class IndustryTogeModule(MlpModule):
                 win = "industry_comp_{}".format(viz_total_size)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
-                    cls_output = output_3d[-1][index,:,j]
-                    cls_output = normalization(cls_output)
+                    if j==0:
+                        continue
+                    cls_output = output_3d[2][index,:,j]
+                    sw_index_value = output_3d[3][index,j]
+                    index_target_item = index_target[j].item()
                     view_data = np.stack([cls_output,indus_targets[:,j]]).transpose(1,0)
                     view_data = view_data[keep_index]
                     win = "target_comp_{}_{}".format(j,viz_total_size)
-                    target_title = "target_{} compare,date:{}".format(j,date)
+                    target_title = "target{} pred_tar:{}_{},date:{}".format(j,sw_index_value,index_target_item,date)
                     tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=rownames,legends=["pred","target"])    
                     xbar_data = output_3d[0][index,...,j]
                     # 可视化当前预测目标的时间序列
                     for k in range(xbar_data.shape[0]):
+                        # if k!=5:
+                        #     continue
                         past_target_item = past_target_3d[index,k,:,j]
                         future_target_item = future_target_3d[index,k,:,j]
                         target_data = np.concatenate([past_target_item,future_target_item],axis=0)                        
@@ -438,24 +429,25 @@ class IndustryTogeModule(MlpModule):
                 self.draw_row(pred_center_data, pred_second_data, pred_third_data,target_item=target_item, ts=ts, names=names,viz=viz_target,win=win)
                                
     def dump_val_data(self,val_batch,outputs,detail_loss):
-        output,last_targets,future_indus_targets = outputs
+        output,past_round_targets,future_round_targets = outputs
         (past_target,past_covariates,historic_future_covariates,future_covariates,
-            static_covariates,past_future_covariates,future_target,target_class,last_targets,sw_indus_targets,target_info) = val_batch
+            static_covariates,past_future_covariates,future_target,target_class,_,_,round_index_targets,target_info) = val_batch
         # 保存数据用于后续验证
         output_res = (output,past_target.cpu().numpy(),future_target.cpu().numpy(),target_class.cpu().numpy(),
-                      last_targets.cpu().numpy(),future_indus_targets.cpu().numpy(),target_info)
+                      past_round_targets.cpu().numpy(),future_round_targets.cpu().numpy(),round_index_targets.cpu().numpy(),target_info)
         self.output_result.append(output_res)
 
     def combine_result_data(self,output_result=None):
         """计算涨跌幅分类准确度以及相关数据"""
         
         # 使用全部验证结果进行统一比较
-        output_3d,past_target_3d,future_target_3d,target_class_3d,last_targets_3d,future_indus_targets,target_info_3d  = self.combine_output_total(output_result)
+        output_3d,past_target_3d,future_target_3d,target_class_3d,last_targets_3d,future_indus_targets,round_index_targets_total,target_info_3d  = self.combine_output_total(output_result)
         total_imp_cnt = np.where(target_class_3d==3)[0].shape[0]
         rate_total = {}
         target_top_match_total = {}
         # 遍历按日期进行评估
         for i in range(target_class_3d.shape[0]):
+            future_target = future_target_3d[i]
             target_info_list = target_info_3d[i]
             target_class_list = target_class_3d[i]
             # 有一些空值，找出对应索引后续做忽略处理
@@ -487,14 +479,14 @@ class IndustryTogeModule(MlpModule):
                 # 预测数量以及总数量
                 rate_total[date].append(total_cnt.item())    
                 # 追加计算目标值排序靠前的命中率，忽略缺失值
-                ind_score = self.compute_top_map(output_list,indus_targets,last_target_list,keep_index=keep_index)
+                ind_score = self.compute_top_map(output_list,future_target,last_target_list,indus_targets=indus_targets)
                 target_top_match_total[date] = ind_score
                 
         target_top_match_total = np.array(list(target_top_match_total.values()))
         
         return rate_total,total_imp_cnt,target_top_match_total
     
-    def compute_top_map(self,output_list,indus_targets,last_target_list,keep_index=None):
+    def compute_top_map(self,output_list,future_target,last_target_list,indus_targets=None):
         """分别计算行业分类排序准确率和分类内股票排序平均精度"""
         
         industry_topk = 6
@@ -502,13 +494,18 @@ class IndustryTogeModule(MlpModule):
         acc = []
         # 排序正反参数
         sort_flag = [1,1,-1]
+        sv_item = output_list[0]
         cls_list = output_list[1]
-        # 计算行业分类总体查准率（AP）
+        pred_range = sv_item[:,-1,:] - sv_item[:,0,:]
+        tar_range = future_target[:,-1,:] - future_target[:,0,:]
         ind_score = [0 for _ in range(last_target_list.shape[-1])]
         for i in range(last_target_list.shape[-1]):
-            ind_score[i] = compute_average_precision(cls_list[:,i],indus_targets,topk=industry_topk)
+            ind_score[i] = compute_average_precision(cls_list[:,i],indus_targets,topk=industry_topk)        
+        # for i in range(sv_item.shape[-1]):
+        #     ind_score[i] = compute_average_precision(pred_range[:,i],tar_range[:,i],topk=industry_topk)
         return ind_score
-            
+
+                
     def combine_output_total(self,output_result):
         """重载父类方法，以适应整合数据"""
         
@@ -516,45 +513,55 @@ class IndustryTogeModule(MlpModule):
         target_info_total = []
         past_target_total = []   
         future_target_total = []  
-        last_targets_total = []    
-        indus_targets_total = []
+        past_round_targets_total = []    
+        future_round_targets_total = []
+        round_index_targets_total = []
         x_bar_total = []
         sv_total = [[] for _ in range(len(self.past_split))]
         cls_total = []
+        ce_index_total = []
         for item in output_result:
-            (output,past_target,future_target,target_class,last_targets,indus_targets,target_info) = item
+            (output,past_target,future_target,target_class,past_round_targets,future_round_targets,round_index_targets,target_info) = item
             x_bar_inner = []
             sv_inner = []
             cls_inner = []
+            ce_index_inner = []
             for i in range(len(self.past_split)):
                 output_item = output[i]
-                x_bar,sv_indus = output_item 
+                x_bar,sv_indus,ce_index = output_item 
                 x_bar_inner.append(x_bar.cpu().numpy())
                 cls_inner.append(sv_indus.cpu().numpy().squeeze(-1))
+                ce_index_inner.append(ce_index.cpu().numpy().squeeze(-1))
+                
             x_bar_inner = np.stack(x_bar_inner).transpose(1,2,3,0)
             cls_inner = np.stack(cls_inner).transpose(1,2,0)
+            ce_index_inner = np.stack(ce_index_inner).transpose(1,0)
             x_bar_total.append(x_bar_inner)
             cls_total.append(cls_inner)
+            ce_index_total.append(ce_index_inner)
             
             target_info_total.append(target_info)
             target_class_total.append(target_class)
             past_target_total.append(past_target)
             future_target_total.append(future_target)
-            last_targets_total.append(last_targets)
-            indus_targets_total.append(indus_targets)
+            past_round_targets_total.append(past_round_targets)
+            future_round_targets_total.append(future_round_targets)
+            round_index_targets_total.append(round_index_targets)
             
         x_bar_total = np.concatenate(x_bar_total)
         cls_total = np.concatenate(cls_total)
+        ce_index_total = np.concatenate(ce_index_total)
 
         target_class_total = np.concatenate(target_class_total)
         past_target_total = np.concatenate(past_target_total)
         future_target_total = np.concatenate(future_target_total)
-        last_targets_total = np.concatenate(last_targets_total)
-        indus_targets_total = np.concatenate(indus_targets_total)
+        past_round_targets_total = np.concatenate(past_round_targets_total)
+        future_round_targets_total = np.concatenate(future_round_targets_total)
+        round_index_targets_total = np.concatenate(round_index_targets_total)
         target_info_total = np.concatenate(target_info_total)
                     
-        return (x_bar_total,sv_total,cls_total),past_target_total,future_target_total,target_class_total, \
-                    last_targets_total,indus_targets_total,target_info_total        
+        return (x_bar_total,sv_total,cls_total,ce_index_total),past_target_total,future_target_total,target_class_total, \
+                    past_round_targets_total,future_round_targets_total,round_index_targets_total,target_info_total        
 
     def build_import_index(self,output_data=None,target_info_list=None):  
         """生成涨幅达标的预测数据下标"""

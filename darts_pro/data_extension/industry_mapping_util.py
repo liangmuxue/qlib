@@ -218,7 +218,7 @@ class IndustryMappingUtil:
         
         codes = ",".join(codes)
         dbaccessor = DbAccessor({})
-        sql = "select code,name,level,cons_num,yield from sw_industry where left(code, 6) in ({})".format(codes)
+        sql = "select code,name,level,cons_num,yield from sw_industry where left(code, 6) in ({}) order by code asc".format(codes)
         result_rows = dbaccessor.do_query(sql)   
         results = []
         for row in result_rows:

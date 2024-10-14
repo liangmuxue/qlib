@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torchmetrics.regression import ConcordanceCorrCoef
 
+import pandas as pd
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
@@ -158,6 +159,21 @@ def normalization_axis(data,res=1e-5,avoid_zero=True,axis=0):
     if avoid_zero:
         rtn = rtn + res  
     return rtn
+
+def normalization_except_outlier(x):
+    """归一化并可以兼顾处理离群值"""
+    
+    rtn = (x - np.median(x,axis=0)) / (np.percentile(x, 75,axis=0) - np.percentile(x, 25,axis=0))
+    return rtn
+
+def interquartile_range(array):
+    p_low, p_up = np.percentile(array, 25), np.percentile(array, 75)
+    bound = (p_up - p_low) * 1.2
+    eps = np.random.random(1)/1e5
+    lower_bound, upper_bound = p_low - bound, p_up + bound
+    array[(array<lower_bound)] = lower_bound + eps
+    array[(array>upper_bound)] = upper_bound + eps
+    return array
 
 def batch_normalization(data,res=1e-5):
     if isinstance(data, torch.Tensor):

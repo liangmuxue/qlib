@@ -69,9 +69,9 @@ class TFTSeriesDataset(TFTDataset):
     def _pre_process_df(self,df,val_range=None):
         """数据预处理"""
         
-        # 从数据库表中读取股票基础信息，并加入申万行业分类数据，需要填充相互的缺失值
+        # 从数据库表中读取股票基础信息，并加入申万行业分类以及指数数据，需要填充相互的缺失值
         instrument_list = self.dbaccessor.do_query("(select code,sw_industry,tradable_shares,-1,-1,-1 from instrument_info where delete_flag=0)" \
-            " union (select code,-1,-1,cons_num,static_pe,yield from sw_industry)")
+            " union (select code,-1,-1,cons_num,static_pe,yield from sw_industry) union (select code,-1,-1,-1,-1,-1 from sw_index)")
         ext_info_arr = []
         for item in instrument_list:
             # 对于行业分类数据，需要统一编码
@@ -208,55 +208,43 @@ class TFTSeriesDataset(TFTDataset):
             logger.debug("emb size after p:{}".format(self.get_emb_size()))
         self.target_scalers = self._create_target_scalers(self.df_all)       
         
-    def build_series_data(self,data_file=None,outer_df=None,no_series_data=False,val_ds_filter=False):
+    def build_series_data(self,outer_df=None,no_series_data=False,val_ds_filter=False,fill_future=True):
         """从pandas数据生成时间序列类型数据"""
+
         
-        if data_file is not None:
-            # 直接从文件中读取数据
-            with open(data_file, "rb") as fin:
-                df_ref = pickle.load(fin)          
-                self.train_range = self.kwargs["segments"]["train_total"] 
-                self.valid_range = self.kwargs["segments"]["valid"] 
-                self.prepare_inner_data(df_ref) 
-                self.df_all = df_ref
-                df_train = df_ref[df_ref["datetime"]<pd.to_datetime(str(self.valid_range[0]))]
-                df_val = df_ref[(df_ref["datetime"]>=pd.to_datetime(str(self.valid_range[0]))) & (df_ref["datetime"]<=pd.to_datetime(str(self.valid_range[1])))]
-                self.target_scalers = self._create_target_scalers(self.df_all)
-            if no_series_data:
-                return None          
-            self.df_train = df_train
-            self.df_val = df_val 
-            return self.create_series_data(df_ref,df_train,df_val,fill_future=False,no_series_data=no_series_data)
-            
-        total_range = self.segments["train_total"]
-        valid_range = self.segments["valid"]
-        return self.build_series_data_step_range(total_range, valid_range,val_ds_filter=val_ds_filter,outer_df=outer_df,no_series_data=no_series_data)
+        val_range = self.segments["valid"]
+        valid_start = val_range[0]
+        valid_end = val_range[1]  
         
-    def build_series_data_step_range(self,total_range,val_range,fill_future=False,outer_df=None,val_ds_filter=False,no_series_data=False):
-        """根据时间点参数，从pandas数据生成时间序列类型数据
-           Params:total_range--完整时间序列开始和结束时间
-                  val_range--预测时间序列开始和结束时间
-        """    
-        
-        logger.info("begin create_base_data")
-        # 生成基础数据
+        # 根据配置决定使用全集模式还是差集模式   
+        if "train_total" in self.segments:
+            total_range = self.segments["train_total"]
+            range_mode = 0
+        else:
+            train_range = self.segments["train"]
+            train_start = val_range[0]
+            train_end = val_range[1]              
+            total_range = [train_range[0],valid_end]   
+            range_mode = 1
+
+        # 生成全集基础数据
         self.create_base_data(total_range,val_range,outer_df=outer_df)
 
-        # 默认使用valid配置进行数据集分割
-        valid_start = val_range[0]
-        valid_end = val_range[1]
         # 截取训练集与测试集
         df_all = self.df_all
-        # 根据配置决定是否验证集也用于训练
-        if self.kwargs["whole_data"]:
+        
+        if range_mode==0:
+            # 全集模式，直接使用验证集起始日期作为训练集结束日期
             df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_end))]
         else:
-            df_train = df_all[df_all["datetime"]<pd.to_datetime(str(valid_start))]
+            # 差集模式，使用配置中的训练集结束日期截取训练集
+            df_train = df_all[df_all["datetime"]<pd.to_datetime(str(train_end))]
+        # 验证集直接根据配置进行截取
         df_val = df_all[(df_all["datetime"]>=pd.to_datetime(str(valid_start))) & (df_all["datetime"]<pd.to_datetime(str(valid_end)))]
         # 在筛选的过程中，有可能产生股票个数不一致的情况，取交集
         df_train = df_train[df_train[self.get_group_column()].isin(df_val[self.get_group_column()])]
         df_val = df_val[df_val[self.get_group_column()].isin(df_train[self.get_group_column()])]
-        # 存储df数据，用于后续评估和回测等过程
+        # 存储数据到本地变量
         self.df_train = df_train
         self.df_val = df_val
         
@@ -274,8 +262,12 @@ class TFTSeriesDataset(TFTDataset):
         target_column = self.get_target_column()
         time_column = self.col_def["time_column"]
         past_columns = self.get_past_columns()
-        # 直接使用经过归一化的未来协变量和静态协变量
-        future_columns = self.get_future_scale_columns()
+        # 根据配置，决定是否使用归一化的未来协变量
+        if self.kwargs["scale_time_col"]:
+            future_columns = self.get_future_scale_columns()
+        else:
+            future_columns = self.get_future_columns()
+        # 直接使用经过归一化的静态协变量
         static_columns = self.get_static_scale_columns()
         
         # 分别生成训练和测试序列数据

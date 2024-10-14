@@ -367,7 +367,44 @@ class AkExtractor(HisDataExtractor):
         temp_df["市净率"] = pd.to_numeric(temp_df["市净率"], errors="coerce")
         temp_df["静态股息率"] = pd.to_numeric(temp_df["静态股息率"], errors="coerce")
         return temp_df
-    
+ 
+    def download_sw_index(self):   
+        """获取申银万国股票指数数据"""
+     
+        # 分别下载3级分类，并合并到一个数据文件
+        sw_index_first_info_df = ak.sw_index_first_info()
+        index_analysis_monthly_sw_df = ak.index_analysis_monthly_sw(symbol="市场表征", date="20240329")
+        # 保存到数据库
+        insert_sql = "insert into sw_index(code,name) values(%s,%s)"
+        for idx,row in index_analysis_monthly_sw_df.iterrows():
+            self.dbaccessor.do_inserto_withparams(insert_sql, (row['指数代码'],row['指数名称']))     
+
+    def get_sw_index_day_data(self,indus_file_path=None):   
+        """取得申万指数的历史交易数据"""
+     
+        # 从之前存储中取得指数类别数据
+        sql = "select code,name from sw_index"
+        result_rows = self.dbaccessor.do_query(sql)        
+        
+        # 遍历各类别，并逐个获取对应日K数据
+        upt_sql = "update instrument_info set sw_industry=%s where code=%s"
+        code_stats = []
+        for result in result_rows:
+            code = result[0]
+            print("process code:{}".format(code))
+            # 调用api，获取当前行业类别下的成分股
+            try:
+                index_hist_sw_df = ak.index_hist_sw(symbol=code, period="day")
+            except Exception:
+                print("index_hist_sw api fail for:{}".format(code))
+                continue
+            file_path = os.path.join(indus_file_path,code+".csv")   
+            # 中文标题改英文 
+            index_hist_sw_df.columns = self.sw_indus_k_columns    
+            # 统一顺序
+            index_hist_sw_df = index_hist_sw_df[self.busi_columns[:8]]     
+            index_hist_sw_df.to_csv(file_path,index=False)  
+                       
     def download_industry_data(self):   
         """生成行业分类数据（申银万国）"""
      
