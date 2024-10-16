@@ -197,7 +197,7 @@ class IndustryRollingModule(MlpModule):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,future_round_targets,sw_index_target),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
-            self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append(detail_loss)
@@ -256,7 +256,7 @@ class IndustryRollingModule(MlpModule):
         # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         preds_combine = []
         for i in range(len(corr_loss_combine)):
-            self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
@@ -368,7 +368,7 @@ class IndustryRollingModule(MlpModule):
                 index_target = round_index_targets_total[index,self.input_chunk_length,:]
                 ts_arr = target_info_3d[index][keep_index]
                 date = ts_arr[0]["future_start_datetime"]
-                if date!=20220421:
+                if date!=20220530:
                     continue
                 codes = [ts["instrument"] for ts in ts_arr]
                 result_df = IndustryMappingUtil.get_industry_info_with_code(codes)
@@ -377,8 +377,8 @@ class IndustryRollingModule(MlpModule):
                 win = "industry_comp_{}".format(viz_total_size)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
-                    if j==0:
-                        continue
+                    # if j==0:
+                    #     continue
                     cls_output = output_3d[2][index,:,j]
                     sw_index_value = output_3d[3][index,j]
                     index_target_item = index_target[j].item()
@@ -390,8 +390,8 @@ class IndustryRollingModule(MlpModule):
                     xbar_data = output_3d[0][index,...,j]
                     # 可视化当前预测目标的时间序列
                     for k in range(xbar_data.shape[0]):
-                        # if k!=5:
-                        #     continue
+                        if j==1:
+                            continue
                         past_target_item = past_target_3d[index,k,:,j]
                         future_target_item = future_target_3d[index,k,:,j]
                         target_data = np.concatenate([past_target_item,future_target_item],axis=0)                        
@@ -401,10 +401,10 @@ class IndustryRollingModule(MlpModule):
                         # Add Price data and Norm
                         price_array = ts_arr[k]["price_array"]
                         price_array = MinMaxScaler().fit_transform(np.expand_dims(price_array,-1)).squeeze()
-                        view_data = np.stack((target_data,pred_data,price_array)).transpose(1,0)
+                        view_data = np.stack((target_data,price_array)).transpose(1,0)
                         win = "target_xbar_{}_{}_{}".format(k,j,viz_total_size)
                         target_title = "{}_{},date:{}".format(rownames[k],j,date)
-                        viz_result.viz_matrix_var(view_data,win=win,title=target_title,names=["target","pred","price"]) 
+                        viz_result.viz_matrix_var(view_data,win=win,title=target_title,names=["target","price"]) 
                             
     def viz_results(self,output_inverse=None,target_inverse=None,import_price_result=None,batch_idx=0,target_vr_class=None,target_info=None,viz_target=None):
         dataset = global_var.get_value("dataset")
@@ -452,7 +452,7 @@ class IndustryRollingModule(MlpModule):
             target_class_list = target_class_3d[i]
             # 有一些空值，找出对应索引后续做忽略处理
             keep_index = np.where(target_class_list>=0)[0]
-            output_list = [output_3d[0][i][keep_index],output_3d[2][i]]
+            output_list = [output_3d[0][i][keep_index],output_3d[2][i],output_3d[3][i]]
             last_target_list = last_targets_3d[i]
             indus_targets = future_indus_targets[i]
             date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
@@ -493,14 +493,16 @@ class IndustryRollingModule(MlpModule):
         instrument_topk = 5
         acc = []
         # 排序正反参数
-        sort_flag = [1,1,-1]
+        sort_flag = [-1,1]
         sv_item = output_list[0]
         cls_list = output_list[1]
         pred_range = sv_item[:,-1,:] - sv_item[:,0,:]
         tar_range = future_target[:,-1,:] - future_target[:,0,:]
         ind_score = [0 for _ in range(last_target_list.shape[-1])]
-        for i in range(last_target_list.shape[-1]):
-            ind_score[i] = compute_average_precision(cls_list[:,i],indus_targets,topk=industry_topk)        
+        for i in range(indus_targets.shape[-1]):
+            match_cls = cls_list[:,i] * sort_flag[i]
+            match_target = indus_targets[:,i] * sort_flag[i]
+            ind_score[i] = compute_average_precision(match_cls,match_target,topk=industry_topk)        
         # for i in range(sv_item.shape[-1]):
         #     ind_score[i] = compute_average_precision(pred_range[:,i],tar_range[:,i],topk=industry_topk)
         return ind_score
@@ -566,11 +568,11 @@ class IndustryRollingModule(MlpModule):
     def build_import_index(self,output_data=None,target_info_list=None):  
         """生成涨幅达标的预测数据下标"""
         
-        (fea_values,cls_values) = output_data
+        (fea_values,cls_values,ce_values) = output_data
         
         fea_range = (fea_values[...,-1] - fea_values[...,0])       
         
-        pred_import_index = self.strategy_top(fea_range,cls_values,batch_size=0)
+        pred_import_index = self.strategy_top(fea_range,cls_values,ce_values,batch_size=0)
         # pred_import_index = self.strategy_threhold(sv_values,(fea_0_range,fea_1_range,fea_2_range),rank_values,batch_size=self.ins_dim)
         
             
@@ -583,7 +585,7 @@ class IndustryRollingModule(MlpModule):
         pred_import_index = np.where(sv_import_bool)[0]
         return pred_import_index
 
-    def strategy_top(self,fea,cls,batch_size=0):
+    def strategy_top(self,fea,cls,ce,batch_size=0):
         """排名方式筛选候选者"""
         
         sw_ins_mappings = self.valid_sw_ins_mappings

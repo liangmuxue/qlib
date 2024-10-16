@@ -174,11 +174,9 @@ class TimeMixer(nn.Module):
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1).unsqueeze(-1)
         # 叠加整体数值残差计算
         last_skip_data = self.last_tar_skip_layer(past_round_target)
-        comp_out = comp_out + x_mar_dec_out + last_skip_data
+        comp_out = comp_out + x_mar_dec_out # + last_skip_data
         # 引入全局未来协变量，串接整体评估部分
-        sw_index_data = self.index_projection_layer(comp_out.squeeze(-1)) + self.index_skip_layer(past_index_target)
-        if torch.isnan(dec_out).any() or torch.isnan(comp_out).any() or torch.isnan(sw_index_data).any():
-            print("eee")
+        sw_index_data = self.index_projection_layer(comp_out.squeeze(-1)) # + self.index_skip_layer(past_index_target)
         return dec_out,comp_out,sw_index_data
 
     def __multi_scale_process_inputs(self, x_enc, x_mark_enc):

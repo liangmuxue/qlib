@@ -76,6 +76,7 @@ class IndustryTogatherDataset(CusGenericShiftedDataset):
         g_col = dataset.get_group_rank_column()
         group_column = dataset.get_group_column()
         df_data[g_col] = df_data[group_column].rank(method='dense',ascending=True).astype("int")  
+        self.df_data = df_data
         # 映射target_series对应的索引位置
         codes = df_data[group_column].unique()
         # 加入申万A指数
@@ -337,7 +338,7 @@ class IndustryRollDataset(IndustryTogatherDataset):
         date_mapping = self.date_mappings[idx]
         past_target_total = np.zeros(self.past_target_shape)
         past_covariate_total = np.zeros(self.covariates_shape)
-        target_info_total = [None for _ in range(date_mapping.shape[0])]
+        target_info_total = [None for _ in range(self.past_target_shape[0])]
         future_target_total = np.zeros(self.future_target_shape)
         static_covariate_total = np.zeros(self.static_covariate_shape)
         covariate_future_total = np.zeros(self.covariates_future_shape)
@@ -407,7 +408,7 @@ class IndustryRollDataset(IndustryTogatherDataset):
             datetime_array = self.ass_data[code][3][past_start:future_end]
             # 记录预测未来第一天的关联日期，用于后续数据对齐
             future_start_datetime = self.ass_data[code][3][past_end]
-            # if future_start_datetime==20220421 and instrument=="801110":
+            # if future_start_datetime==20220421 and instrument=="801740":
             #     print("ggg")
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             past_start_real = past_start+target_series.time_index[0]
@@ -513,6 +514,8 @@ class IndustryRollDataset(IndustryTogatherDataset):
         
         for i in range(len(target_series)):
             ts = target_series[i]
+            # if ts.instrument_code=='801740':
+            #     print("ggg")
             target_vals = ts.random_component_values(copy=False)[...,:self.target_num]
             # target_vals[:,0] = MinMaxScaler().fit_transform(target_vals)[:,0]
             # 分别生成整体幅度，和最后一天的幅度
@@ -525,14 +528,14 @@ class IndustryRollDataset(IndustryTogatherDataset):
             # 计算最后一段差值
             c2 = target_vals_end_single - target_vals_begin_single
             # 加权重整合差值数据
-            combine_value = c1 + c2[self.output_chunk_length:] * weights
+            combine_value = c1 # + c2[self.output_chunk_length:] * weights
             # 规整离群值
             for i in range(combine_value.shape[-1]):
                 combine_value[:,i] = interquartile_range(combine_value[:,i])            
             # Standard Data
             scale_data = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(combine_value)
             # 填充空白值
-            scale_data = np.pad(scale_data,((self.output_chunk_length+1,0),(0,0)),'constant') 
+            scale_data = np.pad(scale_data,((0,self.output_chunk_length+1),(0,0)),'constant') 
             # combine_value = np.pad(combine_value,((self.output_chunk_length+1,0),(0,0)),'constant') 
             total_target_vals.append(scale_data)
           
