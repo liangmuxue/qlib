@@ -368,8 +368,10 @@ class IndustryRollingModule(MlpModule):
                 index_target = round_index_targets_total[index,self.input_chunk_length,:]
                 ts_arr = target_info_3d[index][keep_index]
                 date = ts_arr[0]["future_start_datetime"]
-                if date!=20220530:
-                    continue
+                # if date!=20220420 and date!=20220513 and date!=20220530 and date!=20220428 and date!=20220421:
+                #     continue
+                if date!=20221117:
+                    continue                
                 codes = [ts["instrument"] for ts in ts_arr]
                 result_df = IndustryMappingUtil.get_industry_info_with_code(codes)
                 rownames = result_df["name"].values.tolist()
@@ -390,7 +392,7 @@ class IndustryRollingModule(MlpModule):
                     xbar_data = output_3d[0][index,...,j]
                     # 可视化当前预测目标的时间序列
                     for k in range(xbar_data.shape[0]):
-                        if j==1:
+                        if j==0:
                             continue
                         past_target_item = past_target_3d[index,k,:,j]
                         future_target_item = future_target_3d[index,k,:,j]
@@ -458,6 +460,9 @@ class IndustryRollingModule(MlpModule):
             date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
             # 生成目标索引
             import_index = self.build_import_index(output_data=output_list,target_info_list=target_info_list[keep_index])
+            # 整体走势不好，有可能没有候选数据
+            if import_index is None:
+                continue
             import_index = np.intersect1d(import_index,keep_index)
             # Compute Acc Result
             import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
@@ -574,7 +579,6 @@ class IndustryRollingModule(MlpModule):
         
         pred_import_index = self.strategy_top(fea_range,cls_values,ce_values,batch_size=0)
         # pred_import_index = self.strategy_threhold(sv_values,(fea_0_range,fea_1_range,fea_2_range),rank_values,batch_size=self.ins_dim)
-        
             
         return pred_import_index
         
@@ -588,17 +592,27 @@ class IndustryRollingModule(MlpModule):
     def strategy_top(self,fea,cls,ce,batch_size=0):
         """排名方式筛选候选者"""
         
-        sw_ins_mappings = self.valid_sw_ins_mappings
-        
         cls_0 = cls[...,0]
         cls_1 = cls[...,1]
         fea_0 = fea[0]
         fea_1 = fea[1]
+        ce_0 = ce[0]
+        ce_1 = ce[1]        
         
-        indus_top_k = 5
-        # 查找排名靠前的行业
-        indus_top_index = np.argsort(cls_0)[:indus_top_k]
-
+        ### 策略：首先检查整体指数预测，如果偏涨则多选，否则少选.指数涨幅比较有把握，则使用QTLUMA5指标进行行业走势判别，否则使用RVI指标进行行业走势判别 ###
+        if ce_1<0.4:
+            # 指数评估数值小于指定阈值，则不操作
+            return None
+        # RVI整体指标在阈值以下，使用RVI行业指标,否则使用QTLUMA5指标
+        if ce_1<0.5:
+            indus_top_k = 3
+            indus_top_index = np.argsort(-cls_1)[:indus_top_k]
+            # indus_top_index = np.where(cls_1>0.7)
+        else:
+            indus_top_k = 5
+            indus_top_index = np.argsort(cls_0)[:indus_top_k]  
+            # indus_top_index = np.where(cls_0<0.2)
+        
         pred_import_index = indus_top_index 
         return pred_import_index
            

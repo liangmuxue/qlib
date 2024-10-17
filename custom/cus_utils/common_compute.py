@@ -167,8 +167,8 @@ def normalization_except_outlier(x):
     return rtn
 
 def interquartile_range(array):
-    p_low, p_up = np.percentile(array, 25), np.percentile(array, 75)
-    bound = (p_up - p_low) * 1.2
+    p_low, p_up = np.percentile(array, 10), np.percentile(array, 90)
+    bound = (p_up - p_low) * 1.5
     eps = np.random.random(1)/1e5
     lower_bound, upper_bound = p_low - bound, p_up + bound
     array[(array<lower_bound)] = lower_bound + eps
