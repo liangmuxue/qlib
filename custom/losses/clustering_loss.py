@@ -486,15 +486,15 @@ class IndusAloneLoss(UncertaintyLoss):
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
                 real_target = target[...,i]
-                real_target = real_target.reshape(-1,real_target.shape[-1])[keep_index_flatten]
+                real_target_exi = real_target[:,0,:]
                 index_target_item = future_sw_index_target[:,i]
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
                 x_bar,sv,sw_index_data = output_item  
                 x_bar = x_bar.squeeze(-1)
-                x_bar_flatten = x_bar.reshape(-1,x_bar.shape[-1])[keep_index_flatten]
-                # 预测值的一致性损失,忽略目标缺失值的损失计算
-                # corr_loss[i] = self.ccc_loss_comp(x_bar_flatten, real_target)                
+                x_bar_exi = x_bar[:,0,:]
+                # 只使用指数数据进行corr走势预测
+                corr_loss[i] = self.ccc_loss_comp(x_bar_exi, real_target_exi)                
                 # 行业分类总体损失
                 for j in range(target_class.shape[0]):
                     # 如果存在缺失值，则忽略，不比较

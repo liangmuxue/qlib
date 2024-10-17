@@ -60,7 +60,7 @@ task:
             n_epochs : 200
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/Industry_COMBINE_INDEX_202202'
+            batch_file_path: 'custom/data/asis/Industry_COMBINE_INDEX_202209'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
@@ -79,9 +79,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Industry_TimeMix_COMBINE_NOCORR_202201"
+               model_name: "Industry_TimeMix_COMBINE_EXICORR_202201"
                model_type: 'mlp'
-               load_weight: True
+               load_weight: False
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'

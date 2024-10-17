@@ -107,8 +107,8 @@ class IndustryTogatherDataset(CusGenericShiftedDataset):
         self.sw_ins_mappings = None
 
         # 预先定义数据形状
-        self.total_instrument_num = rank_num_max - 1 # 刨除指数
-        self.keep_index = [0] + [i for i in range(self.total_instrument_num)] # 刨除指数后实际索引对照
+        self.total_instrument_num = rank_num_max # 包含指数
+        self.keep_index = [i for i in range(self.total_instrument_num)] # 实际索引对照
         self.target_num = target_num
         self.past_target_shape = [self.total_instrument_num,input_chunk_length,target_num]
         self.future_target_shape = [self.total_instrument_num,output_chunk_length,target_num]
@@ -394,8 +394,7 @@ class IndustryRollDataset(IndustryTogatherDataset):
             if combine_code[2]==0:
                 # 指标数据单独记录
                 round_index_targets = total_target_vals      
-            else:
-                round_targets[keep_index] = total_target_vals            
+            round_targets[keep_index] = total_target_vals            
             # 预测目标，包括过去和未来数据
             future_target = target_vals[future_start:future_end]
             past_target = target_vals[past_start:past_end]
@@ -453,11 +452,10 @@ class IndustryRollDataset(IndustryTogatherDataset):
             historic_future_covariate = f_conv_values[past_start:past_end]
             # 填充到总体数据中
             if combine_code[2]==0:
-                # 如果是指数数据，则单独计算
+                # 如果是指数数据，则添加指数指标
                 sw_index_target[:self.input_chunk_length,:-1] = past_target
                 sw_index_target[self.input_chunk_length:,:-1] = future_target
                 sw_index_target[:,-1] = price_array
-                continue               
             past_target_total[keep_index] = past_target
             past_covariate_total[keep_index] = covariate
             target_info_total[keep_index] = target_info

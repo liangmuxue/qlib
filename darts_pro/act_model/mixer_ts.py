@@ -86,7 +86,7 @@ class TimeMixer(nn.Module):
         # 行业分类数据投影到指数数据
         self.index_projection_layer = nn.Linear(self.num_nodes, 1, bias=True)   
         # 整合指数过去数据的残差
-        self.index_skip_layer = nn.Linear(seq_len, 1, bias=True)   
+        self.index_skip_layer = nn.Linear(pred_len, 1, bias=True)   
            
     def forward(self, x_in): 
         
@@ -176,7 +176,7 @@ class TimeMixer(nn.Module):
         last_skip_data = self.last_tar_skip_layer(past_round_target)
         comp_out = comp_out + x_mar_dec_out # + last_skip_data
         # 引入全局未来协变量，串接整体评估部分
-        sw_index_data = self.index_projection_layer(comp_out.squeeze(-1)) # + self.index_skip_layer(past_index_target)
+        sw_index_data = self.index_projection_layer(comp_out.squeeze(-1)) + self.index_skip_layer(dec_out[:,0,:])
         return dec_out,comp_out,sw_index_data
 
     def __multi_scale_process_inputs(self, x_enc, x_mark_enc):
