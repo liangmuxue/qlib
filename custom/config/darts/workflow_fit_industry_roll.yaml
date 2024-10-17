@@ -100,8 +100,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2022-02-28]
-                valid: [2022-02-01, 2022-07-31]
+                train: [2010-01-01, 2022-09-30]
+                valid: [2022-09-01, 2022-12-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

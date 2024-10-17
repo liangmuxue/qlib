@@ -505,7 +505,7 @@ class IndustryRollDataset(IndustryTogatherDataset):
                 covariate_future_total,future_target_total,target_class_total,past_round_targets,future_round_targets,round_index_targets,target_info_total     
 
         
-    def build_total_tar_scale_data(self,target_series,weights=3):
+    def build_total_tar_scale_data(self,target_series,weights=2):
         """创建整体目标涨跌评估数据的归一化数据"""
         
         total_target_vals = []
@@ -526,7 +526,7 @@ class IndustryRollDataset(IndustryTogatherDataset):
             # 计算最后一段差值
             c2 = target_vals_end_single - target_vals_begin_single
             # 加权重整合差值数据
-            combine_value = c1 # + c2[self.output_chunk_length:] * weights
+            combine_value = c1 # + c2[:-self.output_chunk_length] * weights
             # 规整离群值
             for i in range(combine_value.shape[-1]):
                 combine_value[:,i] = interquartile_range(combine_value[:,i])            
