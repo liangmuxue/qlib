@@ -379,8 +379,8 @@ class IndustryRollingModule(MlpModule):
                 win = "industry_comp_{}".format(viz_total_size)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
-                    # if j==0:
-                    #     continue
+                    if index!=0:
+                        continue
                     cls_output = output_3d[2][index,:,j]
                     sw_index_value = output_3d[3][index,j]
                     index_target_item = index_target[j].item()
