@@ -512,12 +512,12 @@ class IndustryRollDataset(IndustryTogatherDataset):
         
         for i in range(len(target_series)):
             ts = target_series[i]
-            # if ts.instrument_code=='801740':
-            #     print("ggg")
+            if ts.instrument_code=='801003':
+                print("ggg")
             target_vals = ts.random_component_values(copy=False)[...,:self.target_num]
             # target_vals[:,0] = MinMaxScaler().fit_transform(target_vals)[:,0]
             # 分别生成整体幅度，和最后一天的幅度
-            target_vals_begin = target_vals[:-self.output_chunk_length-1]
+            target_vals_begin = target_vals[1:-self.output_chunk_length]
             target_vals_end = target_vals[self.output_chunk_length+1:]
             # 计算跨预测区域差值
             c1 = target_vals_end - target_vals_begin
@@ -533,7 +533,7 @@ class IndustryRollDataset(IndustryTogatherDataset):
             # Standard Data
             scale_data = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(combine_value)
             # 填充空白值
-            scale_data = np.pad(scale_data,((0,self.output_chunk_length+1),(0,0)),'constant') 
+            scale_data = np.pad(scale_data,((2,self.output_chunk_length-1),(0,0)),'constant') 
             # combine_value = np.pad(combine_value,((self.output_chunk_length+1,0),(0,0)),'constant') 
             total_target_vals.append(scale_data)
           

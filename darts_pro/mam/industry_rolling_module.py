@@ -197,9 +197,9 @@ class IndustryRollingModule(MlpModule):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,future_round_targets,sw_index_target),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
-            self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
+            # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            # self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
+            # self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append(detail_loss)
             total_loss += loss     
             # 手动更新参数
@@ -258,7 +258,8 @@ class IndustryRollingModule(MlpModule):
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,past_round_targets,future_round_targets)
         return loss,detail_loss,output_combine
@@ -370,17 +371,16 @@ class IndustryRollingModule(MlpModule):
                 date = ts_arr[0]["future_start_datetime"]
                 # if date!=20220420 and date!=20220513 and date!=20220530 and date!=20220428 and date!=20220421:
                 #     continue
-                if date!=20221117:
+                if date!=20221209 and date!=20221122 and date!=20221117 and date!=20221118 and date!=20221119:
                     continue                
                 codes = [ts["instrument"] for ts in ts_arr]
                 result_df = IndustryMappingUtil.get_industry_info_with_code(codes)
                 rownames = result_df["name"].values.tolist()
+                rownames = ['申万A指'] + rownames
                 target_title = "industry compare,date:{}".format(date)
                 win = "industry_comp_{}".format(viz_total_size)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
-                    if index!=0:
-                        continue
                     cls_output = output_3d[2][index,:,j]
                     sw_index_value = output_3d[3][index,j]
                     index_target_item = index_target[j].item()
@@ -392,21 +392,22 @@ class IndustryRollingModule(MlpModule):
                     xbar_data = output_3d[0][index,...,j]
                     # 可视化当前预测目标的时间序列
                     for k in range(xbar_data.shape[0]):
-                        if j==0:
+                        if k>0:
                             continue
                         past_target_item = past_target_3d[index,k,:,j]
                         future_target_item = future_target_3d[index,k,:,j]
                         target_data = np.concatenate([past_target_item,future_target_item],axis=0)                        
-                        xbar_data_item = xbar_data[k]
+                        # xbar_data_item = np.mean(xbar_data,axis=0)
+                        xbar_data_item = xbar_data[0,:]
                         pad_data = np.array([0 for i in range(self.input_chunk_length)])
                         pred_data = np.concatenate((pad_data,xbar_data_item))
                         # Add Price data and Norm
                         price_array = ts_arr[k]["price_array"]
                         price_array = MinMaxScaler().fit_transform(np.expand_dims(price_array,-1)).squeeze()
-                        view_data = np.stack((target_data,price_array)).transpose(1,0)
+                        view_data = np.stack((pred_data,target_data,price_array)).transpose(1,0)
                         win = "target_xbar_{}_{}_{}".format(k,j,viz_total_size)
                         target_title = "{}_{},date:{}".format(rownames[k],j,date)
-                        viz_result.viz_matrix_var(view_data,win=win,title=target_title,names=["target","price"]) 
+                        viz_result.viz_matrix_var(view_data,win=win,title=target_title,names=["pred","target","price"]) 
                             
     def viz_results(self,output_inverse=None,target_inverse=None,import_price_result=None,batch_idx=0,target_vr_class=None,target_info=None,viz_target=None):
         dataset = global_var.get_value("dataset")

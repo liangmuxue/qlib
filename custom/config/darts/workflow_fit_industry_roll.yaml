@@ -79,9 +79,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Industry_TimeMix_COMBINE_EXICORR_202201"
+               model_name: "Industry_TimeMix_COMBINE_INDEXCORR_202209"
                model_type: 'mlp'
-               load_weight: True
+               load_weight: False
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'

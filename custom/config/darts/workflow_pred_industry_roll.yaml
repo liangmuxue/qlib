@@ -79,10 +79,10 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Industry_TimeMix_COMBINE_CCC_202209"
+               model_name: "Industry_TimeMix_COMBINE_INDEXCORR_202209"
                model_type: 'mlp'
                load_weight: True
-               best_weight: False
+               best_weight: True
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
@@ -109,7 +109,7 @@ task:
             aug_type: 'no'
             data_type: 'date_range'
             transform_inner: True
-            scale_time_col: False
+            scale_time_col: True
             instrument_pick: [600520,600521,600522]
             scaler_type: 'norm'
             model_type: 'tft'
