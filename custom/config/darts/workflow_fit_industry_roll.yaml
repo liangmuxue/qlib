@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/custom_cn_data'
     region: cn
-market: &market test_5
+market: &market test_5_with_sw
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -15,7 +15,7 @@ data_handler_config: &data_handler_config
           kwargs:
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['MACD','RSI5','RSI20','OBV5','label_ori','label_norm','VOLUME_CLOSE','WVMA5','BETA5','RSQR5',
+              col_list: &col_list ['MACD','ATR5','RSI5','RSI20','OBV5','label_ori','label_norm','VOLUME_CLOSE','WVMA5','BETA5','RSQR5',
               'RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','AOS','HIGH_QTLU5','RVI',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
               'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5']                                   
@@ -58,9 +58,9 @@ task:
             log_every_n_steps: 50
             type: 'fit_industry_roll'
             n_epochs : 200
-            save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/Industry_COMBINE_INDEX_202209'
+            save_dataset_file: True
+            load_dataset_file: &load_dataset_file False
+            batch_file_path: 'custom/data/asis/Industry_ADDPRICE_INDEX_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
@@ -79,7 +79,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Industry_TimeMix_COMBINE_INDEXCORR_202209"
+               model_name: "Industry_TimeMix_INDEXCORR_ADDPRICE_202212"
                model_type: 'mlp'
                load_weight: False
                best_weight: False
@@ -89,7 +89,7 @@ task:
                hidden_size: 32
                forecast_horizon: &forecast_horizon 5
                dropout: 0.3
-               past_split: [[0,12],[12,24]]
+               past_split: [[0,12],[12,24],[24,36],[36,48],[48,60]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -100,8 +100,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2022-09-30]
-                valid: [2022-09-01, 2022-12-31]
+                train: [2010-01-01, 2022-04-30]
+                valid: [2022-04-01, 2022-12-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -123,10 +123,12 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['QTLUMA5','RVI','label_norm']
+                target_column: ['QTLU5','RVI','CORD5','QTLUMA5','CLOSE']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
+                                  ,'KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
+                                  ,'KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
                                   ,'KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
                                   ,'KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
                                   ] 

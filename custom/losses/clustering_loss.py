@@ -412,7 +412,10 @@ class Indus3DLoss(UncertaintyLoss):
                 x_bar = x_bar.squeeze(-1)
                 x_bar = x_bar.reshape(-1,x_bar.shape[-1])[keep_index_flatten]
                 # 预测值的一致性损失,忽略目标缺失值的损失计算
-                corr_loss[i] = self.ccc_loss_comp(x_bar.unsqueeze(-1), real_target.unsqueeze(-1))                
+                corr_loss[i] = self.ccc_loss_comp(x_bar.unsqueeze(-1), real_target.unsqueeze(-1))    
+                last_bar = x_bar[:,-1] - x_bar[:,-2]
+                last_target = real_target[:,-1] - real_target[:,-2]
+                fds_loss[i] = self.mse_loss(last_bar.unsqueeze(-1), last_target.unsqueeze(-1))               
                 # 遍历行业分类，对每个分类下的股票列表预测损失进行计算
                 loss_total = [[] for _ in range(map_size)]
                 loss_combine = None
@@ -494,23 +497,26 @@ class IndusAloneLoss(UncertaintyLoss):
                 x_bar = x_bar.squeeze(-1)
                 x_bar_exi = x_bar[:,0,:]
                 # 只使用指数数据进行corr走势预测
-                corr_loss[i] = self.ccc_loss_comp(x_bar_exi, real_target_exi)        
+                # corr_loss[i] = self.ccc_loss_comp(x_bar_exi, real_target_exi)        
                 # fds_loss[i] = self.ccc_loss_comp(torch.mean(x_bar[:,1:,:],dim=1), real_target_exi) 
-                # x_bar_flat = x_bar[:,1:,:].reshape(-1,x_bar.shape[-1])  
-                # real_target_flat = real_target[:,1:,:].reshape(-1,real_target.shape[-1])  
-                # corr_loss[i] += self.ccc_loss_comp(x_bar_flat, real_target_flat)           
+                x_bar_flat = x_bar.reshape(-1,x_bar.shape[-1])  
+                real_target_flat = real_target.reshape(-1,real_target.shape[-1])  
+                last_bar = x_bar_flat[:,-1] - x_bar_flat[:,-2]
+                last_target = real_target_flat[:,-1] - real_target_flat[:,-2]
+                fds_loss[i] = self.mse_loss(last_bar.unsqueeze(-1), last_target.unsqueeze(-1))                   
+                corr_loss[i] += self.ccc_loss_comp(x_bar_flat, real_target_flat)           
                 # 行业分类总体损失
-                # for j in range(target_class.shape[0]):
-                #     # 如果存在缺失值，则忽略，不比较
-                #     target_class_item = target_class[j]
-                #     keep_index = torch.where(target_class_item>=0)[0]
-                #     round_targets_item = future_round_targets[j,keep_index,i]
-                #     # 总体目标值最后几位(pred_len)会是0，不进行计算
-                #     if torch.any(round_targets_item==0):
-                #         continue
-                #     sv_indus = sv[j,keep_index]
-                #     # cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
-                #     cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
+                for j in range(target_class.shape[0]):
+                    # 如果存在缺失值，则忽略，不比较
+                    target_class_item = target_class[j]
+                    keep_index = torch.where(target_class_item>=0)[0]
+                    round_targets_item = future_round_targets[j,keep_index,i]
+                    # 总体目标值最后几位(pred_len)会是0，不进行计算
+                    if torch.any(round_targets_item==0):
+                        continue
+                    sv_indus = sv[j,keep_index]
+                    # cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
+                    cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
                     
                 # 指标整体数值损失,忽略缺失值
                 for k in range(index_target_item.shape[0]):
@@ -518,7 +524,14 @@ class IndusAloneLoss(UncertaintyLoss):
                     op_data = sw_index_data[k,0]
                     if item>0:
                         ce_loss[i] += torch.abs(op_data-item)
-                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i] + fds_loss[i]
+                if i<=1:
+                    loss_sum = loss_sum + ce_loss[i] + cls_loss[i]
+                elif i==2:
+                    loss_sum = loss_sum + cls_loss[i] 
+                elif i==3:
+                    loss_sum = loss_sum + corr_loss[i]                     
+                else:
+                    loss_sum = loss_sum + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]     
     
         

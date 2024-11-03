@@ -60,7 +60,7 @@ task:
             n_epochs : 180
             save_dataset_file: False
             load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/Industry_COMBINE_INDEX_202209'
+            batch_file_path: 'custom/data/asis/Industry_ADDCORD_INDEX_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
@@ -79,17 +79,17 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Industry_TimeMix_COMBINE_INDEXCORR_202209"
+               model_name: "Industry_TimeMix_INDEXCORR_CORD_202212"
                model_type: 'mlp'
                load_weight: True
-               best_weight: True
+               best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5 
-               past_split: [[0,12],[12,24]]
+               past_split: [[0,12],[12,24],[24,36],[36,48]]
                filter_conv_index: -1
     dataset:
         class: TFTSeriesDataset
@@ -100,8 +100,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2022-09-30]
-                valid: [2022-09-01, 2022-12-31]
+                train: [2010-01-01, 2022-05-31]
+                valid: [2022-05-01, 2022-08-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -123,7 +123,7 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['QTLUMA5','RVI','label_norm']
+                target_column: ['QTLU5','RVI','CORD5','QTLUMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month']   
                 past_covariate_col: ['KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'

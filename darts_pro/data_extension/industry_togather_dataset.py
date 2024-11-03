@@ -407,7 +407,7 @@ class IndustryRollDataset(IndustryTogatherDataset):
             datetime_array = self.ass_data[code][3][past_start:future_end]
             # 记录预测未来第一天的关联日期，用于后续数据对齐
             future_start_datetime = self.ass_data[code][3][past_end]
-            # if future_start_datetime==20220421 and instrument=="801740":
+            # if future_start_datetime==20220607 and instrument=="801170":
             #     print("ggg")
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             past_start_real = past_start+target_series.time_index[0]
@@ -505,14 +505,14 @@ class IndustryRollDataset(IndustryTogatherDataset):
                 covariate_future_total,future_target_total,target_class_total,past_round_targets,future_round_targets,round_index_targets,target_info_total     
 
         
-    def build_total_tar_scale_data(self,target_series,weights=2):
-        """创建整体目标涨跌评估数据的归一化数据"""
+    def build_tar_scale_data(self,target_series,weights=2):
+        """创建整体目标涨跌评估数据的归一化数据，不同股票分别归一化"""
         
         total_target_vals = []
         
         for i in range(len(target_series)):
             ts = target_series[i]
-            if ts.instrument_code=='801003':
+            if ts.instrument_code=='801980' or ts.instrument_code=='801010':
                 print("ggg")
             target_vals = ts.random_component_values(copy=False)[...,:self.target_num]
             # target_vals[:,0] = MinMaxScaler().fit_transform(target_vals)[:,0]
@@ -538,5 +538,59 @@ class IndustryRollDataset(IndustryTogatherDataset):
             total_target_vals.append(scale_data)
           
         return total_target_vals          
+
+    def build_total_tar_scale_data(self,target_series,weights=2):
+        """创建整体目标涨跌评估数据的归一化数据,整体归一化"""
         
+        total_target_vals = []
+        combine_values = []
+        index_range = []
+        begin_index = 0
+        for i in range(len(target_series)):
+            ts = target_series[i]
+            if ts.instrument_code=='801980' or ts.instrument_code=='801010':
+                print("ggg")
+            target_vals = ts.random_component_values(copy=False)[...,:self.target_num]
+            # target_vals[:,0] = MinMaxScaler().fit_transform(target_vals)[:,0]
+            # 分别生成整体幅度，和最后一天的幅度
+            target_vals_begin = target_vals[1:-self.output_chunk_length]
+            target_vals_end = target_vals[self.output_chunk_length+1:]
+            # 计算跨预测区域差值
+            c1 = target_vals_end - target_vals_begin
+            target_vals_begin_single = target_vals[:-1]
+            target_vals_end_single = target_vals[1:]
+            # 计算最后一段差值
+            c2 = target_vals_end_single - target_vals_begin_single
+            # 加权重整合差值数据
+            combine_value = c1 # + c2[:-self.output_chunk_length] * weights
+            combine_values.append(combine_value)    
+            # 累加起始索引，并记录当前索引范围
+            end_index = begin_index + combine_value.shape[0]
+            index_range.append([begin_index,end_index])
+            begin_index = end_index
+        
+        index_range = np.array(index_range)   
+        # 不区分股票整体拼接，并整体归一化
+        combine_values = np.concatenate(combine_values,axis=0)
+        # 规整离群值
+        bound_ratio = [0.8,0.8,None,0.8,0.8]
+        scale_data = [None for _ in range(combine_values.shape[-1])]
+        for i in range(combine_values.shape[-1]):
+            if bound_ratio[i] is not None:
+                combine_values[:,i] = interquartile_range(combine_values[:,i],bound_ratio=bound_ratio[i])           
+            # Standard Data
+            scale_data[i] = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(combine_values[:,i:i+1]).squeeze()
+            if bound_ratio[i] is not None:
+                scale_data[i] = interquartile_range(scale_data[i]) 
+                scale_data[i] = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(np.expand_dims(scale_data[i],-1)).squeeze()
+        scale_data = np.stack(scale_data).transpose(1,0)
+        # 还原到多个股票维度模式
+        for i in range(index_range.shape[0]):
+            idx_range = index_range[i]
+            scale_data_item = scale_data[idx_range[0]:idx_range[1],:]
+            # 填充空白值
+            scale_data_item = np.pad(scale_data_item,((2,self.output_chunk_length-1),(0,0)),'constant')             
+            total_target_vals.append(scale_data_item)
+          
+        return total_target_vals            
         

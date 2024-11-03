@@ -524,10 +524,7 @@ class _CusModule(BaseMixModule):
     def collect_result(self,import_index,target_vr_class=None,target_info=None): 
           
         # 重点类别的准确率
-        try:
-            import_acc_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
-        except Exception:
-            print("eee")
+        import_acc_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
         import_price_count = np.sum(target_vr_class[import_index]==CLASS_SIMPLE_VALUE_MAX)
         if import_index.shape[0]==0:
             import_acc = torch.tensor(0.0)
@@ -546,9 +543,9 @@ class _CusModule(BaseMixModule):
         import_price_result = []
         for i,imp_idx in enumerate(import_index):
             ts = target_info[imp_idx]
-            price_array = ts["price_array"][self.input_chunk_length:]
-            p_taraget_class = compute_price_class(price_array,mode="first_last")
-            import_price_result.append([imp_idx,ts["item_rank_code"],p_taraget_class])
+            price_array = ts["price_array"][self.input_chunk_length-1:]
+            p_taraget_class = compute_price_class(price_array,mode="max_range")
+            import_price_result.append([imp_idx,ts["instrument"],p_taraget_class])
         import_price_result = np.array(import_price_result)        
         price_class = np.array(price_class)
         if import_index.shape[0]==0:
@@ -582,7 +579,7 @@ class _CusModule(BaseMixModule):
         if import_price_result.shape[0]==0:
             import_price_result = None
         else:
-            import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","result"])     
+            import_price_result = pd.DataFrame(import_price_result.astype(np.int64),columns=["imp_index","instrument","result"])     
         
         return import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result
     

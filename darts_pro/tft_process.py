@@ -210,7 +210,7 @@ class TftDatafAnalysis():
                             "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
         analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
-        analysis_columns = ["price","QTLUMA5","SUMPMA5",'RSI10','CCI5','ATR5','MOMENTUM','RVI','AOS','HIGH_QTLU5']
+        analysis_columns = ["price","QTLUMA5",'CCI5','ATR5','RVI','AOS']
         # 利用dataloader进行数据拼装
         val_loader = DataLoader(
                 custom_dataset_valid,
@@ -270,8 +270,8 @@ class TftDatafAnalysis():
         hitrate_mean = np.mean(analysis_data[2],axis=0)
         hitrate_mean = pd.DataFrame(hitrate_mean,columns=["cls_{}".format(k) for k in range(4)],index=analysis_columns[1:])
                 
-        print("corr normal:\n",analysis_data_mean[0])
-        print("corr price:\n",analysis_data_mean[1])
+        print("指标走势与价格走势相关度:\n",analysis_data_mean[0])
+        print("指标涨跌幅与价格涨跌幅相关度:\n",analysis_data_mean[1])
         print("hitrate price:\n",hitrate_mean)
         
     def _batch_collate_filter(self,ori_batch):

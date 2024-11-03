@@ -166,13 +166,21 @@ def normalization_except_outlier(x):
     rtn = (x - np.median(x,axis=0)) / (np.percentile(x, 75,axis=0) - np.percentile(x, 25,axis=0))
     return rtn
 
-def interquartile_range(array):
+def interquartile_range(array,bound_ratio=1.2):
     p_low, p_up = np.percentile(array, 10), np.percentile(array, 90)
-    bound = (p_up - p_low) * 1.5
-    eps = np.random.random(1)/1e5
+    # 取得上下区间范围数值
+    bound = (p_up - p_low) * bound_ratio
     lower_bound, upper_bound = p_low - bound, p_up + bound
-    array[(array<lower_bound)] = lower_bound + eps
-    array[(array>upper_bound)] = upper_bound + eps
+    
+    # 对于超出范围的使用区间最大最小值代替，注意代替的时候需要加减随机数，避免多个相等的数值
+    lower_index = np.where(array<lower_bound)[0]
+    eps_lower = lower_bound * np.random.random(lower_index.shape[0])/10
+    array[lower_index] = lower_bound - eps_lower
+    
+    upper_index = np.where(array>upper_bound)[0]
+    eps_upper = upper_bound * np.random.random(upper_index.shape[0])/10
+    array[upper_index] = lower_bound + eps_upper
+        
     return array
 
 def batch_normalization(data,res=1e-5):
@@ -247,7 +255,7 @@ def compute_price_class(price_array,mode="max_range"):
     if mode=="max_range":
         max_value = np.max(price_array)
         min_value = np.min(price_array)
-        if max_value - cur_price > cur_price - min_value:
+        if price_array[-1] - cur_price > 0:
             raise_range = (max_value - cur_price)/cur_price*100
         else:
             raise_range = (min_value - cur_price)/cur_price*100         

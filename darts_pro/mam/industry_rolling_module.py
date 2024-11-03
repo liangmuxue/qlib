@@ -19,6 +19,7 @@ from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_weig
 from losses.clustering_loss import IndusAloneLoss
 from cus_utils.common_compute import compute_average_precision,normalization
 from darts_pro.data_extension.industry_mapping_util import IndustryMappingUtil
+from tft.class_define import OVERROLL_TREND_UNKNOWN,OVERROLL_TREND_RAISE,OVERROLL_TREND_FALL2RAISE,OVERROLL_TREND_RAISE2FALL,OVERROLL_TREND_FALL
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -26,6 +27,7 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from .mlp_module import MlpModule
 
+TRACK_DATE = 20220708
 
 class IndustryRollingModule(MlpModule):
     """聚合行业数据一起预测的模型"""
@@ -258,8 +260,8 @@ class IndustryRollingModule(MlpModule):
         for i in range(len(corr_loss_combine)):
             self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,past_round_targets,future_round_targets)
         return loss,detail_loss,output_combine
@@ -322,44 +324,45 @@ class IndustryRollingModule(MlpModule):
         # if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
         #     return    
     
-        rate_total,total_imp_cnt,target_top_match = self.combine_result_data(self.output_result)  
+        rate_total,total_imp_cnt,target_top_match = self.combine_result_data(self.output_result) 
+        rate_total = dict(sorted(rate_total.items(), key=lambda x:x[0]))
         sr = []
         for item in list(rate_total.values()):
             if len(item)==0:
                 continue
             item = np.array(item)
             sr.append(item)
-        if len(sr)==0:
-            return
-        if target_top_match.shape[0]==0:
-            return
                    
-        for i in range(len(self.past_split)):
-            industry_score = np.mean(target_top_match[:,i])
-            self.log("industry_score_{}".format(i), industry_score, prog_bar=True) 
 
-        sr = np.stack(sr)  
-        # 汇总计算准确率,取平均数
-        sum_v = sr[:,-1]
-        sr_rate = sr/sum_v[:, np.newaxis]
-        combine_rate = np.mean(sr_rate,axis=0)
-        # 按照日期计算最小准确率
-        combine_rate_min = np.min(sr_rate,axis=0)
-        for i in range(len(CLASS_SIMPLE_VALUES.keys())):
-            self.log("score_{} rate".format(i), combine_rate[i], prog_bar=True) 
-            # self.log("score_{} min rate".format(i), combine_rate_min[i], prog_bar=True) 
-        self.log("total cnt", sr[:,-1].sum(), prog_bar=True)  
-        self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
-        if self.mode is not None and self.mode.startswith("pred"):
-            for date in rate_total.keys():
-                stat_data = rate_total[date]
+        if len(sr)>0:
+            for i in range(len(self.past_split)):
+                industry_score = np.mean(target_top_match[:,i])
+                self.log("industry_score_{}".format(i), industry_score, prog_bar=True) 
+                        
+            sr = np.stack(sr)  
+            # 汇总计算准确率,取平均数
+            sum_v = sr[:,-1]
+            sr_rate = sr/sum_v[:, np.newaxis]
+            combine_rate = np.mean(sr_rate,axis=0)
+            # 按照日期计算最小准确率
+            combine_rate_min = np.min(sr_rate,axis=0)
+            for i in range(len(CLASS_SIMPLE_VALUES.keys())):
+                self.log("score_{} rate".format(i), combine_rate[i], prog_bar=True) 
+                # self.log("score_{} min rate".format(i), combine_rate_min[i], prog_bar=True) 
+            self.log("total cnt", sr[:,-1].sum(), prog_bar=True)  
+            self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
+            if self.mode is not None and self.mode.startswith("pred"):
+                for date in rate_total.keys():
+                    stat_data = rate_total[date]
 
         # 如果是测试模式，则在此进行可视化
         if self.mode is not None and self.mode.startswith("pred_"):
             tar_viz = global_var.get_value("viz_data")
             viz_result = global_var.get_value("viz_result")
+            viz_result_detail = global_var.get_value("viz_result_detail")
             viz_total_size = 0
-            output_3d,past_target_3d,future_target_3d,target_class_3d,past_round_targets_total,future_round_targets_total,round_index_targets_total,target_info_3d = self.combine_output_total(self.output_result)
+            output_3d,past_target_3d,future_target_3d,target_class_3d,past_round_targets_total, \
+                future_round_targets_total,round_index_targets_total,target_info_3d = self.combine_output_total(self.output_result)
             for index in range(target_class_3d.shape[0]):
                 # if viz_total_size>3:
                 #     break
@@ -369,10 +372,12 @@ class IndustryRollingModule(MlpModule):
                 index_target = round_index_targets_total[index,self.input_chunk_length,:]
                 ts_arr = target_info_3d[index][keep_index]
                 date = ts_arr[0]["future_start_datetime"]
-                # if date!=20220420 and date!=20220513 and date!=20220530 and date!=20220428 and date!=20220421:
+                # if date!=20220905 and date!=20220902 and date!=20220825 and date!=20220829 and date!=20220830:
                 #     continue
-                if date!=20221209 and date!=20221122 and date!=20221117 and date!=20221118 and date!=20221119:
-                    continue                
+                if date!=TRACK_DATE:
+                    continue               
+                # if date!=20221209 and date!=20221122 and date!=20221117 and date!=20221118 and date!=20221130:
+                #     continue                
                 codes = [ts["instrument"] for ts in ts_arr]
                 result_df = IndustryMappingUtil.get_industry_info_with_code(codes)
                 rownames = result_df["name"].values.tolist()
@@ -388,26 +393,35 @@ class IndustryRollingModule(MlpModule):
                     view_data = view_data[keep_index]
                     win = "target_comp_{}_{}".format(j,viz_total_size)
                     target_title = "target{} pred_tar:{}_{},date:{}".format(j,sw_index_value,index_target_item,date)
-                    tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=rownames,legends=["pred","target"])    
+                    if j<3:
+                        tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=rownames,legends=["pred","target"])    
                     xbar_data = output_3d[0][index,...,j]
                     # 可视化当前预测目标的时间序列
                     for k in range(xbar_data.shape[0]):
-                        if k>0:
-                            continue
                         past_target_item = past_target_3d[index,k,:,j]
                         future_target_item = future_target_3d[index,k,:,j]
-                        target_data = np.concatenate([past_target_item,future_target_item],axis=0)                        
-                        # xbar_data_item = np.mean(xbar_data,axis=0)
-                        xbar_data_item = xbar_data[0,:]
+                        target_data = np.concatenate([past_target_item,future_target_item],axis=0)    
+                        zero_index = np.where(target_data==0)
+                        target_data[zero_index] = 0.001
+                        xbar_data_item = xbar_data[k,:]                  
+                        xbar_data_mean = np.mean(xbar_data,axis=0)
+                        xbar_data_mean = xbar_data[0]
                         pad_data = np.array([0 for i in range(self.input_chunk_length)])
                         pred_data = np.concatenate((pad_data,xbar_data_item))
+                        pred_data_mean = np.concatenate((pad_data,xbar_data_mean))
                         # Add Price data and Norm
                         price_array = ts_arr[k]["price_array"]
-                        price_array = MinMaxScaler().fit_transform(np.expand_dims(price_array,-1)).squeeze()
+                        scaler = MinMaxScaler(feature_range=(0.001, 1))
+                        scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
+                        price_array = scaler.transform(np.expand_dims(price_array,-1)).squeeze()
                         view_data = np.stack((pred_data,target_data,price_array)).transpose(1,0)
+                        view_data_mean = np.stack((pred_data_mean,target_data,price_array)).transpose(1,0)
                         win = "target_xbar_{}_{}_{}".format(k,j,viz_total_size)
                         target_title = "{}_{},date:{}".format(rownames[k],j,date)
-                        viz_result.viz_matrix_var(view_data,win=win,title=target_title,names=["pred","target","price"]) 
+                        if k==0 and j==3:
+                            viz_result.viz_matrix_var(view_data_mean,win=win,title=target_title,names=["pred","target","price"])                         
+                        if k>0 and j==3:
+                            viz_result_detail.viz_matrix_var(view_data,win=win,title=target_title,names=["pred","target","price"]) 
                             
     def viz_results(self,output_inverse=None,target_inverse=None,import_price_result=None,batch_idx=0,target_vr_class=None,target_info=None,viz_target=None):
         dataset = global_var.get_value("dataset")
@@ -448,9 +462,12 @@ class IndustryRollingModule(MlpModule):
         total_imp_cnt = np.where(target_class_3d==3)[0].shape[0]
         rate_total = {}
         target_top_match_total = {}
+        err_date_list = {}
         # 遍历按日期进行评估
         for i in range(target_class_3d.shape[0]):
             future_target = future_target_3d[i]
+            past_target = past_target_3d[i]
+            whole_target = np.concatenate([past_target,future_target],axis=1)
             target_info_list = target_info_3d[i]
             target_class_list = target_class_3d[i]
             # 有一些空值，找出对应索引后续做忽略处理
@@ -459,8 +476,10 @@ class IndustryRollingModule(MlpModule):
             last_target_list = last_targets_3d[i]
             indus_targets = future_indus_targets[i]
             date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
+            if date!=TRACK_DATE:
+                continue
             # 生成目标索引
-            import_index = self.build_import_index(output_data=output_list,target_info_list=target_info_list[keep_index])
+            import_index,overroll_trend = self.build_import_index(output_data=output_list,target=whole_target,target_info_list=target_info_list[keep_index])
             # 整体走势不好，有可能没有候选数据
             if import_index is None:
                 continue
@@ -468,10 +487,13 @@ class IndustryRollingModule(MlpModule):
             # Compute Acc Result
             import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
                 import_price_result = self.collect_result(import_index, target_class_list, target_info_list)
+            
             score_arr = []
             score_total = 0
             rate_total[date] = []
             if import_price_result is not None:
+                suc_cnt = np.sum(import_price_result["result"].values>=2)
+                err_date_list["{}_{}".format(date,suc_cnt)] = import_price_result[import_price_result["result"].values<2][["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
@@ -487,7 +509,7 @@ class IndustryRollingModule(MlpModule):
                 # 追加计算目标值排序靠前的命中率，忽略缺失值
                 ind_score = self.compute_top_map(output_list,future_target,last_target_list,indus_targets=indus_targets)
                 target_top_match_total[date] = ind_score
-                
+        # print("result:",err_date_list)      
         target_top_match_total = np.array(list(target_top_match_total.values()))
         
         return rate_total,total_imp_cnt,target_top_match_total
@@ -499,7 +521,7 @@ class IndustryRollingModule(MlpModule):
         instrument_topk = 5
         acc = []
         # 排序正反参数
-        sort_flag = [-1,1]
+        sort_flag = [-1,1,-1,1,1]
         sv_item = output_list[0]
         cls_list = output_list[1]
         pred_range = sv_item[:,-1,:] - sv_item[:,0,:]
@@ -571,17 +593,16 @@ class IndustryRollingModule(MlpModule):
         return (x_bar_total,sv_total,cls_total,ce_index_total),past_target_total,future_target_total,target_class_total, \
                     past_round_targets_total,future_round_targets_total,round_index_targets_total,target_info_total        
 
-    def build_import_index(self,output_data=None,target_info_list=None):  
+    def build_import_index(self,output_data=None,target=None,target_info_list=None):  
         """生成涨幅达标的预测数据下标"""
         
         (fea_values,cls_values,ce_values) = output_data
+        price_array = np.array([item["price_array"] for item in target_info_list])
         
-        fea_range = (fea_values[...,-1] - fea_values[...,0])       
-        
-        pred_import_index = self.strategy_top(fea_range,cls_values,ce_values,batch_size=0)
+        pred_import_index,overroll_trend = self.strategy_top(fea_values,cls_values,ce_values,target=target,price_array=price_array)
         # pred_import_index = self.strategy_threhold(sv_values,(fea_0_range,fea_1_range,fea_2_range),rank_values,batch_size=self.ins_dim)
             
-        return pred_import_index
+        return pred_import_index,overroll_trend
         
     def strategy_threhold(self,sv,fea,cls,batch_size=0):
         sv_0 = sv[...,0]
@@ -589,32 +610,136 @@ class IndustryRollingModule(MlpModule):
         sv_import_bool = (sv_0<-0.1) # & (sv_1<-0.02) #  & (sv_2>0.1)
         pred_import_index = np.where(sv_import_bool)[0]
         return pred_import_index
-
-    def strategy_top(self,fea,cls,ce,batch_size=0):
+ 
+    def strategy_top(self,fea_values,cls,ce,target=None,price_array=None):
         """排名方式筛选候选者"""
         
-        cls_0 = cls[...,0]
+        future_target = target[:,self.input_chunk_length:,:]
+        past_target = target[:,:self.input_chunk_length,:]
+        price_recent = price_array[:,:self.input_chunk_length]
+        price_recent = MinMaxScaler().fit_transform(price_recent.transpose(1,0)).transpose(1,0)      
+        # 排整体涨跌判断
+        overroll_trend = self.judge_overall_trend(fea_values, cls, ce, target=future_target[0], past_target=past_target[0],price_recent=price_recent[0])
+        
+        cls_0 = cls[...,0]  
         cls_1 = cls[...,1]
-        fea_0 = fea[0]
-        fea_1 = fea[1]
+        cls_2 = cls[...,2]
+        fea_range = (fea_values[:,-1,:] - fea_values[:,0,:])   
+        last_fea_range = (fea_values[:,-1,:] - fea_values[:,2,:])   
+        fea_mean = np.mean(fea_range,axis=0)  
+        qtlu_past_target = past_target[...,3]
         ce_0 = ce[0]
-        ce_1 = ce[1]        
+        ce_1 = ce[1]      
         
-        ### 策略：首先检查整体指数预测，如果偏涨则多选，否则少选.指数涨幅比较有把握，则使用QTLUMA5指标进行行业走势判别，否则使用RVI指标进行行业走势判别 ###
-        if ce_1<0.4:
-            # 指数评估数值小于指定阈值，则不操作
-            return None
-        # RVI整体指标在阈值以下，使用RVI行业指标,否则使用QTLUMA5指标
-        if ce_1<0.5:
-            indus_top_k = 3
-            indus_top_index = np.argsort(-cls_1)[:indus_top_k]
-            # indus_top_index = np.where(cls_1>0.7)
+        ### 整体策略：首先检查整体趋势预测，然后根据趋势分别进行应对策略 ###
+        if overroll_trend==OVERROLL_TREND_RAISE:
+            # 在确定上涨的时候,看QTLU行业预测指标
+            pred_import_index = np.argsort(cls_0[1:])[:3] + 1
+        elif overroll_trend==OVERROLL_TREND_FALL2RAISE:
+            # 震荡偏正面的趋势，使用CORD行业预测指标，配合前期价格走势综合判断
+            pred_import_index_pre = np.argsort(-cls_2[1:])[:5] + 1
+            pred_import_index = []
+            for i in range(pred_import_index_pre.shape[0]):
+                idx = pred_import_index_pre[i]
+                # 同时对照RVI行业预测指标
+                if cls_1[idx]>0.6:
+                    pred_import_index.append(idx)
+            pred_import_index = np.array(pred_import_index)   
+            pred_import_index = pred_import_index[:3]
+        elif overroll_trend==OVERROLL_TREND_RAISE2FALL:
+            # 震荡偏负面的趋势，使用CORD行业预测指标，配合前期价格走势综合判断
+            pred_import_index_pre = np.argsort(-cls_2[1:])[:3] + 1
+            pred_import_index = []
+            for i in range(pred_import_index_pre.shape[0]):
+                idx = pred_import_index_pre[i]
+                # 上一段价格走势不能太低,也不能太高，并最近几段处于上涨
+                if price_recent[idx,-1]>0.5 and price_recent[idx,-1]<0.96 and (price_recent[idx,-1]-price_recent[idx,-3])>0:
+                    pred_import_index.append(idx)
+            pred_import_index = np.array(pred_import_index)   
+        elif overroll_trend==OVERROLL_TREND_FALL:
+            # 在确定下跌的时候，使用QTLU行业预测指标，配合QTLU的CORR前期指标
+            pred_import_index_pre = np.argsort(cls_0[1:])[:2] + 1   
+            pred_import_index = []
+            for i in range(pred_import_index_pre.shape[0]):
+                idx = pred_import_index_pre[i]
+                # 上一段QTLU指标不能太高
+                if qtlu_past_target[idx,-1]<0.9:
+                    pred_import_index.append(idx)
+            pred_import_index = np.array(pred_import_index)        
+        elif overroll_trend==OVERROLL_TREND_UNKNOWN:
+            # 其他时候，看QTLU行业预测指标
+            pred_import_index = np.argsort(cls_0)[:3]   
         else:
-            indus_top_k = 5
-            indus_top_index = np.argsort(cls_0)[:indus_top_k]  
-            # indus_top_index = np.where(cls_0<0.2)
+            pred_import_index = np.argsort(-cls_1)[:2]    
+            
+        if pred_import_index.shape[0]==0:
+            pred_import_index = None
+                                               
+        return pred_import_index,overroll_trend
+    
+    def price_trend_ana(self,price_recent):
+        """针对历史价格数据，分析历史价格走势 1上涨 2下跌 3震荡"""
         
-        pred_import_index = indus_top_index 
-        return pred_import_index
-           
+        price_recent_range = price_recent[1:] - price_recent[:-1]
+        
+        if price_recent[-1]>0.6 and (price_recent[-1] - price_recent[-5])>0.1 and np.sum(price_recent_range[-5:]>0)>=3:
+            # 上涨：最近值处于比较高位，并且超出前面的数值一定范围,并且最近走势中大多数为上涨
+            return 1
+        if price_recent[-1]>0.8 and (price_recent[-1] - price_recent[-5])>0 and np.sum(price_recent_range[-5:]>0)>=3:
+            # 上涨：最近值处于高位，并且最近走势中大多数为上涨
+            return 1        
+        if price_recent[-1]<0.5 and (price_recent[-1] - price_recent[-5])<-0.1 and np.sum(price_recent_range[:-5]<0)>=3:
+            # 下跌：最近值处于相对低位，并且低于前面的数值一定范围,并且最近走势中大多数为下跌
+            return 2        
+        return 3
+     
+    def judge_overall_trend(self,fea_values,cls,ce,target=None,past_target=None,price_recent=None):
+        """排整体涨跌判断,返回值：1 确定上涨 2 下跌后变盘上涨 3 上涨后变盘下跌 4 确定下跌 5 确定下跌第二种情况 0 其他
+            先判断下跌，然后判断上涨
+        """
+        
+        fea_range = (fea_values[:,-1,:] - fea_values[:,0,:])   
+        last_fea_range = (fea_values[:,-1,:] - fea_values[:,-2,:])   
+        last_fea_mean = last_fea_range[0]
+        fea_mean = np.mean(fea_range,axis=0)    
+        fea_mean = fea_range[0]
+        # 计算多个指标
+        price_recent_range = price_recent[-1] - price_recent[-3]
+        qtlu_recent = past_target[:,3]
+        qtlu_recent_range = qtlu_recent[-1] - qtlu_recent[-4]
+        qtlu_ce = ce[0]
+        rvi_ce = ce[1]
+        cntd_corr = fea_mean[2]
+        qtlu_corr = fea_mean[3]
+        last_qtlu = last_fea_mean[3]
+        
+        price_trend = self.price_trend_ana(price_recent)
+        
+        # 确定下跌：之前处于下跌势头，RVI的CE指标小于阈值,QTLU的走势幅度差值大于阈值
+        if price_trend==2 and qtlu_corr>0.3 and rvi_ce<0.3:
+            return OVERROLL_TREND_FALL
+        # 确定下跌:之前处于震荡势头，前期QTLU指标的CORR整体数值明显上升
+        if price_trend==3 and qtlu_recent_range>0.3:
+            return OVERROLL_TREND_FALL          
+        # 确定上涨,之前处于上涨势头，QTLU指标的CORR整体数值下降
+        if price_trend==1 and qtlu_corr<-0.1:
+            return OVERROLL_TREND_RAISE   
+        #  震荡走势偏正面:之前处于上涨势头，QTLU指标的CORR整体数值上升不超过指定阈值
+        if price_trend==1 and qtlu_corr<=0.1:
+            return OVERROLL_TREND_FALL2RAISE      
+        #  震荡走势偏负面:之前处于上涨势头，QTLU指标的CORR整体数值上升超过指定阈值
+        if price_trend==1 and qtlu_corr>0.1:
+            return OVERROLL_TREND_RAISE2FALL           
+        #  震荡走势偏负面:之前处于震荡势头，QTLU指标的CORR整体数值大于指定阈值
+        if price_trend==3 and qtlu_corr>-0.05:
+            return OVERROLL_TREND_RAISE2FALL                                       
+        # 震荡走势偏负面： 之前处于下跌势头，最近价格有急跌的走势，QTLU的CORR预测指标上升或者下降不明显
+        if price_trend==2 and price_recent_range<-0.3 and qtlu_corr>-0.1:
+            return OVERROLL_TREND_RAISE2FALL     
+        # 震荡走势偏正面： 之前处于上涨或震荡势头，RVI的CE指小于指定阈值，QTLU的CE指小于指定阈值
+        if price_trend!=2 and rvi_ce>0.5 and qtlu_ce<0.55:
+            return OVERROLL_TREND_FALL2RAISE                  
+        
+        # 不确定意味震荡
+        return OVERROLL_TREND_UNKNOWN
         

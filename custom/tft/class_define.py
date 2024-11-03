@@ -84,4 +84,12 @@ def get_slope_text(slope_value):
     if slope_value==SLOPE_SHAPE_SMOOTH:
         return "smooth"        
     return "shake"        
-        
+
+
+# 市场整体走势字典,1 确定上涨 2 震荡偏正面 3 震荡偏谨慎 4 确定下跌 5 确定下跌第二种情况 0 其他
+OVERROLL_TREND_UNKNOWN = 0
+OVERROLL_TREND_RAISE= 1
+OVERROLL_TREND_FALL2RAISE = 2
+OVERROLL_TREND_RAISE2FALL = 3     
+OVERROLL_TREND_FALL = 4
+OVERROLL_TREND_FALL2 = 5
