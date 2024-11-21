@@ -72,7 +72,7 @@ class DataTaskType(Enum):
     DataImport = 1 
 
 
-class HisDataExtractor:
+class HisDataExtractor():
     """历史证券数据采集"""
 
     def __init__(self, backend_channel="ak",savepath=None,**kwargs):
@@ -139,7 +139,8 @@ class HisDataExtractor:
         else:
             # 如果是增量，则取出原来文件，合并后覆盖
             ori_item_data = self.load_item_df(code,period=period,institution=institution)
-            item_data = pd.concat([ori_item_data,item_data],axid=0)
+            if ori_item_data is not None:
+                item_data = pd.concat([ori_item_data,item_data],axid=0)
             item_data.to_csv(save_file_path, index=False)        
 
     def export_whole_item_data(self,period=None,institution=False):
@@ -518,7 +519,7 @@ class HisDataExtractor:
     
     def code_transfer_to_string(self,int_code):
         return str(int_code).zfill(6)
-        
+
 if __name__ == "__main__":    
     
     from data_extract.akshare_extractor import AkExtractor

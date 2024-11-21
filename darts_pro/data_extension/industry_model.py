@@ -19,7 +19,7 @@ from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from cus_utils.tensor_viz import TensorViz
 from darts_pro.data_extension.togather_model import DateTogeModel
 from darts_pro.data_extension.industry_togather_dataset import IndustryTogatherDataset,IndustryRollDataset
-from darts_pro.data_extension.date_align_dataset import DateShiftedDataset
+from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
 from darts_pro.mam.industry_togather_module import IndustryTogeModule
 from darts_pro.mam.industry_rolling_module import IndustryRollingModule
 from darts_pro.data_extension.custom_model import logger
@@ -431,3 +431,4 @@ class IndustryRollModel(IndustryModel):
                 **self.pl_module_params,
         )     
         return model     
+    

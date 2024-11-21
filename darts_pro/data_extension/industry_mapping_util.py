@@ -16,7 +16,7 @@ class IndustryMappingUtil:
     """用于行业分类的功能类"""
     
     """行业分类和股票映射关系对象数据结构规范
-       类型为numpy数组，形状： [行业分类数量，5]
+       类型为numpy数组，形状： [行业分类数量，6]
        其中第1列(sw_index)： 行业分类对应的序列（TargetSeries）排序号（排序号非连续），类型为int
           第2列(sw_code)： 行业分类编码，类型为int
           第3列(instrument_rank)： 当前行业分类下的股票对排序号数组（排序号连续），数组元素类型为int
@@ -61,9 +61,6 @@ class IndustryMappingUtil:
         keep_index = np.array(keep_index).astype(np.int32)        
         sw_industry_index = np.array(sw_industry_index).astype(np.int32)  
         sw_industry_codes = np.array(sw_industry_codes).astype(np.int32)     
-        max_size = sw_industry_codes[:,1].max()
-        # 清除日期不全的分类
-        sw_industry_codes = sw_industry_codes[sw_industry_codes[:,1]==max_size][:,0]
         # 同时从股票及分类列表中删除不在数据集范围的数据
         instrument_df = instrument_df[instrument_df["code"].isin(target_codes)]
         # 联合筛选行业数据集，取得交集，去掉不在真正序列中的部分
@@ -246,4 +243,128 @@ class IndustryMappingUtil:
                 combine_codes[match_index,1] = index
         
         return combine_codes.astype(np.int64)  
-                    
+
+class FuturesMappingUtil:
+    """用于期货行业分类的功能类"""
+    
+    """行业分类和股票映射关系对象数据结构规范
+       类型为numpy数组，形状： [行业分类数量，6]
+       其中第1列(indus_index)： 行业分类对应的序列（TargetSeries）排序号（排序号非连续），类型为int
+          第2列(indus_code)： 行业分类编码，类型为string
+          第3列(instrument_rank)： 当前行业分类下的期货排序号数组（排序号连续），数组元素类型为int
+          第4列(instrument_index)： 当前行业分类下的期货对应的序列（TargetSeries）排序号数组（排序号非连续），数组元素类型为int
+          第5列(instrument_code)： 当前行业分类下的期货代码数组，数组长度需要与第三列中的每个数组长度一致，数组元素类型为string
+    """                   
+    
+    @staticmethod
+    def build_accord_mapping(target_series,fur_indus_df=None,instrument_df=None,dataset=None):
+        """筛选出符合条件的品种，以及分类映射关系
+            Params:
+              target_series： 目标序列，包含股票数据和行业分类数据
+              fur_indus_df 行业分类数据集，columns=["code"]  
+              instrument_df 品种名称编码数据集
+            Return:
+              fur_ins_mappings: 行业分类和股票映射关系对象，具体规范参考类注释的说明
+        """
+        
+        g_col = dataset.get_group_rank_column()
+        fur_indus = fur_indus_df.values
+        # 同时找出申万分类数据索引
+        keep_index = []
+        target_codes = []
+        rank_codes = []
+        fur_industry_index = []
+        fur_industry_codes = []
+        for index,ts in enumerate(target_series):
+            rank_code = int(ts.static_covariates[g_col].values[0])
+            code = dataset.get_group_code_by_rank(rank_code)
+            # 匹配后记录索引值
+            if np.any(instrument_df["code"]==code):
+                keep_index.append([code,index])
+                target_codes.append(code)
+                rank_codes.append(rank_code)
+            # 同时记录类别序号,用于后续target_series的取数对照
+            if np.any(fur_indus[:,0]==code):
+                fur_industry_index.append([code,index])
+                # 保存当前行业分类的时间序列长度，以排查指标日期不全的分类数据
+                size = ts.time_index.stop - ts.time_index.start 
+                fur_industry_codes.append([code,size])
+        keep_index = np.array(keep_index)
+        fur_industry_codes = np.array(fur_industry_codes)
+        fur_industry_index = np.array(fur_industry_index)
+        # 同时从品种及分类列表中删除不在数据集范围的数据
+        instrument_df = instrument_df[instrument_df["code"].isin(target_codes)]
+        # 生成股票数据自身排序号
+        instrument_df[g_col] = instrument_df["code"].rank(method='dense',ascending=True).astype("int")  
+        # 重新调整品种索引映射，保留之前筛选后的部分
+        keep_index = keep_index[np.isin(keep_index[:,0],instrument_df["code"].unique())]
+
+        # 生成行业分类和品种之间的映射关系，具体数据结构规范参考类注释所述
+        fur_ins_mappings = []
+        # 给期货品种进行编号，用于后续对照
+        instrument_df[g_col] = instrument_df["code"].rank(method='dense',ascending=True).astype("int") 
+        instrument_df[g_col] = instrument_df[g_col] - 1 
+        # 排序保证后续对应关系不变
+        instrument_df = instrument_df.sort_values(by=['code'], ascending=[True])
+        for fur_code,group in instrument_df.groupby("indus_code"):
+            # 关联之前的数据，按照规范逐个生成
+            industry_index = int(fur_industry_index[fur_industry_index[:,0]==fur_code][0,1])
+            instrument_codes = group["code"].values
+            instrument_index = np.array([keep_index[keep_index[:,0]==ins_code][0,1] for ins_code in instrument_codes])
+            # 品种编码数组长度和序号数组长度需要相等
+            raise_if_not(
+                instrument_index.shape[0] == instrument_codes.shape[0],
+                f"品种编码数组长度和序号数组长度不一致"
+            )              
+            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,instrument_index,instrument_codes]
+            fur_ins_mappings.append(fur_ins_mapping)
+        fur_ins_mappings = np.array(fur_ins_mappings)
+               
+        return fur_ins_mappings        
+    
+    @staticmethod
+    def assc_series_and_codes(sw_ins_mappings):
+        """关联业务编号和序列排序号,包含品种和分类"""
+        
+        combine_codes = sw_ins_mappings[:,:2]
+        flags = np.expand_dims(np.zeros(combine_codes.shape[0]).astype(np.int),-1)
+        combine_codes = np.concatenate([combine_codes,flags],axis=-1)
+        ins_code = np.concatenate([sw_ins_mappings[i,4] for i in range(sw_ins_mappings[0].shape[0])])
+        ins_index = np.concatenate([sw_ins_mappings[i,3] for i in range(sw_ins_mappings[0].shape[0])])
+        flags = np.ones(ins_code.shape[0]).astype(np.int)
+        ins_combine_codes = np.stack([ins_index,ins_code,flags],axis=-1)
+        ins_combine_codes[:,0] = ins_combine_codes[:,0].astype(np.int)
+        combine_codes = np.concatenate([ins_combine_codes,combine_codes],axis=0)
+        combine_codes = combine_codes[np.argsort(combine_codes[:,1])]
+        
+        return combine_codes
+    
+    @staticmethod
+    def get_industry_codes(sw_ins_mappings):
+        return sw_ins_mappings[:,1]
+
+    @staticmethod
+    def get_industry_names(codes):
+        dbaccessor = DbAccessor({})
+        sql = "select code,name from futures_industry where code in ({}) order by code asc".format(codes)        
+        result_rows = dbaccessor.do_query(sql) 
+        results = []
+        for row in result_rows:
+            results.append([row[0],row[1]])
+        result_df = pd.DataFrame(results,columns=['code','name'])        
+        return result_df
+    
+    @staticmethod
+    def get_industry_data_index(sw_ins_mappings):
+        return sw_ins_mappings[:,0].astype(np.int32)
+
+    @staticmethod
+    def get_industry_instrument(sw_ins_mappings):
+        return sw_ins_mappings[:,2]
+        
+    @staticmethod
+    def get_instrument_index(sw_ins_mappings):
+        ins_in_indus_index = sw_ins_mappings[:,3]
+        instrument_index = np.concatenate([index_arr for index_arr in ins_in_indus_index])       
+        return instrument_index.astype(np.int)
+    

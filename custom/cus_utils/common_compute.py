@@ -13,6 +13,13 @@ from sklearn.preprocessing import MinMaxScaler
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 from pip._internal.models import candidate
 
+def tensor_intersect(t1, t2):
+        indices = torch.zeros_like(t1, dtype = torch.bool, device = t1.device)
+        for elem in t2:
+            indices = indices | (t1 == elem)  
+            intersection = t1[indices]  
+        return intersection
+    
 def slope_compute(target_ori):
     target = target_ori
     mask_idx = np.where(target<0.01)[0]
