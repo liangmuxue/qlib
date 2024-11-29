@@ -60,8 +60,6 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
         logger.debug("begin group process")
-        columns = df.columns.values.tolist()
-        columns = columns + ["industry","tradable_shares"]
         df["min_time"] = df.groupby(group_column)[time_column].transform("min")
         df[time_column] = df[time_column] - df["min_time"]
         df = df.drop(['min_time'], axis=1)
@@ -78,8 +76,6 @@ class TFTFuturesDataset(TFTSeriesDataset):
             conv_col_scale = conv_col + "_scale"
             df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).min()) / (df[conv_col].astype(int).max() - df[conv_col].astype(int).min())
                     
-        logger.debug("end group process")
-
         # 按照股票代码，新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=True).astype("int")  

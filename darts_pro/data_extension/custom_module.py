@@ -579,7 +579,8 @@ class _CusModule(BaseMixModule):
         if import_price_result.shape[0]==0:
             import_price_result = None
         else:
-            import_price_result = pd.DataFrame(import_price_result.astype(np.int64),columns=["imp_index","instrument","result"])     
+            import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","result"])     
+            import_price_result["result"] = import_price_result["result"].astype(np.int64)
         
         return import_acc, import_recall,import_price_acc,import_price_nag,price_class,import_price_result
     

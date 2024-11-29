@@ -512,7 +512,8 @@ def same_value_eps(data):
                 data[i] = data[i] + eps_adju
     else:
         eps_ori = torch.ones(data.shape).uniform_(1e-4, 1e-3).to(data.device)
-        data = torch.where(data==0,eps_ori,data)      
+        data_match = data - data[0]
+        data = torch.where(data_match==0,eps_ori,data)      
     return data
 
 def get_trunck_index(total_size,batch_size):

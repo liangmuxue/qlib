@@ -151,10 +151,10 @@ class FuturesTogatherDataset(GenericShiftedDataset):
     def get_variety_list_with_indus(self):       
         """取得期货品种列表,包含行业板块"""
         
-        sql = "select v.code,upper(concat('zs_',i.code)) as indus_code from trading_variety v left join futures_industry i on v.industry_id = i.id" \
+        sql = "select v.code,upper(concat('zs_',i.code)) as indus_code,v.name as name from trading_variety v left join futures_industry i on v.industry_id = i.id" \
             " order by v.code asc"
         result_rows = self.dbaccessor.do_query(sql)    
-        columns = ["code","indus_code"]
+        columns = ["code","indus_code","name"]
         result_rows = [[row[i] for i in range(len(row))]  for row in result_rows]
         result_rows = np.array(result_rows)
         result = pd.DataFrame(result_rows,columns=columns)
@@ -211,7 +211,7 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         # 不区分股票整体拼接，并整体归一化
         combine_values = np.concatenate(combine_values,axis=0)
         # 规整离群值
-        bound_ratio = [0.8,0.8,None,0.8,0.8]
+        bound_ratio = [0.8,0.8,None,0.8,0.8,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None]
         scale_data = [None for _ in range(combine_values.shape[-1])]
         for i in range(combine_values.shape[-1]):
             if bound_ratio[i] is not None:
@@ -370,19 +370,18 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         for i in range(real_past_target.shape[0]):
             real_past_target_item = real_past_target[i]
             real_future_reshape_item = real_future_target[i]
-            target_scaler = MinMaxScaler()
+            target_scaler = MinMaxScaler(feature_range=(1e-5, 1))
             target_scaler.fit(real_past_target_item)
             scale_data_past = target_scaler.transform(real_past_target_item)
             scale_data_future = target_scaler.transform(real_future_reshape_item)
             past_target_total[real_index[i]] = scale_data_past
             future_target_total[real_index[i]] = scale_data_future
         
-        
         # 过去协变量的归一化处理，逐个进行
         real_covariate_total= past_covariate_total[real_index]
         for i in range(real_covariate_total.shape[0]):
             real_past_conv = real_covariate_total[i]
-            past_conv_scale = MinMaxScaler().fit_transform(real_past_conv)
+            past_conv_scale = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
             past_covariate_total[real_index[i]] = past_conv_scale
             
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  

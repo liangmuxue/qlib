@@ -44,7 +44,7 @@ class FurTimeMixer(nn.Module):
         self.temp_dim_dim = temp_dim_dim
         self.num_nodes = num_nodes
         self.node_dim = node_dim
-        ti_sp_dim = temp_dim_diw + temp_dim_miy + node_dim
+        ti_sp_dim = temp_dim_diw + temp_dim_miy + temp_dim_dim + node_dim
                 
         ###### TimeMixer部分 #####
         self.c_out = c_out
@@ -85,8 +85,8 @@ class FurTimeMixer(nn.Module):
         nn.init.xavier_uniform_(self.month_in_year_emb)    
         # 每月的日期部分
         self.day_in_month_emb = nn.Parameter(
-            torch.empty(day_of_month_size, temp_dim_miy))
-        nn.init.xavier_uniform_(self.month_in_year_emb)          
+            torch.empty(day_of_month_size, temp_dim_dim))
+        nn.init.xavier_uniform_(self.day_in_month_emb)          
         # 空间参数，对应不同的品种或行业分类
         self.node_emb = nn.Parameter(torch.empty(num_nodes, node_dim))
         nn.init.xavier_uniform_(self.node_emb)     
@@ -95,9 +95,15 @@ class FurTimeMixer(nn.Module):
         # 未来时空投影层，整合投影到单通道
         self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, 1, bias=True)      
         
-        # 行业分类数据投影到板块指数数据
-        ins_num = len(FuturesMappingUtil.get_industry_codes(sw_ins_mappings))
-        self.index_projection_layer = nn.Linear(self.num_nodes, ins_num, bias=True)   
+        # 品种数据投影到板块指数数据，按照不同分类板块分别投影
+        indus_num = len(FuturesMappingUtil.get_industry_codes(sw_ins_mappings))
+        index_projection_layer = []
+        for i in range(indus_num):
+            item_num = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)[i].shape[0]
+            proj_item = nn.Linear(item_num, 1, bias=True)    
+            index_projection_layer.append(proj_item)
+            
+        self.index_projection_layer = nn.ModuleList(index_projection_layer)        
         self.all_to_index_projection_layer = nn.Linear((self.num_nodes-1)*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差
         self.index_skip_layer = nn.Linear(pred_len, 1, bias=True)   
@@ -139,7 +145,7 @@ class FurTimeMixer(nn.Module):
         # 全局空间关系变量映射，扩展后的形状: [B,N,T,node_dim]
         node_emb = self.node_emb.unsqueeze(1).unsqueeze(0).repeat(batch_size,1,seq_len,1)  
         # 合并时间和空间协变量，形状：[B,N,T,合并后的特征维度]
-        x_mark_enc = torch.cat([day_in_week_emb,month_in_year_emb,node_emb],dim=-1)
+        x_mark_enc = torch.cat([day_in_week_emb,month_in_year_emb,day_in_month_emb,node_emb],dim=-1)
         
         # 通过池化下采样，得到不同尺度的序列.使用5->25->125,对应业务周期为：日，月，半年
         x_enc, x_mark_enc = self.__multi_scale_process_inputs(x_enc, x_mark_enc)
@@ -199,7 +205,23 @@ class FurTimeMixer(nn.Module):
         # 引入全局未来协变量，串接整体评估部分
         indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
         indus_dec_out = dec_out[:,indus_data_index,:]
-        sw_index_data = self.index_projection_layer(comp_out.squeeze(-1)) + self.index_skip_layer(indus_dec_out).squeeze(-1)
+        # 按照不同分类板块分别投影
+        industry_decoded_data = None
+        sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
+        indus_num = len(FuturesMappingUtil.get_industry_codes(sw_ins_mappings))
+        instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+        for i in range(indus_num):
+            m = self.index_projection_layer[i]
+            idx_list = torch.Tensor(instrument_index[i]).to(x_in[-1].device).long()
+            # 通过索引映射到实际板块内品种组合
+            ins_data = comp_out.squeeze(-1)[:,idx_list,...]
+            ins_data = ins_data.reshape(ins_data.shape[0],-1)
+            ind_decoded = m(ins_data)
+            if industry_decoded_data is None:
+                industry_decoded_data = ind_decoded
+            else:
+                industry_decoded_data = torch.cat([industry_decoded_data,ind_decoded],dim=1)        
+        sw_index_data = industry_decoded_data # + self.index_skip_layer(indus_dec_out).squeeze(-1)
         return dec_out,comp_out,sw_index_data
 
     def __multi_scale_process_inputs(self, x_enc, x_mark_enc):
@@ -252,7 +274,7 @@ class FurTimeMixer(nn.Module):
         """
         
         
-        xfuture_day_of_week,xfuture_month_of_year = x_time_mark_future[...,0],x_time_mark_future[...,1] 
+        xfuture_day_of_week,xfuture_month_of_year,xfuture_day_of_month = x_time_mark_future[...,0],x_time_mark_future[...,1],x_time_mark_future[...,2]
                         
         # 全局时间变量映射到当前时间协变量,形状为: [B,T,temp_dim_xxx]
         day_in_week_emb = torch.zeros([xfuture_day_of_week.shape[0],xfuture_day_of_week.shape[1],self.day_in_week_emb.shape[1]]).to(xfuture_day_of_week.device)
@@ -260,18 +282,24 @@ class FurTimeMixer(nn.Module):
             index = torch.where(xfuture_day_of_week==i)
             if index[0].shape[0]>0:
                 day_in_week_emb[index[0],index[1],:] = self.day_in_week_emb[i]        
-        month_in_year_emb = torch.zeros([xfuture_month_of_year.shape[0],xfuture_month_of_year.shape[1],self.month_in_year_emb.shape[1]]).to(xfuture_day_of_week.device)
+        month_in_year_emb = torch.zeros([xfuture_month_of_year.shape[0],xfuture_month_of_year.shape[1],self.month_in_year_emb.shape[1]]).to(xfuture_month_of_year.device)
         for i in range(self.month_in_year_emb.shape[0]):
             index = torch.where(xfuture_month_of_year==i)
             if index[0].shape[0]>0:
                 month_in_year_emb[index[0],index[1],:] = self.month_in_year_emb[i]
+        day_in_month_emb = torch.zeros([xfuture_day_of_month.shape[0],xfuture_day_of_month.shape[1],self.day_in_month_emb.shape[1]]).to(xfuture_day_of_month.device)
+        for i in range(self.day_in_month_emb.shape[0]):
+            index = torch.where(xfuture_day_of_month==i)
+            if index[0].shape[0]>0:
+                day_in_month_emb[index[0],index[1],:] = self.day_in_month_emb[i]                
         # 把时间变量数据扩充维度到：[B,N,T,temp_dim_xxx]
         day_in_week_emb = day_in_week_emb.unsqueeze(1).repeat(1,node_num,1,1)       
-        month_in_year_emb = month_in_year_emb.unsqueeze(1).repeat(1,node_num,1,1)        
+        month_in_year_emb = month_in_year_emb.unsqueeze(1).repeat(1,node_num,1,1)      
+        day_in_month_emb = day_in_month_emb.unsqueeze(1).repeat(1,node_num,1,1)    
         # 全局空间关系变量映射，扩展后的形状: [B,N,pred_len,node_dim]
         node_emb = self.node_emb.unsqueeze(1).unsqueeze(0).repeat(batch_size,1,self.pred_len,1)  
         # 合并时间和空间协变量，形状：[B,N,pred_len,合并后的特征维度]
-        x_mark_dec = torch.cat([day_in_week_emb,month_in_year_emb,node_emb],dim=-1)
+        x_mark_dec = torch.cat([day_in_week_emb,month_in_year_emb,day_in_month_emb,node_emb],dim=-1)
         x_mark_dec = x_mark_dec.reshape(batch_size,node_num,-1) # [B*N,pred_len,时空特征维度]
                         
         dec_out_list = []

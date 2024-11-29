@@ -119,9 +119,7 @@ class AkFuturesExtractor(AkExtractor):
             "avg(d.low),avg(d.volume),avg(hold),avg(settle) " \
             "from dominant_continues_data d,trading_variety v,futures_industry i where d.var_id=v.id and v.industry_id=i.id " \
             " and d.date not in(select date from dominant_continues_data where code like 'ZS_%') group by d.date,v.industry_id"
-        
         combine_sql = "insert into dominant_continues_data(date,code,open,close,high,low,volume,hold,settle) ({})".format(combine_sql)
-        print(combine_sql)
         self.dbaccessor.do_inserto(combine_sql)    
                       
           

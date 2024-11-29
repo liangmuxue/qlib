@@ -167,7 +167,7 @@ class TFTDataset(DatasetH):
         columns = list(set(columns))
         data = data[columns]
         # 目标字段值转换为64位
-        for col in self.get_target_column():
+        for col in self.get_target_column_exc_ext():
             data[col] = data[col].astype(np.float64)
         return data
 
@@ -220,7 +220,7 @@ class TFTDataset(DatasetH):
         time_column = self.col_def["time_column"]
         col_list = self.col_def["col_list"]
         group_column = self.col_def["group_column"]
-        target_column = self.col_def["target_column"]     
+        target_column = self.get_target_column_exc_ext()
         future_covariate_col = self.col_def["future_covariate_col"]
         columns = [time_column] + [group_column] + target_column + col_list + future_covariate_col
         # 去重
@@ -264,6 +264,15 @@ class TFTDataset(DatasetH):
         """取得目标字段"""
         return self.col_def["target_column"]       
 
+    def get_target_column_exc_ext(self):
+        """取得目标字段,排除扩展字段"""
+        
+        target_column = self.col_def["target_column"]  
+        ext_column = self.col_def["ext_column"]     
+        # 排除扩展字段
+        target_column = list(set(target_column) - set(ext_column))        
+        return target_column 
+    
     def get_future_columns(self):
         """取得未来协变量字段名"""
         feature_columns = self.col_def["future_covariate_col"]    

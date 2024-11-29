@@ -248,12 +248,13 @@ class FuturesMappingUtil:
     """用于期货行业分类的功能类"""
     
     """行业分类和股票映射关系对象数据结构规范
-       类型为numpy数组，形状： [行业分类数量，6]
+       类型为numpy数组，形状： [行业分类数量，5]
        其中第1列(indus_index)： 行业分类对应的序列（TargetSeries）排序号（排序号非连续），类型为int
           第2列(indus_code)： 行业分类编码，类型为string
           第3列(instrument_rank)： 当前行业分类下的期货排序号数组（排序号连续），数组元素类型为int
           第4列(instrument_index)： 当前行业分类下的期货对应的序列（TargetSeries）排序号数组（排序号非连续），数组元素类型为int
           第5列(instrument_code)： 当前行业分类下的期货代码数组，数组长度需要与第三列中的每个数组长度一致，数组元素类型为string
+          第6列(instrument_name)： 当前行业分类下的期货名称数组，数组长度需要与第三列中的每个数组长度一致，数组元素类型为string
     """                   
     
     @staticmethod
@@ -310,13 +311,14 @@ class FuturesMappingUtil:
             # 关联之前的数据，按照规范逐个生成
             industry_index = int(fur_industry_index[fur_industry_index[:,0]==fur_code][0,1])
             instrument_codes = group["code"].values
+            instrument_names = group["name"].values
             instrument_index = np.array([keep_index[keep_index[:,0]==ins_code][0,1] for ins_code in instrument_codes])
             # 品种编码数组长度和序号数组长度需要相等
             raise_if_not(
                 instrument_index.shape[0] == instrument_codes.shape[0],
                 f"品种编码数组长度和序号数组长度不一致"
             )              
-            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,instrument_index,instrument_codes]
+            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,instrument_index,instrument_codes,instrument_names]
             fur_ins_mappings.append(fur_ins_mapping)
         fur_ins_mappings = np.array(fur_ins_mappings)
                
@@ -329,8 +331,8 @@ class FuturesMappingUtil:
         combine_codes = sw_ins_mappings[:,:2]
         flags = np.expand_dims(np.zeros(combine_codes.shape[0]).astype(np.int),-1)
         combine_codes = np.concatenate([combine_codes,flags],axis=-1)
-        ins_code = np.concatenate([sw_ins_mappings[i,4] for i in range(sw_ins_mappings[0].shape[0])])
-        ins_index = np.concatenate([sw_ins_mappings[i,3] for i in range(sw_ins_mappings[0].shape[0])])
+        ins_code = np.concatenate([sw_ins_mappings[i,4] for i in range(sw_ins_mappings[:,0].shape[0])])
+        ins_index = np.concatenate([sw_ins_mappings[i,3] for i in range(sw_ins_mappings[:,0].shape[0])])
         flags = np.ones(ins_code.shape[0]).astype(np.int)
         ins_combine_codes = np.stack([ins_index,ins_code,flags],axis=-1)
         ins_combine_codes[:,0] = ins_combine_codes[:,0].astype(np.int)
@@ -344,16 +346,48 @@ class FuturesMappingUtil:
         return sw_ins_mappings[:,1]
 
     @staticmethod
-    def get_industry_names(codes):
+    def get_futures_names(sw_ins_mappings,indus_index=0):
+        """取得某个行业的期货品种名称列表"""
+        
+        ins_codes = sw_ins_mappings[indus_index,4]
         dbaccessor = DbAccessor({})
-        sql = "select code,name from futures_industry where code in ({}) order by code asc".format(codes)        
-        result_rows = dbaccessor.do_query(sql) 
+        sql = "select name from trading_variety where code in %s order by code asc"
+        result_rows = dbaccessor.do_query(sql,(tuple(ins_codes),)) 
+        results = []
+        for row in result_rows:
+            results.append([row[0]])
+        names = pd.DataFrame(results,columns=['name']).values.squeeze(-1)        
+        return names
+    
+    @staticmethod
+    def get_industry_names(codes=None):
+        dbaccessor = DbAccessor({})
+        if codes is None:
+            sql = "select code,name from futures_industry where delete_flag=0 order by code asc"
+            result_rows = dbaccessor.do_query(sql) 
+        else:
+            sql = "select code,name from futures_industry where delete_flag=0  code in %s"  
+            result_rows = dbaccessor.do_query(sql,(tuple(codes),)) 
         results = []
         for row in result_rows:
             results.append([row[0],row[1]])
-        result_df = pd.DataFrame(results,columns=['code','name'])        
-        return result_df
-    
+        names = pd.DataFrame(results,columns=['code','name'])['name'].values       
+        return names
+
+    @staticmethod
+    def get_combine_names(sw_ins_mappings):
+        """混合品种和分类名称，按照默认的编码排序方式"""
+        
+        combine_codes = FuturesMappingUtil.assc_series_and_codes(sw_ins_mappings)[:,1].tolist()
+        dbaccessor = DbAccessor({})
+        sql = "(select code,name from trading_variety where code in %s) union (select code,name from futures_industry where delete_flag=0 and code in %s) order by code asc"
+        result_rows = dbaccessor.do_query(sql,(tuple(combine_codes),tuple(combine_codes),)) 
+        results = []
+        for row in result_rows:
+            results.append([row[0],row[1]])
+        names = pd.DataFrame(results,columns=['code','name'])['name'].values       
+        return names
+       
     @staticmethod
     def get_industry_data_index(sw_ins_mappings):
         return sw_ins_mappings[:,0].astype(np.int32)
@@ -361,7 +395,25 @@ class FuturesMappingUtil:
     @staticmethod
     def get_industry_instrument(sw_ins_mappings):
         return sw_ins_mappings[:,2]
+
+    @staticmethod
+    def get_combine_industry_instrument(sw_ins_mappings):
+        """取得行业内品种索引和名称合并数据"""
         
+        ins_index = sw_ins_mappings[:,2]
+        ins_names = sw_ins_mappings[:,5]
+        combine_content = None
+        for i in range(ins_index.shape[0]):
+            indus_code = sw_ins_mappings[:,1][i]
+            indus_code_arr = np.array([indus_code for _ in range(ins_index[i].shape[0])])
+            item_combine = np.stack([ins_index[i],ins_names[i],indus_code_arr])
+            if combine_content is None:
+                combine_content = item_combine
+            else:
+                combine_content = np.concatenate([combine_content,item_combine],axis=1)
+        combine_content = combine_content.transpose(1,0)
+        return combine_content
+            
     @staticmethod
     def get_instrument_index(sw_ins_mappings):
         ins_in_indus_index = sw_ins_mappings[:,3]

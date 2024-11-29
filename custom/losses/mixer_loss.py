@@ -82,17 +82,17 @@ class FuturesCombineLoss(UncertaintyLoss):
                     if keep_idx.shape[0]<=1:
                         continue
                     op_data = sw_index_data[k]
-                    ce_loss_item = self.ccc_loss_comp(item[keep_idx],op_data[keep_idx])
+                    if i!=2 and False:
+                        ce_loss_item = self.ccc_loss_comp(item[keep_idx],op_data[keep_idx])
+                    else:
+                        ce_loss_item = self.mse_loss(item[keep_idx].unsqueeze(-1),op_data[keep_idx].unsqueeze(-1))
                     ce_loss[i] += ce_loss_item
-                    # ce_loss[i] += self.mse_loss(item[keep_idx].unsqueeze(-1),op_data[keep_idx].unsqueeze(-1))
-                if i<=1:
+                if i<=3:
                     loss_sum = loss_sum + ce_loss[i] + cls_loss[i]
-                elif i==2:
-                    loss_sum = loss_sum + cls_loss[i] 
-                elif i==3:
-                    loss_sum = loss_sum + corr_loss[i]                     
+                # elif i>=4:
+                #     loss_sum = loss_sum + corr_loss[i]                     
                 else:
-                    loss_sum = loss_sum + cls_loss[i]
+                    loss_sum = loss_sum + ce_loss[i] + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]     
     
         

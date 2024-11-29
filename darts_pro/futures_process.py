@@ -22,6 +22,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import gc
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from darts.metrics import mape
 from darts.models import TFTModel
@@ -44,6 +45,9 @@ import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
 from trader.utils.date_util import get_tradedays,date_string_transfer
 from .tft_process_dataframe import TftDataframeModel 
+from darts_pro.data_extension.series_data_utils import StatDataAssis
+from sklearn.preprocessing import MinMaxScaler
+from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -70,7 +74,12 @@ class FuturesProcessModel(TftDataframeModel):
         if self.type.startswith("fit_futures_togather"):
             self.fit_futures_togather(dataset)
             return   
-             
+        if self.type.startswith("pred_futures_togather"):
+            self.fit_futures_togather(dataset)
+            return        
+        if self.type.startswith("data_corr"):
+            self.data_corr(dataset)   
+            return           
         print("Do Nothing")
 
     def fit_futures_togather(
@@ -156,11 +165,13 @@ class FuturesProcessModel(TftDataframeModel):
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                      max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)
+            self.model.model.train_sw_ins_mappings = self.model.train_sw_ins_mappings
+            self.model.model.valid_sw_ins_mappings = self.model.valid_sw_ins_mappings            
             trainer.validate(model=model,dataloaders=val_loader)
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
 
 
 
@@ -234,4 +245,181 @@ class FuturesProcessModel(TftDataframeModel):
                 )
             
         return my_model
+                    
+    def data_corr(
+        self,
+        dataset: TFTFuturesDataset,
+    ):
+        """对数据进行相关性分析"""
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        if not os.path.exists(self.batch_file_path):
+            os.mkdir(self.batch_file_path)
+            
+        df_data_path = os.path.join(self.batch_file_path,"main_data.pkl")
+        df_train_path = os.path.join(self.batch_file_path,"df_train.pkl")
+        df_valid_path = os.path.join(self.batch_file_path,"df_valid.pkl")
+        ass_train_path = os.path.join(self.batch_file_path,"ass_data_train.pkl")
+        ass_valid_path = os.path.join(self.batch_file_path,"ass_data_valid.pkl")
+            
+        if self.load_dataset_file:
+            # 加载主要序列数据和辅助数据
+            with open(df_data_path, "rb") as fin:
+                train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+                    pickle.load(fin)   
+            with open(ass_train_path, "rb") as fin:
+                ass_data_train = pickle.load(fin)  
+            with open(ass_valid_path, "rb") as fin:
+                ass_data_valid = pickle.load(fin) 
+            with open(df_train_path, "rb") as fin:
+                dataset.df_train = pickle.load(fin)  
+                dataset.prepare_inner_data(dataset.df_train)      
+            with open(df_valid_path, "rb") as fin:
+                dataset.df_val = pickle.load(fin)     
+                dataset.prepare_inner_data(dataset.df_val)           
+            global_var.set_value("ass_data_train",ass_data_train)
+            global_var.set_value("ass_data_valid",ass_data_valid)
+            global_var.set_value("load_ass_data",True)
+        else:
+            # 生成tft时间序列数据集,包括目标数据、协变量等
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+            
+        output_chunk_length = self.optargs["forecast_horizon"]
+        input_chunk_length = self.optargs["wave_period"] - output_chunk_length
+        past_split = self.optargs["past_split"] 
+        
+        custom_dataset_valid = FuturesTogatherDataset(
+                    target_series=val_series_transformed,
+                    covariates=past_convariates,
+                    future_covariates=future_convariates,
+                    input_chunk_length=input_chunk_length,
+                    output_chunk_length=output_chunk_length,
+                    max_samples_per_ts=None,
+                    use_static_covariates=True,
+                    target_num=len(past_split),
+                    ass_sw_ins_mappings=None, # 验证集是需要传入训练集映射关系数据，以进行审计                    
+                    mode="valid"
+                )            
+        data_assis = StatDataAssis()
+        col_list = dataset.col_def["col_list"] + ["label"]
+        analysis_columns = ["label_ori","REV5","IMAX5","QTLUMA5","OBV5","CCI5","KMID","KLEN","KMID2","KUP","KUP2",
+                            "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
+            'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
+        analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
+        analysis_columns = ["price","QTLUMA5",'CORD5','QTLU5','CNTP5','RSI10','RSI5','OBV5','near_basis_rate','dom_basis_rate','ATR5','AOS','CNTD5','SUMPMA5']
+        # 利用dataloader进行数据拼装
+        val_loader = DataLoader(
+                custom_dataset_valid,
+                batch_size=1024,
+                shuffle=False,
+                num_workers=8,
+                pin_memory=True,
+                drop_last=False,
+                collate_fn=self._batch_collate_fn,
+            )
+        past_conv_index = past_split[0]
+        past_columns = dataset.get_past_columns()
+        past_columns = past_columns[past_conv_index[0]:past_conv_index[1]]       
+        combine_columns = ["price"] + past_columns + dataset.get_target_column() 
+        analysis_data = None
+        print("total len：",len(val_loader))
+        # 遍历数据集，并按照批次进行计算，汇总后取得平均值
+        for index,batch_data in enumerate(val_loader):
+            (
+                past_target,
+                past_covariates,
+                historic_future_covariates,
+                future_covariates,
+                static_covariates,
+                past_future_covariates,
+                future_target,
+                target_class,
+                past_round_targets,
+                future_round_targets,
+                target_info
+            ) = batch_data
+            # if index>5:
+            #     break
+            index_filter = []
+            # 筛选指定日期数据,由于是3D模式，因此先把形状调整一下]
+            target_class_flat = target_class.flatten()
+            keep_index = np.where(target_class_flat>-1)[0]
+            future_target_flat = future_target.reshape(-1,future_target.shape[-2],future_target.shape[-1])
+            future_target = future_target_flat[keep_index]
+            price_array_list = [] 
+            for i,ti in enumerate(target_info):
+                for ts in ti: 
+                    # 忽略空值
+                    if ts is not None:
+                        # 计算价格差的时候，把前一日期也包括进来
+                        price_array = np.array(ts["price_array"][-6:])  
+                        price_array_list.append(price_array)
+                future_start_datetime = ti[0]["future_start_datetime"]
+                if future_start_datetime<20220401 and future_start_datetime>=20220301 or True:
+                    index_filter.append(i)    
+            price_array = np.stack(price_array_list)
+            price_range = ((price_array[:,1:] - price_array[:,:-1])/price_array[:,:-1])*10
+            price_range = np.expand_dims(price_range,-1)
+            # 对价格归一化后进行比较
+            price_array_scale = MinMaxScaler().fit_transform(price_array[:,1:].transpose(1,0)).transpose(1,0)
+            price_array_scale = np.expand_dims(price_array_scale,-1)
+            past_future_covariates = past_future_covariates.reshape(past_future_covariates.shape[0]*past_future_covariates.shape[1],past_future_covariates.shape[2],-1)
+            past_future_covariates = past_future_covariates.numpy()[keep_index]
+            past_future_covariates_item = past_future_covariates[...,past_conv_index[0]:past_conv_index[1]]  
+            past_future_covariates_item_trans = past_future_covariates_item.transpose(1,0,2)
+            past_future_covariates_item_trans = past_future_covariates_item_trans.reshape(past_future_covariates_item_trans.shape[0],-1)
+            past_future_covariates_item = MinMaxScaler().fit_transform(past_future_covariates_item_trans).reshape(past_future_covariates_item_trans.shape[0],past_future_covariates_item.shape[0],past_future_covariates_item.shape[2]).transpose(1,0,2)
+            # 整合未来价格、未来目标值以及过去协变量在未来的数值，后续统一进行相关性比较
+            analysis_batch = np.concatenate([price_array_scale,past_future_covariates_item,future_target],-1)   
+            # 计算单个批次的数据
+            df_corr_batch,df_price_batch,range_cls_stat = data_assis.custom_data_corr_analysis(analysis_batch,fit_columns=combine_columns,
+                            analysis_columns=analysis_columns,target_class=target_class[index_filter],price_range=price_range)
+        # 汇总所有批次的数据
+        if analysis_data is None:
+            analysis_data = [df_corr_batch,df_price_batch,[range_cls_stat]]
+        else:
+            analysis_data[0] = pd.concat([analysis_data[0],df_corr_batch])
+            analysis_data[1] = pd.concat([analysis_data[1],df_price_batch])
+            analysis_data[2] = analysis_data[2] + [range_cls_stat]
+        print("process index:{}".format(index))           
+         
+        analysis_data_mean = [analysis_data[0].mean(),analysis_data[1].mean()]
+        analysis_data[2] = np.stack(analysis_data[2])
+        hitrate_mean = np.mean(analysis_data[2],axis=0)
+        hitrate_mean = pd.DataFrame(hitrate_mean,columns=["cls_{}".format(k) for k in range(4)],index=analysis_columns[1:])
+                
+        print("指标走势与价格走势相关度:\n",analysis_data_mean[0])
+        print("指标涨跌幅与价格涨跌幅相关度:\n",analysis_data_mean[1])
+        print("hitrate price:\n",hitrate_mean)
+
+    @staticmethod           
+    def _batch_collate_fn(batch):
+        """批次整合"""
+        
+        aggregated = []
+        first_sample = batch[0]
+        for i in range(len(first_sample)):
+            elem = first_sample[i]
+            if isinstance(elem, np.ndarray):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, MinMaxScaler):
+                aggregated.append([sample[i] for sample in batch])
+            elif isinstance(elem, tuple):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+            elif isinstance(elem, List):
+                aggregated.append([sample[i] for sample in batch])
+            else:
+                print("no match for:",elem.dtype)
+        return tuple(aggregated)   
+                                
                     

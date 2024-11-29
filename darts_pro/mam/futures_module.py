@@ -20,6 +20,7 @@ from losses.mixer_loss import FuturesCombineLoss
 from cus_utils.common_compute import compute_average_precision,normalization
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from tft.class_define import OVERROLL_TREND_UNKNOWN,OVERROLL_TREND_RAISE,OVERROLL_TREND_FALL2RAISE,OVERROLL_TREND_RAISE2FALL,OVERROLL_TREND_FALL
+from cus_utils.tensor_viz import TensorViz
 
 MixedCovariatesTrainTensorType = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -27,7 +28,8 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from .mlp_module import MlpModule
 
-TRACK_DATE = 20220708
+TRACK_DATE = 20220822
+DRAW_SEQ = [1]
 
 class FuturesTogeModule(MlpModule):
     """期货品种和行业板块数据一起预测的模型"""
@@ -283,7 +285,7 @@ class FuturesTogeModule(MlpModule):
         for i,p_index in enumerate(self.past_split):
             past_conv_index = self.past_split[i]
             past_covariates_item = past_covariates[...,past_conv_index[0]:past_conv_index[1]]
-            # 修改协变量生成模式，只取自相关目标作为协变量，不使用时间协变量
+            # 修改协变量生成模式，只取自相关目标作为协变量，不使用时间协变量（时间协变量不进行归一化，只用于EMB嵌入）
             conv_defs = [
                         past_target[...,i:i+1],
                         past_covariates_item,
@@ -315,8 +317,8 @@ class FuturesTogeModule(MlpModule):
     def on_validation_epoch_end(self):
         """重载父类方法，修改指标计算部分"""
         # SANITY CHECKING模式下，不进行处理
-        if self.trainer.state.stage==RunningStage.SANITY_CHECKING or True:
-            return    
+        # if self.trainer.state.stage==RunningStage.SANITY_CHECKING:
+        #     return    
     
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         
@@ -355,69 +357,106 @@ class FuturesTogeModule(MlpModule):
         if self.mode is not None and self.mode.startswith("pred_"):
             tar_viz = global_var.get_value("viz_data")
             viz_result = global_var.get_value("viz_result")
-            viz_result_detail = global_var.get_value("viz_result_detail")
+            # viz_result_detail = global_var.get_value("viz_result_detail")
+            
             viz_total_size = 0
             output_3d,past_target_3d,future_target_3d,target_class_3d,past_round_targets_total, \
                 future_round_targets_total,target_info_3d = self.combine_output_total(self.output_result)
-            indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+            
+            instrument_names = FuturesMappingUtil.get_combine_names(sw_ins_mappings)
+            indus_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+            indus_rownames = FuturesMappingUtil.get_industry_names()
+            indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)  
+            viz_result_detail = {}
+            for code in indus_codes:
+                viz_result_detail[code] = TensorViz(env="viz_result_detail_{}".format(code))
+                viz_result_detail[code].remove_env()
+                viz_result_detail[code] = TensorViz(env="viz_result_detail_{}".format(code))
+                   
             for index in range(target_class_3d.shape[0]):
                 # if viz_total_size>3:
                 #     break
                 viz_total_size+=1
                 keep_index = np.where(target_class_3d[index]>=0)[0]
-                indus_targets = future_round_targets_total[index,indus_data_index]
-                ts_arr = target_info_3d[index][keep_index]
-                date = ts_arr[0]["future_start_datetime"]
-                # if date!=20220905 and date!=20220902 and date!=20220825 and date!=20220829 and date!=20220830:
-                #     continue
+                round_targets = future_round_targets_total[index]
+                cls_output = output_3d[2]
+                ts_arr = target_info_3d[index]
+                date = ts_arr[keep_index][0]["future_start_datetime"]
                 if date!=TRACK_DATE:
                     continue               
-                # if date!=20221209 and date!=20221122 and date!=20221117 and date!=20221118 and date!=20221130:
-                #     continue                
-                codes = [ts["instrument"] for ts in ts_arr]
-                result_df = FuturesMappingUtil.get_industry_names(codes)
-                rownames = result_df["name"].values.tolist()
-                rownames = ['申万A指'] + rownames
-                target_title = "industry compare,date:{}".format(date)
-                win = "industry_comp_{}".format(viz_total_size)
+                
+                ins_with_indus = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
-                    cls_output = output_3d[2][index,:,j]
-                    sw_index_value = output_3d[3][index,j]
-                    index_target_item = indus_targets[j].item()
-                    view_data = np.stack([cls_output,indus_targets[:,j]]).transpose(1,0)
-                    view_data = view_data[keep_index]
-                    win = "target_comp_{}_{}".format(j,viz_total_size)
-                    target_title = "target{} pred_tar:{}_{},date:{}".format(j,sw_index_value,index_target_item,date)
-                    if j<3:
-                        tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=rownames,legends=["pred","target"])    
+                    # 显示板块分类整体预测数据
+                    indust_output_value = cls_output[index,indus_index,j]
+                    indust_target = round_targets[indus_index,j]
+                    win = "indus_round_target_{}_{}".format(j,viz_total_size)
+                    target_title = "industry compare_{},date:{}".format(j,date)
+                    view_data = np.stack([indust_output_value,indust_target]).transpose(1,0)
+                    if j in DRAW_SEQ:
+                        tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_rownames.tolist(),legends=["pred","target"])   
+                    
+                    total_view_data = None
+                    # 按照每个板块分类，分别显示板块内的品种整体预测数据
+                    futures_names_combine = None
+                    futures_index_combine = None
+                    for k,instruments in enumerate(ins_with_indus):
+                        indus_code = indus_codes[k]
+                        indus_name = indus_rownames[k]
+                        futures_names = FuturesMappingUtil.get_futures_names(sw_ins_mappings,k).tolist()
+                        futures_index = FuturesMappingUtil.get_futures_names(sw_ins_mappings,k).tolist()
+                        ins_cls_output = cls_output[index,instruments,j]
+                        fur_round_target = round_targets[instruments,j]
+                        view_data = np.stack([ins_cls_output,fur_round_target]).transpose(1,0)
+                        win = "round_target_{}_{}_{}".format(j,k,viz_total_size)
+                        target_title = "target{}_{} pred_tar:{}_{},date:{}".format(j,indus_name,round(indust_output_value[k],2),round(indust_target[k],2),date)
+                        if j in DRAW_SEQ and len(futures_names)>1:
+                            viz_result.viz_bar_compare(view_data,win=win,title=target_title,rownames=futures_names,legends=["pred","target"])   
+                        if total_view_data is None:
+                            total_view_data = view_data
+                        else:
+                            total_view_data = np.concatenate([total_view_data,view_data],axis=0) 
+                        if futures_names_combine is None:
+                            futures_names_combine = futures_names
+                            futures_index_combine = futures_index
+                        else:
+                            futures_names_combine = np.concatenate([futures_names_combine,futures_names],axis=0)    
+                            futures_index_combine = np.concatenate([futures_index_combine,futures_index],axis=0)    
+                    # 合并所有品种并显示
+                    if j in DRAW_SEQ:
+                        win = "target_comb_{}_{}".format(j,viz_total_size)
+                        target_title = "combine target{},date:{}".format(j,date)
+                        tar_viz.viz_bar_compare(total_view_data,win=win,title=target_title,rownames=futures_names_combine.tolist(),legends=["pred","target"])                       
+                    
+                    # 显示预测走势数据        
                     xbar_data = output_3d[0][index,...,j]
-                    # 可视化当前预测目标的时间序列
-                    for k in range(xbar_data.shape[0]):
+                    ins_combine = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
+                    for idx in range(ins_combine.shape[0]):
+                        k = ins_combine[idx,0]
+                        ins_name = ins_combine[idx,1]
+                        indus_code = ins_combine[idx,2]
+                        if not k in keep_index:
+                            continue
                         past_target_item = past_target_3d[index,k,:,j]
                         future_target_item = future_target_3d[index,k,:,j]
                         target_data = np.concatenate([past_target_item,future_target_item],axis=0)    
                         zero_index = np.where(target_data==0)
                         target_data[zero_index] = 0.001
                         xbar_data_item = xbar_data[k,:]                  
-                        xbar_data_mean = np.mean(xbar_data,axis=0)
-                        xbar_data_mean = xbar_data[0]
                         pad_data = np.array([0 for i in range(self.input_chunk_length)])
                         pred_data = np.concatenate((pad_data,xbar_data_item))
-                        pred_data_mean = np.concatenate((pad_data,xbar_data_mean))
                         # Add Price data and Norm
                         price_array = ts_arr[k]["price_array"]
                         scaler = MinMaxScaler(feature_range=(0.001, 1))
                         scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
                         price_array = scaler.transform(np.expand_dims(price_array,-1)).squeeze()
-                        view_data = np.stack((pred_data,target_data,price_array)).transpose(1,0)
-                        view_data_mean = np.stack((pred_data_mean,target_data,price_array)).transpose(1,0)
-                        win = "target_xbar_{}_{}_{}".format(k,j,viz_total_size)
-                        target_title = "{}_{},date:{}".format(rownames[k],j,date)
-                        if k==0 and j==3:
-                            viz_result.viz_matrix_var(view_data_mean,win=win,title=target_title,names=["pred","target","price"])                         
-                        if k>0 and j==3:
-                            viz_result_detail.viz_matrix_var(view_data,win=win,title=target_title,names=["pred","target","price"]) 
+                        view_data = np.stack((target_data,price_array)).transpose(1,0)
+                        win = "target_xbar_{}_{}_{}".format(indus_code,k,j)
+                        target_title = "{}_{},date:{}".format(ins_name,j,date)
+                        if j in DRAW_SEQ:
+                            viz_detail = viz_result_detail[indus_code]
+                            viz_detail.viz_matrix_var(view_data,win=win,title=target_title,names=["target","price"])                         
                             
     def viz_results(self,output_inverse=None,target_inverse=None,import_price_result=None,batch_idx=0,target_vr_class=None,target_info=None,viz_target=None):
         dataset = global_var.get_value("dataset")
@@ -468,21 +507,20 @@ class FuturesTogeModule(MlpModule):
             target_class_list = target_class_3d[i]
             # 有一些空值，找出对应索引后续做忽略处理
             keep_index = np.where(target_class_list>=0)[0]
-            output_list = [output_3d[0][i][keep_index],output_3d[2][i],output_3d[3][i]]
+            output_list = [output_3d[0][i][keep_index],output_3d[2][i][keep_index],output_3d[3][i]]
             last_target_list = last_targets_3d[i]
             indus_targets = future_indus_targets[i]
             date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
             # if date!=TRACK_DATE:
             #     continue
             # 生成目标索引
-            import_index,overroll_trend = self.build_import_index(output_data=output_list,target=whole_target,target_info_list=target_info_list[keep_index])
+            import_index,overroll_trend = self.build_import_index(output_data=output_list,target=whole_target[keep_index],target_info_list=target_info_list[keep_index])
             # 整体走势不好，有可能没有候选数据
             if import_index is None:
                 continue
-            import_index = np.intersect1d(import_index,keep_index)
             # Compute Acc Result
             import_acc, import_recall,import_price_acc,import_price_nag,price_class, \
-                import_price_result = self.collect_result(import_index, target_class_list, target_info_list)
+                import_price_result = self.collect_result(import_index, target_class_list, target_info_list[keep_index])
             
             score_arr = []
             score_total = 0
@@ -589,6 +627,8 @@ class FuturesTogeModule(MlpModule):
     def build_import_index(self,output_data=None,target=None,target_info_list=None):  
         """生成涨幅达标的预测数据下标"""
         
+        return None,None
+        
         (fea_values,cls_values,ce_values) = output_data
         price_array = np.array([item["price_array"] for item in target_info_list])
         
@@ -648,7 +688,7 @@ class FuturesTogeModule(MlpModule):
                 idx = pred_import_index_pre[i]
                 # 上一段价格走势不能太低,也不能太高，并最近几段处于上涨
                 if price_recent[idx,-1]>0.5 and price_recent[idx,-1]<0.96 and (price_recent[idx,-1]-price_recent[idx,-3])>0:
-                    pred_import_index.append(idx)
+                        pred_import_index.append(idx)
             pred_import_index = np.array(pred_import_index)   
         elif overroll_trend==OVERROLL_TREND_FALL:
             # 在确定下跌的时候，使用QTLU行业预测指标，配合QTLU的CORR前期指标
@@ -708,7 +748,6 @@ class FuturesTogeModule(MlpModule):
         last_qtlu = last_fea_mean[3]
         
         price_trend = self.price_trend_ana(price_recent)
-        
         # 确定下跌：之前处于下跌势头，RVI的CE指标小于阈值,QTLU的走势幅度差值大于阈值
         if price_trend==2 and qtlu_corr>0.3 and rvi_ce<0.3:
             return OVERROLL_TREND_FALL
@@ -731,9 +770,8 @@ class FuturesTogeModule(MlpModule):
         if price_trend==2 and price_recent_range<-0.3 and qtlu_corr>-0.1:
             return OVERROLL_TREND_RAISE2FALL     
         # 震荡走势偏正面： 之前处于上涨或震荡势头，RVI的CE指小于指定阈值，QTLU的CE指小于指定阈值
-        if price_trend!=2 and rvi_ce>0.5 and qtlu_ce<0.55:
-            return OVERROLL_TREND_FALL2RAISE                  
-        
+        # if price_trend!=2 and rvi_ce>0.5 and qtlu_ce<0.55:
+        #     return OVERROLL_TREND_FALL2RAISE                  
         # 不确定意味震荡
         return OVERROLL_TREND_UNKNOWN
            
