@@ -14,6 +14,7 @@ from sklearn.cluster import DBSCAN
 from sklearn import metrics
 from sklearn.datasets import make_blobs
 from sklearn.preprocessing import StandardScaler
+from scipy.spatial.distance import cosine
 import networkx as nx 
 import matplotlib.pyplot as plt
 
@@ -404,12 +405,50 @@ def test_corr_tensor():
     print(ret)
 
 def test_slope():
-    import numpy as np
-    x = [1, 3]
-    y = [1,0.5]
+    
+    x = [1,2]
+    y = [2,2]
     slope, intercept = np.polyfit(x,y,1)
     print(slope)
+    
+    angle = np.angle(0.5,True)
+    print("angle:",angle)
+    
+    # line = [1, 2, 3, 100]
+    # x1, y1, x2, y2 = line
+    # angle = np.rad2deg(np.arctan2(y2 - y1, x2 - x1))    
+    # print("angle is",angle)
 
+def test_angle():
+    def angle_between_vectors(v1, v2):
+        # 计算点积 (a·b = |a||b|cosθ)
+        dot_product = np.dot(v1, v2)
+        # 计算每个向量的模
+        magnitude_v1 = np.linalg.norm(v1)
+        magnitude_v2 = np.linalg.norm(v2)
+    
+        # 如果两个向量的模为0，则认为它们是同方向的，夹角为0
+        if magnitude_v1 == 0 or magnitude_v2 == 0:
+            return 0
+    
+        # 使用上面的点积和模长计算余弦值，然后转换为弧度
+        cos_theta = dot_product / (magnitude_v1 * magnitude_v2)
+        theta_radians = np.arccos(cos_theta)
+    
+        # 返回结果，如果需要角度范围在0到π之间，可以取绝对值
+        return np.abs(theta_radians)
+    
+    # 示例向量
+    v1 = np.array([1, 1])
+    v2 = np.array([1, 1.2])
+    
+    # angle_rad = angle_between_vectors(v1, v2)
+    # print(f"向量间的夹角为: {angle_rad} 弧度")    
+    
+    cos_sim = 1 - cosine(v1, v2)
+    print("cos_sim:",cos_sim)
+    
+    
 def concordance_correlation_coefficient(y_true, y_pred,
                        sample_weight=None,
                        multioutput='uniform_average'):
@@ -696,7 +735,8 @@ if __name__ == "__main__":
     # test_date()
     # test_corr()
     # test_corr_tensor()
-    # test_slope()
+    test_slope()
+    # test_angle()
     # test_each()
     # test_split_compute()
     # test_variable()
@@ -705,7 +745,7 @@ if __name__ == "__main__":
     # test_copy_torch()
     # test_compute()
     # test_temp()
-    test_where()
+    # test_where()
     # test_pd_ser()
     # test_torch_vision()
     # torch_comp()
@@ -729,6 +769,5 @@ if __name__ == "__main__":
     # test_matrix_view()
     # test_pr()
     # test_scaler()
-    
     
     

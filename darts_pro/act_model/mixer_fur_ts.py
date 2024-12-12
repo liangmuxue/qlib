@@ -200,11 +200,10 @@ class FurTimeMixer(nn.Module):
         x_mar_dec_out = self.tisp_projection_layer(x_mark_dec).reshape([batch_size,node_num]).unsqueeze(-1)       
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1).unsqueeze(-1)
         # 叠加整体数值残差计算
-        last_skip_data = self.last_tar_skip_layer(past_round_target)
-        comp_out = comp_out + x_mar_dec_out # + last_skip_data
+        comp_out = comp_out + x_mar_dec_out
         # 引入全局未来协变量，串接整体评估部分
-        indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
-        indus_dec_out = dec_out[:,indus_data_index,:]
+        # indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+        # indus_dec_out = dec_out[:,indus_data_index,:]
         # 按照不同分类板块分别投影
         industry_decoded_data = None
         sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings

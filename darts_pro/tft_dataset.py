@@ -158,7 +158,7 @@ class TFTDataset(DatasetH):
         group_column = self.get_group_column()
         data["label"] = data.groupby(group_column)["label"].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
         # 生成价格归一化数据
-        data["label_norm"] = data[["label","instrument"]].groupby("instrument").transform(lambda x: (x-x.min())/(x.max()-x.min()))    
+        data["price_norm"] = data[["label_ori","instrument"]].groupby("instrument").transform(lambda x: (x-x.min())/(x.max()-x.min()))    
         # 生成KDJ指标
         self.compute_kdj(data)    
         self.compute_atr(data)     

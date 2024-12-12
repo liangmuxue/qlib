@@ -264,14 +264,14 @@ class IndustryModel(DateTogeModel):
                     cur_loss = float(x.split("=")[2][:-5])
                     cur_epoch = int(x.split("=")[1].split("-")[0])
                     # 大于一定的epoch才计算评分
-                    if cur_epoch>50 and cur_loss<=min_loss:
+                    if cur_epoch>20 and cur_loss<=min_loss:
                         min_loss = cur_loss
                         cadi_x = x
                 file_name = cadi_x
             else:
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
-                # file_name = "epoch=117-val_CNTN_loss=0.75.ckpt"
+                file_name = "epoch=58-val_loss=1.48.ckpt"
             file_name = os.path.basename(file_name)       
         
         file_path = os.path.join(checkpoint_dir, file_name)

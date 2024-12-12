@@ -72,7 +72,8 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             df_data_total = dataset.df_val 
         
         instrument_df = self.get_variety_list_with_indus()
-        codes_query = np.concatenate([instrument_df["code"].values,instrument_df["indus_code"].values])
+        # 包含整体指数
+        codes_query = np.concatenate([instrument_df["code"].values,instrument_df["indus_code"].values,np.array(['ZS_ALL'])])
         # 只使用在数据表中的目标数据
         df_data = df_data_total[df_data_total["instrument"].isin(codes_query)]
         df_data = df_data.sort_values(by=["instrument","datetime_number"],ascending=True)
@@ -80,9 +81,6 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         group_column = dataset.get_group_column()
         df_data[g_col] = df_data[group_column].rank(method='dense',ascending=True).astype("int")  
         self.df_data = df_data
-        # 映射target_series对应的索引位置
-        combine_codes = FuturesMappingUtil.assc_series_and_codes(fur_ins_mappings)
-        self.combine_codes = combine_codes
         # 通过最小最大日期，生成所有交易日期列表
         datetime_col = dataset.get_datetime_index_column()   
         time_column = dataset.get_time_column()   
@@ -118,7 +116,7 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         self.sw_indus_shape = [rank_num_max,input_chunk_length+output_chunk_length]  
         
         # 创建整体目标涨跌评估数据的归一化数据,整体归一化
-        total_target_vals = self.build_total_tar_scale_data(target_series)
+        total_target_vals = self.build_total_tar_scale_data(target_series,scale=False)
         self.total_target_vals = total_target_vals  
 
         self.mode = mode
@@ -166,7 +164,9 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         # 取得相关期货品种以及对应行业板块
         instrument_df = self.get_variety_list_with_indus()     
         fur_indus = self.get_fur_industry()
-        fur_indus_df = pd.DataFrame(fur_indus,columns=["code"])
+        fur_indus_df = pd.DataFrame(fur_indus,columns=["code","name"])
+        # 插入整体指标数据
+        fur_indus_df = fur_indus_df.append(pd.DataFrame(np.array([['ZS_all','综合']]),columns=["code","name"]),ignore_index=True)
         # 生成继承映射关系对象
         sw_ins_mappings = FuturesMappingUtil.build_accord_mapping(target_series, fur_indus_df, instrument_df, dataset=dataset)
         return sw_ins_mappings
@@ -174,12 +174,12 @@ class FuturesTogatherDataset(GenericShiftedDataset):
     def get_fur_industry(self):       
         """取得板块分类"""
         
-        sql = "select upper(concat('ZS_',code)) from futures_industry order by code asc"
+        sql = "select upper(concat('ZS_',code)),name from futures_industry where delete_flag=0 order by code asc"
         result_rows = self.dbaccessor.do_query(sql)    
-        results = [row[0] for row in result_rows]
+        results = [[row[0],row[1]] for row in result_rows]
         return np.array(results)
 
-    def build_total_tar_scale_data(self,target_series,weights=2):
+    def build_total_tar_scale_data(self,target_series,scale=True):
         """创建整体目标涨跌评估数据的归一化数据,整体归一化"""
         
         total_target_vals = []
@@ -208,27 +208,38 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             begin_index = end_index
         
         index_range = np.array(index_range)   
-        # 不区分股票整体拼接，并整体归一化
         combine_values = np.concatenate(combine_values,axis=0)
-        # 规整离群值
-        bound_ratio = [0.8,0.8,None,0.8,0.8,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None]
-        scale_data = [None for _ in range(combine_values.shape[-1])]
-        for i in range(combine_values.shape[-1]):
-            if bound_ratio[i] is not None:
-                combine_values[:,i] = interquartile_range(combine_values[:,i],bound_ratio=bound_ratio[i])           
-            # Standard Data
-            scale_data[i] = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(combine_values[:,i:i+1]).squeeze()
-            if bound_ratio[i] is not None:
-                scale_data[i] = interquartile_range(scale_data[i]) 
-                scale_data[i] = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(np.expand_dims(scale_data[i],-1)).squeeze()
-        scale_data = np.stack(scale_data).transpose(1,0)
+        # 根据标志决定是否归一化
+        if scale:
+            # 规整离群值
+            bound_ratio = [0.8,0.8,None,0.8,0.8,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None]
+            scale_data = [None for _ in range(combine_values.shape[-1])]
+            # 不区分股票整体拼接，并整体归一化
+            for i in range(combine_values.shape[-1]):
+                if bound_ratio[i] is not None:
+                    combine_values[:,i] = interquartile_range(combine_values[:,i],bound_ratio=bound_ratio[i])           
+                # Standard Data
+                scale_data[i] = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(combine_values[:,i:i+1]).squeeze()
+                if bound_ratio[i] is not None:
+                    scale_data[i] = interquartile_range(scale_data[i]) 
+                    scale_data[i] = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(np.expand_dims(scale_data[i],-1)).squeeze()
+            scale_data = np.stack(scale_data).transpose(1,0)
+            combine_values = scale_data
+        else:
+            # 0值替换为非0
+            eps = 1e-5
+            for i in range(combine_values.shape[-1]):
+                zero_index = np.where(combine_values[:,i]==0)[0]
+                eps_adju = np.random.uniform(low=eps,high=eps*10,size=zero_index.shape[0])
+                combine_values[:,i][zero_index] = eps_adju
+            
         # 还原到多个股票维度模式
         for i in range(index_range.shape[0]):
             idx_range = index_range[i]
-            scale_data_item = scale_data[idx_range[0]:idx_range[1],:]
+            data_item = combine_values[idx_range[0]:idx_range[1],:]
             # 填充空白值
-            scale_data_item = np.pad(scale_data_item,((2,self.output_chunk_length-1),(0,0)),'constant')             
-            total_target_vals.append(scale_data_item)
+            data_item = np.pad(data_item,((2,self.output_chunk_length-1),(0,0)),'constant')             
+            total_target_vals.append(data_item)
           
         return total_target_vals  
             
@@ -260,9 +271,8 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         for index,ser_idx in enumerate(sw_date_mapping):
             if ser_idx==-1:
                 continue     
-            # 取得原序列索引进行series取数
-            combine_code = self.combine_codes[index]
-            ori_index = combine_code[0]
+            # 取得原序列索引进行series取数,目前一致
+            ori_index = index
             code = ori_index + 1
             target_series = self.target_series[ori_index]
             # 如果最后的序列号与当前序列号的差值不足序列输出长度，则忽略
@@ -292,7 +302,6 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             covariate_end = past_end
             # 记录预测未来第一天的关联日期，用于后续数据对齐
             future_start_datetime = self.ass_data[code][3][past_end]
-                
             # 取得整体评估量化数据
             total_target_vals = self.total_target_vals[ori_index][past_start:future_end]
             round_targets[keep_index] = total_target_vals            
@@ -304,6 +313,8 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             # rank数值就是当前索引加1
             code = ori_index + 1
             instrument = self.ass_data[code][0]
+            # if future_start_datetime==20220708:
+            #     print("ggg")                
             price_array = self.ass_data[code][2][past_start:future_end]
             datetime_array = self.ass_data[code][3][past_start:future_end]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引

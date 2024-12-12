@@ -110,19 +110,27 @@ class AkFuturesExtractor(AkExtractor):
         # 数据表关联字段挂接
         upt_sql = "update dominant_continues_data d set d.var_id=(select id from trading_variety t where t.code=d.code)"
         self.dbaccessor.do_updateto(upt_sql)
-    
+        # 结算价为0并且收盘价不为0的，把收盘价赋给结算价
+        upt_sql = "update dominant_continues_data set settle=close where settle=0 and close>0 "
+        self.dbaccessor.do_updateto(upt_sql)
+            
     def build_industry_data(self):
         """生成行业板块历史行情数据"""
         
         # 汇总每天每个行业板块的成交信息（忽略已经生成的行业数据）
-        combine_sql = "select d.date,concat('ZS_',i.code) as v_code,avg(d.open),avg(d.close),avg(d.high), "\
-            "avg(d.low),avg(d.volume),avg(hold),avg(settle) " \
-            "from dominant_continues_data d,trading_variety v,futures_industry i where d.var_id=v.id and v.industry_id=i.id " \
-            " and d.date not in(select date from dominant_continues_data where code like 'ZS_%') group by d.date,v.industry_id"
+        # combine_sql = "select d.date,concat('ZS_',i.code) as v_code,avg(d.open),avg(d.close),avg(d.high), "\
+        #     "avg(d.low),avg(d.volume),avg(hold),avg(settle) " \
+        #     "from dominant_continues_data d,trading_variety v,futures_industry i where d.var_id=v.id and v.industry_id=i.id " \
+        #     " and d.date not in(select date from dominant_continues_data where code like 'ZS_%') group by d.date,v.industry_id"
+        # combine_sql = "insert into dominant_continues_data(date,code,open,close,high,low,volume,hold,settle) ({})".format(combine_sql)
+        # self.dbaccessor.do_inserto(combine_sql)    
+        # 生成总体指数数据
+        combine_sql = "select d.date,'ZS_all' as v_code,avg(d.open),avg(d.close),avg(d.high), "\
+            "avg(d.low),avg(d.volume),avg(hold),avg(settle) from dominant_continues_data d where d.code like 'ZS_%' and d.code<>'ZS_all'" \
+            " and d.date not in(select date from dominant_continues_data where code='ZS_all') group by d.date"
         combine_sql = "insert into dominant_continues_data(date,code,open,close,high,low,volume,hold,settle) ({})".format(combine_sql)
-        self.dbaccessor.do_inserto(combine_sql)    
-                      
-          
+        self.dbaccessor.do_inserto(combine_sql)   
+                  
     def import_extension_data(self,begin_date=None):
         """导入历史行情辅助数据"""
         
@@ -216,7 +224,8 @@ class AkFuturesExtractor(AkExtractor):
             filename = "{}/{}.csv".format(save_path,code)
             with open(filename,mode='w',encoding='utf-8') as f:
                 writer = csv.writer(f,dialect='excel')
-                header = ["datetime","open","close","high","low","volume","hold","settle"]
+                # 改变字段名，把结算价设置为收盘价，收盘价命名为参考收盘价
+                header = ["datetime","open","refclose","high","low","volume","hold","close"]
                 writer.writerow(header)
                 for row in item_rows:
                     writer.writerow(row)            

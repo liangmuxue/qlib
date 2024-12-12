@@ -255,6 +255,7 @@ class FuturesMappingUtil:
           第4列(instrument_index)： 当前行业分类下的期货对应的序列（TargetSeries）排序号数组（排序号非连续），数组元素类型为int
           第5列(instrument_code)： 当前行业分类下的期货代码数组，数组长度需要与第三列中的每个数组长度一致，数组元素类型为string
           第6列(instrument_name)： 当前行业分类下的期货名称数组，数组长度需要与第三列中的每个数组长度一致，数组元素类型为string
+          第7列(industry_name)： 行业分类名称，数组长度需要与第1列中的数组长度一致，数组元素类型为string
     """                   
     
     @staticmethod
@@ -307,9 +308,14 @@ class FuturesMappingUtil:
         instrument_df[g_col] = instrument_df[g_col] - 1 
         # 排序保证后续对应关系不变
         instrument_df = instrument_df.sort_values(by=['code'], ascending=[True])
+        
         for fur_code,group in instrument_df.groupby("indus_code"):
             # 关联之前的数据，按照规范逐个生成
-            industry_index = int(fur_industry_index[fur_industry_index[:,0]==fur_code][0,1])
+            indus_arr = fur_industry_index[fur_industry_index[:,0]==fur_code]
+            if indus_arr.shape[0]==0:
+                continue
+            industry_index = int(indus_arr[0,1])
+            industry_name = fur_indus_df[fur_indus_df['code']==fur_code]['name'].values[0]
             instrument_codes = group["code"].values
             instrument_names = group["name"].values
             instrument_index = np.array([keep_index[keep_index[:,0]==ins_code][0,1] for ins_code in instrument_codes])
@@ -318,33 +324,26 @@ class FuturesMappingUtil:
                 instrument_index.shape[0] == instrument_codes.shape[0],
                 f"品种编码数组长度和序号数组长度不一致"
             )              
-            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,instrument_index,instrument_codes,instrument_names]
+            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,instrument_index,instrument_codes,instrument_names,industry_name]
             fur_ins_mappings.append(fur_ins_mapping)
+        
+        # 添加整体指数数据
+        combine_content = FuturesMappingUtil.get_combine_industry_instrument(np.array(fur_ins_mappings))
+        for i in range(len(target_series)):
+            if target_series[i].instrument_code=="ZS_ALL":
+                total_index = i
+                break
+        fur_ins_mapping = [total_index,'ZS_ALL',combine_content[:,0].astype(np.int),combine_content[:,0].astype(np.int),combine_content[:,3],combine_content[:,1],'综合']
+        fur_ins_mappings.append(fur_ins_mapping)
         fur_ins_mappings = np.array(fur_ins_mappings)
-               
+        
         return fur_ins_mappings        
-    
-    @staticmethod
-    def assc_series_and_codes(sw_ins_mappings):
-        """关联业务编号和序列排序号,包含品种和分类"""
-        
-        combine_codes = sw_ins_mappings[:,:2]
-        flags = np.expand_dims(np.zeros(combine_codes.shape[0]).astype(np.int),-1)
-        combine_codes = np.concatenate([combine_codes,flags],axis=-1)
-        ins_code = np.concatenate([sw_ins_mappings[i,4] for i in range(sw_ins_mappings[:,0].shape[0])])
-        ins_index = np.concatenate([sw_ins_mappings[i,3] for i in range(sw_ins_mappings[:,0].shape[0])])
-        flags = np.ones(ins_code.shape[0]).astype(np.int)
-        ins_combine_codes = np.stack([ins_index,ins_code,flags],axis=-1)
-        ins_combine_codes[:,0] = ins_combine_codes[:,0].astype(np.int)
-        combine_codes = np.concatenate([ins_combine_codes,combine_codes],axis=0)
-        combine_codes = combine_codes[np.argsort(combine_codes[:,1])]
-        
-        return combine_codes
     
     @staticmethod
     def get_industry_codes(sw_ins_mappings):
         return sw_ins_mappings[:,1]
 
+    
     @staticmethod
     def get_futures_names(sw_ins_mappings,indus_index=0):
         """取得某个行业的期货品种名称列表"""
@@ -360,63 +359,75 @@ class FuturesMappingUtil:
         return names
     
     @staticmethod
-    def get_industry_names(codes=None):
-        dbaccessor = DbAccessor({})
-        if codes is None:
-            sql = "select code,name from futures_industry where delete_flag=0 order by code asc"
-            result_rows = dbaccessor.do_query(sql) 
-        else:
-            sql = "select code,name from futures_industry where delete_flag=0  code in %s"  
-            result_rows = dbaccessor.do_query(sql,(tuple(codes),)) 
-        results = []
-        for row in result_rows:
-            results.append([row[0],row[1]])
-        names = pd.DataFrame(results,columns=['code','name'])['name'].values       
-        return names
+    def get_industry_names(sw_ins_mappings):
+        return sw_ins_mappings[:,6]
 
-    @staticmethod
-    def get_combine_names(sw_ins_mappings):
-        """混合品种和分类名称，按照默认的编码排序方式"""
-        
-        combine_codes = FuturesMappingUtil.assc_series_and_codes(sw_ins_mappings)[:,1].tolist()
-        dbaccessor = DbAccessor({})
-        sql = "(select code,name from trading_variety where code in %s) union (select code,name from futures_industry where delete_flag=0 and code in %s) order by code asc"
-        result_rows = dbaccessor.do_query(sql,(tuple(combine_codes),tuple(combine_codes),)) 
-        results = []
-        for row in result_rows:
-            results.append([row[0],row[1]])
-        names = pd.DataFrame(results,columns=['code','name'])['name'].values       
-        return names
-       
     @staticmethod
     def get_industry_data_index(sw_ins_mappings):
         return sw_ins_mappings[:,0].astype(np.int32)
 
     @staticmethod
+    def get_industry_data_index_without_main(sw_ins_mappings):
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+        index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+        idx = np.where(index!=main_index)[0]
+        left_index = index[idx]
+        return left_index.astype(np.int32)
+    
+    @staticmethod
     def get_industry_instrument(sw_ins_mappings):
         return sw_ins_mappings[:,2]
 
+    @staticmethod
+    def get_instrument_obj_in_industry(sw_ins_mappings,indus_index):
+        ins_obj = []
+        for i in range(sw_ins_mappings[indus_index,2].shape[0]):
+            index = sw_ins_mappings[indus_index,3][i]
+            code = sw_ins_mappings[indus_index,4][i]
+            name = sw_ins_mappings[indus_index,5][i]
+            ins_obj.append([index,code,name])
+        ins_obj = np.array(ins_obj)
+        return ins_obj
+        
+    @staticmethod
+    def get_industry_instrument_exc_main(sw_ins_mappings):
+        return sw_ins_mappings[:-1,2]
+    
     @staticmethod
     def get_combine_industry_instrument(sw_ins_mappings):
         """取得行业内品种索引和名称合并数据"""
         
         ins_index = sw_ins_mappings[:,2]
         ins_names = sw_ins_mappings[:,5]
+        ins_codes = sw_ins_mappings[:,4]
         combine_content = None
         for i in range(ins_index.shape[0]):
             indus_code = sw_ins_mappings[:,1][i]
+            if indus_code=="ZS_ALL":
+                continue
             indus_code_arr = np.array([indus_code for _ in range(ins_index[i].shape[0])])
-            item_combine = np.stack([ins_index[i],ins_names[i],indus_code_arr])
+            item_combine = np.stack([ins_index[i],ins_names[i],indus_code_arr,ins_codes[i]])
             if combine_content is None:
                 combine_content = item_combine
             else:
                 combine_content = np.concatenate([combine_content,item_combine],axis=1)
         combine_content = combine_content.transpose(1,0)
         return combine_content
-            
+
     @staticmethod
     def get_instrument_index(sw_ins_mappings):
         ins_in_indus_index = sw_ins_mappings[:,3]
         instrument_index = np.concatenate([index_arr for index_arr in ins_in_indus_index])       
         return instrument_index.astype(np.int)
+    
+    @staticmethod
+    def get_main_index(sw_ins_mappings):
+        index = np.where(sw_ins_mappings[:,1]=="ZS_ALL")[0]
+        return sw_ins_mappings[index,0][0]
+    
+    @staticmethod
+    def get_main_index_in_indus(sw_ins_mappings):
+        index = np.where(sw_ins_mappings[:,1]=="ZS_ALL")[0][0]
+        return index    
+        
     

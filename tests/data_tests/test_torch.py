@@ -255,7 +255,15 @@ def test_js():
     t1 = torch.Tensor([0.1,0.2,0.3])
     t2 = torch.Tensor([0.5,0.6])
     print(js_div(t1,t2))
+
+def test_cos():
+    input1 = torch.Tensor(np.array([0,2]))
+    input2 = torch.Tensor(np.array([1,30]))
     
+    similarity = torch.cosine_similarity(input1, input2, dim=0)
+    print(similarity) 
+
+        
 if __name__ == "__main__":
     # test_tensor()    
     # test_sort()
@@ -265,7 +273,8 @@ if __name__ == "__main__":
     # test_corr()
     # test_pca()
     # test_grad()
-    test_js()
+    # test_js()
+    test_cos()
     # test_nor()
     # test_transfer()
     # test_pairwise()

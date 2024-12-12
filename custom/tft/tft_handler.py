@@ -110,7 +110,7 @@ class TftDataHandler(DataHandlerLP):
                 "$close/Ref($close,5)*100",
                 build_rvi_factor_str(),
                 build_aos_factor_str(),
-                "$high - EMA($close, 12)",
+                "($high - EMA($close, 12))/EMA($close, 12)",
             ]
             names += [
                 "KMID",
@@ -132,7 +132,7 @@ class TftDataHandler(DataHandlerLP):
             ]
         if "price" in config:
             windows = config["price"].get("windows", range(5))
-            feature = config["price"].get("feature", ["OPEN", "HIGH", "LOW", "CLOSE", "VWAP"])
+            feature = config["price"].get("feature", ["OPEN", "HIGH", "LOW", "CLOSE"])
             # 添加标准指标开盘收盘等
             for field in feature:
                 field = field.lower()
@@ -191,13 +191,13 @@ class TftDataHandler(DataHandlerLP):
                 fields += ["Min($low, %d)/$close" % d for d in windows]
                 names += ["MIN%d" % d for d in windows]
             if use("QTLU"):
-                fields += ["Quantile($close, %d, 0.8)/$close" % d for d in windows]
+                fields += ["100*Quantile($close, %d, 0.8)/$close - 100" % d for d in windows]
                 names += ["QTLU%d" % d for d in windows]
             if use("HIGH_QTLU"):
                 fields += ["Quantile($high, %d, 0.8)/$high" % d for d in windows]
                 names += ["HIGH_QTLU%d" % d for d in windows]               
             if use("QTLUMA"):
-                fields += ["Mean(Quantile($close, %d, 0.8)/$close,%d)" % (d,d) for d in windows]
+                fields += ["Mean(100*Quantile($close, %d, 0.8)/$close-100,%d)" % (d,d) for d in windows]
                 names += ["QTLUMA%d" % d for d in windows]                
             if use("QTLD"):
                 fields += ["Quantile($close, %d, 0.2)/$close" % d for d in windows]
@@ -343,5 +343,24 @@ class TftDataHandler(DataHandlerLP):
                 fields += ["Mean((($close-$LOW) - ($HIGH-$close))/($HIGH-$LOW)*$volume,{})".format(d) for d in windows]
                 names += ["OBV%d" % d for d in windows]                                        
         return fields, names
+    
+    
+class FuturesDataHandler(TftDataHandler):    
+
+    def get_feature_config(self):
+        conf = {
+            "kbar": {},
+            "price": {
+                "windows": [0],
+                # "feature": ["OPEN", "HIGH", "LOW", "VWAP"],
+                "feature": ["OPEN", "HIGH", "LOW","CLOSE","REFCLOSE","HOLD"],
+            },
+            "volume": {},
+            "turnover": {},
+            "rolling": {},
+            # 添加nan_validate_label，用于数据空值校验
+            "validate_fields": {},
+        }
+        return self.parse_config_to_fields(conf)    
     
     

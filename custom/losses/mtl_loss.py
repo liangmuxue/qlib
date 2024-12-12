@@ -336,7 +336,12 @@ class UncertaintyLoss(nn.Module):
             
     def mse_loss(self,x1, x2,weighted_data=None):
         return torch.mean(self.mse_dis(x1,x2))
-    
+
+    def cos_loss(self,x1, x2):
+        similarity = torch.cosine_similarity(x1, x2, dim=1)
+        loss = 1 - similarity
+        return loss
+        
     def triplet_dis(self,x1, x2):
         return self.ccc_distance(x1,x2)      
 
@@ -430,9 +435,6 @@ class UncertaintyLoss(nn.Module):
         loss = self.dtw_loss(input_real, target_real).mean()       
         return loss
     
-    def cos_loss(self,output,target):
-        return 1 - torch.matmul(output, torch.t(target))
-        
     def triplet_online(self,embeddings,labels,target=None,dist_func=None,margin=0.3):
         """在线triplet挖掘及损失计算"""
         

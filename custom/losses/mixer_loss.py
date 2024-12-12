@@ -41,7 +41,7 @@ class FuturesCombineLoss(UncertaintyLoss):
         keep_index_flatten = torch.where(keep_index_bool_flatten)[0]
         # 取得所有品种排序号
         instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
-        indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+        indus_data_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
         
         for i in range(len(output)):
             if optimizers_idx==i or optimizers_idx==-1:
@@ -52,12 +52,14 @@ class FuturesCombineLoss(UncertaintyLoss):
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
                 x_bar,sv,sw_index_data = output_item  
                 x_bar = x_bar.squeeze(-1)
-                x_bar_exi = x_bar[:,indus_data_index,:]
                 # corr走势预测
                 x_bar_flat = x_bar.reshape(-1,x_bar.shape[-1])  
                 real_target_flat = real_target.reshape(-1,real_target.shape[-1])  
-                corr_loss[i] += self.ccc_loss_comp(x_bar_flat, real_target_flat)           
+                # corr_loss[i] += self.ccc_loss_comp(x_bar_flat, real_target_flat)      
+                # corr_loss[i] += self.mse_loss(x_bar_flat, real_target_flat)     
+                corr_loss[i] += self.cos_loss(x_bar_flat,real_target_flat).mean()
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
+                counter = 0
                 for j in range(target_class.shape[0]):
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
@@ -72,10 +74,11 @@ class FuturesCombineLoss(UncertaintyLoss):
                         continue                    
                     sv_indus = sv[j,keep_index]
                     # cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
-                    cls_loss_item = self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
-                    cls_loss[i] += cls_loss_item
-                    
-                # 板块分类指标整体数值损失,板块间使用相关系数损失
+                    cls_loss[i] += self.cos_loss(sv_indus.transpose(1,0),round_targets_item.unsqueeze(0))[0] 
+                    # cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
+                    counter += 1
+                cls_loss[i] = cls_loss[i]/counter
+                # 板块分类指标整体数值损失,板块间使用MSE(或相关系数)损失
                 for k in range(index_target_item.shape[0]):
                     item = index_target_item[k]
                     keep_idx = torch.where(item!=0)[0]
@@ -87,12 +90,19 @@ class FuturesCombineLoss(UncertaintyLoss):
                     else:
                         ce_loss_item = self.mse_loss(item[keep_idx].unsqueeze(-1),op_data[keep_idx].unsqueeze(-1))
                     ce_loss[i] += ce_loss_item
-                if i<=3:
-                    loss_sum = loss_sum + ce_loss[i] + cls_loss[i]
+                # 总体指标数据损失
+                main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+                main_index_relative = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+                main_index_target = future_round_targets[:,main_index:main_index+1,i]
+                main_index_output = sw_index_data[:,main_index_relative:main_index_relative+1]
+                fds_loss[i] = self.mse_loss(main_index_output,main_index_target)
+                
+                if i==2:
+                    loss_sum = loss_sum + corr_loss[i]   
                 # elif i>=4:
                 #     loss_sum = loss_sum + corr_loss[i]                     
                 else:
-                    loss_sum = loss_sum + ce_loss[i] + cls_loss[i]
+                    loss_sum = loss_sum + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]     
     
         

@@ -1,5 +1,6 @@
 from trader.utils.date_util import tradedays
 from datetime import datetime
+import math
 import pickle
 
 def test_days_dur():
@@ -55,11 +56,37 @@ def debug_data():
     with open(data_path, "rb") as fin:
         rate_total = pickle.load(fin)      
     print(rate_total) 
+
+def test_math():
+
+    def slope(line):
+        x1, y1, x2, y2 = line
+        if x2 != x1:
+            return (y2 - y1) / (x2 - x1)
+        else:
+            return 0
+        
+    def slope_to_angle_signed(slope):
+        angle_radians = math.atan(slope)
+        angle_degrees = math.degrees(angle_radians)
+        return angle_degrees if slope >= 0 else 180 + angle_degrees
+    
+    line = [1, 2, 3, 3]
+    s = slope(line)
+    angle = slope_to_angle_signed(s)
+    angle = -angle if s<0 else angle
+    sin_val = math.sin(math.radians(angle))  
+    print(f"slope is {s} angle is {angle},sin is:{sin_val}")   
+    
+    x1, y1, x2, y2 = line
+    angle = np.rad2deg(np.arctan2(y2 - y1, x2 - x1))
+    
      
 if __name__ == "__main__":
     # test_days_dur()
 
     # test_import()
     # test_date()
-    debug_data()
+    test_math()
+    # debug_data()
     

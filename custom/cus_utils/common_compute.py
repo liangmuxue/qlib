@@ -538,13 +538,17 @@ def compute_average_precision(candidate,target,topk=10):
         total_score += i/top_ret[i-1]
     return total_score
 
-
 def softmax(x):
     """ Softmax function """
     
     x -= np.max(x, axis = 1, keepdims = True) 
     x = np.exp(x) / np.sum(np.exp(x), axis = 1, keepdims = True)
     return x
+
+def slope_angle(lines):
+    """取得斜率角度正弦值"""
+    
+    
 
 if __name__ == "__main__":
     # test_normal_vis()

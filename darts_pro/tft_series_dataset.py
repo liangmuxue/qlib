@@ -92,7 +92,9 @@ class TFTSeriesDataset(TFTDataset):
         # 清除序列长度不够的股票
         group_column = self.get_group_column()
         time_column = self.col_def["time_column"]       
-        df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)        
+        df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)  
+        # 重置异常值      
+        df = self.reset_outlier(df)
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
         logger.debug("begin group process")
@@ -123,6 +125,17 @@ class TFTSeriesDataset(TFTDataset):
         group_col_scale = rank_group_column + "_scale"   
         df[group_col_scale] = (df[rank_group_column].astype(int) - df[rank_group_column].astype(int).min()) / (df[rank_group_column].astype(int).max() - df[rank_group_column].astype(int).min())
         return df    
+    
+    def reset_outlier(self,df):
+        """重置异常值"""
+        
+        # RSV指标需要在0到1
+        df.loc[df['RSV5']>1,'RSV5'] = 1
+        df.loc[df['RSV5']<0,'RSV5'] = 0
+        # QTLU指标需要在0到1
+        df.loc[df['QTLU5']>2,'QTLU5'] = 2
+        df.loc[df['QTLU5']<-0.1,'QTLU5'] = -0.1 
+        return df
     
     def filter_by_indicator(self,df):
         """通过指标，进一步筛选数据集"""
