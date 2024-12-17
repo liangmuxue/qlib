@@ -30,8 +30,9 @@ MixedCovariatesTrainTensorType = Tuple[
 from .mlp_module import MlpModule
 
 TRACK_DATE = [20220520]
-DRAW_SEQ = [0,1,3]
+DRAW_SEQ = [0,1]
 DRAW_SEQ_DETAIL = [0]
+
 class FuturesTogeModule(MlpModule):
     """期货品种和行业板块数据一起预测的模型"""
     
@@ -115,11 +116,12 @@ class FuturesTogeModule(MlpModule):
                 + past_covariates_shape
             )
            
-            # 使用TimeMixer模型
+            # 使用混合时间序列模型
             model = FurTimeMixer(
                 num_nodes=self.indus_dim, # 对应多变量数量（行业分类数量）
                 seq_len=self.input_chunk_length,
                 pred_len=self.output_chunk_length,
+                down_sampling_window=self.output_chunk_length,
                 past_cov_dim=input_dim,
                 dropout=dropout,
                 device=device,
@@ -166,13 +168,17 @@ class FuturesTogeModule(MlpModule):
         
     def on_train_epoch_start(self):  
         self.loss_data = []
+        
     def on_train_epoch_end(self):  
         pass
         
     def on_validation_epoch_start(self):  
         self.import_price_result = None
         self.total_imp_cnt = 0
-                    
+    
+    def get_optimizer_size(self):
+        return len(self.past_split)
+    
     def training_step_real(self, train_batch, batch_idx): 
         # 全部转换为2维模式进行网络计算
         (
@@ -197,7 +203,7 @@ class FuturesTogeModule(MlpModule):
             self.criterion.epoch = self.epochs_trained   
         total_loss = torch.tensor(0.0).to(self.device)
         ce_loss = None
-        for i in range(len(self.past_split)):
+        for i in range(self.get_optimizer_size()):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), (future_target,target_class,future_round_targets,target_info),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
@@ -211,7 +217,8 @@ class FuturesTogeModule(MlpModule):
             opt.zero_grad()
             self.manual_backward(loss)
             opt.step()
-            self.lr_schedulers()[i].step()                           
+            self.lr_schedulers()[i].step()    
+                                   
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("lr0",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  
         
@@ -256,7 +263,6 @@ class FuturesTogeModule(MlpModule):
                     (future_target,target_class,future_round_targets,target_info),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_ce_loss", ce_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         preds_combine = []
         for i in range(len(self.past_split)):
             # self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
@@ -264,7 +270,7 @@ class FuturesTogeModule(MlpModule):
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
-        output_combine = (output,past_round_targets,future_round_targets)
+        output_combine = (output,vr_class,past_round_targets,future_round_targets)
         return loss,detail_loss,output_combine
 
     def _process_input_batch(
@@ -376,8 +382,7 @@ class FuturesTogeModule(MlpModule):
             viz_result_detail["all"] = TensorViz(env="viz_result_detail_all")
                  
             for index in range(target_class_3d.shape[0]):
-                # if viz_total_size>3:
-                #     break
+                
                 viz_total_size+=1
                 keep_index = np.where(target_class_3d[index]>=0)[0]
                 round_targets = future_round_targets_total[index]
@@ -386,7 +391,7 @@ class FuturesTogeModule(MlpModule):
                 date = ts_arr[keep_index][0]["future_start_datetime"]
                 if not date in TRACK_DATE:
                     continue               
-                
+
                 ins_with_indus = FuturesMappingUtil.get_industry_instrument_exc_main(sw_ins_mappings)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
@@ -409,10 +414,14 @@ class FuturesTogeModule(MlpModule):
                         indus_code = indus_codes[k]
                         indus_name = indus_names[k]
                         futures_names = FuturesMappingUtil.get_futures_names(sw_ins_mappings,k).tolist()
-                        futures_index = FuturesMappingUtil.get_futures_names(sw_ins_mappings,k).tolist()
                         ins_cls_output = cls_output[index,instruments,j]
                         fur_round_target = round_targets[instruments,j]
-                        view_data = np.stack([ins_cls_output,fur_round_target]).transpose(1,0)
+                        # 添加价格显示
+                        price_array = np.array([ts_arr[h]["price_array"] for h in instruments])
+                        scaler = MinMaxScaler(feature_range=(0.001, 1))
+                        price_array = scaler.fit_transform(price_array.transpose(1,0)).transpose(1,0)
+                        price_array_range = price_array[:,-1] - price_array[:,-self.output_chunk_length-1]                    
+                        view_data = np.stack([ins_cls_output,fur_round_target,price_array_range]).transpose(1,0)
                         win = "round_target_{}_{}_{}".format(j,k,viz_total_size)
                         target_title = "target{}_{} pred_tar:{}_{},date:{}".format(j,indus_name,round(indust_output_value[k],2),round(indust_target[k],2),date)
                         # if j in DRAW_SEQ and len(futures_names)>1:
@@ -423,15 +432,15 @@ class FuturesTogeModule(MlpModule):
                             total_view_data = np.concatenate([total_view_data,view_data],axis=0) 
                         if futures_names_combine is None:
                             futures_names_combine = futures_names
-                            futures_index_combine = futures_index
+                            futures_index_combine = instruments
                         else:
                             futures_names_combine = np.concatenate([futures_names_combine,futures_names],axis=0)    
-                            futures_index_combine = np.concatenate([futures_index_combine,futures_index],axis=0)    
+                            futures_index_combine = np.concatenate([futures_index_combine,instruments],axis=0)    
                     # 合并所有品种并显示
                     if j in DRAW_SEQ:
                         win = "target_comb_{}_{}".format(j,viz_total_size)
                         target_title = "combine target{},date:{}".format(j,date)
-                        tar_viz.viz_bar_compare(total_view_data,win=win,title=target_title,rownames=futures_names_combine.tolist(),legends=["pred","target"])                       
+                        tar_viz.viz_bar_compare(total_view_data,win=win,title=target_title,rownames=futures_names_combine.tolist(),legends=["pred","target","price"])                       
                         
                     xbar_data = output_3d[0][index,...,j]
                     
@@ -504,7 +513,7 @@ class FuturesTogeModule(MlpModule):
                 self.draw_row(pred_center_data, pred_second_data, pred_third_data,target_item=target_item, ts=ts, names=names,viz=viz_target,win=win)
                                
     def dump_val_data(self,val_batch,outputs,detail_loss):
-        output,past_round_targets,future_round_targets = outputs
+        output,vr_class,past_round_targets,future_round_targets = outputs
         (past_target,past_covariates,historic_future_covariates,future_covariates,
             static_covariates,past_future_covariates,future_target,target_class,_,_,target_info) = val_batch
         # 保存数据用于后续验证
@@ -794,5 +803,5 @@ class FuturesTogeModule(MlpModule):
         import_price_result["result"] = import_price_result["result"].astype(np.int64)      
             
         return import_price_result
-               
-        
+
+

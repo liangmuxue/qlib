@@ -73,36 +73,108 @@ class FuturesCombineLoss(UncertaintyLoss):
                     if round_targets_item.shape[0]<=1:
                         continue                    
                     sv_indus = sv[j,keep_index]
-                    # cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
-                    cls_loss[i] += self.cos_loss(sv_indus.transpose(1,0),round_targets_item.unsqueeze(0))[0] 
+                    if i==1:
+                        cls_loss[i] += 10 * self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1)) 
+                    else:
+                        cls_loss[i] += 10 * self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
+                    # cls_loss[i] += self.cos_loss(sv_indus.transpose(1,0),round_targets_item.unsqueeze(0))[0] 
                     # cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
                     counter += 1
                 cls_loss[i] = cls_loss[i]/counter
                 # 板块分类指标整体数值损失,板块间使用MSE(或相关系数)损失
-                for k in range(index_target_item.shape[0]):
-                    item = index_target_item[k]
-                    keep_idx = torch.where(item!=0)[0]
-                    if keep_idx.shape[0]<=1:
-                        continue
-                    op_data = sw_index_data[k]
-                    if i!=2 and False:
-                        ce_loss_item = self.ccc_loss_comp(item[keep_idx],op_data[keep_idx])
-                    else:
-                        ce_loss_item = self.mse_loss(item[keep_idx].unsqueeze(-1),op_data[keep_idx].unsqueeze(-1))
-                    ce_loss[i] += ce_loss_item
+                # for k in range(index_target_item.shape[0]):
+                #     item = index_target_item[k]
+                #     keep_idx = torch.where(item!=0)[0]
+                #     if keep_idx.shape[0]<=1:
+                #         continue
+                #     op_data = sw_index_data[k]
+                #     if i!=2 and False:
+                #         ce_loss_item = self.ccc_loss_comp(item[keep_idx],op_data[keep_idx])
+                #     else:
+                #         ce_loss_item = self.mse_loss(item[keep_idx].unsqueeze(-1),op_data[keep_idx].unsqueeze(-1))
+                #     ce_loss[i] += ce_loss_item
                 # 总体指标数据损失
-                main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-                main_index_relative = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
-                main_index_target = future_round_targets[:,main_index:main_index+1,i]
-                main_index_output = sw_index_data[:,main_index_relative:main_index_relative+1]
-                fds_loss[i] = self.mse_loss(main_index_output,main_index_target)
+                # main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+                # main_index_relative = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+                # main_index_target = future_round_targets[:,main_index:main_index+1,i]
+                # main_index_output = sw_index_data[:,main_index_relative:main_index_relative+1]
+                # fds_loss[i] = self.mse_loss(main_index_output,main_index_target)
                 
-                if i==2:
-                    loss_sum = loss_sum + corr_loss[i]   
-                # elif i>=4:
-                #     loss_sum = loss_sum + corr_loss[i]                     
-                else:
-                    loss_sum = loss_sum + cls_loss[i]
+                loss_sum = loss_sum + cls_loss[i]
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]     
     
+
+class FuturesStrategyLoss(FuturesCombineLoss):
+    """基于策略选取的损失"""
+
+    def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=6,epoch_num=0):
+        """Multiple Loss Combine"""
+
+        (output,vr_class,_) = output_ori
+        (target,target_class,future_round_targets,target_info) = target_ori
+        corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        fds_loss = torch.tensor(0.0).to(self.device)
+        ce_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        # 指标分类
+        loss_sum = torch.tensor(0.0).to(self.device) 
+        # 取得所有品种排序号
+        instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
+        indus_data_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
         
+        for i in range(len(output)):
+            if optimizers_idx==i or optimizers_idx==-1:
+                output_item = output[i] 
+                # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
+                x_bar,sv,sw_index_data = output_item  
+                # 分批次，按照不同分类，分别衡量类内期货品种总体损失
+                counter = 0
+                for j in range(target_class.shape[0]):
+                    # 如果存在缺失值，则忽略，不比较
+                    target_class_item = target_class[j]
+                    keep_index = torch.where(target_class_item>=0)[0]
+                    # 只比较期货品种，不比较分类
+                    keep_index = tensor_intersect(keep_index,torch.Tensor(instrument_index).to(keep_index.device))
+                    round_targets_item = future_round_targets[j,keep_index,i]
+                    # 总体目标值最后几位(pred_len)会是0，不进行计算
+                    if torch.any(round_targets_item==0):
+                        continue
+                    if round_targets_item.shape[0]<=1:
+                        continue                    
+                    sv_indus = sv[j,keep_index]
+                    cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
+                    # cls_loss[i] += self.cos_loss(sv_indus.transpose(1,0),round_targets_item.unsqueeze(0))[0] 
+                    # cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
+                    counter += 1
+                cls_loss[i] = cls_loss[i]/counter
+                loss_sum = loss_sum + cls_loss[i]
+        
+        if epoch_num>=50:
+            # 综合策略损失评判
+            if optimizers_idx==(len(output)) or optimizers_idx==-1:
+                # 网络输出值包括预测数值，以及对应的总体趋势标志
+                choice,trend_value = vr_class
+                # 通过标志，把多空判断标志统一为正向排序模式
+                choice = torch.mul(choice.transpose(1,0),trend_value).transpose(1,0)
+                choice = F.softmax(choice,dim=0)
+                # 使用非重复采样方法，取得排名靠前的预测数据下标
+                choice_index = torch.multinomial(choice, num_samples=top_num, replacement=False)
+                choice_values = torch.gather(choice, 1, choice_index)   
+                # 默认第二组数据(价格数据)为当前的目标值
+                target = future_round_targets[:,instrument_index,1] 
+                # 目标值也需要根据多空判断重新整理顺序
+                target = torch.mul(target.transpose(1,0),trend_value).transpose(1,0)      
+                # 根据序号取得对应目标数据，
+                choice_target = torch.gather(target, 1, choice_index)   
+                # 计算预测排名靠前的数值与实际数值损失
+                fds_loss = nn.MSELoss(reduction="sum")(choice_values,choice_target)
+                # 同时计算实际排名靠前的记录与对应的预测记录间的差距
+                target_index = torch.multinomial(F.softmax(target,dim=0), num_samples=top_num, replacement=False)
+                pred_values = torch.gather(choice, 1, target_index)   
+                tar_values = torch.gather(target, 1, target_index)   
+                # fds_loss += nn.MSELoss(reduction="sum")(pred_values,tar_values)
+                loss_sum = loss_sum + fds_loss
+            
+        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]       
+    
+            

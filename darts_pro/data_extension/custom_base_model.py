@@ -68,10 +68,15 @@ class BaseMixModule(PLMixedCovariatesModule):
                                             hidden_size, lstm_layers, num_attention_heads, full_attention, 
                                             feed_forward, hidden_continuous_size, categorical_embedding_sizes, 
                                             dropout, add_relative_index, norm_type,model_type=model_type,device=device,seq=i,**kwargs)
-            model_list.append(model)
+            if isinstance(model, tuple):
+                model_main,_ = model
+                model_list.append(model_main)
+            else:
+                model_list.append(model)
+                
             vr_layer = self._construct_classify_layer(self.output_chunk_length,vr_range_num)  
             classify_vr_layers.append(vr_layer)
-        self.sub_models = nn.ModuleList(model_list) 
+        self.sub_models = nn.ModuleList(model_list)
         self.vr_layers = nn.ModuleList(classify_vr_layers) 
         # 序列分类层，包括目标分类和输出分类
         self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,device=device)        
@@ -244,7 +249,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         optimizers = []
         # 针对不同子模型，分别生成优化器
         for i in range(len(self.past_split)):
-            avalabel_params = list(map(id, self.sub_models[i].parameters()))
+            avalabel_params = list(map(id, nn.ModuleList(self.sub_models)[i].parameters()))
             avalabel_params_vr = list(map(id, self.vr_layers[i].parameters()))
             avalabel_params = avalabel_params + avalabel_params_vr
             base_params = filter(lambda p: id(p) in avalabel_params, self.parameters())

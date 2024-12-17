@@ -263,8 +263,19 @@ def test_cos():
     similarity = torch.cosine_similarity(input1, input2, dim=0)
     print(similarity) 
 
+def test_slice():
+    x = torch.arange(15).reshape(3,-1)
+    idx = torch.tensor([1,2,3])
+    
+    idx = torch.column_stack([idx, idx+1])
+    y = torch.gather(x, 1, idx)    
+    
+    print(x)
+    print(idx)
+    print(y)
         
 if __name__ == "__main__":
+    test_slice()
     # test_tensor()    
     # test_sort()
     # test_kmeans()
@@ -274,7 +285,7 @@ if __name__ == "__main__":
     # test_pca()
     # test_grad()
     # test_js()
-    test_cos()
+    # test_cos()
     # test_nor()
     # test_transfer()
     # test_pairwise()

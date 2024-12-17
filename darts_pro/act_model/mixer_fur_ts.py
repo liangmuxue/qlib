@@ -468,3 +468,38 @@ class PastDecomposableMixing(nn.Module):
                 out = ori + self.out_cross_layer(out)
             out_list.append(out[:, :length, :])
         return out_list
+    
+    
+#####################   新增策略模型  #########################    
+      
+class FurStrategy(nn.Module):
+    """基于前置模型的结果，实现相关策略的模型"""
+    
+    def __init__(self, features_dim,target_num=2,hidden_size=8,top_num=5):    
+        """ 使用MLP基础网络实现策略选择
+            Params:
+                features_dim: 特征维度(即所有品种的数量)
+                target_num: 输入中的目标值个数
+                hidden_dim: 隐藏维度
+                sort_length: 排序
+        """
+    
+        super().__init__()
+        
+        self.top_num = top_num
+        # 条件选取网络，输出形状为1，结合第一维度，形成一维的特征值，后续进行排序取值
+        self.net = nn.Sequential(nn.Linear(target_num, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 1))
+        # 整体涨跌判断网络,输出维度为2，后续取大的下标作为整体判断
+        self.trend_net = nn.Linear(features_dim*target_num, 2)
+        
+    def forward(self, x,sw_ins_mappings=None):
+        choice = self.net(x)
+        instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
+        choice = choice[:,instrument_index,0]
+        trend = self.trend_net(x.reshape([x.shape[0],-1]))
+        # 根据网络返回数据，取得排名靠前的记录索引,参照趋势结果，决定排序规则(即看空还是看多)
+        trend_value = torch.argmax(trend,dim=1)
+        trend_value[torch.where(trend_value==0)[0]] = -1 
+        return (choice,trend_value)
+        
+        

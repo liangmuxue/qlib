@@ -14,6 +14,7 @@ from torch import nn
 from .industry_model import IndustryRollModel
 from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
 from darts_pro.mam.futures_module import FuturesTogeModule
+from darts_pro.mam.futures_strategy_module import FuturesStrategyModule
 
 """把分阶段数据再次整合到一起"""
     

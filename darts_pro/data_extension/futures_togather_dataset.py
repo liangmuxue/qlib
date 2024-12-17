@@ -116,7 +116,7 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         self.sw_indus_shape = [rank_num_max,input_chunk_length+output_chunk_length]  
         
         # 创建整体目标涨跌评估数据的归一化数据,整体归一化
-        total_target_vals = self.build_total_tar_scale_data(target_series,scale=False)
+        total_target_vals = self.build_total_tar_scale_data(target_series,scale=0)
         self.total_target_vals = total_target_vals  
 
         self.mode = mode
@@ -179,7 +179,7 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         results = [[row[0],row[1]] for row in result_rows]
         return np.array(results)
 
-    def build_total_tar_scale_data(self,target_series,scale=True):
+    def build_total_tar_scale_data(self,target_series,scale=0):
         """创建整体目标涨跌评估数据的归一化数据,整体归一化"""
         
         total_target_vals = []
@@ -210,7 +210,7 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         index_range = np.array(index_range)   
         combine_values = np.concatenate(combine_values,axis=0)
         # 根据标志决定是否归一化
-        if scale:
+        if scale==1:
             # 规整离群值
             bound_ratio = [0.8,0.8,None,0.8,0.8,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None,None]
             scale_data = [None for _ in range(combine_values.shape[-1])]
@@ -225,6 +225,11 @@ class FuturesTogatherDataset(GenericShiftedDataset):
                     scale_data[i] = MinMaxScaler(feature_range=(0.01, 1)).fit_transform(np.expand_dims(scale_data[i],-1)).squeeze()
             scale_data = np.stack(scale_data).transpose(1,0)
             combine_values = scale_data
+        elif scale==2:
+            eps = 1e-5
+            scale_data = [None for _ in range(combine_values.shape[-1])]
+            for i in range(combine_values.shape[-1]):
+                combine_values = MinMaxScaler(feature_range=(eps, 1)).fit_transform(combine_values)
         else:
             # 0值替换为非0
             eps = 1e-5
@@ -399,8 +404,10 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         
         # 整体目标数据拆分为过去值和目标值
         past_round_targets = round_targets[:,:self.input_chunk_length,:]
-        # 取得整体目标值
         future_round_targets = round_targets[:,self.input_chunk_length,:]
+        # 整体目标值批次内归一化
+        for i in range(future_round_targets.shape[-1]):
+            future_round_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[:,i:i+1]).squeeze(-1)
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,past_round_targets,future_round_targets,target_info_total 

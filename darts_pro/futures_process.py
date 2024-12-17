@@ -309,7 +309,7 @@ class FuturesProcessModel(TftDataframeModel):
                             "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
         analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
-        analysis_columns = ["price","QTLUMA5",'CORD5','QTLU5','CNTP5','RSI10','RSI5','OBV5','BULLS','RSV5','ATR5','AOS','CNTD5','SUMPMA5']
+        analysis_columns = ["price","QTLUMA5",'VSUMP5','QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','REV5','SUMPMA5']
         # 利用dataloader进行数据拼装
         val_loader = DataLoader(
                 custom_dataset_valid,

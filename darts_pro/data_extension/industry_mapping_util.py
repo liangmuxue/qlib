@@ -416,8 +416,7 @@ class FuturesMappingUtil:
 
     @staticmethod
     def get_instrument_index(sw_ins_mappings):
-        ins_in_indus_index = sw_ins_mappings[:,3]
-        instrument_index = np.concatenate([index_arr for index_arr in ins_in_indus_index])       
+        instrument_index = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)[:,0] 
         return instrument_index.astype(np.int)
     
     @staticmethod
