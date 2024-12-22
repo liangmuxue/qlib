@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/futures_data'
     region: cn
-market: &market all
+market: &market abpfi
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_TimeMix_step3_202212"
+               model_name: "Futures_TimeMix_ABPFI_202212"
                model_type: 'mlp'
                load_weight: True
                best_weight: False
@@ -90,7 +90,8 @@ task:
                hidden_size: 32
                forecast_horizon: &forecast_horizon 3
                dropout: 0.3
-               past_split: [[0,15],[15,30]]
+               past_split: [[0,15],[15,30],[30,45]]
+               target_mode: [0,0,0]
                filter_conv_index: -1
     dataset:
         class: TFTFuturesDataset
@@ -125,7 +126,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['RSV5','QTLUMA5','CNTP5','RSI5','price_norm']
+                target_column: ['RSV5','CCI5','WVMA5','RSI5','SUMPMA5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','dayofmonth','month']   
                 past_covariate_col: ['HOLD','MACD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','REFCLOSE','AOS','KDJ_K','dom_basis_rate','CORR5'
@@ -134,4 +135,4 @@ task:
                                   ,'HOLD','MACD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','REFCLOSE','AOS','KDJ_K','dom_basis_rate','CORR5'
                                   ,'HOLD','MACD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','REFCLOSE','AOS','KDJ_K','dom_basis_rate','CORR5'
                                   ] 
-                static_covariate_col: []    
+                static_covariate_col: ['industry']    

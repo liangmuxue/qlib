@@ -77,6 +77,7 @@ class FuturesModel(IndustryRollModel):
             _,
             _,
             _,
+            _,
             _
         ) = train_sample
 
@@ -123,7 +124,7 @@ class FuturesModel(IndustryRollModel):
 
         self.categorical_embedding_sizes = categorical_embedding_sizes
                
-        model = FuturesTogeModule(
+        model = FuturesStrategyModule(
                 indus_dim=past_target.shape[0],
                 output_dim=self.output_dim,
                 variables_meta_array=variables_meta_array,
@@ -140,6 +141,7 @@ class FuturesModel(IndustryRollModel):
                 norm_type=self.norm_type,
                 use_weighted_loss_func=self.use_weighted_loss_func,
                 past_split=self.past_split,
+                target_mode=self.target_mode,
                 filter_conv_index=self.filter_conv_index,
                 device=self.device,
                 batch_file_path=self.batch_file_path,

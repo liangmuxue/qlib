@@ -113,7 +113,7 @@ class FurTimeMixer(nn.Module):
         sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
         # 分别对应输入协变量，过去时间变量,未来时间变量。过去整体量化数值,过去指数数值
         # 其中输入协变量形状：[批次数（B），节点数（C或N），序列长度(T),协变量维度(D)]
-        x_enc, historic_future_covariates,future_covariates,past_round_target = x_in
+        x_enc, historic_future_covariates,future_covariates,past_price_target = x_in
         # 采样得到对应时间变量
         x_time_mark_past = historic_future_covariates[:,0,:,:]
         x_time_mark_future = future_covariates[:,0,:,:]
@@ -475,31 +475,69 @@ class PastDecomposableMixing(nn.Module):
 class FurStrategy(nn.Module):
     """基于前置模型的结果，实现相关策略的模型"""
     
-    def __init__(self, features_dim,target_num=2,hidden_size=8,top_num=5):    
+    def __init__(self, features_dim,target_num=2,hidden_size=8,select_num=10,past_tar_dim=3,trend_threhold=0.55):    
         """ 使用MLP基础网络实现策略选择
             Params:
                 features_dim: 特征维度(即所有品种的数量)
                 target_num: 输入中的目标值个数
                 hidden_dim: 隐藏维度
-                sort_length: 排序
+                select_num: 一次筛选的数量
+                past_tar_dim: 过去目标值时间段数量
+                trend_threhold: 整体趋势阈值
         """
     
         super().__init__()
         
-        self.top_num = top_num
-        # 条件选取网络，输出形状为1，结合第一维度，形成一维的特征值，后续进行排序取值
-        self.net = nn.Sequential(nn.Linear(target_num, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 1))
-        # 整体涨跌判断网络,输出维度为2，后续取大的下标作为整体判断
-        self.trend_net = nn.Linear(features_dim*target_num, 2)
+        self.select_num = select_num
+        self.trend_threhold = trend_threhold
+        self.past_tar_dim = past_tar_dim
+        # 条件选取网络，输出形状为1，结合第一维度，形成一维的特征值，后续进行排序取值.
+        # 在此根据趋势分别设置多头和空头2个网络
+        self.l_net = nn.Sequential(nn.Linear(past_tar_dim*2+1, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 1))
+        self.s_net = nn.Sequential(nn.Linear(past_tar_dim*2+1, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 1))
         
-    def forward(self, x,sw_ins_mappings=None):
-        choice = self.net(x)
-        instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
-        choice = choice[:,instrument_index,0]
-        trend = self.trend_net(x.reshape([x.shape[0],-1]))
-        # 根据网络返回数据，取得排名靠前的记录索引,参照趋势结果，决定排序规则(即看空还是看多)
-        trend_value = torch.argmax(trend,dim=1)
-        trend_value[torch.where(trend_value==0)[0]] = -1 
-        return (choice,trend_value)
+    def forward(self, x1,x2,past_targets,ignore_next=False):
+        """策略：1.判断趋势 2.根据排序进行一次筛选 3.使用网络实现二次筛选
+            Params:
+                x1 1号目标输出值
+                x2 2号目标输出值
+                past_targets 过去目标值(包含价格目标值，包含最近3个时间段),shape:[batch_size,时间段,2]
+        """
         
+        # 使用RSV指标作为整体趋势判断指标
+        output_mean_value = torch.mean(x1,dim=1)
+        # 取得排名靠前的索引
+        selected_index_s = x1.argsort(dim=1)[:,:self.select_num]
+        selected_index_l = x2.argsort(dim=1,descending=True)[:,:self.select_num]
+        # 取得排序后的索引
+        trend_value = (output_mean_value>self.trend_threhold)
+        combine_index = torch.zeros([x1.shape[0],self.select_num]).long().to(x1.device)
+        l_index = torch.where(trend_value)[0].to(x1.device)
+        combine_index[l_index] = selected_index_l[l_index]
+        s_index = torch.where(~trend_value)[0].to(x1.device)
+        combine_index[s_index] = selected_index_s[s_index]   
+        if ignore_next:
+            return (torch.ones([x1.shape[0],self.select_num]).to(x1.device),trend_value,combine_index) 
+        # 取得排名靠前的输出值(RSV取得反向用于空房判断，CCI使用正向用于多方判断  
+        x1_input = torch.gather(x1, 1, selected_index_s)       
+        x2_input = torch.gather(x2, 1, selected_index_l)      
+        # 整合RSV指标和过去参考数值，用于空方网络判断
+        past_targets_s = [torch.gather(past_targets[...,i], 1, selected_index_s)  for i in range(past_targets.shape[-1])]
+        past_targets_s = torch.stack(past_targets_s,dim=-1)
+        x1_input = torch.cat([x1_input.unsqueeze(-1),past_targets_s],dim=-1)
+        s_output = self.s_net(x1_input)
+        # 整合CCI指标和过去参考数值，用于多方网络判断
+        past_targets_l = [torch.gather(past_targets[...,i], 1, selected_index_l)  for i in range(past_targets.shape[-1])]
+        past_targets_l = torch.stack(past_targets_l,dim=-1)
+        x2_input = torch.cat([x2_input.unsqueeze(-1),past_targets_l],dim=-1)
+        l_output = self.l_net(x2_input)
+        # 根据总体趋势，合并输出
+        output = torch.zeros([x1.shape[0],self.select_num]).to(x1.device)
+
+        if l_index.shape[0]>0:
+            output[l_index] = l_output[l_index,:,0]
+        if s_index.shape[0]>0:
+            output[s_index] = s_output[s_index,:,0]
+        
+        return (output,trend_value,combine_index)
         

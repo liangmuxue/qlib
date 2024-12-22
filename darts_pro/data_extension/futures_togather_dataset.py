@@ -118,6 +118,7 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         # 创建整体目标涨跌评估数据的归一化数据,整体归一化
         total_target_vals = self.build_total_tar_scale_data(target_series,scale=0)
         self.total_target_vals = total_target_vals  
+        self.last_target_vals = self.build_last_tar_scale_data(target_series,scale=0)
 
         self.mode = mode
         # 组建辅助数据
@@ -247,7 +248,56 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             total_target_vals.append(data_item)
           
         return total_target_vals  
+
+    def build_last_tar_scale_data(self,target_series,scale=0):
+        """创建目标最后一段涨跌评估数据的归一化数据,整体归一化"""
+        
+        total_target_vals = []
+        combine_values = []
+        index_range = []
+        begin_index = 0
+        for i in range(len(target_series)):
+            ts = target_series[i]
+            target_vals = ts.random_component_values(copy=False)[...,:self.target_num]
+            # target_vals[:,0] = MinMaxScaler().fit_transform(target_vals)[:,0]
+            # 分别生成整体幅度，和最后一天的幅度
+            target_vals_begin = target_vals[1:-self.output_chunk_length]
+            target_vals_end = target_vals[self.output_chunk_length+1:]
+            # 计算跨预测区域差值
+            c1 = target_vals_end - target_vals_begin
+            target_vals_begin_single = target_vals[:-1]
+            target_vals_end_single = target_vals[1:]
+            # 计算最后一段差值
+            c2 = target_vals_end_single - target_vals_begin_single
+            # 加权重整合差值数据
+            combine_value = c2
+            combine_values.append(combine_value)    
+            # 累加起始索引，并记录当前索引范围
+            end_index = begin_index + combine_value.shape[0]
+            index_range.append([begin_index,end_index])
+            begin_index = end_index
+        
+        index_range = np.array(index_range)   
+        combine_values = np.concatenate(combine_values,axis=0)
+        
+        # 0值替换为非0
+        eps = 1e-5
+        for i in range(combine_values.shape[-1]):
+            zero_index = np.where(combine_values[:,i]==0)[0]
+            eps_adju = np.random.uniform(low=eps,high=eps*10,size=zero_index.shape[0])
+            combine_values[:,i][zero_index] = eps_adju
             
+        # 还原到多个股票维度模式
+        for i in range(index_range.shape[0]):
+            idx_range = index_range[i]
+            data_item = combine_values[idx_range[0]:idx_range[1],:]
+            # 填充空白值
+            data_item = np.pad(data_item,((2,self.output_chunk_length-1),(0,0)),'constant')             
+            total_target_vals.append(data_item)
+          
+        return total_target_vals  
+    
+               
     def __len__(self):
         return self.date_list.shape[0]
 
@@ -268,6 +318,8 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         target_class_total = np.ones(self.total_instrument_num)*-1
         target_class_total = target_class_total.astype(np.int8)
         round_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
+        last_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
+        price_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
         
         ########### 生成行业数据 #########
         sw_date_mapping = self.date_mappings[idx]
@@ -309,7 +361,10 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             future_start_datetime = self.ass_data[code][3][past_end]
             # 取得整体评估量化数据
             total_target_vals = self.total_target_vals[ori_index][past_start:future_end]
-            round_targets[keep_index] = total_target_vals            
+            round_targets[keep_index] = total_target_vals       
+            # 取得最后一段涨跌幅度评估
+            last_target_vals = self.last_target_vals[ori_index][past_start:future_end]     
+            last_targets[keep_index] = last_target_vals    
             # 预测目标，包括过去和未来数据
             future_target = target_vals[future_start:future_end]
             past_target = target_vals[past_start:past_end]
@@ -318,9 +373,10 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             # rank数值就是当前索引加1
             code = ori_index + 1
             instrument = self.ass_data[code][0]
-            # if future_start_datetime==20220708:
+            # if future_start_datetime==20220513:
             #     print("ggg")                
             price_array = self.ass_data[code][2][past_start:future_end]
+            price_targets[keep_index] = MinMaxScaler().fit_transform(np.expand_dims(price_array,-1)).squeeze(-1)
             datetime_array = self.ass_data[code][3][past_start:future_end]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             past_start_real = past_start+target_series.time_index[0]
@@ -405,11 +461,15 @@ class FuturesTogatherDataset(GenericShiftedDataset):
         # 整体目标数据拆分为过去值和目标值
         past_round_targets = round_targets[:,:self.input_chunk_length,:]
         future_round_targets = round_targets[:,self.input_chunk_length,:]
+        future_last_targets = last_targets[:,-1,:]
         # 整体目标值批次内归一化
         for i in range(future_round_targets.shape[-1]):
             future_round_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[:,i:i+1]).squeeze(-1)
+        # 最后一段目标值批次内归一化
+        for i in range(last_targets.shape[-1]):
+            future_last_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_last_targets[:,i:i+1]).squeeze(-1)            
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,past_round_targets,future_round_targets,target_info_total 
+                covariate_future_total,future_target_total,target_class_total,price_targets,future_round_targets,future_last_targets,target_info_total 
                             
 

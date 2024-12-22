@@ -264,15 +264,19 @@ def test_cos():
     print(similarity) 
 
 def test_slice():
-    x = torch.arange(15).reshape(3,-1)
-    idx = torch.tensor([1,2,3])
-    
-    idx = torch.column_stack([idx, idx+1])
-    y = torch.gather(x, 1, idx)    
-    
-    print(x)
-    print(idx)
-    print(y)
+    # x = torch.arange(15).reshape(3,-1)
+    # idx = torch.tensor([1,2,3])
+    #
+    # idx = torch.column_stack([idx, idx+1])
+    # y = torch.gather(x, 1, idx)    
+    #
+    # print(x)
+    # print(idx)
+    # print(y)
+    x = torch.ones([10,5,3])
+    index = torch.ones([10,2,3]).long()
+    t = torch.gather(x, 1, index)  
+    print(t.shape)
         
 if __name__ == "__main__":
     test_slice()

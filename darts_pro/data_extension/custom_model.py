@@ -70,6 +70,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         monitor=None,
         mode="train",
         past_split=None,
+        target_mode=None,
         filter_conv_index=0,
         no_dynamic_data=False,
         model_type="tft",
@@ -80,6 +81,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.mode = mode
         model_kwargs = {key: val for key, val in self.model_params.items()}
         del model_kwargs["model_type"]
+        del model_kwargs["target_mode"]
         
         if "devices" in model_kwargs["pl_trainer_kwargs"]:
             self.device = "cuda:" + str(model_kwargs["pl_trainer_kwargs"]["devices"][0])
@@ -124,6 +126,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.norm_type = norm_type
         self.monitor = monitor
         self.past_split = past_split
+        self.target_mode = target_mode
         self.filter_conv_index = filter_conv_index
         self.no_dynamic_data = no_dynamic_data
         self.model_type = model_type

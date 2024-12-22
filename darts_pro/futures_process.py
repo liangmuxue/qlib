@@ -190,6 +190,7 @@ class FuturesProcessModel(TftDataframeModel):
         # categorical_embedding_sizes = None    
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
         past_split = self.optargs["past_split"] 
+        target_mode = self.optargs["target_mode"] 
         filter_conv_index = self.optargs["filter_conv_index"] 
         model_name = self.optargs["model_name"]
         model_type = self.optargs["model_type"]
@@ -233,6 +234,7 @@ class FuturesProcessModel(TftDataframeModel):
                     log_tensorboard=True,
                     save_checkpoints=True,
                     past_split=past_split,
+                    target_mode=target_mode,
                     filter_conv_index=filter_conv_index,
                     work_dir=self.optargs["work_dir"],
                     lr_scheduler_cls=scheduler,
