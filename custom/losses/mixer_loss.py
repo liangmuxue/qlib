@@ -136,11 +136,12 @@ class FuturesStrategyLoss(FuturesCombineLoss):
                         continue                    
                     sv_indus = sv[j,keep_index]
                     if target_mode==0:
-                        cls_loss[i] += 10 * self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
+                        # cls_loss[i] += 10 * self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1)) 
+                        cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)   
                     else:
-                        cls_loss[i] += 10 * self.mse_loss(sv_indus,last_target_item.unsqueeze(-1))  
+                        # cls_loss[i] += 10 * self.mse_loss(sv_indus,last_target_item.unsqueeze(-1))  
                     # cls_loss[i] += self.cos_loss(sv_indus.transpose(1,0),round_targets_item.unsqueeze(0))[0] 
-                    # cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)  
+                        cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),last_target_item)  
                     counter += 1
                 cls_loss[i] = cls_loss[i]/counter
                 loss_sum = loss_sum + cls_loss[i]

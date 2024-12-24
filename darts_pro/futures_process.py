@@ -311,7 +311,7 @@ class FuturesProcessModel(TftDataframeModel):
                             "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
         analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
-        analysis_columns = ["price","QTLUMA5",'VSUMP5','QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','REV5','SUMPMA5']
+        analysis_columns = ["price","QTLUMA5",'VSUMP5','QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
         # 利用dataloader进行数据拼装
         val_loader = DataLoader(
                 custom_dataset_valid,
@@ -340,6 +340,7 @@ class FuturesProcessModel(TftDataframeModel):
                 future_target,
                 target_class,
                 past_round_targets,
+                _,
                 future_round_targets,
                 target_info
             ) = batch_data

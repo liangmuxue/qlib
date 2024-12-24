@@ -373,10 +373,12 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             # rank数值就是当前索引加1
             code = ori_index + 1
             instrument = self.ass_data[code][0]
-            # if future_start_datetime==20220513:
+            # if future_start_datetime==20220516 and target_series.instrument_code=="PK":
             #     print("ggg")                
             price_array = self.ass_data[code][2][past_start:future_end]
-            price_targets[keep_index] = MinMaxScaler().fit_transform(np.expand_dims(price_array,-1)).squeeze(-1)
+            scaler = MinMaxScaler(feature_range=(1e-5, 1))
+            scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
+            price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()            
             datetime_array = self.ass_data[code][3][past_start:future_end]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             past_start_real = past_start+target_series.time_index[0]

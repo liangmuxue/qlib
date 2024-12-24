@@ -225,7 +225,8 @@ class FuturesStrategyModule(FuturesTogeModule):
                 self.lr_schedulers()[i].step()                  
                                        
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
-        self.log("lr_last",self.trainer.optimizers[-2].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  
+        self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  
+        self.log("lr_last",self.trainer.optimizers[-2].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=False)  
         
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
@@ -368,6 +369,7 @@ class FuturesStrategyModule(FuturesTogeModule):
         err_date_list = {}
         
         instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
+        combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
         # 遍历按日期进行评估
         for i in range(target_class_3d.shape[0]):
             future_target = future_target_3d[i]
@@ -383,11 +385,12 @@ class FuturesStrategyModule(FuturesTogeModule):
             output_list = [output_3d[2][i],output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
-            if not date in TRACK_DATE:
-                continue
+            # if not date in TRACK_DATE:
+            #     continue
             # 生成目标索引
             import_index,overroll_trend = self.build_import_index(output_data=output_list,
-                            target=whole_target,price_target=price_target_list,target_info_list=target_info_list,instrument_index=instrument_index)
+                            target=whole_target,price_target=price_target_list,
+                            combine_instrument=combine_content,instrument_index=instrument_index)
             # 有可能没有候选数据
             if import_index is None or import_index.shape[0]==0:
                 continue
@@ -409,7 +412,8 @@ class FuturesStrategyModule(FuturesTogeModule):
                     result_values_inverse[np.where(result_values==2)[0]] = 1    
                     result_values = result_values_inverse                            
                 suc_cnt = np.sum(result_values>=2)
-                err_date_list["{}_{}".format(date,suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
+                if suc_cnt==0:
+                    err_date_list["{}_{}".format(date,suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
@@ -428,14 +432,14 @@ class FuturesStrategyModule(FuturesTogeModule):
         
         return rate_total,total_imp_cnt
 
-    def build_import_index(self,output_data=None,target=None,price_target=None,instrument_index=None,target_info_list=None):  
+    def build_import_index(self,output_data=None,target=None,price_target=None,combine_instrument=None,instrument_index=None):  
         """生成涨幅达标的预测数据下标"""
         
         (cls_values,choice,trend_value,combine_index) = output_data
         
         # pred_import_index,overroll_trend = self.strategy_top(cls_values,choice,trend_value,combine_index,target=target,price_array=price_array,target_info=target_info_list)
-        pred_import_index,overroll_trend = self.strategy_top_direct(cls_values,choice,trend_value,
-                    combine_index,target=target,price_array=price_target,instrument_index=instrument_index)
+        pred_import_index,overroll_trend = self.strategy_top_direct(cls_values,target=target,
+                                price_array=price_target,instrument_index=instrument_index,combine_instrument=combine_instrument)
             
         return pred_import_index,overroll_trend
                                           
@@ -460,45 +464,136 @@ class FuturesStrategyModule(FuturesTogeModule):
             index = np.argsort(choice)[:self.top_num]
         pred_import_index = combine_index[index]  
 
-    def strategy_top_direct(self,cls,choice,trend_value,combine_index,target=None,price_array=None,instrument_index=None):
+    def strategy_top_direct(self,cls_ori,target=None,price_array=None,instrument_index=None,combine_instrument=None):
         """排名方式筛选候选者"""
 
         past_target = target[instrument_index,:self.input_chunk_length,:]
         past_price = price_array[instrument_index,:self.input_chunk_length]
         # 使用最近价格前值进行估算   
-        price_recent = past_price[combine_index,-5:]
-        price_recent[:,0] += 1e-5
-        price_recent_range = (price_recent[:,-1] - price_recent[:,0])/price_recent[:,0]
+        price_recent = past_price[:,-10:]
+        price_recent_range = price_recent[:,-1] - price_recent[:,0]
         # 目标前值
-        rsv_past_target = past_target[combine_index,:,0]
-        cci_past_target = past_target[combine_index,:,1]
-        # 使用CCI最近前值进行估算
-        cci_recent = cci_past_target[:,-5:]
+        rsv_past_target = past_target[instrument_index,:,0]
+        rsv_recent_range = rsv_past_target[:,-1] - rsv_past_target[:,-5]
+        qtlu_past_target = past_target[instrument_index,:,1]
+        cls = cls_ori[instrument_index]
         cls_rsv = cls[...,0]
-        cls_cci = cls[...,1]
-        cls_wvma = cls[...,2]
+        cls_qtlu = cls[...,1]
+        cls_ma = cls[...,2]
         rsv_mean = cls_rsv.mean()
-        cci_mean = cls_cci.mean()
+        std_mean = cls_ma.mean()
+        qtlu_mean = cls_qtlu.mean()
         
         rsv_mean_threhold = 0.55
-        cci_mean_threhold = 0.6
+        rsv_range_threhold = 0.15
+        rsv_recent_threhold = 0.8
+        qtlu_threhold = 0.75
+        last_price_thredhold = 0.9
+        qtlu_mean_threhold = 0.3
+        
+        top_num = 3
+        select_num = 1
+        trend_value = 0
+        
         # 根据策略网络输出，看多或看空的不同情况，进行正向或反向排序取得相关记录索引
-        if rsv_mean>rsv_mean_threhold:
-            # SV总体大于阈值，则看RSV指标的空方，或者RSV指标结合CCI指标的多方
-            index = np.argsort(cls_rsv)[0]
-            pred_import_index = combine_index[index]  
-        else:
+        if qtlu_mean<qtlu_mean_threhold and rsv_mean>rsv_mean_threhold:
+            # RSV和MA总体大于阈值，则看RSV指标的多方
+            pred_import_index = np.argsort(-cls_rsv)[:select_num]
+            trend_value = 1
+        elif rsv_mean>rsv_mean_threhold and qtlu_mean>qtlu_threhold:
+            # RSV和QTLU总体大于阈值，则看RSV指标的多方
+            pre_index = np.argsort(-cls_rsv)[:top_num]  
+            # 取得RSV排序靠前的记录，从而进行多方判断
             pred_import_index = []
-            if cci_mean<cci_mean_threhold:
-                # RSV总体小于0.55，并且CCI小于0.6,看WVMA的空方
-                index = np.argsort(cls_wvma)[0]
-                pred_import_index = combine_index[index]   
-            else:
-                # RSV总体小于0.55，并且CCI大于0.6,看RSV的空方
-                index = np.argsort(cls_rsv)[0]
-                pred_import_index = combine_index[index]                  
+            for index in pre_index:
+                # 如果价格前值上升过大，或者价格最近值过高，则忽略
+                if self.continus_trend_judge(price_recent[index], trend_type=0)==1 \
+                        or price_recent[index,-1]<last_price_thredhold \
+                        or rsv_past_target[index,-1]<-last_price_thredhold :
+                    continue
+                pred_import_index.append(index)            
+            trend_value = 1              
+        elif qtlu_mean>qtlu_threhold:
+            # RSV小，QTLU大，看QTLU排序靠前的空方
+            pre_index = np.argsort(-cls_qtlu)[:top_num]  
+            pred_import_index = []
+            for index in pre_index:
+                # 如果价格前值上升过大，或者价格最近值过高，则忽略.或者rsv指标近期升幅过大，则忽略
+                if self.continus_trend_judge(price_recent[index], trend_type=1)==1 \
+                        or price_recent[index,-1]>last_price_thredhold \
+                        or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
+                    continue
+                pred_import_index.append(index)            
+            trend_value = 0  
+        else:
+            # 取得RSV反向排序靠前的记录，从而进行空方判断
+            pre_index = np.argsort(cls_rsv)[:top_num]       
+            pred_import_index = []
+            for index in pre_index:
+                # 如果价格前值上升过大，或者价格最近值过高，则忽略.或者rsv指标近期升幅过大，则忽略
+                if self.continus_trend_judge(price_recent[index], trend_type=1)==1 \
+                        or price_recent[index,-1]>last_price_thredhold \
+                        or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
+                    continue
+                pred_import_index.append(index)
+            pred_import_index = np.array(pred_import_index)
             
+            # 如果没有候选者，则使用STD指标作为空方指标
+            if pred_import_index.shape[0]==0:
+                pred_import_index = np.argsort(-std_mean)[:select_num]
+            
+            trend_value = 0
+        pred_import_index = np.array(pred_import_index)
+        pred_import_index = pred_import_index[:select_num]
+        
         return pred_import_index,trend_value
 
-    
-          
+    def continus_trend_judge(self,target_data,trend_type=1):
+        """连续趋势判断--在某段时间内连续涨或跌的趋势
+            参数： 
+                trend_type： 0 判断下跌 1 判断上涨
+            返回值: 0 非连续 1 连续
+        """
+        
+        total_threhold = 0.5
+        part_threhold = 0.25
+        
+        total_range = target_data[-1]-target_data[0]
+        range_data = target_data[1:] - target_data[:-1]
+        
+        if trend_type==1:
+            # 总体幅度判断
+            if total_range>total_threhold:
+                return 1
+            # 计算趋势上涨或下跌占比，来判断是否连续趋势
+            total_range_num = np.sum(range_data>0)
+            part_range_num = np.sum(range_data[-5:]>0)
+            # 上涨数量多，并且幅度超出局部阈值
+            if (range_data[-1]>part_threhold):
+                return 1
+            # 最近一段上涨幅度超出局部阈值
+            if (total_range_num>=(target_data.shape[0]-2)) and (total_range>part_threhold):
+                return 1            
+            # 如果总体上涨一定幅度，并且近期大多数上涨
+            if (part_range_num>=4) and (total_range>part_threhold):
+                return 1
+
+        if trend_type==0:
+            # 总体幅度判断
+            if total_range<-total_threhold:
+                return 1
+            # 计算趋势上涨或下跌占比，来判断是否连续趋势
+            total_range_num = np.sum(range_data<0)
+            part_range_num = np.sum(range_data[-5:]<0)
+            # 上涨数量多，并且幅度超出局部阈值
+            if (range_data[-1]>part_threhold):
+                return 1
+            # 最近一段下跌幅度超出局部阈值
+            if (total_range_num>=(target_data.shape[0]-2)) and (total_range<-part_threhold):
+                return 1            
+            # 如果总体下跌一定幅度，并且近期大多数下跌
+            if (part_range_num>=4) and (total_range<-part_threhold):
+                return 1
+                   
+        return 0  
+        
