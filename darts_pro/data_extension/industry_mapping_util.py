@@ -329,12 +329,14 @@ class FuturesMappingUtil:
         
         # 添加整体指数数据
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(np.array(fur_ins_mappings))
+        total_index = -1
         for i in range(len(target_series)):
             if target_series[i].instrument_code=="ZS_ALL":
                 total_index = i
                 break
-        fur_ins_mapping = [total_index,'ZS_ALL',combine_content[:,0].astype(np.int),combine_content[:,0].astype(np.int),combine_content[:,3],combine_content[:,1],'综合']
-        fur_ins_mappings.append(fur_ins_mapping)
+        if total_index!=-1:
+            fur_ins_mapping = [total_index,'ZS_ALL',combine_content[:,0].astype(np.int),combine_content[:,0].astype(np.int),combine_content[:,3],combine_content[:,1],'综合']
+            fur_ins_mappings.append(fur_ins_mapping)
         fur_ins_mappings = np.array(fur_ins_mappings)
         
         return fur_ins_mappings        

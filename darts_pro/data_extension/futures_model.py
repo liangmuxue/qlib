@@ -41,6 +41,7 @@ class FuturesModel(IndustryRollModel):
                 max_samples_per_ts=None,
                 use_static_covariates=True,
                 target_num=len(self.past_split),
+                scale_mode=self.scale_mode,
                 mode=mode
             )  
             # 透传行业分类和股票映射关系，后续使用
@@ -57,6 +58,7 @@ class FuturesModel(IndustryRollModel):
                 use_static_covariates=True,
                 target_num=len(self.past_split),
                 ass_sw_ins_mappings=self.train_sw_ins_mappings, # 验证集是需要传入训练集映射关系数据，以进行审计
+                scale_mode=self.scale_mode,
                 mode=mode
             )
             # 透传行业分类和股票映射关系，后续使用
@@ -142,6 +144,7 @@ class FuturesModel(IndustryRollModel):
                 use_weighted_loss_func=self.use_weighted_loss_func,
                 past_split=self.past_split,
                 target_mode=self.target_mode,
+                scale_mode=self.scale_mode,
                 filter_conv_index=self.filter_conv_index,
                 device=self.device,
                 batch_file_path=self.batch_file_path,

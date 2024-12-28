@@ -61,7 +61,7 @@ task:
             n_epochs : 200
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
-            batch_file_path: 'custom/data/asis/Futures_Begin_202212'
+            batch_file_path: 'custom/data/asis/Futures_Begin_202206'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
@@ -80,10 +80,10 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_TimeMix_ABPFI_more_202212"
+               model_name: "Futures_TimeMix_ABPFI_more_202204"
                model_type: 'mlp'
                load_weight: True
-               best_weight: True
+               best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
@@ -91,7 +91,8 @@ task:
                forecast_horizon: &forecast_horizon 3
                dropout: 0.3
                past_split: [[0,15],[15,30],[30,45],[45,60],[60,75]]
-               target_mode: [0,0,0,0,0]
+               target_mode: [0,1,1,3,1]
+               scale_mode: [0,0,2,0,0]
                filter_conv_index: -1
     dataset:
         class: TFTFuturesDataset
@@ -126,7 +127,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['RSV5','QTLUMA5','STD5','OBV5','MACD']
+                target_column: ['RSV5','RSV5','CLOSE','CNTP5','RSI5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','dayofmonth','month']   
                 past_covariate_col: ['HOLD','MACD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','REFCLOSE','AOS','KDJ_K','dom_basis_rate','CORR5'

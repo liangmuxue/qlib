@@ -124,13 +124,16 @@ class FuturesStrategyModule(FuturesTogeModule):
                     torch.ones([batch_size]).long().to(self.device),
                     torch.ones([batch_size,self.select_num]).long().to(self.device))
         past_price_target = x_in[4][...,:self.input_chunk_length] 
+        past_index_targets = x_in[5]
         # 分别单独运行模型
         for i,m in enumerate(self.sub_models):
             # 根据配置，不同的模型使用不同的过去协变量
-            past_convs_item = x_in[0][i]    
+            past_convs_item = x_in[0][i]  
+            # 使用指标整体数据作为输入部分  
+            past_index_round_targets = past_index_targets[...,i]
             # 根据优化器编号匹配计算,当编号超出模型数量时，也需要全部进行向前传播，此时没有梯度回传，主要用于生成二次模型输入数据
             if optimizer_idx==i or optimizer_idx>=sub_model_length or optimizer_idx==-1:
-                x_in_item = (past_convs_item,x_in[1],x_in[2],past_price_target)
+                x_in_item = (past_convs_item,x_in[1],x_in[2],past_index_round_targets)
                 out = m(x_in_item)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
@@ -190,7 +193,7 @@ class FuturesStrategyModule(FuturesTogeModule):
             target_info
         ) = train_batch
                 
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets)     
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,last_targets)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
         # 给criterion对象设置epoch数量。用于动态loss策略
@@ -201,13 +204,15 @@ class FuturesStrategyModule(FuturesTogeModule):
         for i in range(self.get_optimizer_size()):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), 
-                            (future_target,target_class,future_round_targets,last_targets,price_targets,target_info),optimizers_idx=i)
+                            (future_target,target_class,future_round_targets,last_targets,price_targets),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
             # self.log("train_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
             if i==(self.get_optimizer_size()-1):
+                pass
                 self.log("train_fds_loss", fds_loss, batch_size=train_batch[0].shape[0], prog_bar=False)  
             else:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
+                self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append(detail_loss)
             total_loss += loss     
             # 手动更新参数
@@ -251,32 +256,74 @@ class FuturesStrategyModule(FuturesTogeModule):
             target_info
         ) = val_batch
               
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets) 
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,last_targets) 
         input_batch = self._process_input_batch(inp)
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,future_round_targets,last_targets,price_targets,target_info),optimizers_idx=-1)
+                    (future_target,target_class,future_round_targets,last_targets,price_targets),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         preds_combine = []
         for i in range(len(self.past_split)):
             # self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            # self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-        self.log("val_fds_loss", fds_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        # self.log("val_fds_loss", fds_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,vr_class,price_targets,future_round_targets)
         return loss,detail_loss,output_combine       
 
+    def _process_input_batch(
+        self, input_batch
+    ):
+        """重载方法，以适应数据结构变化"""
+        (
+            past_target,
+            past_covariates,
+            historic_future_covariates,
+            future_covariates,
+            static_covariates,
+            price_targets,
+            index_round_targets
+        ) = input_batch
+        dim_variable = -1
+
+        # 生成多组过去协变量，用于不同子模型匹配
+        x_past_array = []
+        for i,p_index in enumerate(self.past_split):
+            past_conv_index = self.past_split[i]
+            past_covariates_item = past_covariates[...,past_conv_index[0]:past_conv_index[1]]
+            # 修改协变量生成模式，只取自相关目标作为协变量，不使用时间协变量（时间协变量不进行归一化，只用于EMB嵌入）
+            conv_defs = [
+                        past_target[...,i:i+1],
+                        past_covariates_item,
+                ]            
+            x_past = torch.cat(
+                [
+                    tensor
+                    for tensor in conv_defs if tensor is not None
+                ],
+                dim=dim_variable,
+            )
+            x_past_array.append(x_past)
+            
+        # 忽略静态协变量第一列(索引列),后边的都是经过归一化的
+        static_covariates = static_covariates[...,1:]
+        past_index_targets = index_round_targets[:,:self.input_chunk_length,:]
+        
+        # 整合相关数据，分为输入值和目标值两组
+        return (x_past_array, historic_future_covariates,future_covariates, static_covariates,price_targets,past_index_targets)
+    
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
 
-        (future_target,target_class,future_round_targets,last_targets,price_targets,target_info) = target   
+        (future_target,target_class,future_round_targets,index_round_targets,price_targets) = target   
+        future_index_round_target = index_round_targets[:,self.input_chunk_length,:]
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        return self.criterion(output,(future_target,target_class,future_round_targets,last_targets,price_targets[...,self.input_chunk_length-1:],target_info),
+        return self.criterion(output,(future_target,target_class,future_round_targets,future_index_round_target,price_targets[...,self.input_chunk_length-1:]),
                     sw_ins_mappings=sw_ins_mappings,optimizers_idx=optimizers_idx,top_num=self.top_num,epoch_num=self.current_epoch)        
         
     def dump_val_data(self,val_batch,outputs,detail_loss):
@@ -382,11 +429,11 @@ class FuturesStrategyModule(FuturesTogeModule):
             sub_len = output_3d[4][i].shape[0]
             # 去除指数整体及行业
             keep_index = np.intersect1d(keep_index,instrument_index)   
-            output_list = [output_3d[2][i],output_3d[4][i],output_3d[5][i],output_3d[6][i]]
+            output_list = [output_3d[2][i],output_3d[3][i],output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
-            # if not date in TRACK_DATE:
-            #     continue
+            if not date in TRACK_DATE:
+                continue
             # 生成目标索引
             import_index,overroll_trend = self.build_import_index(output_data=output_list,
                             target=whole_target,price_target=price_target_list,
@@ -412,7 +459,7 @@ class FuturesStrategyModule(FuturesTogeModule):
                     result_values_inverse[np.where(result_values==2)[0]] = 1    
                     result_values = result_values_inverse                            
                 suc_cnt = np.sum(result_values>=2)
-                if suc_cnt==0:
+                if suc_cnt==0 or True:
                     err_date_list["{}_{}".format(date,suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
@@ -435,10 +482,12 @@ class FuturesStrategyModule(FuturesTogeModule):
     def build_import_index(self,output_data=None,target=None,price_target=None,combine_instrument=None,instrument_index=None):  
         """生成涨幅达标的预测数据下标"""
         
-        (cls_values,choice,trend_value,combine_index) = output_data
+        # return None,None
+    
+        (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
         # pred_import_index,overroll_trend = self.strategy_top(cls_values,choice,trend_value,combine_index,target=target,price_array=price_array,target_info=target_info_list)
-        pred_import_index,overroll_trend = self.strategy_top_direct(cls_values,target=target,
+        pred_import_index,overroll_trend = self.strategy_top_direct(cls_values,ce_values,target=target,
                                 price_array=price_target,instrument_index=instrument_index,combine_instrument=combine_instrument)
             
         return pred_import_index,overroll_trend
@@ -464,13 +513,13 @@ class FuturesStrategyModule(FuturesTogeModule):
             index = np.argsort(choice)[:self.top_num]
         pred_import_index = combine_index[index]  
 
-    def strategy_top_direct(self,cls_ori,target=None,price_array=None,instrument_index=None,combine_instrument=None):
+    def strategy_top_direct(self,cls_ori,ce_values,target=None,price_array=None,instrument_index=None,combine_instrument=None):
         """排名方式筛选候选者"""
 
         past_target = target[instrument_index,:self.input_chunk_length,:]
         past_price = price_array[instrument_index,:self.input_chunk_length]
         # 使用最近价格前值进行估算   
-        price_recent = past_price[:,-10:]
+        price_recent = past_price[:,-8:]
         price_recent_range = price_recent[:,-1] - price_recent[:,0]
         # 目标前值
         rsv_past_target = past_target[instrument_index,:,0]
@@ -478,13 +527,12 @@ class FuturesStrategyModule(FuturesTogeModule):
         qtlu_past_target = past_target[instrument_index,:,1]
         cls = cls_ori[instrument_index]
         cls_rsv = cls[...,0]
-        cls_qtlu = cls[...,1]
-        cls_ma = cls[...,2]
+        # cls_qtlu = cls[...,1]
+        # cls_ma = cls[...,2]
+        ce_rsv = ce_values[...,1]
         rsv_mean = cls_rsv.mean()
-        std_mean = cls_ma.mean()
-        qtlu_mean = cls_qtlu.mean()
         
-        rsv_mean_threhold = 0.55
+        rsv_mean_threhold = 0.6
         rsv_range_threhold = 0.15
         rsv_recent_threhold = 0.8
         qtlu_threhold = 0.75
@@ -496,11 +544,7 @@ class FuturesStrategyModule(FuturesTogeModule):
         trend_value = 0
         
         # 根据策略网络输出，看多或看空的不同情况，进行正向或反向排序取得相关记录索引
-        if qtlu_mean<qtlu_mean_threhold and rsv_mean>rsv_mean_threhold:
-            # RSV和MA总体大于阈值，则看RSV指标的多方
-            pred_import_index = np.argsort(-cls_rsv)[:select_num]
-            trend_value = 1
-        elif rsv_mean>rsv_mean_threhold and qtlu_mean>qtlu_threhold:
+        if ce_rsv>rsv_mean_threhold:
             # RSV和QTLU总体大于阈值，则看RSV指标的多方
             pre_index = np.argsort(-cls_rsv)[:top_num]  
             # 取得RSV排序靠前的记录，从而进行多方判断
@@ -513,34 +557,33 @@ class FuturesStrategyModule(FuturesTogeModule):
                     continue
                 pred_import_index.append(index)            
             trend_value = 1              
-        elif qtlu_mean>qtlu_threhold:
-            # RSV小，QTLU大，看QTLU排序靠前的空方
-            pre_index = np.argsort(-cls_qtlu)[:top_num]  
-            pred_import_index = []
-            for index in pre_index:
-                # 如果价格前值上升过大，或者价格最近值过高，则忽略.或者rsv指标近期升幅过大，则忽略
-                if self.continus_trend_judge(price_recent[index], trend_type=1)==1 \
-                        or price_recent[index,-1]>last_price_thredhold \
-                        or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
-                    continue
-                pred_import_index.append(index)            
-            trend_value = 0  
+        # elif qtlu_mean>qtlu_threhold:
+        #     # RSV小，QTLU大，看QTLU排序靠前的空方
+        #     pre_index = np.argsort(-cls_qtlu)[:top_num]  
+        #     pred_import_index = []
+        #     for index in pre_index:
+        #         # 如果价格前值上升过大，或者价格最近值过高，则忽略.或者rsv指标近期升幅过大，则忽略
+        #         if self.continus_trend_judge(price_recent[index], trend_type=1)==1 \
+        #                 or price_recent[index,-1]>last_price_thredhold \
+        #                 or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
+        #             continue
+        #         pred_import_index.append(index)            
+        #     trend_value = 0  
         else:
             # 取得RSV反向排序靠前的记录，从而进行空方判断
             pre_index = np.argsort(cls_rsv)[:top_num]       
             pred_import_index = []
             for index in pre_index:
-                # 如果价格前值上升过大，或者价格最近值过高，则忽略.或者rsv指标近期升幅过大，则忽略
-                if self.continus_trend_judge(price_recent[index], trend_type=1)==1 \
-                        or price_recent[index,-1]>last_price_thredhold \
-                        or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
+                # 如果价格前值上升过大，或者价格近期值过高，则忽略.或者rsv指标近期升幅过大，则忽略
+                if self.continus_trend_judge(price_recent[index], trend_type=1)==1: 
+                        # or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
                     continue
                 pred_import_index.append(index)
             pred_import_index = np.array(pred_import_index)
             
             # 如果没有候选者，则使用STD指标作为空方指标
             if pred_import_index.shape[0]==0:
-                pred_import_index = np.argsort(-std_mean)[:select_num]
+                pred_import_index = []
             
             trend_value = 0
         pred_import_index = np.array(pred_import_index)
@@ -557,6 +600,7 @@ class FuturesStrategyModule(FuturesTogeModule):
         
         total_threhold = 0.5
         part_threhold = 0.25
+        last_price_thredhold = 0.9
         
         total_range = target_data[-1]-target_data[0]
         range_data = target_data[1:] - target_data[:-1]
@@ -573,10 +617,17 @@ class FuturesStrategyModule(FuturesTogeModule):
                 return 1
             # 最近一段上涨幅度超出局部阈值
             if (total_range_num>=(target_data.shape[0]-2)) and (total_range>part_threhold):
-                return 1            
+                return 1     
             # 如果总体上涨一定幅度，并且近期大多数上涨
             if (part_range_num>=4) and (total_range>part_threhold):
+                return 1                   
+            # 最近几段上涨过快超出阈值，则判断上涨趋势  
+            if (range_data[-3:].sum()>part_threhold):
                 return 1
+            # 近期价格曾经处于较高位置，则判断上涨趋势     
+            if target_data[-4:].max()>last_price_thredhold:
+                return 1       
+                          
 
         if trend_type==0:
             # 总体幅度判断
@@ -594,6 +645,5 @@ class FuturesStrategyModule(FuturesTogeModule):
             # 如果总体下跌一定幅度，并且近期大多数下跌
             if (part_range_num>=4) and (total_range<-part_threhold):
                 return 1
-                   
         return 0  
         

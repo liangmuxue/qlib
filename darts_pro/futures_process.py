@@ -171,7 +171,7 @@ class FuturesProcessModel(TftDataframeModel):
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0)  
 
 
 
@@ -191,6 +191,7 @@ class FuturesProcessModel(TftDataframeModel):
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
         past_split = self.optargs["past_split"] 
         target_mode = self.optargs["target_mode"] 
+        scale_mode = self.optargs["scale_mode"] 
         filter_conv_index = self.optargs["filter_conv_index"] 
         model_name = self.optargs["model_name"]
         model_type = self.optargs["model_type"]
@@ -235,6 +236,7 @@ class FuturesProcessModel(TftDataframeModel):
                     save_checkpoints=True,
                     past_split=past_split,
                     target_mode=target_mode,
+                    scale_mode=scale_mode,
                     filter_conv_index=filter_conv_index,
                     work_dir=self.optargs["work_dir"],
                     lr_scheduler_cls=scheduler,

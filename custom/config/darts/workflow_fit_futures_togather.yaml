@@ -5,9 +5,9 @@ market: &market abpfi
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2008-01-01
+    start_time: 2005-01-01
     end_time: 2023-12-31
-    fit_start_time: 2008-01-01
+    fit_start_time: 2005-01-01
     fit_end_time: 2023-12-31
     instruments: *market
     infer_processors:
@@ -53,7 +53,7 @@ task:
         module_path: darts_pro.futures_process
         kwargs:
             GPU: 0
-            batch_size: 8
+            batch_size: 16
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_TimeMix_ABPFI_more_202212"
+               model_name: "Futures_TimeMix_ABPFI_more_202204"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
@@ -91,7 +91,8 @@ task:
                forecast_horizon: &forecast_horizon 5
                dropout: 0.5
                past_split: [[0,15],[15,30],[30,45],[45,60],[60,75]]
-               target_mode: [0,0,0,0,0]
+               target_mode: [0,1,1,3,1]
+               scale_mode: [0,0,2,0,0]
                filter_conv_index: -1
     dataset:
         class: TFTFuturesDataset
@@ -102,7 +103,7 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2022-04-30]
+                train: [2006-01-01, 2022-04-30]
                 valid: [2022-04-01, 2022-12-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
@@ -126,7 +127,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['RSV5','QTLUMA5','STD5','OBV5','MACD']
+                target_column: ['RSV5','RSV5','CLOSE','CNTP5','RSI5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
                 past_covariate_col: ['HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'

@@ -23,7 +23,6 @@ from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.tft_dataset import TFTDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
-from numba.core.types import none
 from cus_utils.db_accessor import DbAccessor
 
 from cus_utils.log_util import AppLogger

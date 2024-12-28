@@ -100,20 +100,23 @@ class FurTimeMixer(nn.Module):
         index_projection_layer = []
         for i in range(indus_num):
             item_num = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)[i].shape[0]
-            proj_item = nn.Linear(item_num, 1, bias=True)    
+            proj_item = nn.Sequential(
+                nn.Linear(item_num, 1, bias=True),
+                nn.BatchNorm1d(1, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)  
+            )            
             index_projection_layer.append(proj_item)
             
         self.index_projection_layer = nn.ModuleList(index_projection_layer)        
         self.all_to_index_projection_layer = nn.Linear((self.num_nodes-1)*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差
-        self.index_skip_layer = nn.Linear(pred_len, 1, bias=True)   
+        self.index_skip_layer = nn.Linear(seq_len, 1, bias=True)   
            
     def forward(self, x_in): 
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
         # 分别对应输入协变量，过去时间变量,未来时间变量。过去整体量化数值,过去指数数值
         # 其中输入协变量形状：[批次数（B），节点数（C或N），序列长度(T),协变量维度(D)]
-        x_enc, historic_future_covariates,future_covariates,past_price_target = x_in
+        x_enc, historic_future_covariates,future_covariates,past_index_round_targets = x_in
         # 采样得到对应时间变量
         x_time_mark_past = historic_future_covariates[:,0,:,:]
         x_time_mark_future = future_covariates[:,0,:,:]
@@ -220,7 +223,7 @@ class FurTimeMixer(nn.Module):
                 industry_decoded_data = ind_decoded
             else:
                 industry_decoded_data = torch.cat([industry_decoded_data,ind_decoded],dim=1)        
-        sw_index_data = industry_decoded_data # + self.index_skip_layer(indus_dec_out).squeeze(-1)
+        sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
         return dec_out,comp_out,sw_index_data
 
     def __multi_scale_process_inputs(self, x_enc, x_mark_enc):

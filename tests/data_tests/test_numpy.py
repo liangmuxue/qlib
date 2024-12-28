@@ -720,6 +720,18 @@ def test_where():
     flag = np.isin(x,y)
     ret = [np.where(y==x[i])[0][0] for i in range(len(x))]
     print(ret)
+
+def test_rolling():
+    from numpy.lib.stride_tricks import as_strided
+    data = np.arange(20)
+    
+    def rolling_window(a, window):
+        shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
+        strides = a.strides + (a.strides[-1],)
+        return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+     
+    ret = rolling_window(data,10)    
+    print(ret)
               
 if __name__ == "__main__":
     # test_mask()
@@ -735,7 +747,8 @@ if __name__ == "__main__":
     # test_date()
     # test_corr()
     # test_corr_tensor()
-    test_slope()
+    # test_slope()
+    test_rolling()
     # test_angle()
     # test_each()
     # test_split_compute()

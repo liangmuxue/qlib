@@ -102,7 +102,7 @@ class FuturesStrategyLoss(FuturesCombineLoss):
         """Multiple Loss Combine"""
 
         (output,vr_class,_) = output_ori
-        (target,target_class,future_round_targets,last_targets,price_targets,target_info) = target_ori
+        (target,target_class,future_round_targets,index_round_target,price_targets) = target_ori
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
         fds_loss = torch.tensor(0.0).to(self.device)
@@ -111,7 +111,7 @@ class FuturesStrategyLoss(FuturesCombineLoss):
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 取得所有品种排序号
         instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
-        indus_data_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
+        indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
         
         for i in range(len(output)):
             target_mode = self.target_mode[i]
@@ -121,6 +121,8 @@ class FuturesStrategyLoss(FuturesCombineLoss):
                 x_bar,sv,sw_index_data = output_item  
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 counter = 0
+                sv_mean = []
+                round_targets_indus = []
                 for j in range(target_class.shape[0]):
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
@@ -128,24 +130,37 @@ class FuturesStrategyLoss(FuturesCombineLoss):
                     # 只比较期货品种，不比较分类
                     keep_index = tensor_intersect(keep_index,torch.Tensor(instrument_index).to(keep_index.device))
                     round_targets_item = future_round_targets[j,keep_index,i]
-                    last_target_item = last_targets[j,keep_index,i]
+                    last_target_item = index_round_target[j,i]
                     # 总体目标值最后几位(pred_len)会是0，不进行计算
                     if torch.any(round_targets_item==0):
                         continue
                     if round_targets_item.shape[0]<=1:
                         continue                    
                     sv_indus = sv[j,keep_index]
-                    if target_mode==0:
-                        # cls_loss[i] += 10 * self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1)) 
-                        cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)   
+                    # sv_mean.append(sv_indus.mean())
+                    sv_mean.append(sw_index_data[j,0])
+                    round_targets_indus.append(last_target_item)
+                    # round_targets_indus.append(round_targets_item.mean())
+                    if target_mode==0 or target_mode==1:
+                        cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)     
+                        counter += 1
+                    if target_mode==3:
+                        cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))     
+                        counter += 1                        
+                if target_mode!=2:
+                    cls_loss[i] = cls_loss[i]/counter
+                    loss_sum = loss_sum + cls_loss[i]
+                if target_mode>0: 
+                    # 复用last_targets字段，作为单独品种归一化的总体数值，进行总体损失判断
+                    round_targets_indus = torch.stack(round_targets_indus)
+                    sw_indus = torch.stack(sv_mean)
+                    if target_mode==1 or target_mode==3:
+                        cl = self.mse_loss(sw_indus.unsqueeze(-1),round_targets_indus.unsqueeze(-1))  
                     else:
-                        # cls_loss[i] += 10 * self.mse_loss(sv_indus,last_target_item.unsqueeze(-1))  
-                    # cls_loss[i] += self.cos_loss(sv_indus.transpose(1,0),round_targets_item.unsqueeze(0))[0] 
-                        cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),last_target_item)  
-                    counter += 1
-                cls_loss[i] = cls_loss[i]/counter
-                loss_sum = loss_sum + cls_loss[i]
-        
+                        cl = self.ccc_loss_comp(sw_indus,round_targets_indus)  
+                    ce_loss[i] += cl
+                    loss_sum = loss_sum + ce_loss[i]
+                    
         if epoch_num>=self.lock_epoch_num:
             # 综合策略损失评判
             if optimizers_idx==(len(output)) or optimizers_idx==-1:

@@ -29,9 +29,9 @@ MixedCovariatesTrainTensorType = Tuple[
 
 from .mlp_module import MlpModule
 
-TRACK_DATE = [20220524,20220520,20220516,20220718,20220519,20220804,20220923]
-TRACK_DATE = [20220712,20220718]
-DRAW_SEQ = [0,1,2]
+TRACK_DATE = [20220524,20220520,20220516,20220718,20220811,20220810,20220923]
+TRACK_DATE = [20220516]
+DRAW_SEQ = [0]
 DRAW_SEQ_DETAIL = [0]
 
 class FuturesTogeModule(MlpModule):
@@ -56,6 +56,7 @@ class FuturesTogeModule(MlpModule):
         use_weighted_loss_func=False,
         past_split=None,
         target_mode=None,
+        scale_mode=None,
         batch_file_path=None,
         device="cpu",
         train_sw_ins_mappings=None,
@@ -67,6 +68,7 @@ class FuturesTogeModule(MlpModule):
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
         self.target_mode = target_mode
+        self.scale_mode = scale_mode
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
@@ -375,10 +377,10 @@ class FuturesTogeModule(MlpModule):
             output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_total, \
                 future_round_targets_total,last_round_targets,target_info_3d = self.combine_output_total(self.output_result)
             
-            indus_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
-            main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-            indus_names = FuturesMappingUtil.get_industry_names(sw_ins_mappings)[:-1]
-            indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)[:-1]  
+            indus_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+            # main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+            indus_names = FuturesMappingUtil.get_industry_names(sw_ins_mappings)
+            indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
             industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
             
             viz_result_detail = {}
@@ -393,22 +395,22 @@ class FuturesTogeModule(MlpModule):
                 viz_total_size+=1
                 keep_index = np.where(target_class_3d[index]>=0)[0]
                 round_targets = future_round_targets_total[index]
+                last_targets = last_round_targets[index]
                 cls_output = output_3d[2]
+                ce_output = output_3d[3]
                 ts_arr = target_info_3d[index]
                 date = ts_arr[keep_index][0]["future_start_datetime"]
                 if not date in TRACK_DATE:
                     continue               
 
-                ins_with_indus = FuturesMappingUtil.get_industry_instrument_exc_main(sw_ins_mappings)
+                ins_with_indus = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
                     # 显示板块分类整体预测数据
                     indust_output_value = cls_output[index,indus_index,j]
                     indust_target = round_targets[indus_index,j]
-                    main_value = cls_output[index,main_index,j]
-                    main_target = round_targets[main_index,j]                    
                     win = "indus_round_target_{}_{}".format(j,viz_total_size)
-                    target_title = "industry compare_{},date:{},pred_tar:{}_{}".format(j,date,round(main_value,2),round(main_target,2))
+                    target_title = "industry compare_{},date:{}".format(j,date)
                     view_data = np.stack([indust_output_value,indust_target]).transpose(1,0)
                     # if j in DRAW_SEQ:
                     #     tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_names.tolist(),legends=["pred","target"])   
@@ -427,7 +429,8 @@ class FuturesTogeModule(MlpModule):
                         # 添加价格显示
                         price_array = np.array([ts_arr[h]["price_array"] for h in instruments])
                         scaler = MinMaxScaler(feature_range=(0.001, 1))
-                        price_array = scaler.fit_transform(price_array.transpose(1,0)).transpose(1,0)
+                        scaler.fit(price_array[:,:-self.output_chunk_length].transpose(1,0))
+                        price_array = scaler.transform(price_array.transpose(1,0)).transpose(1,0)
                         price_array_range = price_array[:,-1] - price_array[:,-self.output_chunk_length-1]                    
                         view_data = np.stack([ins_cls_output,fur_round_target,price_array_range]).transpose(1,0)
                         win = "round_target_{}_{}_{}".format(j,k,viz_total_size)
@@ -447,7 +450,10 @@ class FuturesTogeModule(MlpModule):
                     # 合并所有品种并显示
                     if j in DRAW_SEQ:
                         win = "target_combt_{}_{}".format(j,viz_total_size)
-                        target_title = "combine target{}_{},date:{}".format(j,np.mean(total_view_data[:,0]),date)
+                        mean_seq = 1
+                        target_title = "combine target{}_{},index_pred_tar:{}_{},date:{}" \
+                            .format(j,round(np.mean(total_view_data[:,0]),2),round(ce_output[index,0,mean_seq],2),
+                                    round(last_targets[self.input_chunk_length,mean_seq],2),int(date))
                         tar_viz.viz_bar_compare(total_view_data,win=win,title=target_title,rownames=futures_names_combine.tolist(),legends=["pred","target","price"])                       
                         
                     xbar_data = output_3d[0][index,...,j]

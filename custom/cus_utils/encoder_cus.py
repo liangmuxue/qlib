@@ -1,6 +1,7 @@
 from typing import Callable, Dict, Iterable, List, Tuple, Union
 import pandas as pd
 import numpy as np
+from numpy.lib.stride_tricks import as_strided
 import torch
 from sklearn.preprocessing import MinMaxScaler
 
@@ -24,7 +25,31 @@ def transform_slope_value(target_value):
 def unverse_transform_slope_value(slope_value):
     target_range = slope_value/10
     return target_range
-        
+
+def rolling_window(a, window):
+    shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
+    strides = a.strides + (a.strides[-1],)
+    return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+    
+def rolling_norm(arr,rolling_length,step_len):
+    """滚动求时间段内差值的归一化数据"""
+    
+    # 前留1，后留预测时间段长度
+    arr_padded = np.pad(arr,(1,step_len), mode='constant',constant_values=(0,0))
+    # 滚动取得多段矩阵
+    strides_data = rolling_window(arr_padded,rolling_length)    
+    # 每个段内进行归一化
+    scale_data = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(strides_data.transpose(1,0)).transpose(1,0)    
+    # 求归一化后的差值
+    round_vals = scale_data[:,-1] - scale_data[:,-step_len-1]
+    # 整体再次归一化
+    norm_vals = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(np.expand_dims(round_vals,-1)).squeeze(-1) 
+    # 去掉之前补充的多余内容
+    norm_vals = norm_vals[1:-step_len]
+    round_vals = round_vals[1:-step_len]
+    
+    return norm_vals,round_vals
+    
 class StockNormalizer(object):
     """针对股票数据的标准化归一化工具类"""
 
