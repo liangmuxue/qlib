@@ -94,7 +94,7 @@ class FuturesStrategyModule(FuturesTogeModule):
     def _construct_classify_layer(self, input_dim,output_dim,device=None):
         """新增策略选择模型"""
         
-        self.lock_epoch_num = 100
+        self.lock_epoch_num = 180
         
         self.top_num = 5 # 选取目标数量
         self.select_num = 10 # 一次筛选的数量
@@ -459,8 +459,8 @@ class FuturesStrategyModule(FuturesTogeModule):
                     result_values_inverse[np.where(result_values==2)[0]] = 1    
                     result_values = result_values_inverse                            
                 suc_cnt = np.sum(result_values>=2)
-                if suc_cnt==0 or True:
-                    err_date_list["{}_{}".format(date,suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
+                if suc_cnt==0:
+                    err_date_list["{}_{}".format(date,overroll_trend)] = import_price_result[result_values<2][["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
@@ -475,7 +475,7 @@ class FuturesStrategyModule(FuturesTogeModule):
                 rate_total[date].append(total_cnt.item())   
                 # 添加多空判断预测信息 
                 rate_total[date].append(overroll_trend)   
-        print("result:",err_date_list)      
+        # print("result:",err_date_list)      
         
         return rate_total,total_imp_cnt
 
@@ -524,15 +524,15 @@ class FuturesStrategyModule(FuturesTogeModule):
         # 目标前值
         rsv_past_target = past_target[instrument_index,:,0]
         rsv_recent_range = rsv_past_target[:,-1] - rsv_past_target[:,-5]
-        qtlu_past_target = past_target[instrument_index,:,1]
         cls = cls_ori[instrument_index]
         cls_rsv = cls[...,0]
-        # cls_qtlu = cls[...,1]
-        # cls_ma = cls[...,2]
-        ce_rsv = ce_values[...,1]
+        cls_std = cls[...,2]
         rsv_mean = cls_rsv.mean()
+        ce_rsv = ce_values[...,1]
+        std_mean = cls_std.mean()
         
-        rsv_mean_threhold = 0.6
+        rsv_ce_threhold = 0.65
+        rsv_mean_threhold = 0.5
         rsv_range_threhold = 0.15
         rsv_recent_threhold = 0.8
         qtlu_threhold = 0.75
@@ -544,46 +544,32 @@ class FuturesStrategyModule(FuturesTogeModule):
         trend_value = 0
         
         # 根据策略网络输出，看多或看空的不同情况，进行正向或反向排序取得相关记录索引
-        if ce_rsv>rsv_mean_threhold:
+        if ce_rsv>rsv_ce_threhold and rsv_mean>rsv_mean_threhold:
             # RSV和QTLU总体大于阈值，则看RSV指标的多方
             pre_index = np.argsort(-cls_rsv)[:top_num]  
             # 取得RSV排序靠前的记录，从而进行多方判断
             pred_import_index = []
             for index in pre_index:
                 # 如果价格前值上升过大，或者价格最近值过高，则忽略
-                if self.continus_trend_judge(price_recent[index], trend_type=0)==1 \
-                        or price_recent[index,-1]<last_price_thredhold \
-                        or rsv_past_target[index,-1]<-last_price_thredhold :
+                if self.continus_trend_judge(price_recent[index], trend_type=0)==1:
                     continue
                 pred_import_index.append(index)            
             trend_value = 1              
-        # elif qtlu_mean>qtlu_threhold:
-        #     # RSV小，QTLU大，看QTLU排序靠前的空方
-        #     pre_index = np.argsort(-cls_qtlu)[:top_num]  
-        #     pred_import_index = []
-        #     for index in pre_index:
-        #         # 如果价格前值上升过大，或者价格最近值过高，则忽略.或者rsv指标近期升幅过大，则忽略
-        #         if self.continus_trend_judge(price_recent[index], trend_type=1)==1 \
-        #                 or price_recent[index,-1]>last_price_thredhold \
-        #                 or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
-        #             continue
-        #         pred_import_index.append(index)            
-        #     trend_value = 0  
         else:
             # 取得RSV反向排序靠前的记录，从而进行空方判断
             pre_index = np.argsort(cls_rsv)[:top_num]       
             pred_import_index = []
             for index in pre_index:
                 # 如果价格前值上升过大，或者价格近期值过高，则忽略.或者rsv指标近期升幅过大，则忽略
-                if self.continus_trend_judge(price_recent[index], trend_type=1)==1: 
-                        # or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
+                if self.continus_trend_judge(price_recent[index], trend_type=1)==1 \
+                        or ((rsv_past_target[index,-1]-rsv_past_target[index,-4])>rsv_range_threhold and rsv_past_target[index,-1]>rsv_recent_threhold):
                     continue
                 pred_import_index.append(index)
             pred_import_index = np.array(pred_import_index)
             
             # 如果没有候选者，则使用STD指标作为空方指标
             if pred_import_index.shape[0]==0:
-                pred_import_index = []
+                pred_import_index = np.argsort(-std_mean)[:select_num]
             
             trend_value = 0
         pred_import_index = np.array(pred_import_index)
@@ -625,7 +611,7 @@ class FuturesStrategyModule(FuturesTogeModule):
             if (range_data[-3:].sum()>part_threhold):
                 return 1
             # 近期价格曾经处于较高位置，则判断上涨趋势     
-            if target_data[-4:].max()>last_price_thredhold:
+            if target_data[-3:].max()>last_price_thredhold:
                 return 1       
                           
 

@@ -244,15 +244,21 @@ class FuturesTogatherDataset(GenericShiftedDataset):
             scale_data = np.stack(scale_data).transpose(1,0)
             combine_values = scale_data        
         elif scale==2:
-            # 直接归一化
             eps = 1e-5
+            # 根据单独指标决定如何归一化
             for i in range(combine_values.shape[-1]):
                 if scale_mode[i]==1:
+                    # 直接归一化
                     combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1)    
                 if scale_mode[i]==2:
                     # 使用幅度比值代替幅度绝对数值
                     range_values[:,i][np.where(range_values[:,i]>0.35)[0]] = 0.35
-                    combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(range_values[:,i],-1)).squeeze(-1)                     
+                    combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(range_values[:,i],-1)).squeeze(-1)   
+                else:
+                    # 不做归一化，0值替换为非0
+                    zero_index = np.where(combine_values[:,i]==0)[0]
+                    eps_adju = np.random.uniform(low=eps,high=eps*10,size=zero_index.shape[0])
+                    combine_values[:,i][zero_index] = eps_adju                        
         else:
             # 不归一化，0值替换为非0
             eps = 1e-5

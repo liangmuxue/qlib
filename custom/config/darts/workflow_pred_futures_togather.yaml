@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/futures_data'
     region: cn
-market: &market abpfi
+market: &market nmfi
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_TimeMix_ABPFI_more_202204"
+               model_name: "Futures_TimeMix_NMFI_more_202206"
                model_type: 'mlp'
                load_weight: True
                best_weight: False
@@ -91,8 +91,8 @@ task:
                forecast_horizon: &forecast_horizon 3
                dropout: 0.3
                past_split: [[0,15],[15,30],[30,45],[45,60],[60,75]]
-               target_mode: [0,1,1,3,1]
-               scale_mode: [0,0,2,0,0]
+               target_mode: [0,1,0,1,3]
+               scale_mode: [0,0,0,0,0]
                filter_conv_index: -1
     dataset:
         class: TFTFuturesDataset
@@ -103,8 +103,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2022-04-30]
-                valid: [2022-04-01, 2022-12-31]
+                train: [2010-01-01, 2022-06-30]
+                valid: [2022-06-01, 2022-10-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -127,7 +127,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['RSV5','RSV5','CLOSE','CNTP5','RSI5']
+                target_column: ['RSV5','RSV5','STD5','AOS','IMXD5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','dayofmonth','month']   
                 past_covariate_col: ['HOLD','MACD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','REFCLOSE','AOS','KDJ_K','dom_basis_rate','CORR5'

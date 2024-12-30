@@ -102,7 +102,7 @@ class FurTimeMixer(nn.Module):
             item_num = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)[i].shape[0]
             proj_item = nn.Sequential(
                 nn.Linear(item_num, 1, bias=True),
-                nn.BatchNorm1d(1, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)  
+                # nn.BatchNorm1d(1, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)  
             )            
             index_projection_layer.append(proj_item)
             

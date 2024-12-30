@@ -30,9 +30,10 @@ MixedCovariatesTrainTensorType = Tuple[
 from .mlp_module import MlpModule
 
 TRACK_DATE = [20220524,20220520,20220516,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220516]
+TRACK_DATE = [20220923]
 DRAW_SEQ = [0]
 DRAW_SEQ_DETAIL = [0]
+MEAN_SEQ = 1
 
 class FuturesTogeModule(MlpModule):
     """期货品种和行业板块数据一起预测的模型"""
@@ -450,10 +451,10 @@ class FuturesTogeModule(MlpModule):
                     # 合并所有品种并显示
                     if j in DRAW_SEQ:
                         win = "target_combt_{}_{}".format(j,viz_total_size)
-                        mean_seq = 1
+                        
                         target_title = "combine target{}_{},index_pred_tar:{}_{},date:{}" \
-                            .format(j,round(np.mean(total_view_data[:,0]),2),round(ce_output[index,0,mean_seq],2),
-                                    round(last_targets[self.input_chunk_length,mean_seq],2),int(date))
+                            .format(j,round(np.mean(total_view_data[:,0]),2),round(ce_output[index,0,MEAN_SEQ],2),
+                                    round(last_targets[self.input_chunk_length,MEAN_SEQ],2),int(date))
                         tar_viz.viz_bar_compare(total_view_data,win=win,title=target_title,rownames=futures_names_combine.tolist(),legends=["pred","target","price"])                       
                         
                     xbar_data = output_3d[0][index,...,j]
