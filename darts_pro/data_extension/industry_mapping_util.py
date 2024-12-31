@@ -381,6 +381,13 @@ class FuturesMappingUtil:
         return sw_ins_mappings[:,2]
 
     @staticmethod
+    def get_industry_instrument_num(sw_ins_mappings):
+        num = 0
+        for item in sw_ins_mappings[:,2]:
+            num += item.shape[0]
+        return num
+    
+    @staticmethod
     def get_instrument_obj_in_industry(sw_ins_mappings,indus_index):
         ins_obj = []
         for i in range(sw_ins_mappings[indus_index,2].shape[0]):

@@ -15,7 +15,7 @@ class FurTimeMixer(nn.Module):
     def __init__(self, c_in=10,c_out=1,seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,decomp_method='moving_avg',d_ff=2048,moving_avg=25,
                  e_layers:int=3, d_model=16,down_sampling_method='avg',down_sampling_window=5,down_sampling_layers=1,
                  num_nodes=0,node_dim=16,day_of_week_size=5,temp_dim_diw=8,month_of_year_size=12,temp_dim_miy=8,day_of_month_size=31,temp_dim_dim=8,
-                 train_sw_ins_mappings=None, valid_sw_ins_mappings=None,device="cpu"):
+                 device="cpu"):
         """Params:
                 c_in:输入目标维度
                 c_out: 输出目标维度，默认1
@@ -34,9 +34,6 @@ class FurTimeMixer(nn.Module):
         
         super().__init__()
         
-        self.train_sw_ins_mappings = train_sw_ins_mappings
-        self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        sw_ins_mappings = train_sw_ins_mappings if self.training else valid_sw_ins_mappings
         
         self.pred_len = pred_len
         self.temp_dim_diw = temp_dim_diw
@@ -96,17 +93,7 @@ class FurTimeMixer(nn.Module):
         self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, 1, bias=True)      
         
         # 品种数据投影到板块指数数据，按照不同分类板块分别投影
-        indus_num = len(FuturesMappingUtil.get_industry_codes(sw_ins_mappings))
-        index_projection_layer = []
-        for i in range(indus_num):
-            item_num = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)[i].shape[0]
-            proj_item = nn.Sequential(
-                nn.Linear(item_num, 1, bias=True),
-                # nn.BatchNorm1d(1, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)  
-            )            
-            index_projection_layer.append(proj_item)
-            
-        self.index_projection_layer = nn.ModuleList(index_projection_layer)        
+        self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
         self.all_to_index_projection_layer = nn.Linear((self.num_nodes-1)*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差
         self.index_skip_layer = nn.Linear(seq_len, 1, bias=True)   
@@ -203,25 +190,8 @@ class FurTimeMixer(nn.Module):
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1).unsqueeze(-1)
         # 叠加整体数值残差计算
         comp_out = comp_out + x_mar_dec_out
-        # 引入全局未来协变量，串接整体评估部分
-        # indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
-        # indus_dec_out = dec_out[:,indus_data_index,:]
         # 按照不同分类板块分别投影
-        industry_decoded_data = None
-        sw_ins_mappings = self.train_sw_ins_mappings if self.training else self.valid_sw_ins_mappings
-        indus_num = len(FuturesMappingUtil.get_industry_codes(sw_ins_mappings))
-        instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-        for i in range(indus_num):
-            m = self.index_projection_layer[i]
-            idx_list = torch.Tensor(instrument_index[i]).to(x_in[-1].device).long()
-            # 通过索引映射到实际板块内品种组合
-            ins_data = comp_out.squeeze(-1)[:,idx_list,...]
-            ins_data = ins_data.reshape(ins_data.shape[0],-1)
-            ind_decoded = m(ins_data)
-            if industry_decoded_data is None:
-                industry_decoded_data = ind_decoded
-            else:
-                industry_decoded_data = torch.cat([industry_decoded_data,ind_decoded],dim=1)        
+        industry_decoded_data = self.index_projection_layer(comp_out.squeeze(-1))
         sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
         return dec_out,comp_out,sw_index_data
 
