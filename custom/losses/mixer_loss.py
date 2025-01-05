@@ -205,9 +205,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
         (output,vr_class,_) = output_ori
         (target,target_class,future_round_targets,index_round_target,price_targets) = target_ori
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
-        cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        cls_loss = torch.zeros([len(output)],requires_grad=True).to(self.device)
         fds_loss = torch.tensor(0.0).to(self.device)
-        ce_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        ce_loss = torch.zeros([len(output)],requires_grad=True).to(self.device)
         # 指标分类
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 取得所有品种排序号
@@ -227,14 +227,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
                     index_target_item = index_round_target[j,:,i]
-                    index_data = []
                     for k in range(indus_data_index.shape[0]):     
                         ins_index = ins_in_indus_index[k]
                         inner_class_item = target_class_item[ins_index]
                         inner_index = torch.where(inner_class_item>=0)[0]
                         ins_index = tensor_intersect(keep_index,ins_index).to(keep_index.device)
                         round_targets_item = future_round_targets[j,ins_index,i]
-                        index_data.append(sw_index_data[k][j,0])
                         # 总体目标值最后几位(pred_len)会是0，不进行计算
                         if torch.any(round_targets_item==0):
                             continue
@@ -242,27 +240,28 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             continue                          
                         sv_indus = sv[k][j]
                         sv_indus = sv_indus[inner_index]
-                        if target_mode==0 or target_mode==1:
+                        if target_mode==0:
                             if round_targets_item.shape[0]>1:
                                 cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
                             else:
                                 cls_loss[i] += torch.abs(sv_indus.squeeze(-1),round_targets_item)     
                             counter += 1     
-                        if target_mode==3:
+                        elif target_mode==3:
                             cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))     
                             counter += 1                                                 
                     # 整体板块损失计算
                     if target_mode>0: 
                         if torch.sum(index_target_item<1e-4)>2:
                             continue                          
-                        index_data = torch.stack(index_data).to(keep_index.device)
-                        ce_loss[i] += self.ccc_loss_comp(index_data,index_target_item)
+                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item)
+                        # ce_loss[i] += self.mse_loss(index_data.unsqueeze(-1),index_target_item.unsqueeze(-1))
 
-                if target_mode!=2:
+                if target_mode==0:
                     cls_loss[i] = cls_loss[i]/counter
                     loss_sum = loss_sum + cls_loss[i] 
-                if target_mode>0: 
-                    loss_sum = loss_sum + ce_loss[i]
+                if target_mode==1: 
+                    # cls_loss[i] = cls_loss[i]/counter
+                    loss_sum = loss_sum + ce_loss[i] # + cls_loss[i] 
 
                     
         # if epoch_num>=self.lock_epoch_num:

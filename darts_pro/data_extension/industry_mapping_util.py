@@ -386,7 +386,23 @@ class FuturesMappingUtil:
         for item in sw_ins_mappings[:,2]:
             num += item.shape[0]
         return num
-    
+
+    @staticmethod
+    def get_instrument_rel_index(sw_ins_mappings):
+        rel_index = []
+        for item in sw_ins_mappings[:,2]:
+            rel_index.append(item.shape[0])
+        return np.array(rel_index)
+
+    @staticmethod
+    def get_instrument_rel_index_within_industry(sw_ins_mappings,indus_index):
+        if indus_index==0:
+            begin_index = 0
+        else:
+            begin_index = sw_ins_mappings[indus_index-1,2].shape[0]
+        end_index = begin_index + sw_ins_mappings[indus_index,2].shape[0]
+        return [begin_index,end_index]
+            
     @staticmethod
     def get_instrument_obj_in_industry(sw_ins_mappings,indus_index):
         ins_obj = []

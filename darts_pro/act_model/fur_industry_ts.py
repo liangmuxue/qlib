@@ -4,6 +4,7 @@ from torch import nn
 from torch import Tensor
 import torch.nn.functional as F
 import numpy as np
+from torch import nn
 
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from .layers.Autoformer_EncDec import series_decomp
@@ -16,24 +17,9 @@ class FurIndustryMixer(nn.Module):
        把行业板块信息融合到模型中，不同行业，权重不共享
     """
     
-    def __init__(self, c_in=10,c_out=1,seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,
-                 combine_nodes_num=None,instrument_index=None,
-                 train_sw_ins_mappings=None, valid_sw_ins_mappings=None,device="cpu"):
-        """Params:
-                c_in:输入目标维度
-                c_out: 输出目标维度，默认1
-                seq_len： 输入序列长度
-                pred_len: 预测序列长度
-                past_cov_dim: 输入协变量维度
-                e_layers: 多尺度计算的神经网络层数
-                d_model： 嵌入编码维度
-                day_of_week_size: 每周工作日数量
-                month_of_year_size: 每年月数量
-                temp_dim_diw： 周日期参数对应的嵌入维度
-                temp_dim_miy: 月份参数对应的嵌入维度
-                temp_dim_dim： 月日期参数对应的嵌入维度
-                
-        """
+    def __init__(self, seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,
+                 combine_nodes_num=None,instrument_index=None,device="cpu"):
+        """行业总体网络，分为子网络，以及整合网络2部分"""
         
         super().__init__()
         
@@ -55,14 +41,17 @@ class FurIndustryMixer(nn.Module):
                 )
             sub_model_list.append(sub_model)
         self.sub_models = nn.ModuleList(sub_model_list)
+        # 整合输出网络
+        self.combine_layer = nn.Sequential(
+                nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
+                nn.ReLU(), 
+                nn.Linear(hidden_size,self.combine_nodes_num.shape[0]),
+                nn.LayerNorm(self.combine_nodes_num.shape[0])
+            ).to(device)
         
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""
         
-        # cls_out_combine = torch.zeros([x_in[0].shape[0],x_in[1].shape[1],1]).to(x_in[0].device)
-        # cls_out_combine = torch.randn([x_in[0].shape[0],x_in[1].shape[1],1], requires_grad=True).to(x_in[0].device)
-        # index_data_combine = torch.zeros([x_in[0].shape[0],self.combine_nodes_num.shape[0]]).to(x_in[0].device)
-        # index_data_combine = torch.randn([x_in[0].shape[0],self.combine_nodes_num.shape[0]], requires_grad=True).to(x_in[0].device)
         cls_out_combine = []
         index_data_combine = []
         # 不同行业分别输出
@@ -73,19 +62,10 @@ class FurIndustryMixer(nn.Module):
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_index_round_targets[:,i,...])
             _,cls_out,sw_index_data = m(x_inner)
-        
-            # cls_out_combine[:,instrument_index] = torch.clone(cls_out)
-            # index_data_combine[:,i] = torch.clone(sw_index_data.squeeze(-1))
-            
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
-            # if cls_out_combine is None:
-            #     cls_out_combine = cls_out
-            #     index_data_combine = sw_index_data
-            # else:
-            #     cls_out_combine = torch.cat([cls_out_combine,cls_out],dim=1)
-            #     index_data_combine = torch.cat([index_data_combine,sw_index_data],dim=1)
-                
+        
+        index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
         return None,cls_out_combine,index_data_combine
 
 
