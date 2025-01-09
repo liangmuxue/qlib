@@ -55,7 +55,8 @@ class MlWorkflowIntergrate(MlIntergrate):
         # 初始化dataset
         dataset = init_instance_by_config(self.dataset_cfg)
         df_data_path = self.pred_data_path + "/df_all.pkl"
-        dataset.build_series_data(df_data_path,no_series_data=True)  
+        df_data = pickle.load(df_data_path)
+        dataset.build_series_data(df_data,no_series_data=True)  
           
         # 生成recorder,用于后续预测数据处理
         record_cfg = config["task"]["record"]

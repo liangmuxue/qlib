@@ -219,22 +219,20 @@ class TFTSeriesDataset(TFTDataset):
             self.df_all = df_all
             logger.debug("emb size after p:{}".format(self.get_emb_size()))
         self.target_scalers = self._create_target_scalers(self.df_all)       
-        
-    def build_series_data(self,outer_df=None,no_series_data=False,val_ds_filter=False,fill_future=True):
+    
+    def build_series_data_with_segments(self,segments,outer_df=None,no_series_data=False,val_ds_filter=False,fill_future=True):
         """从pandas数据生成时间序列类型数据"""
-
         
-        val_range = self.segments["valid"]
+        val_range = segments["valid"]
         valid_start = val_range[0]
         valid_end = val_range[1]  
         
         # 根据配置决定使用全集模式还是差集模式   
-        if "train_total" in self.segments:
+        if "train_total" in segments:
             total_range = self.segments["train_total"]
             range_mode = 0
         else:
-            train_range = self.segments["train"]
-            train_start = val_range[0]
+            train_range = segments["train"]
             train_end = val_range[1]              
             total_range = [train_range[0],valid_end]   
             range_mode = 1
@@ -266,7 +264,14 @@ class TFTSeriesDataset(TFTDataset):
         # 如果只需要df数据，则不进行series数据生成
         if no_series_data:
             return
-        return self.create_series_data(self.df_all,self.df_train,self.df_val,fill_future=fill_future)
+        return self.create_series_data(self.df_all,self.df_train,self.df_val,fill_future=fill_future)        
+          
+    def build_series_data(self,outer_df=None,no_series_data=False,val_ds_filter=False,fill_future=True):
+        """从pandas数据生成时间序列类型数据"""
+
+        segments = self.segments
+        return self.build_series_data_with_segments(segments, outer_df=outer_df, no_series_data=no_series_data, val_ds_filter=val_ds_filter, fill_future=fill_future)
+
         
     def create_series_data(self,df_all,df_train,df_val,fill_future=False):
         

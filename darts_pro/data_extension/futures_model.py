@@ -10,6 +10,7 @@ import torch
 import pickle
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
+from torch.utils.data import DataLoader
 
 from .industry_model import IndustryRollModel
 from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
@@ -188,7 +189,7 @@ class FuturesIndustryModel(FuturesModel):
             # 透传行业分类和股票映射关系，后续使用
             self.train_sw_ins_mappings = ds.sw_ins_mappings            
         # 验证模式下，需要传入之前存储的静态数据集合
-        if mode=="valid":
+        if mode=="valid" or mode=="predict":
             ds = FuturesIndustryDataset(
                 target_series=target,
                 covariates=past_covariates,
@@ -296,5 +297,51 @@ class FuturesIndustryModel(FuturesModel):
                 **self.pl_module_params,
         )     
         return model         
-    
+
+    def _batch_collate_fn(self,batch):
+        """批次整合"""
+        
+        aggregated = []
+        first_sample = batch[0]
+        for i in range(len(first_sample)):
+            elem = first_sample[i]
+            if isinstance(elem, np.ndarray):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, tuple):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+            elif isinstance(elem, List):
+                aggregated.append([sample[i] for sample in batch])
+            else:
+                print("no match for:",elem.dtype)
+        return tuple(aggregated) 
+     
+    def predict(self,series,past_covariates=None,future_covariates=None,batch_size=1,num_loader_workers=1):
+        
+        dataset = self._build_train_dataset(
+            target=series,
+            past_covariates=past_covariates,
+            future_covariates=future_covariates,
+            max_samples_per_ts=10,
+            mode="predict"
+        )
+        pred_loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_loader_workers,
+            pin_memory=True,
+            drop_last=False,
+            collate_fn=self._batch_collate_fn,
+        )        
+        self.trainer.predict(self.model, pred_loader)
+        predictions = self.model.resutl_date_list
+        
+        return predictions
     

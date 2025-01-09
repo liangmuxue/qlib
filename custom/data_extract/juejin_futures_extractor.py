@@ -23,17 +23,15 @@ from cus_utils.log_util import AppLogger
 from data_extract.akshare_extractor import AkExtractor
 from data_extract.his_data_extractor import get_period_name
 
-class AkFuturesExtractor(AkExtractor):
-    """akshare期货数据源"""
+class JuejinFuturesExtractor(AkExtractor):
+    """掘金期货数据源"""
 
-    def __init__(self, backend_channel="ak",savepath=None,**kwargs):
+    def __init__(self, backend_channel="juejin",savepath=None,**kwargs):
         super().__init__(backend_channel=backend_channel,savepath=savepath,kwargs=kwargs)
         self.busi_columns = ["date","open","high","low","close","volume","hold","settle"]
 
     def get_whole_item_datapath(self,period,institution=False):
         period_name = get_period_name(period)
-        if institution:
-            return "{}/item/{}/institution".format(self.savepath,period_name)
         return "{}/item/{}/csv_data".format(self.savepath,period_name)
             
     def import_trading_variety(self):
@@ -54,7 +52,7 @@ class AkFuturesExtractor(AkExtractor):
             self.dbaccessor.do_inserto_withparams(insert_sql, (exchange_id,row['代码'],row['品种'],magin_radio,limit_rate))           
 
     def extract_item_data(self,code,start_date=None,end_date=None,period=PeriodType.DAY.value):  
-        """取得单个股票历史行情数据"""
+        """取得单个品种历史行情数据"""
         
         # AKSHARE目前只支持按照日导入
         if period!=PeriodType.DAY.value:
@@ -132,114 +130,29 @@ class AkFuturesExtractor(AkExtractor):
         # combine_sql = "insert into dominant_continues_data(date,code,open,close,high,low,volume,hold,settle) ({})".format(combine_sql)
         # self.dbaccessor.do_inserto(combine_sql)   
                   
-    def import_extension_data(self,begin_date=None):
-        """导入历史行情辅助数据"""
+    def load_item_df(self,instrument,period=PeriodType.MIN5.value,institution=False):
+        """加载单个股票"""
         
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
-
-        if begin_date is None:
-            begin_date = '2015-03-01'
-    
-        # 获取基差信息
-        self.extract_basis_rate(begin_date,engine=engine)
-
-    def extract_outer_data(self):
-        """导入外盘数据"""
-        
-        # 外盘品种入库
-        # futures_hq_subscribe_exchange_symbol_df = ak.futures_hq_subscribe_exchange_symbol()
-        # for row in futures_hq_subscribe_exchange_symbol_df.iterrows():
-        #     insert_sql = "insert into trading_variety_outer(name,code) values('{}','{}')".format(row[1]["symbol"],row[1]["code"])
-        #     self.dbaccessor.do_inserto(insert_sql)
-
-        # 入库外盘历史行情
-        variety_sql = "select code from trading_variety_outer where isnull(var_id)=0"
-        result_rows = self.dbaccessor.do_query(variety_sql)        
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
-
-        dtype = {
-            "date": sqlalchemy.DateTime,
-            'code': sqlalchemy.String,
-            'open': sqlalchemy.FLOAT,
-            'close': sqlalchemy.FLOAT,
-            'high': sqlalchemy.FLOAT,
-            'low': sqlalchemy.FLOAT,
-            'volume': sqlalchemy.FLOAT,
-            'position': sqlalchemy.INT,
-            's': sqlalchemy.INT 
-        }        
-        # 遍历所有品种，并分别取得历史数据
-        for result in result_rows:
-            code = result[0]
-            item_data = ak.futures_foreign_hist(symbol=code)
-            if code=='SC':
-                print("ggg")
-            item_data["code"] = code
-            # 保存到数据库表
-            item_data.to_sql('outer_trading_data', engine, index=False, if_exists='append',dtype=dtype)  
-            print("code:{} ok".format(code))        
-                           
-    def extract_basis_rate(self,begin_date,engine=None):
-        """获取基差信息"""
-
-        # 取得对应历史记录中的日期，并以此日期为基准遍历
-        date_sql = "select distinct(date) from dominant_continues_data where date>='{}'".format(begin_date)
-        result_rows = self.dbaccessor.do_query(date_sql)    
-        for index,result in enumerate(result_rows):
-            date = result[0]
-            item_data = ak.futures_spot_price(date)
-            # 首先导入到临时表，后续一并拼接
-            if index==0:
-                item_data.to_sql('temp_spot_price', engine, index=False, if_exists='replace') 
-            else:
-                item_data.to_sql('temp_spot_price', engine, index=False, if_exists='append') 
-            print("futures_spot_price {} ok".format(date))
-                
-        # 先清除重复的
-        filter_sql = "delete from temp_spot_price where exists (select 1 from extension_trade_info e where " \
-            "temp_spot_price.date=e.date and temp_spot_price.symbol=e.code)"
-        self.dbaccessor.do_inserto(filter_sql)
-        # 然后批量插入
-        combine_sql = "insert into extension_trade_info(date,code,dom_basis_rate,near_basis_rate) " \
-                        " select date,symbol,dom_basis_rate,near_basis_rate from temp_spot_price"   
-        self.dbaccessor.do_inserto(combine_sql)      
-        # 关联字段挂接
-        upt_sql = "update extension_trade_info d set d.var_id=(select id from trading_variety t where t.code=d.code)"
-        self.dbaccessor.do_updateto(upt_sql)  
-        # 清空临时表
-        self.dbaccessor.do_updateto("drop table temp_spot_price")  
-    
-    def export_to_qlib(self):
-        """导出到qlib"""
-        
-        # 首先从数据库导出到csv
-        save_path = "{}/day/csv_data".format(self.item_savepath)
-        date_sql = "select distinct(code) from dominant_continues_data"
-        result_rows = self.dbaccessor.do_query(date_sql)    
-        for index,result in enumerate(result_rows):
-            code = result[0]
-            item_sql = "select date,open,close,high,low,volume,hold,settle from dominant_continues_data where code='{}'".format(code)
-            item_rows = self.dbaccessor.do_query(item_sql)    
-            filename = "{}/{}.csv".format(save_path,code)
-            with open(filename,mode='w',encoding='utf-8') as f:
-                writer = csv.writer(f,dialect='excel')
-                # 改变字段名，把结算价设置为收盘价，收盘价命名为参考收盘价
-                header = ["datetime","open","refclose","high","low","volume","hold","close"]
-                writer.writerow(header)
-                for row in item_rows:
-                    writer.writerow(row)            
-                print("{} ok".format(code))
-                
-        # 然后导出到qlib
-        qlib_dir = "/home/qdata/qlib_data/futures_data"
-        super().export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=False)        
-        
+        period_name = get_period_name(period)
+        item_savepath = self.item_savepath + "/{}".format(period_name)
+        if institution:
+            f = "{}/institution/{}.csv".format(item_savepath,instrument)
+        else:
+            f = "{}/origin/{}.csv".format(item_savepath,instrument)
+        # 文件不存在则返回空
+        if not os.path.exists(f):
+            return None
+        item_df = pd.read_csv(f,dtype=self.col_data_types)  
+        # 对时间字段进行检查及清洗
+        if self.backend_channel=="tdx":
+            item_df["volume"] = item_df["vol"]            
+        item_df["datetime"] = pd.to_datetime(item_df["datetime"],errors="coerce")
+        item_df = item_df.dropna()
+        return item_df        
     
 if __name__ == "__main__":    
     
-    extractor = AkFuturesExtractor(savepath="/home/qdata/futures_data")   
+    extractor = JuejinFuturesExtractor(savepath="/home/qdata/futures_data")   
     save_path = "custom/data/results/futures"
     # 期货规则-交易日历表,交易品种
     # futures_rule_df = ak.futures_rule(date="20231205")

@@ -638,7 +638,7 @@ class FuturesIndustryModule(MlpModule):
                     past_target_total,future_target_total,target_class_total, \
                     price_targets_total,future_round_targets_total,last_targets_total,target_info_total        
                            
-    def combine_result_data(self,output_result=None):
+    def combine_result_data(self,output_result=None,predict_mode=False):
         """计算涨跌幅分类准确度以及相关数据"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -647,7 +647,7 @@ class FuturesIndustryModule(MlpModule):
         total_imp_cnt = np.where(target_class_3d==3)[0].shape[0]
         rate_total = {}
         target_top_match_total = {}
-        err_date_list = {}
+        resutl_date_list = {}
         
         instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
         instrument_in_indus_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
@@ -665,7 +665,7 @@ class FuturesIndustryModule(MlpModule):
             keep_index = np.intersect1d(keep_index,instrument_index)   
             output_list = [output_3d[2][i],output_3d[3][i],output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
-            date = target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"]
+            date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             # if not date in TRACK_DATE:
             #     continue
             # 生成目标索引
@@ -677,6 +677,10 @@ class FuturesIndustryModule(MlpModule):
                 continue
             
             import_index = np.intersect1d(keep_index,import_index)  
+            # 如果是预测模式，则只输出结果,不验证
+            if predict_mode:
+                resutl_date_list[date] = import_index
+                continue
             # Compute Acc Result
             import_price_result = self.collect_result(import_index,target_class=target_class_list, target_info=target_info_list)
             rate_total[date] = []
@@ -693,7 +697,7 @@ class FuturesIndustryModule(MlpModule):
                 suc_cnt = np.sum(result_values>=2)
                 fail_cnt = np.sum(result_values<2)
                 if fail_cnt>0:
-                    err_date_list["{}_{}/{}_{}".format(int(date),int(overroll_trend),round(trend_value,2),suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
+                    resutl_date_list["{}_{}/{}_{}".format(int(date),int(overroll_trend),round(trend_value,2),suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
@@ -708,7 +712,11 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(total_cnt.item())   
                 # 添加多空判断预测信息 
                 rate_total[date].append(overroll_trend)   
-        print("result:",err_date_list)      
+        # print("result:",resutl_date_list)      
+
+        # 如果是预测模式，则只输出结果,不验证
+        if predict_mode:
+            return resutl_date_list
         
         return rate_total,total_imp_cnt
 
@@ -900,4 +908,46 @@ class FuturesIndustryModule(MlpModule):
             if (part_range_num>=4) and (total_range<-part_threhold):
                 return 1
         return 0  
+
+    ########################## 预测部分 #############################
+    def on_predict_epoch_start(self):  
+        self.output_result = []
         
+    def predict_step(
+        self, batch: Tuple, batch_idx: int, dataloader_idx: Optional[int] = None
+    ):
+        """预测流程，生成输出结果"""
+ 
+        (
+            past_target,
+            past_covariates,
+            historic_future_covariates,
+            future_covariates,
+            static_covariates,
+            past_future_covariates,
+            future_target,
+            target_class,
+            price_targets,
+            future_round_targets,
+            last_targets,
+            target_info
+        ) = batch
+               
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,last_targets) 
+        input_batch = self._process_input_batch(inp)
+        (outputs,vr_class,out_class_total) = self(input_batch,optimizer_idx=-1)
+        
+        choice_out,trend_value,combine_index = vr_class        
+        # 保存数据用于后续验证
+        output_res = (outputs,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
+                      future_target.cpu().numpy(),target_class.cpu().numpy(),
+                      price_targets.cpu().numpy(),future_round_targets.cpu().numpy(),last_targets.cpu().numpy(),target_info)
+        self.output_result.append(output_res)        
+         
+    def on_predict_epoch_end(self,args):   
+               
+        resutl_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
+        self.resutl_date_list = resutl_date_list
+        return resutl_date_list
+                         
+           

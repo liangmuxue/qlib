@@ -557,6 +557,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             # 预测模式，不使用tensorboard
             self.trainer_params["logger"] = False
             trainer,model,train_loader,val_loader = self._setup_for_train(train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers)
+            self.trainer = trainer
             return trainer,model,train_loader,val_loader
         
         return self.fit_from_dataset(

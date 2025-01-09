@@ -40,7 +40,8 @@ class PredResultProcessor(BaseProcessor):
         valid_start_date = get_tradedays_dur(end_date,-30*3)
         # 验证集结束日期为当日
         valid_end_date = end_date_fmt
-        dataset_template["kwargs"]["segments"]["valid"] = [valid_start_date,valid_end_date]
+        # 直接使用当前日期作为开始和结束日期
+        dataset_template["kwargs"]["segments"]["valid"] = [valid_end_date,valid_end_date]
         # 预测开始和结束日期都为当天
         working_day_list = self.wf_task.get_calendar_by_seq(self.wf_task.task_entity["sequence"])
         if len(working_day_list)>0:
