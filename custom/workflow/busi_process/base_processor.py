@@ -15,6 +15,7 @@ from multiprocessing import Queue
 
 from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus,FrequencyType,WorkflowType
 from cus_utils.db_accessor import DbAccessor
+import cus_utils.global_var as global_var
 from cus_utils.log_util import AppLogger
 
 logger = AppLogger()
@@ -80,7 +81,7 @@ class BaseProcessor(object):
             )
             rtn = r.generate()
             rtn_list.append(rtn)
-        return rtn_list
+        return rtn_list,model
 
     def before_run(self,working_day=None):
         """子任务运行的前处理，子类实现"""
@@ -119,7 +120,9 @@ class BaseProcessor(object):
                     exp_manager["kwargs"]["uri"] = "file:" + str(Path(os.getcwd()).resolve() / uri_folder)  
                     self.before_run(working_day=working_day)  
                     # 执行任务    
-                    results = self._exe_task(config.get("task"))
+                    results,model = self._exe_task(config.get("task"))
+                    # 透传整体模型变量，后续统一使用
+                    global_var.set_value("model",model)
                     # 执行个性化内容             
                     self.sub_run(working_day=working_day,results=results,resume=resume)
             except Exception as e:

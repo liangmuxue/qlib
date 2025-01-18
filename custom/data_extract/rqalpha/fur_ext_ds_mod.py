@@ -29,7 +29,12 @@ class ExtDataMod(AbstractMod):
         if not os.path.exists(self.report_save_path):
             os.makedirs(self.report_save_path)  
         self.env = env
-        env.set_data_source(FuturesDataSource(env.config.base.data_bundle_path,env.config.extra.stock_data_path,frequency_sim=env.config.base.frequency_sim))
+        ds = FuturesDataSource(env.config.base.data_bundle_path,stock_data_path=env.config.extra.stock_data_path,
+                            sim_path=env.config.extra.stock_data_path,frequency_sim=env.config.base.frequency_sim)
+        simdata_date = env.config.extra.simdata_date
+        # 根据配置日期加载主力合约数据
+        ds.load_sim_data(simdata_date)
+        env.set_data_source(ds)
 
     def tear_down(self, code, exception=None):
         """统计分析入口"""

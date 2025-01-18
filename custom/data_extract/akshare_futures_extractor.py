@@ -2,6 +2,8 @@ from data_extract.his_data_extractor import HisDataExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 
+import time
+import datetime
 import math
 import pickle
 import os
@@ -19,6 +21,7 @@ import numpy as np
 import pandas as pd
 import requests
 
+from trader.utils.date_util import get_previous_month,get_next_month
 from cus_utils.log_util import AppLogger
 from data_extract.akshare_extractor import AkExtractor
 from data_extract.his_data_extractor import get_period_name
@@ -28,14 +31,19 @@ class AkFuturesExtractor(AkExtractor):
 
     def __init__(self, backend_channel="ak",savepath=None,**kwargs):
         super().__init__(backend_channel=backend_channel,savepath=savepath,kwargs=kwargs)
-        self.busi_columns = ["date","open","high","low","close","volume","hold","settle"]
+        self.busi_columns = ["code","date","open","high","low","close","volume","hold","settle"]
 
     def get_whole_item_datapath(self,period,institution=False):
         period_name = get_period_name(period)
         if institution:
             return "{}/item/{}/institution".format(self.savepath,period_name)
         return "{}/item/{}/csv_data".format(self.savepath,period_name)
-            
+      
+      
+    #######################   数据加载 ######################################     
+
+          
+    #######################   数据导入 ######################################      
     def import_trading_variety(self):
         """导入交易品种数据"""
 
@@ -45,16 +53,20 @@ class AkFuturesExtractor(AkExtractor):
         for result in result_rows:
             exchange_map[result[1]] = result[0]
         
-        insert_sql = "insert into trading_variety(exchange_id,code,name,magin_radio,limit_rate) values(%s,%s,%s,%s,%s)"
+        insert_sql = "insert into trading_variety(exchange_id,code,name,magin_radio,limit_rate,multiplier) values(%s,%s,%s,%s,%s,%s)"
+        # update_sql = "update trading_variety set multiplier={} where code='{}'"
         futures_rule_df = ak.futures_rule()        
         for idx,row in futures_rule_df.iterrows():
             exchange_id = exchange_map[row['交易所']]
             magin_radio = row['交易保证金比例'] if not math.isnan(row['交易保证金比例']) else None
             limit_rate = row['涨跌停板幅度'] if not math.isnan(row['交易保证金比例']) else None
-            self.dbaccessor.do_inserto_withparams(insert_sql, (exchange_id,row['代码'],row['品种'],magin_radio,limit_rate))           
+            multiplier = row['合约乘数'] if not math.isnan(row['合约乘数']) else None
+            self.dbaccessor.do_inserto_withparams(insert_sql, (exchange_id,row['代码'],row['品种'],magin_radio,limit_rate,multiplier))     
+            # update_sql_real = update_sql.format(multiplier,row['代码'])   
+            # self.dbaccessor.do_inserto(update_sql_real)  
 
     def extract_item_data(self,code,start_date=None,end_date=None,period=PeriodType.DAY.value):  
-        """取得单个股票历史行情数据"""
+        """取得单个品种的主力连续历史行情数据"""
         
         # AKSHARE目前只支持按照日导入
         if period!=PeriodType.DAY.value:
@@ -70,6 +82,37 @@ class AkFuturesExtractor(AkExtractor):
         item_data = self.data_clean(item_data)
                  
         return item_data
+
+    def extract_main_item_data(self,code,start_date=None,end_date=None,period=PeriodType.DAY.value):  
+        """取得单个品种的主力合约历史行情数据"""
+        
+        # AKSHARE目前只支持按照日导入
+        if period!=PeriodType.DAY.value:
+            raise NotImplementedError
+        try:
+            item_data = ak.futures_zh_daily_sina(symbol=code)    
+        except Exception as e:
+            print("err for:{}".format(code))
+            return None
+        if item_data is None or item_data.shape[0]==0:
+            return None
+        
+        # 插入编号
+        item_data.insert(loc=0, column='code', value=code)
+        # 清洗无效数据
+        item_data = self.data_clean(item_data)
+                 
+        return item_data
+    
+    def import_variety_trade_schedule(self): 
+        """从固定表格中更新导入期货品种的交易时间段"""      
+        
+        datapath = "/home/qdata/futures_data/ak/ins_trading_sche.csv"
+        data = pd.read_csv(datapath)
+        for index,row in data.iterrows():
+            upt_sql = "update trading_variety set ac_time_range='{}',night_time_range='{}',day_time_range='{}' where code='{}'" \
+                .format(row['集合竞价'],row['夜盘时间'],row['日盘时间'],row['品种代码'])
+            self.dbaccessor.do_inserto(upt_sql)
         
     def import_his_data(self):
         """导入历史行情数据"""
@@ -98,7 +141,6 @@ class AkFuturesExtractor(AkExtractor):
             # 加0表示主力连续合约
             main_code = code + "0"
             item_data = self.extract_item_data(main_code)
-            # 变回原来的编码
             item_data['code'] = item_data['code'].str[:-1]
             # 保存csv数据文件,全量
             # savepath = "{}/{}".format(self.item_savepath,get_period_name(period))
@@ -113,7 +155,57 @@ class AkFuturesExtractor(AkExtractor):
         # 结算价为0并且收盘价不为0的，把收盘价赋给结算价
         upt_sql = "update dominant_continues_data set settle=close where settle=0 and close>0 "
         self.dbaccessor.do_updateto(upt_sql)
-            
+
+    def import_continius_his_data_local(self,date_range=[2201,2412]):
+        """从本地导入主力连续历史行情数据"""
+        
+        # 不下载期权数据
+        variety_sql = "select id,code from trading_variety where isnull(magin_radio)=0 and id>27 order by id asc"
+        result_rows = self.dbaccessor.do_query(variety_sql)        
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+
+        dtype = {
+            'var_id': sqlalchemy.INT,
+            'code': sqlalchemy.String,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,   
+            'settle': sqlalchemy.FLOAT,          
+            "date": sqlalchemy.DateTime
+        }        
+        begin_date = datetime.datetime.strptime(str(date_range[0]), '%y%m')
+        # 遍历所有品种，并分别取得历史数据
+        for result in result_rows:
+            var_id = result[0]
+            code = result[1]
+            cur_date = begin_date
+            cur_month = date_range[0]
+            # 在指定日期内循环取得每个月的数据
+            while cur_month<=date_range[1]:
+                # 主力合约名称使用品种编码+YYMM的格式
+                main_code = code + str(cur_month)
+                item_data = self.extract_main_item_data(main_code)
+                if item_data is None:
+                    continue
+                # 填充固定字段
+                item_data['code'] = main_code
+                item_data['var_id'] = var_id
+                # 保存到数据库表
+                item_data.to_sql('dominant_real_data_sina', engine, index=False, if_exists='append',dtype=dtype)  
+                # 切换到下个月
+                cur_date = get_next_month(cur_date,1)
+                cur_month = int(cur_date.strftime('%y%m'))
+                time.sleep(5)
+            print("code:{} ok".format(code))
+        
+        # 结算价为0并且收盘价不为0的，把收盘价赋给结算价
+        upt_sql = "update dominant_real_data_sina set settle=close where settle=0 and close>0 "
+        self.dbaccessor.do_updateto(upt_sql)
+
     def build_industry_data(self):
         """生成行业板块历史行情数据"""
         
@@ -252,11 +344,11 @@ if __name__ == "__main__":
     # futures_zh_spot_df = ak.futures_zh_spot(symbol='FU2501', market="shfe", adjust='0')
     # print(futures_zh_spot_df)
     # 分时数据
-    futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2501", period="1")
-    print(futures_zh_minute_sina_df)
+    # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2501", period="1")
+    # print(futures_zh_minute_sina_df)
     # 历史行情
-    # futures_zh_daily_sina_df = ak.futures_zh_daily_sina(symbol="FU0")
-    # print(futures_zh_daily_sina_df[1000:1010])
+    # futures_zh_daily_sina_df = ak.futures_zh_daily_sina(symbol="BR2201")
+    # print(futures_zh_daily_sina_df)
     # 外盘品种
     # futures_hq_subscribe_exchange_symbol_df = ak.futures_hq_subscribe_exchange_symbol()
     # print(futures_hq_subscribe_exchange_symbol_df)
@@ -299,8 +391,12 @@ if __name__ == "__main__":
     
     # 导入期货交易品种
     # extractor.import_trading_variety()    
-    # 导入历史数据
+    # 导入交易时间表
+    # extractor.import_variety_trade_schedule()    
+    # 导入主力连续历史数据
     # extractor.import_his_data()
+    # 导入主力合约历史数据
+    # extractor.import_main_his_data()    
     # 导入历史拓展数据
     # extractor.import_extension_data()
     # 生成行业板块历史行情数据
@@ -309,4 +405,5 @@ if __name__ == "__main__":
     # extractor.extract_outer_data()
     # 导出到qlib
     # extractor.export_to_qlib()
+    # extractor.load_item_day_data("CU2205", "2022-03-03")
             

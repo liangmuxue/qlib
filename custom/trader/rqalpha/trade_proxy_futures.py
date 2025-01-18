@@ -9,15 +9,15 @@ from rqalpha.portfolio.position import Position as RQPosition
 from rqalpha.const import POSITION_DIRECTION
 from rqalpha.apis import get_position,get_positions
 from rqalpha.core.events import EVENT, Event
-from rqalpha.model.trade import Trade
+from trader.rqalpha.model.trade import Trade
 from trader.emulator.base_trade_proxy import BaseTrade
 
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
  
-class RqalphaTrade(BaseTrade):
-    """Rq仿真交易类"""
+class FuturesTrade(BaseTrade):
+    """期货的仿真交易类"""
     
     def __init__(
         self,

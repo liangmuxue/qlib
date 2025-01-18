@@ -341,7 +341,7 @@ class FuturesIndustryModel(FuturesModel):
             collate_fn=self._batch_collate_fn,
         )        
         self.trainer.predict(self.model, pred_loader)
-        predictions = self.model.resutl_date_list
+        predictions = self.model.result_target
         
         return predictions
     

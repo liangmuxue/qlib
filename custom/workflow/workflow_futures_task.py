@@ -378,7 +378,7 @@ class WorkflowSubTask(object):
     def get_stock_data_path(self):
         """数据文件路径"""
         
-        filepath = "/home/qdata/stock_data"
+        filepath = "/home/qdata/futures_data/juejin/main_1min"
         return filepath 
     
     def get_trader_data_path(self):

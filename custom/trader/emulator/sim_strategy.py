@@ -591,14 +591,14 @@ class SimStrategy(BaseStrategy):
                 continue
             pos_info = self.get_position(order_book_id)
             sell_amount = pos_info.quantity
-            before_date = context.now.strftime('%Y%m%d')
+            now_date = context.now.strftime('%Y%m%d')
             # 通过之前存储的交易信息，查找到对应交易
             trade_date = self.trade_entity.get_trade_date_by_instrument(order_book_id,SIDE.BUY,context.now)
             if trade_date is None:
-                logger.warning("trade not found:{},{}".format(order_book_id,before_date))
+                logger.warning("trade not found:{},{}".format(order_book_id,now_date))
                 continue
             # 检查是否超期，以决定是否卖出
-            dur_days = tradedays(trade_date,before_date)
+            dur_days = tradedays(trade_date,now_date)
             if dur_days>keep_day_number:
                 if dur_days>4:
                     logger.warning("dur_days exceed,trade_date:{},dur_day:{},order_book_id:{}".format(trade_date,dur_days,order_book_id))

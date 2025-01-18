@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import date
+import datetime as dt
 import sys, os
 import numpy as np
 import cv2
@@ -315,9 +316,21 @@ def test_peak_combine():
         base_axis = base_axis + 0.95
         plt.plot(base_axis, "--", color="gray")
         plt.show()        
-           
+
+def test_timequery():
+    
+    query_date = dt.datetime.strptime('20220606 09:10:00', '%Y%m%d %H:%M:%S')
+    data = np.expand_dims(np.array([1,query_date]),0)
+    df = pd.DataFrame(data,columns=['id','date'])
+    df['date'] = df['date'].dt.tz_localize(tz='Asia/Shanghai')
+    df['timestamp'] = df['date'].astype(np.int64)//10 ** 9
+    test_df = pd.read_csv("/home/liang/test/test_df.csv")
+    ret = test_df[(test_df['timestamp']==int(query_date.timestamp()))]
+    print(ret)
+            
 if __name__ == "__main__":
-    test_scipy_peak()
+    # test_scipy_peak()
+    test_timequery()
     # test_peak_combine()
     # test_pd_index()
     # test_pd_timeser()

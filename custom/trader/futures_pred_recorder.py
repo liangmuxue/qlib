@@ -1,3 +1,4 @@
+import os
 import logging
 import warnings
 import numpy as np
@@ -32,8 +33,6 @@ from .tft_recorder import TftRecorder
 
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from darts_pro.tft_series_dataset import TFTSeriesDataset
-from cus_utils.common_compute import normalization,compute_series_slope,slope_classify_compute,compute_price_class,comp_max_and_rate
-from tft.class_define import SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_SEC,CLASS_SIMPLE_VALUE_MAX
 from trader.utils.date_util import get_tradedays,get_tradedays_dur
 from cus_utils.log_util import AppLogger
 from trader.data_viewer import DataViewer
@@ -66,7 +65,7 @@ class FuturesPredRecorder(TftRecorder):
         self.pred_data_file = pred_data_file
         
         # self.df_ref = dataset.df_all     
-        self.pred_result_columns = ['pred_date','time_idx','instrument','trend_class','vr_class','pred_data'] 
+        self.pred_result_columns = ['pred_date','trend','item_index','name','industry','code'] 
         # self.data_viewer_correct = DataViewer(env_name="stat_pred_classify_correct")
         # self.data_viewer_incorrect = DataViewer(env_name="stat_pred_classify_incorrect")
         
@@ -101,79 +100,63 @@ class FuturesPredRecorder(TftRecorder):
     def build_pred_result(self,start_time,end_time):
         """逐天生成预测数据"""
         
-        # 取得日期范围，并遍历生成预测数据
-        date_range = get_tradedays(start_time,end_time)
-        date_range = [start_time.strftime('%Y%m%d')]
-        data_total = {}
         dataset = self.dataset
-        for cur_date in date_range:
-            # 进行预测，取得预测结果
-            logger.debug("begin predict_process")  
-            pred_combine_data = self.predict_process(cur_date=cur_date)
-            logger.debug("begin build_pred_data")  
-            # # 生成加工后的预测数据
-            # data_pred = self.build_pred_data(cur_date,pred_combine_data,df_ref=dataset.df_all)
-            data_total[cur_date] = pred_combine_data
-            logger.debug("build df_pred,data:{}".format(cur_date))   
-             
-        # pred_data_path = self.pred_data_path + "/" + self.pred_data_file
-        # with open(pred_data_path, "wb") as fout:
-        #     pickle.dump(data_total, fout)     
-        return data_total
+        pred_range=[start_time,end_time]        
+        # 进行预测，取得预测结果
+        pred_data = self.predict_process(pred_range=pred_range)
+        # 生成加工后的预测数据
+        combine_result = self.build_pred_data(pred_data,df_ref=dataset.df_all)
+        # 保存数据      
+        pred_data_path = self.pred_data_path + "/" + self.pred_data_file
+        # 首先取得之前已经有的数据，把此次数据按照日期进行覆盖
+        if not os.path.exists(pred_data_path):
+            pred_data_df = None
+        else:
+            with open(pred_data_path, "rb") as fin:
+                pred_data_df = pickle.load(fin)     
+        pred_data_result = None  
+        if pred_data_df is None:
+            pred_data_result = combine_result
+        else:
+            pred_data_result_filter = pred_data_df[~pred_data_df['pred_date'].isin(combine_result['pred_date'])]
+            pred_data_result = pd.concat([pred_data_result_filter,combine_result])
+        with open(pred_data_path, "wb") as fout:
+            pickle.dump(pred_data_result, fout)     
+        return pred_data_result
     
-    def build_pred_data(self,pred_date,pred_combine_data,df_ref=None):
-        """预测数据生成,numpy格式"""
+    def build_pred_data(self,pred_combine_data,df_ref=None):
+        """预测数据生成,pandas格式"""
         
-        group_column = self.dataset.get_group_rank_column()        
-        time_index_column = self.dataset.get_time_column()
-        (pred_series_list,pred_class_total,vr_class_total) = pred_combine_data
-        data_pred = None
-        for index,series in enumerate(pred_series_list):
-            group_rank = series.static_covariates[group_column].values[0]
-            group_item = self.dataset.get_group_code_by_rank(group_rank)  
-            time_index = series.time_index.values
-            # 根据概率数据取得唯一性数据
-            pred_center_data = get_pred_center_value(series).data
-            # 取得分类值
-            # pred_class = pred_class_total[index]
-            # pred_class_max = self.dataset.combine_pred_class(pred_class)   
-            # pred_class_real = pred_class_max[1].item()
-            vr_class_data = vr_class_total[index]
-            vr_class,vr_class_confidence = comp_max_and_rate(np.array(vr_class_data))
-            data_item = np.array([[int(pred_date) for i in range(time_index.shape[0])],
-                                  time_index.tolist(),
-                                 [group_item for i in range(time_index.shape[0])],
-                                 [1 for i in range(time_index.shape[0])],
-                                 [vr_class for i in range(time_index.shape[0])]])
-            data_item = np.concatenate((data_item,np.expand_dims(pred_center_data,0)),axis=0).transpose(1,0)
-            # 图像验证
-            # df_item = pd.DataFrame(data_item,columns=self.pred_result_columns)
-            # df_item["pred_date"] = df_item["pred_date"].astype("int")
-            # complex_df = self.combine_complex_df_data(pred_date,group_item,pred_df=df_item,df_ref=df_ref)      
-            # self.data_viewer.show_single_complex_pred_data(complex_df,dataset=self.dataset,save_path=self.pred_data_path+"/plot")
-            # self.data_viewer.show_single_complex_pred_data_visdom(complex_df,dataset=self.dataset)                    
-            if data_pred is None:
-                data_pred = data_item
+        pred_dates = np.array(list(pred_combine_data.keys())).astype(np.int)
+        pred_combine_result = None
+        for date in pred_dates:
+            pred_res = pred_combine_data[date]
+            pred_data = pred_res[0]
+            pred_trend = pred_res[1]
+            if pred_data.shape[0]==0:
+                continue
+            # 拼接日期和趋势字段，整合为数据表格式
+            pred_trend_arr = np.array([[pred_trend] for _ in range(pred_data.shape[0])])
+            pred_trend_date = np.array([[date] for _ in range(pred_data.shape[0])])
+            pred_combine_item = np.concatenate([pred_trend_date,pred_trend_arr,pred_data],axis=1)
+            if pred_combine_result is None:
+                pred_combine_result = pred_combine_item
             else:
-                data_pred = np.concatenate((data_pred,data_item),axis=0)
-        return data_pred
+                pred_combine_result = np.concatenate((pred_combine_result,pred_combine_item),axis=0)
+        pred_combine_result = pd.DataFrame(pred_combine_result,columns=self.pred_result_columns)
+        return pred_combine_result
     
     def _get_pickle_path(self,cur_date):
         pred_data_path = self.pred_data_path
         data_path = pred_data_path + "/" + str(cur_date) + ".pkl"
         return data_path
     
-    def predict_process(self,cur_date):
+    def predict_process(self,pred_range):
         """根据日期进行预测，得到预测结果 """
         
-        # 开始结束日期都是给定日期当天
-        cur_date = datetime.strptime(cur_date, '%Y%m%d').date()
-        pred_range=[cur_date,cur_date]
         # 调用模型进行预测
         pred_result = self.model.predict(pred_range=pred_range)
-        # 返回股票编码
-        instrument_rank_arr = [ts["instrument"] for ts in pred_result]
-        return instrument_rank_arr
+        return pred_result
 
     def combine_complex_df_data(self,pred_date,instrument,pred_df=None,df_ref=None,ext_length=25,type="combine"):
         """合并预测数据,实际行情数据,价格数据等

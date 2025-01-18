@@ -1,5 +1,6 @@
 import copy
 import datetime
+from datetime import timedelta
 import os
 
 from rqalpha import run_file
@@ -7,6 +8,7 @@ from rqalpha import run_file
 from .base_processor import BaseProcessor
 from trader.utils.date_util import get_first_and_last_day,get_tradedays_dur
 from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus,FrequencyType,WorkflowType
+import cus_utils.global_var as global_var
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -36,9 +38,9 @@ class BacktestProcessor(BaseProcessor):
         dataset_template["kwargs"]["segments"]["classify_range"] = [start_date,end_date]
         # 给回测进程植入任务号
         backtest_template["rqalpha"]["extra"]["task_id"] = self.wf_task.task_entity["id"]
-        # config_path为当前文件路径
+        # config_path为当前文件路径--Cancel
         config_file_path = self.wf_task.get_task_config_file()   
-        backtest_template["rqalpha"]["extra"]["context_vars"]["strategy_class"]["config_path"] = config_file_path
+        # backtest_template["rqalpha"]["extra"]["context_vars"]["strategy_class"]["config_path"] = config_file_path
         # 相关文件路径
         parent_path = self.wf_task.get_trader_data_path()
         cur_period_path = parent_path + "/" + str(working_day)[4:6]
@@ -48,7 +50,7 @@ class BacktestProcessor(BaseProcessor):
         # 映射数据文件路径
         backtest_template["rqalpha"]["extra"]["stock_data_path"] = self.wf_task.get_stock_data_path()
         # 映射预测数据文件路径
-        backtest_template["rqalpha"]["extra"]["dump_path"] = self.wf_task.get_dumpdata_part_path()
+        backtest_template["rqalpha"]["extra"]["dump_path"] = self.wf_task.get_dumpdata_path()
         # 根据当前序号，如果不够则不进行此次任务
         cur_sequence = self.wf_task.task_entity["sequence"]
         if cur_sequence<1:
@@ -59,6 +61,13 @@ class BacktestProcessor(BaseProcessor):
     def get_first_and_last_day(self,working_day):
         month = int(str(working_day)[4:6])
         year = int(str(working_day)[:4])     
+        # 周频率，取得本周数据
+        if self.wf_task.config["frequency"]==FrequencyType.WEEK.value:
+            main_task = self.wf_task.main_task
+            today = datetime.datetime.strptime(str(working_day), "%Y%m%d")
+            start_date = (today - timedelta(today.weekday())).date()
+            end_date = today.date()
+                    
         # 月度频率，取得上个月数据
         if self.wf_task.config["frequency"]==FrequencyType.MONTH.value:
             # 回测上个月数据
@@ -94,6 +103,8 @@ class BacktestProcessor(BaseProcessor):
         rq_config = self.config["task"]["backtest"]["rqalpha"]
         # 统一一个运行策略文件，后面通过不同的实现类来进行策略区分
         strategy_file_path = self.config["task"]["backtest"]["run_file"]
+        # 透传总体任务配置
+        global_var.set_value("task_config", self.config)
         run_file(strategy_file_path, rq_config)   
         
         

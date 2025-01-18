@@ -18,6 +18,7 @@ from rqalpha.mod.rqalpha_mod_sys_simulation.matcher import DefaultTickMatcher
 from trader.rqalpha.mod_ext_simulation.matcher import ExtBarMatcher
 from trader.emulator.juejin.trade_proxy_juejin import JuejinTrade
 from trader.rqalpha.trade_proxy_rqalpha import RqalphaTrade
+from trader.rqalpha.trade_proxy_futures import FuturesTrade
 
 class ExtSimulationBroker(SimulationBroker):
     """扩展broker代理，加入仿真环境"""
@@ -34,7 +35,10 @@ class ExtSimulationBroker(SimulationBroker):
             emu_args = mod_config.emu_args
             # RQALPHA环境，初始化植入自身环境上下文
             self.trade_proxy = RqalphaTrade(context=self,account_alias=emu_args["account_alias"])            
-
+        if mod_config.emu_channel=="futures":
+            emu_args = mod_config.emu_args
+            self.trade_proxy = FuturesTrade(context=self,account_alias=emu_args["account_alias"])   
+            
     @lru_cache(1024)
     def _get_matcher(self, order_book_id):
         # type: (str) -> AbstractMatcher

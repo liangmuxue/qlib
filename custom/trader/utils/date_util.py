@@ -2,6 +2,7 @@ import datetime as dt
 from datetime import datetime,timedelta
 import calendar
 from chinese_calendar import is_holiday
+from dateutil.relativedelta import relativedelta
 
 def is_working_day(day):
     """判断是否节假日"""
@@ -103,7 +104,21 @@ def get_first_and_last_day(year,month):
     lastDay = dt.date(year,month,day=monthCountDay)
     return firstDay,lastDay
 
+def get_previous_month(date):
+    """取得上个月月份字符串"""
+    
+    first = date.replace(day=1)
+    last_month = first - dt.timedelta(days=1)
+    last_month_str = last_month.strftime("%Y%m")
+    return last_month_str
 
+def get_next_month(date,next=1):
+    """取得下个月月份字符串"""
+    
+    week, days_num = calendar.monthrange(date.year, date.month)
+    month_later = date + relativedelta(months=next)
+    return month_later
+    
 def get_tradedays(start,end):
     '''
     计算指定日期之间的工作日

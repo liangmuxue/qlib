@@ -15,6 +15,21 @@ def transfer_order_book_id(instrument,type=1):
         return "{}.XSHG".format(instrument)
     return "{}.XSHE".format(instrument)
 
+def transfer_furtures_order_book_id(instrument,type=1):
+    """期货代码转换为rqalpha格式
+        PARAMS:
+             type 1 沪市A股 0 深市A股
+    """
+    
+    if isinstance(instrument,int):
+        instrument = str(instrument)
+    # 对于深市相关编码规则，需要补充到6位数
+    if len(instrument)<6:
+        instrument = instrument.zfill(6)
+    if type==1:
+        return "{}.XSHG".format(instrument)
+    return "{}.XSHE".format(instrument)
+
 def transfer_instrument(order_book_id):
     """股票代码转换为通用格式"""
     

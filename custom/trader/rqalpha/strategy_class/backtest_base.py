@@ -10,7 +10,7 @@ from trader.rqalpha.trade_entity import TradeEntity
 from trader.utils.date_util import tradedays
 from cus_utils.db_accessor import DbAccessor
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
-
+import cus_utils.global_var as global_var
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
@@ -30,13 +30,19 @@ class BaseStrategy():
     """交易对象处理BASE类"""
     
     def __init__(self,proxy_name="rqalpha"):
+        self.instruments_dict = self.create_instruments_dict() 
+    
+    def create_instruments_dict(self):
+        
         dbaccessor = DbAccessor({})
+        instruments_dict = {}  
         # 只处理具备数据的股票,因此生成库内股票字典
         result_rows = dbaccessor.do_query("select code,market from instrument_info")
-        self.instruments_dict = {}  
         for row in result_rows:
-            self.instruments_dict[int(row[0])] = {"code":row[0],"market":row[1]}
-         
+            instruments_dict[int(row[0])] = {"code":row[0],"market":row[1]}        
+        
+        return instruments_dict
+     
     def logger_debug(self,msg):  
         logger.debug("[{}] {}".format(self.context.now,msg))
 
@@ -53,7 +59,8 @@ class BaseStrategy():
         provider_uri = context.config.extra.context_vars.strategy_class.provider_uri
         # 加载qlib上下文  
         if workflow_mode:
-            context.ml_context = MlWorkflowIntergrate(config_path=config_path,provider_uri=provider_uri,ext_length=25
+            task_config = global_var.get_value("task_config")
+            context.ml_context = MlWorkflowIntergrate(task_config=task_config,provider_uri=provider_uri,ext_length=25
                                         ,task_id=context.config.extra.task_id,dump_path=context.config.extra.dump_path)
         else:
             context.ml_context = MlIntergrate(ext_length=25,config_path=config_path,provider_uri=provider_uri)
@@ -62,7 +69,7 @@ class BaseStrategy():
         save_path = context.config.extra.report_save_path
         data_save_path = save_path + "/trade_data.csv"
         log_save_path = save_path + "/trade_data_log.csv"
-        self.trade_entity = TradeEntity(save_path=data_save_path,log_save_path=log_save_path)
+        self.trade_entity = self.create_trade_entity(save_path=data_save_path,log_save_path=log_save_path)
         # 注册订单事件
         context.fired = False
         subscribe_event(EVENT.TRADE, self.on_trade_handler)

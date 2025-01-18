@@ -62,7 +62,7 @@ class SimulationEventSource(AbstractEventSource):
             if self._env.get_account_type(order_book_id) == DEFAULT_ACCOUNT_TYPE.STOCK:
                 continue
             trading_minutes.update(self._env.data_proxy.get_trading_minutes_for(order_book_id, trading_date))
-        return set([convert_int_to_datetime(minute) for minute in trading_minutes])
+        return trading_minutes
 
     def _get_trading_minutes(self, trading_date):
         trading_minutes = set()

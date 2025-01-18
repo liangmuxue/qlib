@@ -32,16 +32,14 @@ class MlWorkflowIntergrate(MlIntergrate):
     
     def __init__(
         self,
-        config_path,
+        task_config,
         **kwargs,
     ):
-        with open(config_path) as fp:
-            config = yaml.safe_load(fp)    
             
         # 配置文件内容
-        self.model_cfg =  config["task"]["model"]
-        self.dataset_cfg = config["task"]["dataset"]
-        self.backtest_cfg = config["task"]["backtest"]
+        self.model_cfg =  task_config["task"]["model"]
+        self.dataset_cfg = task_config["task"]["dataset"]
+        self.backtest_cfg = task_config["task"]["backtest"]
         # 调试的股票列表
         if "verbose_list" in self.backtest_cfg:
             self.verbose_list = self.backtest_cfg["verbose_list"]
@@ -49,31 +47,11 @@ class MlWorkflowIntergrate(MlIntergrate):
             self.verbose_list = None
         # 初始化
         self.pred_data_path = self.model_cfg["kwargs"]["pred_data_path"]
+        self.pred_data_file = self.model_cfg["kwargs"]["pred_data_file"]
         self.load_dataset_file = self.model_cfg["kwargs"]["load_dataset_file"]
         self.save_dataset_file = self.model_cfg["kwargs"]["save_dataset_file"]
         
-        # 初始化dataset
-        dataset = init_instance_by_config(self.dataset_cfg)
-        df_data_path = self.pred_data_path + "/df_all.pkl"
-        df_data = pickle.load(df_data_path)
-        dataset.build_series_data(df_data,no_series_data=True)  
-          
-        # 生成recorder,用于后续预测数据处理
-        record_cfg = config["task"]["record"]
-        optargs = self.model_cfg["kwargs"]["optargs"]
-        model = TFTCluSerModel.load_from_checkpoint(optargs["model_name"],work_dir=optargs["work_dir"],best=True)
-        placehorder_value = {"<MODEL>": model, "<DATASET>": dataset}
-        record_cfg = fill_placeholder(record_cfg, placehorder_value)   
-        rec = R.get_recorder()
-        recorder = init_instance_by_config(
-            record_cfg,
-            recorder=rec,
-        )       
-             
-        self.dataset = dataset
-        self.pred_recorder = recorder
         self.kwargs = kwargs
-               
         self.pred_df = None
         self.task_id = kwargs["task_id"]
         self.task_store = WfTaskStore()
@@ -85,29 +63,23 @@ class MlWorkflowIntergrate(MlIntergrate):
         columns = ["pred_date","instrument"]
         # 根据日期，累加当前上下文的预测数据
         # pred_data_file = self.model_cfg["kwargs"]["pred_data_file"]
-        date_pred_df_file = "{}/pred_part/pred_result_{}.pkl".format(self.pred_data_path,pred_date)
+        date_pred_df_file = "{}/{}".format(self.pred_data_path,self.pred_data_file)
         with open(date_pred_df_file, "rb") as fin:
             pred_df = pickle.load(fin)     
-            inst_list = list(pred_df.values())[0] 
-            # 拼装为Dataframe形式
-            data = [[pred_date,instrument] for instrument in inst_list]
-            pred_df = pd.DataFrame(data,columns=columns)
-            
-        if self.pred_df is None:
-            self.pred_df = pred_df
-        else:
-            self.pred_df = pd.concat([self.pred_df,pred_df])
+            self.pred_df = pred_df[pred_df['pred_date']==pred_date]
         
     def filter_buy_candidate(self,pred_date):
-        """根据预测计算，筛选可以买入的股票"""
-
-        dump_path = self.kwargs["dump_path"]
-        date_pred_df_file = "{}/pred_part/pred_result_{}.pkl".format(self.pred_data_path,pred_date)
-        with open(date_pred_df_file, "rb") as fin:
-            pred_df = pickle.load(fin)      
-        inst_list = list(pred_df.values())[0]  
+        """根据预测计算，筛选可以买入的品种"""
+        
+        inst_list = self.pred_df.values[:,-1]  
         return inst_list
-                   
+
+    def filter_futures_buy_candidate(self,pred_date):
+        """根据预测计算，筛选可以买入的品种"""
+        
+        inst_list = self.pred_df[["trend","code"]]  
+        return inst_list.values
+                       
     def filter_buy_candidate_old(self,pred_date):
         """根据预测计算，筛选可以买入的股票"""
         

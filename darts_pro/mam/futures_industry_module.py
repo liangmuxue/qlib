@@ -647,7 +647,7 @@ class FuturesIndustryModule(MlpModule):
         total_imp_cnt = np.where(target_class_3d==3)[0].shape[0]
         rate_total = {}
         target_top_match_total = {}
-        resutl_date_list = {}
+        result_date_list = {}
         
         instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
         instrument_in_indus_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
@@ -679,7 +679,7 @@ class FuturesIndustryModule(MlpModule):
             import_index = np.intersect1d(keep_index,import_index)  
             # 如果是预测模式，则只输出结果,不验证
             if predict_mode:
-                resutl_date_list[date] = import_index
+                result_date_list[date] = [import_index,overroll_trend]
                 continue
             # Compute Acc Result
             import_price_result = self.collect_result(import_index,target_class=target_class_list, target_info=target_info_list)
@@ -697,7 +697,7 @@ class FuturesIndustryModule(MlpModule):
                 suc_cnt = np.sum(result_values>=2)
                 fail_cnt = np.sum(result_values<2)
                 if fail_cnt>0:
-                    resutl_date_list["{}_{}/{}_{}".format(int(date),int(overroll_trend),round(trend_value,2),suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
+                    result_date_list["{}_{}/{}_{}".format(int(date),int(overroll_trend),round(trend_value,2),suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
@@ -712,11 +712,11 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(total_cnt.item())   
                 # 添加多空判断预测信息 
                 rate_total[date].append(overroll_trend)   
-        # print("result:",resutl_date_list)      
+        # print("result:",result_date_list)      
 
         # 如果是预测模式，则只输出结果,不验证
         if predict_mode:
-            return resutl_date_list
+            return result_date_list
         
         return rate_total,total_imp_cnt
 
@@ -945,9 +945,19 @@ class FuturesIndustryModule(MlpModule):
         self.output_result.append(output_res)        
          
     def on_predict_epoch_end(self,args):   
-               
-        resutl_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
-        self.resutl_date_list = resutl_date_list
-        return resutl_date_list
+        """汇总预测数据，生成实际业务预测结果"""
+        
+        sw_ins_mappings = self.valid_sw_ins_mappings
+        combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
+        result_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
+        result_target = {}
+        # 根据原始数组，生成实际品种信息
+        for date in list(result_date_list.keys()):
+            res_arr = result_date_list[date]
+            res_index = res_arr[0]
+            target = combine_content[np.isin(combine_content[:,0],res_index)]
+            result_target[date] = [target,res_arr[1]]
+        self.result_target = result_target
+        
+        return result_target
                          
-           
