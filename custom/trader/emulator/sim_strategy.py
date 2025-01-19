@@ -420,7 +420,6 @@ class SimStrategy(BaseStrategy):
                 self.buy_list[buy_item.order_book_id].kwargs["need_resub"] = True                
                 # 发起撤单
                 self.cancel_order(buy_order)
-
         
         # 已拒绝订单，重新按照现在价格下单
         buy_list_reject = self.trade_entity.get_buy_list_reject(str(self.trade_day))

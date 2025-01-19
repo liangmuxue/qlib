@@ -11,7 +11,7 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 # 交易信息表字段，分别为交易日期，股票代码，成交价格，成交量,总价格，成交状态，订单编号,卖出原因
-TRADE_COLUMNS = ["trade_date","order_book_id","side","price","quantity","total_price","status","order_id","sell_reason","secondary_order_id"]
+TRADE_COLUMNS = ["trade_date","order_book_id","side","position_effect","price","quantity","total_price","status","order_id","sell_reason","secondary_order_id"]
 TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
 
 class TradeEntity():
@@ -49,6 +49,7 @@ class TradeEntity():
         trade_date = order.datetime
         order_book_id = order.order_book_id
         side = order.side
+        position_effect = order.position_effect
         # 订单价格为冻结价格
         price = order.frozen_price
         quantity = order.quantity
@@ -64,7 +65,7 @@ class TradeEntity():
             sell_reason = order.sell_reason
         else:
             sell_reason = 0
-        row_data = [trade_date,order_book_id,side,price,quantity,0,status,order_id,sell_reason,secondary_order_id]
+        row_data = [trade_date,order_book_id,side,position_effect,price,quantity,0,status,order_id,sell_reason,secondary_order_id]
         logger.debug("row_data is:{}".format(row_data))
         row_data_np = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
