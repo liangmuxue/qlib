@@ -24,7 +24,7 @@ from .futures_module import TRACK_DATE
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220516,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220728,20220712]
+TRACK_DATE = [20220601]
 DRAW_SEQ = [1]
 DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = [0]
@@ -666,8 +666,8 @@ class FuturesIndustryModule(MlpModule):
             output_list = [output_3d[2][i],output_3d[3][i],output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
-            # if not date in TRACK_DATE:
-            #     continue
+            if not date in TRACK_DATE:
+                continue
             # 生成目标索引
             import_index,overroll_trend,trend_value = self.build_import_index(output_data=output_list,
                             target=whole_target,price_target=price_target_list,
@@ -696,8 +696,9 @@ class FuturesIndustryModule(MlpModule):
                     result_values = result_values_inverse                            
                 suc_cnt = np.sum(result_values>=2)
                 fail_cnt = np.sum(result_values<2)
-                if fail_cnt>0:
-                    result_date_list["{}_{}/{}_{}".format(int(date),int(overroll_trend),round(trend_value,2),suc_cnt)] = import_price_result[result_values<2][["instrument","result"]].values
+                if fail_cnt>0 or True:
+                    result_date_list["{}_{}/{}_{}".format(int(date),int(overroll_trend),round(trend_value,2),suc_cnt)] = \
+                        import_price_result[["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
@@ -712,7 +713,7 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(total_cnt.item())   
                 # 添加多空判断预测信息 
                 rate_total[date].append(overroll_trend)   
-        # print("result:",result_date_list)      
+        print("result:",result_date_list)      
 
         # 如果是预测模式，则只输出结果,不验证
         if predict_mode:
@@ -728,7 +729,7 @@ class FuturesIndustryModule(MlpModule):
         for i,imp_idx in enumerate(import_index):
             ts = target_info[imp_idx]
             price_array = ts["price_array"][self.input_chunk_length-1:]
-            p_taraget_class = compute_price_class(price_array,mode="first_last")
+            p_taraget_class = compute_price_class(price_array,mode="fast")
             import_price_result.append([imp_idx,ts["instrument"],p_taraget_class])       
         import_price_result = np.array(import_price_result)  
         if import_price_result.shape[0]==0:

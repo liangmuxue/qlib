@@ -558,6 +558,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
             self.trainer_params["logger"] = False
             trainer,model,train_loader,val_loader = self._setup_for_train(train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers)
             self.trainer = trainer
+            if self.model is None:
+                self.model = model
             return trainer,model,train_loader,val_loader
         
         return self.fit_from_dataset(

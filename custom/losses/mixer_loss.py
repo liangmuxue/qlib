@@ -205,9 +205,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
         (output,vr_class,_) = output_ori
         (target,target_class,future_round_targets,index_round_target,price_targets) = target_ori
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
-        cls_loss = torch.zeros([len(output)],requires_grad=True).to(self.device)
+        cls_loss = torch.zeros([len(output)]).to(self.device)
         fds_loss = torch.tensor(0.0).to(self.device)
-        ce_loss = torch.zeros([len(output)],requires_grad=True).to(self.device)
+        ce_loss = torch.zeros([len(output)]).to(self.device)
         # 指标分类
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 取得所有品种排序号
@@ -237,18 +237,22 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         if torch.any(round_targets_item==0):
                             continue
                         if round_targets_item.shape[0]<=1:
-                            continue                          
-                        sv_indus = sv[k][j]
-                        sv_indus = sv_indus[inner_index]
+                            continue           
+                        try:               
+                            sv_indus = sv[k][j]
+                            sv_indus = sv_indus[inner_index]
+                        except RuntimeError as e:
+                            print("eee")  
                         if target_mode==0:
                             if round_targets_item.shape[0]>1:
                                 cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
                             else:
                                 cls_loss[i] += torch.abs(sv_indus.squeeze(-1),round_targets_item)     
-                            counter += 1     
+                            counter += 1   
                         elif target_mode==3:
                             cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))     
-                            counter += 1                                                 
+                            counter += 1                                  
+                                               
                     # 整体板块损失计算
                     if target_mode>0: 
                         if torch.sum(index_target_item<1e-4)>2:

@@ -143,6 +143,10 @@ class FurBacktestStrategy(SimStrategy):
         
         self.logger_info("handle_bar.now:{}".format(context.now))
         
+        # 临时限制时间
+        if context.now.hour>=10 or (context.now.hour==9 and context.now.minute>35):
+            return
+        
         # 首先进行撮合，然后进行策略
         env = Environment.get_instance()
         env.broker.trade_proxy.handler_bar(context.now)
@@ -446,6 +450,8 @@ class FurBacktestStrategy(SimStrategy):
         """代理api的订单创建方法"""
         
         order_book_id = assure_order_book_id(id_or_ins)
+        multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
+        
         style = cal_style(price, None)
         if side==SIDE.BUY:
             order = Order.__from_create__(
@@ -456,6 +462,7 @@ class FurBacktestStrategy(SimStrategy):
                 position_effect=position_effect,
                 # 自定义属性
                 price=price,
+                multiplier=multiplier,
                 try_cnt=0, 
                 close_reason=None,  
                 need_resub=False        
@@ -469,6 +476,7 @@ class FurBacktestStrategy(SimStrategy):
                 position_effect=position_effect,
                 # 自定义属性
                 price=price,
+                multiplier=multiplier,
                 try_cnt=0, 
                 close_reason=close_reason,  
                 need_resub=False         
@@ -599,7 +607,7 @@ class FurBacktestStrategy(SimStrategy):
         account = event.account
         self.logger_debug("on_trade_handler in,order:{}".format(order))
         # 保存成单交易对象
-        self.trade_entity.add_trade(trade)
+        self.trade_entity.add_trade(trade,multiplier=order.kwargs['multiplier'])
         # 更新卖单状态
         if order.side == SIDE.SELL:
             sell_order = self.get_sell_order(order.order_book_id, context=context)

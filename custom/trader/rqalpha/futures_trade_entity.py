@@ -27,7 +27,7 @@ class FuturesTradeEntity(TradeEntity):
         super().__init__(save_path,log_save_path,**kwargs)
         
 
-    def add_trade(self,trade,default_status=ORDER_STATUS.FILLED):
+    def add_trade(self,trade,multiplier=1,default_status=ORDER_STATUS.FILLED):
         """添加交易信息，需要先具备订单信息"""
         
         order = self.get_order_by_id(trade.order_id)
@@ -42,7 +42,7 @@ class FuturesTradeEntity(TradeEntity):
         quantity = trade.last_quantity
         position_effect = trade.position_effect
         # 自己计算总成交额
-        total_price = price*quantity + trade.tax + trade.transaction_cost
+        total_price = price*quantity*multiplier + trade.tax + trade.transaction_cost
         # 交易状态为已成交
         status = default_status
         order_id = trade.order_id
@@ -50,7 +50,7 @@ class FuturesTradeEntity(TradeEntity):
         secondary_order_id = order.secondary_order_id
         if secondary_order_id is None:
             secondary_order_id = 0        
-        row_data = [trade_date,order_book_id,side,position_effect,price,quantity,total_price,status,order_id,order.sell_reason,secondary_order_id]
+        row_data = [trade_date,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,order.sell_reason,secondary_order_id]
         # 使用订单号查询并更新记录
         self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
         # 变更后保存数据
