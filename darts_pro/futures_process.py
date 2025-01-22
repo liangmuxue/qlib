@@ -258,13 +258,13 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.monitor = monitor        
         
         self.model.mode = self.type  
-        self.model.model.mode = self.type  
         
         if self.type=="pred_futures_industry":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                      max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=8)
+            self.model.model.mode = self.type  
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             # self.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings
@@ -383,8 +383,8 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
-                    # pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
-                    pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
                         
         return my_model

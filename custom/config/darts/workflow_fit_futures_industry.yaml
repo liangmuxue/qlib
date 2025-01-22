@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_industryAll_priceCombineNorm_202206"
+               model_name: "Futures_industryAll_limitPastRound_202206"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False

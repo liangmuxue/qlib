@@ -199,7 +199,6 @@ class FuturesIndustryModel(FuturesModel):
                 max_samples_per_ts=None,
                 use_static_covariates=True,
                 target_num=len(self.past_split),
-                ass_sw_ins_mappings=self.train_sw_ins_mappings, # 验证集是需要传入训练集映射关系数据，以进行审计
                 scale_mode=self.scale_mode,
                 mode=mode
             )

@@ -246,11 +246,11 @@ class FuturesIndustryModule(MlpModule):
             target_class,
             price_targets,
             future_round_targets,
-            last_targets,
+            index_round_targets,
             target_info
         ) = train_batch
                 
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,last_targets)     
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,index_round_targets)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
         # 给criterion对象设置epoch数量。用于动态loss策略
@@ -260,7 +260,7 @@ class FuturesIndustryModule(MlpModule):
         for i in range(self.get_optimizer_size()):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), 
-                            (future_target,target_class,future_round_targets,last_targets,price_targets),optimizers_idx=i)
+                            (future_target,target_class,future_round_targets,index_round_targets,price_targets),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
             if i==(self.get_optimizer_size()-1):
                 pass
@@ -307,17 +307,17 @@ class FuturesIndustryModule(MlpModule):
             target_class,
             price_targets,
             future_round_targets,
-            last_targets,
+            index_round_targets,
             target_info
         ) = val_batch
               
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,last_targets) 
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,index_round_targets) 
         input_batch = self._process_input_batch(inp)
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,future_round_targets,last_targets,price_targets),optimizers_idx=-1)
+                    (future_target,target_class,future_round_targets,index_round_targets,price_targets),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
         preds_combine = []
@@ -366,7 +366,8 @@ class FuturesIndustryModule(MlpModule):
             
         # 忽略静态协变量第一列(索引列),后边的都是经过归一化的
         static_covariates = static_covariates[...,1:]
-        past_index_targets = index_round_targets[:,:,:self.input_chunk_length,:]
+        # 切分出过去整体数值
+        past_index_targets = index_round_targets[:,:,:-1,:]
         
         # 整合相关数据，分为输入值和目标值两组
         return (x_past_array, historic_future_covariates,future_covariates, static_covariates,price_targets,past_index_targets)
@@ -375,7 +376,7 @@ class FuturesIndustryModule(MlpModule):
         """重载父类方法"""
 
         (future_target,target_class,future_round_targets,index_round_targets,price_targets) = target   
-        future_index_round_target = index_round_targets[:,:,self.input_chunk_length,:]
+        future_index_round_target = index_round_targets[:,:,-1,:]
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         return self.criterion(output,(future_target,target_class,future_round_targets,future_index_round_target,price_targets[...,self.input_chunk_length-1:]),
@@ -564,11 +565,11 @@ class FuturesIndustryModule(MlpModule):
         output,vr_class,price_targets,future_round_targets = outputs
         choice_out,trend_value,combine_index = vr_class
         (past_target,past_covariates,historic_future_covariates,future_covariates,
-            static_covariates,past_future_covariates,future_target,target_class,_,_,last_targets,target_info) = val_batch
+            static_covariates,past_future_covariates,future_target,target_class,_,_,index_round_targets,target_info) = val_batch
         # 保存数据用于后续验证
         output_res = (output,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
                       future_target.cpu().numpy(),target_class.cpu().numpy(),
-                      price_targets.cpu().numpy(),future_round_targets.cpu().numpy(),last_targets.cpu().numpy(),target_info)
+                      price_targets.cpu().numpy(),future_round_targets.cpu().numpy(),index_round_targets.cpu().numpy(),target_info)
         self.output_result.append(output_res)
 
     def combine_output_total(self,output_result):
@@ -587,9 +588,9 @@ class FuturesIndustryModule(MlpModule):
         choice_total = []
         trend_total = []
         combine_index_total = []
-        last_targets_total = []
+        index_round_targets_total = []
         for item in output_result:
-            (output,choice,trend_value,combine_index,past_target,future_target,target_class,price_targets,future_round_targets,last_targets,target_info) = item
+            (output,choice,trend_value,combine_index,past_target,future_target,target_class,price_targets,future_round_targets,index_round_targets,target_info) = item
             x_bar_inner = []
             sv_inner = []
             cls_inner = []
@@ -617,7 +618,7 @@ class FuturesIndustryModule(MlpModule):
             future_target_total.append(future_target)
             price_targets_total.append(price_targets)
             future_round_targets_total.append(future_round_targets)
-            last_targets_total.append(last_targets)
+            index_round_targets_total.append(index_round_targets)
             
         x_bar_total = np.concatenate(x_bar_total)
         cls_total = np.concatenate(cls_total)
@@ -631,12 +632,12 @@ class FuturesIndustryModule(MlpModule):
         future_target_total = np.concatenate(future_target_total)
         price_targets_total = np.concatenate(price_targets_total)
         future_round_targets_total = np.concatenate(future_round_targets_total)
-        last_targets_total = np.concatenate(last_targets_total)
+        index_round_targets_total = np.concatenate(index_round_targets_total)
         target_info_total = np.concatenate(target_info_total)
                     
         return (x_bar_total,sv_total,cls_total,ce_index_total,choice_total,trend_total,combine_index_total), \
                     past_target_total,future_target_total,target_class_total, \
-                    price_targets_total,future_round_targets_total,last_targets_total,target_info_total        
+                    price_targets_total,future_round_targets_total,index_round_targets_total,target_info_total        
                            
     def combine_result_data(self,output_result=None,predict_mode=False):
         """计算涨跌幅分类准确度以及相关数据"""
@@ -666,8 +667,8 @@ class FuturesIndustryModule(MlpModule):
             output_list = [output_3d[2][i],output_3d[3][i],output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
-            if not date in TRACK_DATE:
-                continue
+            # if not date in TRACK_DATE:
+            #     continue
             # 生成目标索引
             import_index,overroll_trend,trend_value = self.build_import_index(output_data=output_list,
                             target=whole_target,price_target=price_target_list,
@@ -713,7 +714,7 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(total_cnt.item())   
                 # 添加多空判断预测信息 
                 rate_total[date].append(overroll_trend)   
-        print("result:",result_date_list)      
+        # print("result:",result_date_list)      
 
         # 如果是预测模式，则只输出结果,不验证
         if predict_mode:
@@ -792,7 +793,7 @@ class FuturesIndustryModule(MlpModule):
         # cls_std = cls[...,2]
         rsv_mean = cls_rsv.mean()
         ce_close = ce_values[...,1]
-        ce_mean_close = ce_values[...,2].mean()
+        ce_mean_close = ce_values[...,1].mean()
         # std_mean = cls_std.mean()
         
         ce_mean_threhold = 0.5
@@ -930,11 +931,11 @@ class FuturesIndustryModule(MlpModule):
             target_class,
             price_targets,
             future_round_targets,
-            last_targets,
+            index_round_targets,
             target_info
         ) = batch
                
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,last_targets) 
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,index_round_targets) 
         input_batch = self._process_input_batch(inp)
         (outputs,vr_class,out_class_total) = self(input_batch,optimizer_idx=-1)
         
@@ -942,7 +943,7 @@ class FuturesIndustryModule(MlpModule):
         # 保存数据用于后续验证
         output_res = (outputs,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
                       future_target.cpu().numpy(),target_class.cpu().numpy(),
-                      price_targets.cpu().numpy(),future_round_targets.cpu().numpy(),last_targets.cpu().numpy(),target_info)
+                      price_targets.cpu().numpy(),future_round_targets.cpu().numpy(),index_round_targets.cpu().numpy(),target_info)
         self.output_result.append(output_res)        
          
     def on_predict_epoch_end(self,args):   

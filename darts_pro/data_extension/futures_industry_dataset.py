@@ -47,7 +47,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         covariate_type: CovariateType = CovariateType.NONE,
         use_static_covariates: bool = True,
         load_ass_data=False,
-        ass_sw_ins_mappings=None,
         scale_mode=None,
         mode="train"
     ):  
@@ -254,14 +253,13 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 eps_adju = np.random.uniform(low=eps,high=eps*10,size=zero_index.shape[0])
                 combine_values[:,i][zero_index] = eps_adju 
             
-        # 还原到多个股票维度模式
+        # 还原到多个品种维度模式
         for i in range(index_range.shape[0]):
             idx_range = index_range[i]
             data_item = combine_values[idx_range[0]:idx_range[1],:]
             # 填充空白值
             data_item = np.pad(data_item,((2,self.output_chunk_length-1),(0,0)),'constant')             
             total_target_vals.append(data_item)
-            
           
         return total_target_vals  
 
@@ -481,13 +479,16 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 整体目标数据拆分为过去值和目标值
         past_round_targets = round_targets[:,:self.input_chunk_length,:]
         future_round_targets = round_targets[:,self.input_chunk_length,:]
+        future_round_targets_for_index = round_targets[:,self.input_chunk_length-self.output_chunk_length,:]
         # 行业板块数据归一化
-        past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
+        past_index_round_targets_ori = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
+        # 由于整体预测根据output_chunk_length进行了差分，因此过去值需要去掉后output_chunk_length个数据，以避免未来数据泄露
+        past_index_round_targets = past_index_round_targets_ori[:,:-self.output_chunk_length,:]
         future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.past_target_shape[-1]])
         for i in range(self.ins_in_indus_index.shape[0]):
             ins_index = self.ins_in_indus_index[i]
-            past_index_round_targets[i] = np.mean(past_round_targets[ins_index,:,:],axis=0)
-            future_index_round_targets[i] = np.mean(future_round_targets[ins_index],axis=0)
+            past_index_round_targets[i] = np.mean(past_round_targets[ins_index,:-self.output_chunk_length,:],axis=0)
+            future_index_round_targets[i] = np.mean(future_round_targets_for_index[ins_index],axis=0)
         # 跨行业归一化
         scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets.reshape(-1,self.past_target_shape[-1]))  
         past_index_round_targets = scaler.transform(past_index_round_targets.reshape(-1,self.past_target_shape[-1])).reshape(past_index_round_targets.shape)
