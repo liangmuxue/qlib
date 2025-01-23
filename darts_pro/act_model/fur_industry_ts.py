@@ -18,7 +18,7 @@ class FurIndustryMixer(nn.Module):
     """
     
     def __init__(self, seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,
-                 combine_nodes_num=None,instrument_index=None,device="cpu"):
+                 combine_nodes_num=None,instrument_index=None,index_num=1,device="cpu"):
         """行业总体网络，分为子网络，以及整合网络2部分"""
         
         super().__init__()
@@ -27,6 +27,7 @@ class FurIndustryMixer(nn.Module):
         self.combine_instrument_index = instrument_index
         self.industry_index = industry_index
         self.num_nodes = combine_nodes_num.sum()
+        self.index_num = index_num
         
         # 循环取得不同行业板块的多个下级模型
         sub_model_list = []
@@ -42,12 +43,19 @@ class FurIndustryMixer(nn.Module):
             sub_model_list.append(sub_model)
         self.sub_models = nn.ModuleList(sub_model_list)
         # 整合输出网络
-        self.combine_layer = nn.Sequential(
-                nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
-                nn.ReLU(), 
-                nn.Linear(hidden_size,self.combine_nodes_num.shape[0]),
-                nn.LayerNorm(self.combine_nodes_num.shape[0])
-            ).to(device)
+        if index_num>1:
+            self.combine_layer = nn.Sequential(
+                    nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
+                    nn.ReLU(), 
+                    nn.Linear(hidden_size,index_num),
+                    nn.LayerNorm(index_num)
+                ).to(device)
+        else:
+            self.combine_layer = nn.Sequential(
+                    nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
+                    nn.ReLU(), 
+                    nn.Linear(hidden_size,index_num),
+                ).to(device)            
         
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""

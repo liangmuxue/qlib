@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_industryAll_priceCombineNorm_202206"
+               model_name: "Futures_industryAll_partIndexRound_202206"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
@@ -104,7 +104,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train: [2006-01-01, 2022-06-30]
-                valid: [2022-04-01, 2022-07-31]
+                valid: [2022-04-01, 2022-10-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
