@@ -55,11 +55,18 @@ class FurIndustryMixer(nn.Module):
                     nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
                     nn.ReLU(), 
                     nn.Linear(hidden_size,index_num),
-                ).to(device)            
+                ).to(device)    
+        self.infer_combine_layer = nn.Sequential(
+                nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
+                nn.ReLU(), 
+                nn.Linear(hidden_size,index_num),
+                nn.LayerNorm(index_num)
+            ).to(device)                        
         
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""
         
+        infer_index_combine = []
         cls_out_combine = []
         index_data_combine = []
         # 不同行业分别输出
@@ -69,12 +76,15 @@ class FurIndustryMixer(nn.Module):
             x_enc, historic_future_covariates,future_covariates,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_index_round_targets[:,i,...])
-            _,cls_out,sw_index_data = m(x_inner)
+            infer_index_data,cls_out,sw_index_data = m(x_inner)
+            infer_index_combine.append(infer_index_data)
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
         
         index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
-        return None,cls_out_combine,index_data_combine
+        infer_data_combine = self.infer_combine_layer(torch.cat(infer_index_combine,dim=1))  
+        
+        return infer_data_combine,cls_out_combine,index_data_combine
 
 
 #####################   新增策略模型  #########################    

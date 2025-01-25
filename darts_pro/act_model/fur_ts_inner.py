@@ -13,7 +13,7 @@ class FurTimeMixer(nn.Module):
     """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络"""
     
     def __init__(self, c_in=10,c_out=1,seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,decomp_method='moving_avg',d_ff=2048,moving_avg=25,
-                 e_layers:int=3, d_model=16,down_sampling_method='avg',down_sampling_window=5,down_sampling_layers=1,
+                 e_layers:int=3, d_model=16,down_sampling_method='avg',down_sampling_window=5,down_sampling_layers=1,hidden_size=8,
                  num_nodes=0,node_dim=16,day_of_week_size=5,temp_dim_diw=8,month_of_year_size=12,temp_dim_miy=8,day_of_month_size=31,temp_dim_dim=8,
                  device="cpu"):
         """Params:
@@ -97,12 +97,19 @@ class FurTimeMixer(nn.Module):
         self.all_to_index_projection_layer = nn.Linear((self.num_nodes-1)*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
         self.index_skip_layer = nn.Linear(seq_len-pred_len, 1, bias=True)   
-           
+        self.index_infer_layer = nn.Sequential(
+                nn.Linear(2, hidden_size),
+                nn.ReLU(), 
+                nn.Linear(hidden_size,1),
+            ).to(device)    
+                           
     def forward(self, x_in): 
         
         # 分别对应输入协变量，过去时间变量,未来时间变量。过去整体量化数值,过去指数数值
         # 其中输入协变量形状：[批次数（B），节点数（C或N），序列长度(T),协变量维度(D)]
-        x_enc, historic_future_covariates,future_covariates,past_index_round_targets = x_in
+        x_enc, historic_future_covariates,future_covariates,past_index_round_targets_total = x_in
+        past_index_round_targets = past_index_round_targets_total[...,:-1]
+        past_index_round_infer = past_index_round_targets_total[...,-1:]
         # 采样得到对应时间变量
         x_time_mark_past = historic_future_covariates[:,0,:,:]
         x_time_mark_future = future_covariates[:,0,:,:]
@@ -194,7 +201,9 @@ class FurTimeMixer(nn.Module):
         industry_decoded_data = self.index_projection_layer(comp_out.squeeze(-1))
         # 使用整体走势过去值,注意这里的数据做了再次拆分，以避免未来数据泄露
         sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
-        return dec_out,comp_out,sw_index_data
+        comp_index_data = torch.cat([sw_index_data,past_index_round_infer],-1)
+        index_infer_data = self.index_infer_layer(comp_index_data) 
+        return index_infer_data,comp_out,sw_index_data
 
     def __multi_scale_process_inputs(self, x_enc, x_mark_enc):
         """修改原方法，增加一组维度"""

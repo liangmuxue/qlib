@@ -25,8 +25,8 @@ from .futures_module import TRACK_DATE
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220516,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220601]
-DRAW_SEQ = [2]
+TRACK_DATE = [20220718]
+DRAW_SEQ = [1]
 DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = [0]
 
@@ -122,11 +122,7 @@ class FuturesIndustryModule(MlpModule):
             combine_nodes_num = torch.Tensor(combine_nodes_num).int().to(self.device)
             instrument_index = combine_nodes
             industry_index = FuturesMappingUtil.get_industry_data_index(self.train_sw_ins_mappings)
-            # 如果是整体评估模式，则index目标部分只输出1个维度
-            if self.target_mode[seq]==2:
-                index_num = 1
-            else:
-                index_num = combine_nodes_num.shape[0]
+            index_num = combine_nodes_num.shape[0]
             # 使用混合时间序列模型
             model = FurIndustryMixer(
                 combine_nodes_num=combine_nodes_num, # 对应不同行业板块的期货品种数量
@@ -273,7 +269,7 @@ class FuturesIndustryModule(MlpModule):
                 pass
                 # self.log("train_fds_loss", fds_loss, batch_size=train_batch[0].shape[0], prog_bar=False)  
             else:
-                self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
+                # self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
                 self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append((corr_loss_combine.detach(),ce_loss.detach(),fds_loss.detach(),cls_loss.detach()))
             total_loss += loss     
@@ -332,7 +328,7 @@ class FuturesIndustryModule(MlpModule):
             # self.log("val_corr_loss_{}".format(i), corr_loss_combine[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-        # self.log("val_fds_loss", fds_loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+            self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
         
         output_combine = (output,vr_class,price_targets,future_round_targets)
         return loss,detail_loss,output_combine       
@@ -374,7 +370,7 @@ class FuturesIndustryModule(MlpModule):
         # 忽略静态协变量第一列(索引列),后边的都是经过归一化的
         static_covariates = static_covariates[...,1:]
         # 切分出过去整体数值
-        past_index_targets = index_round_targets[:,:,:-1,:]
+        past_index_targets = index_round_targets[:,:,:-2,:]
         
         # 整合相关数据，分为输入值和目标值两组
         return (x_past_array, historic_future_covariates,future_covariates, static_covariates,price_targets,past_index_targets)
@@ -384,9 +380,10 @@ class FuturesIndustryModule(MlpModule):
 
         (future_target,target_class,future_round_targets,index_round_targets,price_targets) = target   
         future_index_round_target = index_round_targets[:,:,-1,:]
+        short_future_index_round_target = index_round_targets[:,:,-2,:]
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        return self.criterion(output,(future_target,target_class,future_round_targets,future_index_round_target,price_targets[...,self.input_chunk_length-1:]),
+        return self.criterion(output,(future_target,target_class,future_round_targets,future_index_round_target,short_future_index_round_target),
                     sw_ins_mappings=sw_ins_mappings,optimizers_idx=optimizers_idx,top_num=self.top_num,epoch_num=self.current_epoch)        
 
 
@@ -433,7 +430,7 @@ class FuturesIndustryModule(MlpModule):
             viz_total_size = 0
                           
             output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_total, \
-                future_round_targets_total,last_round_targets,target_info_3d = self.combine_output_total(self.output_result)
+                future_round_targets_total,index_round_targets_3d,target_info_3d = self.combine_output_total(self.output_result)
             
             indus_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
             # main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
@@ -455,7 +452,8 @@ class FuturesIndustryModule(MlpModule):
                 keep_index = np.where(target_class_item>=0)[0]
                             
                 round_targets = future_round_targets_total[index]
-                index_round_targets = last_round_targets[index,:,-1,:]
+                index_round_targets = index_round_targets_3d[index,:,-1,:]
+                infer_index_round_targets = index_round_targets_3d[index,:,-2,:]
                 cls_output = output_3d[2]
                 ce_output = output_3d[3]
                 ts_arr = target_info_3d[index]
@@ -495,7 +493,7 @@ class FuturesIndustryModule(MlpModule):
                         scaler = MinMaxScaler(feature_range=(0.001, 1))
                         scaler.fit(price_array[:,:-self.output_chunk_length].transpose(1,0))
                         price_array_norm = scaler.transform(price_array.transpose(1,0)).transpose(1,0)
-                        price_array_range = price_array_norm[:,-1] - price_array_norm[:,-self.output_chunk_length-1]     
+                        price_array_range = price_array_norm[:,-4] - price_array_norm[:,-self.output_chunk_length-1]     
                         past_price_array_range = price_array_norm[:,-self.output_chunk_length-1] - price_array_norm[:,self.input_chunk_length-self.output_chunk_length]  
                         price_range_total.append(price_array_range.mean())   
                         past_price_range_total.append(past_price_array_range.mean())    
@@ -519,13 +517,13 @@ class FuturesIndustryModule(MlpModule):
                     # 显示板块分类整体预测数据
                     indust_output_value = ce_output[j][index]
                     indust_target = index_round_targets[...,j]
-                    price_range_total = np.array(price_range_total)
-                    indust_output_differ_value = ce_output[j][index] - past_price_range_total
+                    infer_indust_target = infer_index_round_targets[...,j]
+                    indust_output_differ_value = ce_output[j][index] - infer_indust_target
                     win = "indus_round_target_{}_{}".format(j,viz_total_size)
                     target_title = "industry compare_{},mean_tar:{}_{},date:{}".format(j,round(ce_output[2][index].mean(),2),round(index_round_targets[...,2].mean(),2),date)
-                    view_data = np.stack([indust_output_value,indust_output_differ_value,indust_target,price_range_total]).transpose(1,0)
+                    view_data = np.stack([indust_output_value,indust_target,indust_output_differ_value,price_range_total]).transpose(1,0)
                     if j in DRAW_SEQ:
-                        tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_names.tolist(),legends=["pred","differ_pred","target","price"])   
+                        tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_names.tolist(),legends=["pred","target","differ_pred","price"])   
                         
                     # 显示预测走势数据    
                     def show_trend_data(k,indus_code,ins_name,type=0):
@@ -656,7 +654,7 @@ class FuturesIndustryModule(MlpModule):
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         # 使用全部验证结果进行统一比较
-        output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_3d,_,_,target_info_3d  = self.combine_output_total(output_result)
+        output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_3d,_,index_round_targets_3d,target_info_3d  = self.combine_output_total(output_result)
         total_imp_cnt = np.where(target_class_3d==3)[0].shape[0]
         rate_total = {}
         target_top_match_total = {}
@@ -667,7 +665,9 @@ class FuturesIndustryModule(MlpModule):
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
         # 遍历按日期进行评估
         for i in range(target_class_3d.shape[0]):
+            index_round_targets = index_round_targets_3d[i]
             future_target = future_target_3d[i]
+            infer_index_round_targets = index_round_targets[:,-2,:]
             past_target = past_target_3d[i]
             whole_target = np.concatenate([past_target,future_target],axis=1)
             target_info_list = target_info_3d[i]
@@ -684,7 +684,7 @@ class FuturesIndustryModule(MlpModule):
                 continue
             # 生成目标索引
             import_index,overroll_trend,trend_value = self.build_import_index(output_data=output_list,
-                            target=whole_target,price_target=price_target_list,
+                            target=whole_target,price_target=price_target_list,infer_index_round_targets=infer_index_round_targets,
                             combine_instrument=combine_content,instrument_index=instrument_in_indus_index)
             # 有可能没有候选数据
             if import_index is None or import_index.shape[0]==0:
@@ -727,7 +727,7 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(total_cnt.item())   
                 # 添加多空判断预测信息 
                 rate_total[date].append(overroll_trend)   
-        print("result:",result_date_list)      
+        # print("result:",result_date_list)      
 
         # 如果是预测模式，则只输出结果,不验证
         if predict_mode:
@@ -753,7 +753,7 @@ class FuturesIndustryModule(MlpModule):
             
         return import_price_result
     
-    def build_import_index(self,output_data=None,target=None,price_target=None,combine_instrument=None,instrument_index=None):  
+    def build_import_index(self,output_data=None,target=None,price_target=None,infer_index_round_targets=None,combine_instrument=None,instrument_index=None):  
         """生成涨幅达标的预测数据下标"""
         
         # return None,None
@@ -761,7 +761,8 @@ class FuturesIndustryModule(MlpModule):
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
         # pred_import_index,overroll_trend = self.strategy_top(cls_values,choice,trend_value,combine_index,target=target,price_array=price_array,target_info=target_info_list)
-        indus_top_index,pred_import_index,overroll_trend,trend_value = self.strategy_top_direct(cls_values,ce_values,target=target,
+        indus_top_index,pred_import_index,overroll_trend,trend_value = self.strategy_top_direct(cls_values,ce_values,
+                                    target=target,infer_index_round_targets=infer_index_round_targets,
                                 price_array=price_target,instrument_index=instrument_index,combine_instrument=combine_instrument)
 
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -795,7 +796,7 @@ class FuturesIndustryModule(MlpModule):
             index = np.argsort(choice)[:self.top_num]
         pred_import_index = combine_index[index]  
 
-    def strategy_top_direct(self,cls,ce_values,target=None,price_array=None,instrument_index=None,combine_instrument=None):
+    def strategy_top_direct(self,cls,ce_values,target=None,price_array=None,infer_index_round_targets=None,instrument_index=None,combine_instrument=None):
         """排名方式筛选候选者"""
 
         # 目标前值
@@ -806,9 +807,10 @@ class FuturesIndustryModule(MlpModule):
         # cls_std = cls[...,2]
         rsv_mean = cls_rsv.mean()
         ce_close = ce_values[1]
-        ce_mean_close = ce_values[2].mean()
-        # std_mean = cls_std.mean()
-        
+        ce_mean_close = ce_close.mean() #ce_values[2].mean()
+        # 取得相对差分数值比较
+        ce_differ_value = ce_close - infer_index_round_targets[:,1]
+              
         ce_mean_threhold = 0.5
         ce_threhold = 0.4
         
@@ -817,8 +819,8 @@ class FuturesIndustryModule(MlpModule):
         trend_value = 0
         
         # 取得行业板块中最高和最低的两个，并使用这2个中的一个作为目标行业板块
-        raise_top_index = np.argsort(-ce_close)[0] 
-        fall_top_index = np.argsort(ce_close)[0]   
+        raise_top_index = np.argsort(-ce_differ_value)[0] 
+        fall_top_index = np.argsort(ce_differ_value)[0]   
         trend_flag = ce_mean_close>ce_mean_threhold
         # 整体预测均值和阈值比较，决定整体使用多方还是空方作为预测方向
         if trend_flag:
@@ -831,8 +833,10 @@ class FuturesIndustryModule(MlpModule):
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_rel_index = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,indus_top_index)
         ins_index = instrument_index[indus_top_index]
-        cls_rsv_can = cls_rsv[ins_rel_index[0]:ins_rel_index[1]]
         past_price = price_array[ins_index,:self.input_chunk_length]
+        cls_rsv_can = cls_rsv[ins_rel_index[0]:ins_rel_index[1]]
+
+        
         # 使用最近价格前值进行估算   
         price_recent_can = past_price[:,-8:]
         # 取得对应行业下的品种排名，并作为候选
