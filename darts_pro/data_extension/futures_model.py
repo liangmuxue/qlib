@@ -168,10 +168,11 @@ class FuturesIndustryModel(FuturesModel):
         past_covariates: Optional[Sequence[TimeSeries]],
         future_covariates: Optional[Sequence[TimeSeries]],
         max_samples_per_ts: Optional[int],
+        cut_len=2,
         mode="train"
     ):
         """使用原数据集作为训练和测试数据集"""
-        
+        self.cut_len = cut_len
         # 训练模式下，需要多放回一个静态数据对照集合
         if mode=="train":
             ds = FuturesIndustryDataset(
@@ -180,6 +181,7 @@ class FuturesIndustryModel(FuturesModel):
                 future_covariates=future_covariates,
                 input_chunk_length=self.input_chunk_length,
                 output_chunk_length=self.output_chunk_length,
+                cut_len=cut_len,
                 max_samples_per_ts=None,
                 use_static_covariates=True,
                 target_num=len(self.past_split),
@@ -196,6 +198,7 @@ class FuturesIndustryModel(FuturesModel):
                 future_covariates=future_covariates,
                 input_chunk_length=self.input_chunk_length,
                 output_chunk_length=self.output_chunk_length,
+                cut_len=cut_len,
                 max_samples_per_ts=None,
                 use_static_covariates=True,
                 target_num=len(self.past_split),
@@ -269,6 +272,7 @@ class FuturesIndustryModel(FuturesModel):
                
         model = FuturesIndustryModule(
                 output_dim=self.output_dim,
+                cut_len=self.cut_len,
                 variables_meta_array=variables_meta_array,
                 num_static_components=n_static_components,
                 hidden_size=self.hidden_size,

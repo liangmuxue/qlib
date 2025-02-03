@@ -219,7 +219,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if optimizers_idx==i or optimizers_idx==-1:
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
-                sw_infer_index_data,sv,sw_index_data = output_item  
+                _,sv,sw_index_data = output_item  
                 future_round_targets_factor = future_round_targets[...,i]
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 counter = 0
@@ -257,7 +257,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     if target_mode==2: 
                         if torch.sum(short_index_target_item<1e-4)>2:
                             continue                                                
-                        fds_loss[i] += self.ccc_loss_comp(sw_infer_index_data[j],short_index_target_item)/10               
+                        fds_loss[i] += self.ccc_loss_comp(sw_index_data[j],short_index_target_item)/10               
                 # if target_mode==2:
                 #     # 整体指数比较的模式
                 #     ce_loss[i] += self.mse_loss(sw_index_data,future_round_targets_factor.mean(dim=1).unsqueeze(-1)) * 10
