@@ -25,7 +25,7 @@ from .futures_module import TRACK_DATE
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220516,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220923,20220718,20220811,20220810,20221011]
+TRACK_DATE = [20220923]
 DRAW_SEQ = [1]
 DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = [0]
@@ -126,6 +126,9 @@ class FuturesIndustryModule(MlpModule):
             instrument_index = combine_nodes
             industry_index = FuturesMappingUtil.get_industry_data_index(self.train_sw_ins_mappings)
             index_num = combine_nodes_num.shape[0]
+            # 加入短期指标
+            if self.target_mode[seq]==0:
+                pred_len = self.output_chunk_length            
             if self.target_mode[seq]==1:
                 pred_len = self.output_chunk_length
             if self.target_mode[seq]==2:
@@ -293,7 +296,10 @@ class FuturesIndustryModule(MlpModule):
             # 前面的轮次，只更新主网络
             if self.current_epoch<self.lock_epoch_num:
                 if i<(self.get_optimizer_size()-1):
-                    self.manual_backward(loss)
+                    try:
+                        self.manual_backward(loss)
+                    except Exception:
+                        print("eee")
                     opt.step()
                     self.lr_schedulers()[i].step()    
             else:
@@ -384,7 +390,7 @@ class FuturesIndustryModule(MlpModule):
         # 忽略静态协变量第一列(索引列),后边的都是经过归一化的
         static_covariates = static_covariates[...,1:]
         # 切分出过去整体数值
-        past_index_targets = index_round_targets[:,:,:-2,:]
+        past_index_targets = index_round_targets[:,:,:-1,:]
         # 整合相关数据，分为输入值和目标值两组
         return (x_past_array, historic_future_covariates,future_covariates, static_covariates,price_targets,past_index_targets)
     
@@ -756,7 +762,7 @@ class FuturesIndustryModule(MlpModule):
         for i,imp_idx in enumerate(import_index):
             ts = target_info[imp_idx]
             price_array = ts["price_array"][self.input_chunk_length-1:]
-            p_taraget_class = compute_price_class(price_array,mode="very_fast")
+            p_taraget_class = compute_price_class(price_array,mode="first_last")
             import_price_result.append([imp_idx,ts["instrument"],p_taraget_class])       
         import_price_result = np.array(import_price_result)  
         if import_price_result.shape[0]==0:
@@ -769,7 +775,7 @@ class FuturesIndustryModule(MlpModule):
     def build_import_index(self,output_data=None,target=None,price_target=None,infer_index_round_targets=None,combine_instrument=None,instrument_index=None):  
         """生成涨幅达标的预测数据下标"""
         
-        return None,None,None
+        # return None,None,None
     
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
@@ -816,15 +822,15 @@ class FuturesIndustryModule(MlpModule):
         # past_target = target[instrument_index,:self.input_chunk_length,:]
         # rsv_past_target = past_target[instrument_index,:,0]
         # rsv_recent_range = rsv_past_target[:,-1] - rsv_past_target[:,-5]
-        cls_rsv = cls[...,0]
+        cls_aos = cls[...,0]
         # cls_std = cls[...,2]
-        rsv_mean = cls_rsv.mean()
+        aos_mean = cls_aos.mean()
         ce_close = ce_values[1]
         ce_mean_close = ce_close.mean() #ce_values[2].mean()
         # 取得相对差分数值比较
-        ce_differ_value = ce_close - infer_index_round_targets[:,1]
+        # ce_differ_value = ce_close - infer_index_round_targets[:,1]
               
-        ce_mean_threhold = 0.5
+        ce_mean_threhold = 0.6
         ce_threhold = 0.4
         
         top_num = 3
@@ -832,8 +838,8 @@ class FuturesIndustryModule(MlpModule):
         trend_value = 0
         
         # 取得行业板块中最高和最低的两个，并使用这2个中的一个作为目标行业板块
-        raise_top_index = np.argsort(-ce_differ_value)[0] 
-        fall_top_index = np.argsort(ce_differ_value)[0]   
+        raise_top_index = np.argsort(-ce_close)[0] 
+        fall_top_index = np.argsort(ce_close)[0]   
         trend_flag = ce_mean_close>ce_mean_threhold
         # 整体预测均值和阈值比较，决定整体使用多方还是空方作为预测方向
         if trend_flag:
@@ -847,101 +853,31 @@ class FuturesIndustryModule(MlpModule):
         ins_rel_index = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,indus_top_index)
         ins_index = instrument_index[indus_top_index]
         past_price = price_array[ins_index,:self.input_chunk_length]
-        cls_rsv_can = cls_rsv[ins_rel_index[0]:ins_rel_index[1]]
-
+        aos_rsv_can = cls_aos[ins_rel_index[0]:ins_rel_index[1]]
         
         # 使用最近价格前值进行估算   
         price_recent_can = past_price[:,-8:]
         # 取得对应行业下的品种排名，并作为候选
         if trend_type==0:
-            # 看RSV指标的多方
-            pre_index = np.argsort(cls_rsv_can)[:top_num]  
+            # 看CLS指标的多方
+            pre_index = np.argsort(aos_rsv_can)[:top_num]  
             # 取得RSV排序靠前的记录，从而进行空方判断
             pred_import_index = []
             for index in pre_index:
-                # 如果价格前值上升过大，或者价格最近值过高，则忽略
-                # if self.continus_trend_judge(price_recent_can[index], trend_type=1)==1:
-                #     continue
                 pred_import_index.append(index)            
             trend_value = 0              
         else:
-            # 取得RSV反向排序靠前的记录，从而进行多方判断
-            pre_index = np.argsort(-cls_rsv_can)[:top_num]       
+            # 取得CLS反向排序靠前的记录，从而进行多方判断
+            pre_index = np.argsort(-aos_rsv_can)[:top_num]       
             pred_import_index = []
             for index in pre_index:
-                # 如果价格前值下跌过大，或者价格近期值过低，则忽略
-                # if self.continus_trend_judge(price_recent_can[index], trend_type=0)==1:
-                #     continue
                 pred_import_index.append(index)
-            pred_import_index = np.array(pred_import_index)
-            
-            # # 如果没有候选者，则使用STD指标作为空方指标
-            # if pred_import_index.shape[0]==0:
-            #     pred_import_index = np.argsort(-std_mean)[:select_num]
-            
             trend_value = 1
         pred_import_index = np.array(pred_import_index)
         pred_import_index = pred_import_index[:select_num]
         
         return indus_top_index,pred_import_index,trend_value,ce_mean_close
 
-    def continus_trend_judge(self,target_data,trend_type=1):
-        """连续趋势判断--在某段时间内连续涨或跌的趋势
-            参数： 
-                trend_type： 0 判断下跌 1 判断上涨
-            返回值: 0 非连续 1 连续
-        """
-        
-        total_threhold = 0.5
-        part_threhold = 0.25
-        last_price_thredhold = 0.9
-        
-        total_range = target_data[-1]-target_data[0]
-        range_data = target_data[1:] - target_data[:-1]
-        
-        if trend_type==1:
-            # 总体幅度判断
-            if total_range>total_threhold:
-                return 1
-            # 计算趋势上涨或下跌占比，来判断是否连续趋势
-            total_range_num = np.sum(range_data>0)
-            part_range_num = np.sum(range_data[-5:]>0)
-            # 上涨数量多，并且幅度超出局部阈值
-            if (range_data[-1]>part_threhold):
-                return 1
-            # 最近一段上涨幅度超出局部阈值
-            if (total_range_num>=(target_data.shape[0]-2)) and (total_range>part_threhold):
-                return 1     
-            # 如果总体上涨一定幅度，并且近期大多数上涨
-            if (part_range_num>=4) and (total_range>part_threhold):
-                return 1                   
-            # 最近几段上涨过快超出阈值，则判断上涨趋势  
-            if (range_data[-3:].sum()>part_threhold):
-                return 1
-            # 近期价格曾经处于较高位置，则判断上涨趋势     
-            if target_data[-3:].max()>last_price_thredhold:
-                return 1       
-                          
-
-        if trend_type==0:
-            # 总体幅度判断
-            if total_range<-total_threhold:
-                return 1
-            # 计算趋势上涨或下跌占比，来判断是否连续趋势
-            total_range_num = np.sum(range_data<0)
-            part_range_num = np.sum(range_data[-5:]<0)
-            # 上涨数量多，并且幅度超出局部阈值
-            if (range_data[-1]>part_threhold):
-                return 1
-            # 最近一段下跌幅度超出局部阈值
-            if (total_range_num>=(target_data.shape[0]-2)) and (total_range<-part_threhold):
-                return 1            
-            # 如果总体下跌一定幅度，并且近期大多数下跌
-            if (part_range_num>=4) and (total_range<-part_threhold):
-                return 1
-        return 0  
-
-    ########################## 预测部分 #############################
     def on_predict_epoch_start(self):  
         self.output_result = []
         

@@ -265,7 +265,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
 
                 if target_mode==0:
                     cls_loss[i] = cls_loss[i]/counter
-                    loss_sum = loss_sum + cls_loss[i] 
+                    loss_sum = loss_sum + cls_loss[i]
                 if target_mode==1: 
                     # cls_loss[i] = cls_loss[i]/counter
                     loss_sum = loss_sum + ce_loss[i]

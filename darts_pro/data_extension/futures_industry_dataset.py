@@ -250,18 +250,17 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 # 使用幅度比值代替幅度绝对数值,并归一化
                 range_values[:,i][np.where(range_values[:,i]>0.35)[0]] = 0.35
                 combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(range_values[:,i],-1)).squeeze(-1)                  
-            else:
-                # 不做归一化，0值替换为非0
-                zero_index = np.where(combine_values[:,i]==0)[0]
-                eps_adju = np.random.uniform(low=eps,high=eps*10,size=zero_index.shape[0])
-                combine_values[:,i][zero_index] = eps_adju 
+            # 0值替换为非0
+            zero_index = np.where(combine_values[:,i]==0)[0]
+            eps_adju = np.random.uniform(low=eps,high=eps*10,size=zero_index.shape[0])
+            combine_values[:,i][zero_index] = eps_adju 
             
         # 还原到多个品种维度模式
         for i in range(index_range.shape[0]):
             idx_range = index_range[i]
             data_item = combine_values[idx_range[0]:idx_range[1],:]
             # 填充空白值
-            data_item = np.pad(data_item,((2,cut_len-1),(0,0)),'constant')             
+            data_item = np.pad(data_item,((2,cut_len-1),(0,0)),mode='minimum')             
             total_target_vals.append(data_item)
           
         return total_target_vals  
@@ -498,7 +497,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         infer_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.past_target_shape[-1]])
         for i in range(self.ins_in_indus_index.shape[0]):
             ins_index = self.ins_in_indus_index[i]
-            past_index_round_targets[i] = np.mean(past_round_targets[ins_index,:-self.output_chunk_length,:],axis=0)
+            past_data = past_round_targets[ins_index,:-self.output_chunk_length,:]
+            past_index_round_targets[i] = np.mean(past_data,axis=0)
             future_index_round_targets[i] = np.mean(future_round_targets_for_index[ins_index],axis=0)
             # 叠加使用短期整体预测值
             short_past_index_round_targets[i] = np.mean(short_past_round_targets[ins_index,:-self.cut_len,:],axis=0)
@@ -517,9 +517,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 future_index_round_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[:,i:i+1]).squeeze(-1)
                 short_future_index_round_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(short_future_index_round_targets[:,i:i+1]).squeeze(-1)
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
-        index_round_targets = np.concatenate([past_index_round_targets,short_past_index_round_targets,
-                        np.expand_dims(short_future_index_round_targets,1),np.expand_dims(future_index_round_targets,1)],axis=1)
-        
+        index_round_targets = np.concatenate([past_index_round_targets,np.expand_dims(future_index_round_targets,1)],axis=1)
+
         # 整体目标值批次内,分行业归一化
         for i in range(future_round_targets.shape[-1]):
             if self.scale_mode[i]==0 or self.scale_mode[i]==2:
