@@ -520,10 +520,14 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         index_round_targets = np.concatenate([past_index_round_targets,np.expand_dims(future_index_round_targets,1)],axis=1)
 
         # 整体目标值批次内,分行业归一化
-        for i in range(future_round_targets.shape[-1]):
-            if self.scale_mode[i]==0 or self.scale_mode[i]==2:
-                for index in self.ins_in_indus_index :
-                    future_round_targets[index,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,i:i+1]).squeeze(-1)
+        past_data_scale = np.zeros([self.total_instrument_num,self.input_chunk_length-self.output_chunk_length,self.past_target_shape[-1]])
+        if self.scale_mode[i]==0 or self.scale_mode[i]==2:
+            for index in self.ins_in_indus_index:
+                past_data = past_round_targets[index,:-self.output_chunk_length,:]
+                scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data.reshape(-1,self.past_target_shape[-1]))
+                past_data_scale[index] = scaler.transform(past_data.reshape(-1,self.past_target_shape[-1])).reshape(past_data.shape)
+                future_round_targets[index] = scaler.transform(future_round_targets[index])
+        past_future_round_targets = np.concatenate([past_data_scale,np.expand_dims(future_round_targets,axis=1)],axis=1)
         # 使用行业内的品种目标差值的均值，作为行业整体预测目标
         # range_target = future_target_total[:self.indus_index,-1,:] - past_target_total[:self.indus_index,-1,:]
         # 使用已经算好的最大最小值，进行归一化
@@ -531,6 +535,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # index_round_targets = np.mean(range_target,axis=0)
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,price_targets,future_round_targets,index_round_targets,target_info_total 
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,target_info_total 
                             
 

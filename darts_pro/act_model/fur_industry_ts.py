@@ -72,9 +72,9 @@ class FurIndustryMixer(nn.Module):
         for i in range(self.combine_nodes_num.shape[0]):
             m = self.sub_models[i]
             instrument_index = self.combine_instrument_index[i]
-            x_enc, historic_future_covariates,future_covariates,past_index_round_targets = x_in
+            x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
-                        future_covariates[:,instrument_index,...],past_index_round_targets[:,i,...])
+                        future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             _,cls_out,sw_index_data = m(x_inner)
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
