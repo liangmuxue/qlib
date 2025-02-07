@@ -254,6 +254,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         if torch.sum(index_target_item<1e-4)>2:
                             continue   
                         ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item)/10
+                        # ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))
                     if target_mode==2: 
                         if torch.sum(short_index_target_item<1e-4)>2:
                             continue                                                

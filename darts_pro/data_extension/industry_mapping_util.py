@@ -344,7 +344,6 @@ class FuturesMappingUtil:
     @staticmethod
     def get_industry_codes(sw_ins_mappings):
         return sw_ins_mappings[:,1]
-
     
     @staticmethod
     def get_futures_names(sw_ins_mappings,indus_index=0):

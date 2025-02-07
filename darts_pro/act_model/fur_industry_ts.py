@@ -42,6 +42,7 @@ class FurIndustryMixer(nn.Module):
                 )
             sub_model_list.append(sub_model)
         self.sub_models = nn.ModuleList(sub_model_list)
+        # self.sub_models_after = nn.ModuleList(sub_model_after_list)
         # 整合输出网络
         if index_num>1:
             self.combine_layer = nn.Sequential(
@@ -56,12 +57,6 @@ class FurIndustryMixer(nn.Module):
                     nn.ReLU(), 
                     nn.Linear(hidden_size,index_num),
                 ).to(device)    
-        self.infer_combine_layer = nn.Sequential(
-                nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
-                nn.ReLU(), 
-                nn.Linear(hidden_size,index_num),
-                nn.LayerNorm(index_num)
-            ).to(device)                        
         
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""
@@ -71,11 +66,14 @@ class FurIndustryMixer(nn.Module):
         # 不同行业分别输出
         for i in range(self.combine_nodes_num.shape[0]):
             m = self.sub_models[i]
+            # m_after = self.sub_models_after[i]
             instrument_index = self.combine_instrument_index[i]
             x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             _,cls_out,sw_index_data = m(x_inner)
+            # 叠加归一化输出
+            # cls_out = m_after(cls_out.squeeze(-1)).unsqueeze(-1)
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
         

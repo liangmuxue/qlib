@@ -481,11 +481,11 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
         
         # 整体目标数据拆分为过去值和目标值
-        past_round_targets = round_targets[:,:self.input_chunk_length,:]
-        future_round_targets = round_targets[:,self.input_chunk_length,:]
+        past_round_targets = round_targets[:,:self.input_chunk_length,:].copy()
+        future_round_targets = round_targets[:,self.input_chunk_length,:].copy()
         short_past_round_targets = short_round_targets[:,:self.input_chunk_length,:]
         # 预测最近几个差分的未来整体数值
-        future_round_targets_for_index = round_targets[:,self.input_chunk_length,:]
+        future_round_targets_for_index = round_targets[:,self.input_chunk_length,:].copy()
         short_future_round_targets = short_round_targets[:,self.input_chunk_length-self.cut_len,:]
         # 行业板块数据归一化
         past_index_round_targets_ori = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
@@ -523,10 +523,15 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         past_data_scale = np.zeros([self.total_instrument_num,self.input_chunk_length-self.output_chunk_length,self.past_target_shape[-1]])
         if self.scale_mode[i]==0 or self.scale_mode[i]==2:
             for index in self.ins_in_indus_index:
+                # 使用过去数值参考,进行第一次归一化
                 past_data = past_round_targets[index,:-self.output_chunk_length,:]
                 scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data.reshape(-1,self.past_target_shape[-1]))
                 past_data_scale[index] = scaler.transform(past_data.reshape(-1,self.past_target_shape[-1])).reshape(past_data.shape)
                 future_round_targets[index] = scaler.transform(future_round_targets[index])
+                # 针对目标值，再次归一化以加速收敛
+                for i in range(future_round_targets.shape[-1]):
+                    future_round_targets[index,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,i:i+1]).squeeze(-1)
+                                    
         past_future_round_targets = np.concatenate([past_data_scale,np.expand_dims(future_round_targets,axis=1)],axis=1)
         # 使用行业内的品种目标差值的均值，作为行业整体预测目标
         # range_target = future_target_total[:self.indus_index,-1,:] - past_target_total[:self.indus_index,-1,:]

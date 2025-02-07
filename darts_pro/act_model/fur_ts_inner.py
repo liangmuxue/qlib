@@ -92,6 +92,7 @@ class FurTimeMixer(nn.Module):
         # 未来时空投影层，整合投影到单通道
         self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, 1, bias=True)      
         
+        self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到板块指数数据，按照不同分类板块分别投影
         self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
         self.all_to_index_projection_layer = nn.Linear((self.num_nodes-1)*pred_len, pred_len, bias=True)          
@@ -190,7 +191,7 @@ class FurTimeMixer(nn.Module):
         x_mar_dec_out = self.tisp_projection_layer(x_mark_dec).reshape([batch_size,node_num]).unsqueeze(-1)       
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1).unsqueeze(-1)
         # 叠加整体数值残差计算
-        comp_out = comp_out + x_mar_dec_out + self.round_skip_layer(past_round_targets)
+        comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).squeeze(-1)).unsqueeze(-1) + self.round_skip_layer(past_round_targets)
         # 按照不同分类板块分别投影
         industry_decoded_data = self.index_projection_layer(comp_out.squeeze(-1))
         # 使用整体走势过去值,注意这里的数据做了再次拆分，以避免未来数据泄露
