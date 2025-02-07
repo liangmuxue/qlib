@@ -404,6 +404,6 @@ if __name__ == "__main__":
     # 导入外盘数据
     # extractor.extract_outer_data()
     # 导出到qlib
-    # extractor.export_to_qlib()
+    extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
             

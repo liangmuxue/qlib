@@ -44,7 +44,18 @@ class FuturesDataSource(BaseDataSource):
         
     def load_sim_data(self,simdata_date):
         self.extractor.load_sim_data(simdata_date,dataset=self.dataset)
-      
+
+    def get_trading_calendar(self, trading_calendar_type=None):
+        """取得交易日历"""
+        
+        # type: (Optional[TRADING_CALENDAR_TYPE]) -> pd.DatetimeIndex
+        if trading_calendar_type is None:
+            return self.merged_trading_calendars
+        try:
+            return self.trading_calendars[trading_calendar_type]
+        except KeyError:
+            raise NotImplementedError("unsupported trading_calendar_type {}".format(trading_calendar_type))
+            
     def build_trading_contract_mapping(self,date):  
         """生成对应日期的所有可交易合约的对照表"""
         
@@ -307,4 +318,13 @@ class FuturesDataSource(BaseDataSource):
             trading_minutes.update(set(min_list.to_pydatetime().tolist()))
             
         return trading_minutes
+    
+    def get_exchange_from_instrument(self,instrument_code):
+        
+        sql = "select e.code from trading_variety v,futures_exchange e where v.exchange_id=e.id and v.code='{}' ".format(instrument_code)
+        result_rows = self.dbaccessor.do_query(sql)  
+        if len(result_rows)==0:
+            return None        
+        return result_rows[0][0]
+        
         

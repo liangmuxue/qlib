@@ -197,7 +197,7 @@ class JuejinFuturesExtractor(HisDataExtractor):
         upt_sql = "update dominant_real_data d set d.var_id=(select id from trading_variety t where t.code=LEFT(d.code, LENGTH(d.code)-4))"
         self.dbaccessor.do_updateto(upt_sql)                
 
-    def import_main_his_data_local(self,date_range=[2201,2412]):
+    def import_main_his_data_local(self,date_range=[2201,2512]):
         """从本地导入主力合约历史行情数据"""
         
         data_path = self.sim_path
