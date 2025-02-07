@@ -600,6 +600,10 @@ if __name__ == "__main__":
     # 2022回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="fur_backtest_flow_2022",resume=False)
     task = WorkflowTask(task_batch=159,workflow_name="fur_backtest_flow_2022",resume=True)    
-    
+
+    # 2025仿真工作流
+    # task = WorkflowTask(task_batch=0,workflow_name="fur_sim_flow_2025",resume=False)
+    # task = WorkflowTask(task_batch=162,workflow_name="fur_sim_flow_2025",resume=True)    
+        
     task.start_task()
         

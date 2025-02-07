@@ -2,6 +2,7 @@ import copy
 import datetime
 import os
 
+import cus_utils.global_var as global_var
 from .base_processor import BaseProcessor
 from trader.utils.date_util import get_first_and_last_day
 from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus,FrequencyType,WorkflowType
@@ -79,6 +80,8 @@ class SimulationProcessor(BaseProcessor):
         rq_config = self.config["task"]["backtest"]["rqalpha"]
         # 统一一个运行策略文件，后面通过不同的实现类来进行策略区分
         strategy_file_path = self.config["task"]["backtest"]["run_file"]
+        # 透传总体任务配置
+        global_var.set_value("task_config", self.config)
         # 改写run file，用于使用自定义strategy,解决execution context问题
         from trader.rqalpha import run_file
         run_file(strategy_file_path, rq_config)   

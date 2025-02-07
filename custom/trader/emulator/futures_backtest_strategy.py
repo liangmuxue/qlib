@@ -451,6 +451,8 @@ class FurBacktestStrategy(SimStrategy):
         
         order_book_id = assure_order_book_id(id_or_ins)
         multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
+        # 添加交易所编码
+        exchange_code = self.data_source.get_exchange_from_instrument(order_book_id)
         
         style = cal_style(price, None)
         if side==SIDE.BUY:
@@ -465,7 +467,8 @@ class FurBacktestStrategy(SimStrategy):
                 multiplier=multiplier,
                 try_cnt=0, 
                 close_reason=None,  
-                need_resub=False        
+                need_resub=False, 
+                exchange_id=exchange_code      
             )   
         else:
             order = Order.__from_create__(
@@ -479,7 +482,8 @@ class FurBacktestStrategy(SimStrategy):
                 multiplier=multiplier,
                 try_cnt=0, 
                 close_reason=close_reason,  
-                need_resub=False         
+                need_resub=False, 
+                exchange_id=exchange_code           
             )                    
         return order
     

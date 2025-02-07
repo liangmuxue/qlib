@@ -13,7 +13,7 @@ logger = AppLogger()
 
     
 def init(context):
-    """回测入口(工作流模式)，这里只负责与相关的回测类进行对接"""
+    """仿真入口(工作流模式)，这里只负责与相关的回测类进行对接"""
     
     logger.info("init in")
     strategy_class_config = context.strategy_class
