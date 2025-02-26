@@ -195,7 +195,7 @@ def batch_normalization(data,res=1e-5):
         rtn = (data - torch.min(data))/(torch.max(data)-torch.min(data) + res) 
     else:
         rtn = (data - np.min(data))/(np.max(data)-np.min(data) + res)         
-    return rtn
+    return rtn + res
 
 def price_range_normalization(data,res=0.001,mode="numpy",avoid_zero=True):
     """针对股市涨跌幅度，进行统一的归一化"""

@@ -48,6 +48,7 @@ from .tft_process_dataframe import TftDataframeModel
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from sklearn.preprocessing import MinMaxScaler
 from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
+from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -396,6 +397,8 @@ class FuturesProcessModel(TftDataframeModel):
     ):
         """对数据进行相关性分析"""
         
+        scale_mode = self.optargs["scale_mode"]
+        pred_len = self.optargs["forecast_horizon"]
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.batch_file_path = self.kwargs["batch_file_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
@@ -435,7 +438,7 @@ class FuturesProcessModel(TftDataframeModel):
         input_chunk_length = self.optargs["wave_period"] - output_chunk_length
         past_split = self.optargs["past_split"] 
         
-        custom_dataset_valid = FuturesTogatherDataset(
+        custom_dataset_valid = FuturesIndustryDataset(
                     target_series=val_series_transformed,
                     covariates=past_convariates,
                     future_covariates=future_convariates,
@@ -444,7 +447,7 @@ class FuturesProcessModel(TftDataframeModel):
                     max_samples_per_ts=None,
                     use_static_covariates=True,
                     target_num=len(past_split),
-                    ass_sw_ins_mappings=None, # 验证集是需要传入训练集映射关系数据，以进行审计                    
+                    scale_mode=scale_mode,
                     mode="valid"
                 )            
         data_assis = StatDataAssis()
@@ -453,7 +456,7 @@ class FuturesProcessModel(TftDataframeModel):
                             "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
         analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
-        analysis_columns = ["price","QTLUMA5",'VSUMP5','QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
+        analysis_columns = ["price","QTLUMA5",'QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
         # 利用dataloader进行数据拼装
         val_loader = DataLoader(
                 custom_dataset_valid,
@@ -500,7 +503,7 @@ class FuturesProcessModel(TftDataframeModel):
                     # 忽略空值
                     if ts is not None:
                         # 计算价格差的时候，把前一日期也包括进来
-                        price_array = np.array(ts["price_array"][-6:])  
+                        price_array = np.array(ts["price_array"][-pred_len-1:])  
                         price_array_list.append(price_array)
                 future_start_datetime = ti[0]["future_start_datetime"]
                 if future_start_datetime<20220401 and future_start_datetime>=20220301 or True:

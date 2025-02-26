@@ -368,6 +368,13 @@ class FuturesMappingUtil:
         return sw_ins_mappings[:,0].astype(np.int32)
 
     @staticmethod
+    def get_industry_rel_index(sw_ins_mappings):
+        rel_index = [i for i in range(sw_ins_mappings[:,0].shape[0])]
+        main_index = np.where(sw_ins_mappings[:,1]=="ZS_ALL")[0]
+        rel_index.remove(main_index)
+        return rel_index
+       
+    @staticmethod
     def get_industry_data_index_without_main(sw_ins_mappings):
         main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
         index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
@@ -376,8 +383,11 @@ class FuturesMappingUtil:
         return left_index.astype(np.int32)
     
     @staticmethod
-    def get_industry_instrument(sw_ins_mappings):
-        return sw_ins_mappings[:,2]
+    def get_industry_instrument(sw_ins_mappings,without_main=True):
+        ins = sw_ins_mappings[:,2]
+        if without_main:
+            return ins[:-1]
+        return ins
 
     @staticmethod
     def get_industry_instrument_num(sw_ins_mappings):

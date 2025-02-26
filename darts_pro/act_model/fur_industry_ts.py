@@ -17,7 +17,7 @@ class FurIndustryMixer(nn.Module):
        把行业板块信息融合到模型中，不同行业，权重不共享
     """
     
-    def __init__(self, seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,
+    def __init__(self, seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
                  combine_nodes_num=None,instrument_index=None,index_num=1,device="cpu"):
         """行业总体网络，分为子网络，以及整合网络2部分"""
         
@@ -38,6 +38,7 @@ class FurIndustryMixer(nn.Module):
                 pred_len=pred_len,
                 past_cov_dim=past_cov_dim,
                 dropout=dropout,
+                down_sampling_window=down_sampling_window,
                 device=device,
                 )
             sub_model_list.append(sub_model)

@@ -80,6 +80,10 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df = df[df['industry']!='None']    
         df = df.fillna(0) 
         df = df[df['datetime_number']!=0]  
+        # 生成行业均值数据
+        df = self.build_industry_mean(df,indus_info=indus_info)     
+        df['industry'] = df['industry'].astype(int)          
+        df[time_column] = df[time_column].astype(int)   
         # 静态协变量和未来协变量提前进行归一化
         for conv_col in self.get_static_columns():
             conv_col_scale = conv_col + "_scale"
@@ -88,8 +92,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         future_covariate_col = self.get_future_columns()          
         for conv_col in future_covariate_col:
             conv_col_scale = conv_col + "_scale"
-            df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).min()) / (df[conv_col].astype(int).max() - df[conv_col].astype(int).min())
-        df[time_column] = df[time_column].astype(int)           
+            df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).min()) / (df[conv_col].astype(int).max() - df[conv_col].astype(int).min())                
         # 按照股票代码，新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=True).astype("int")  
@@ -101,4 +104,24 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
         return df    
     
+    def build_industry_mean(self,df,indus_info=None):
+        """针对特定指标，生成行业平均值"""
+        
+        group_cols = ['datetime','industry']
+        # 添加行并根据行业取平均值
+        df_mean = df.groupby(group_cols).mean().reset_index()
+        df_mean['industry'] = df_mean['industry'].astype(str)
+        # 针对整体数值取平均值
+        df_total_mean = df.groupby('datetime').mean().reset_index()
+        indus_sql = "select  id from futures_industry where code='all'"   
+        indus_id = self.dbaccessor.do_query(indus_sql)[0][0]
+        df_total_mean['industry'] = str(indus_id)
+        df_mean = pd.concat([df_mean,df_total_mean],axis=0)
+        indus_info_merge = indus_info[(indus_info['instrument'].str.startswith('ZS_'))]
+        df_mean = pd.merge(indus_info_merge,df_mean,on=["industry"],how="left",validate="one_to_many")  
+        df_mean['time_idx'] = df_mean['datetime'].groupby(df_mean['industry']).rank(method='dense',ascending=True)
+        df_mean = df_mean[~df_mean['time_idx'].isna()]
+        df_mean['time_idx'] = df_mean['time_idx'].astype(int)
+        df = pd.concat([df,df_mean])
+        return df
     

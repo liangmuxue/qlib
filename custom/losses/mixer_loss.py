@@ -9,7 +9,7 @@ from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 import geomloss
 
-from cus_utils.common_compute import tensor_intersect
+from cus_utils.common_compute import tensor_intersect,batch_normalization
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 
@@ -212,7 +212,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         loss_sum = torch.tensor(0.0).to(self.device) 
         # 取得所有品种排序号
         ins_in_indus_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-        indus_data_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+        indus_data_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
+        indus_rel_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
         
         for i in range(len(output)):
             target_mode = self.target_mode[i]
@@ -227,7 +228,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
-                    index_target_item = index_round_target[j,:,i]
+                    index_target_item = index_round_target[j,indus_rel_index,i]
                     short_index_target_item = short_index_round_target[j,:,i]
                     for k in range(indus_data_index.shape[0]):     
                         ins_index = ins_in_indus_index[k]
@@ -242,7 +243,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             continue           
                         sv_indus = sv[k][j]
                         sv_indus = sv_indus[inner_index]
-                        if target_mode==0:
+                        if target_mode==0 or target_mode==3:
                             if round_targets_item.shape[0]>1:
                                 cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
                             else:
@@ -253,27 +254,40 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     if target_mode==1: 
                         if torch.sum(index_target_item<1e-4)>2:
                             continue   
+                        if torch.sum(index_target_item>=0.9999)>=5:
+                            print("all 1")
+                            continue                           
                         ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item)/10
                         # ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))
                     if target_mode==2: 
-                        if torch.sum(short_index_target_item<1e-4)>2:
+                        if torch.sum(index_target_item<1e-4)>2:
                             continue                                                
-                        fds_loss[i] += self.ccc_loss_comp(sw_index_data[j],short_index_target_item)/10               
-                # if target_mode==2:
-                #     # 整体指数比较的模式
-                #     ce_loss[i] += self.mse_loss(sw_index_data,future_round_targets_factor.mean(dim=1).unsqueeze(-1)) * 10
-                #     counter += 1          
-
+                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],short_index_target_item)/10       
+                    # 进行整体比较的时候，使用MSE损失进行衡量  
+                    if target_mode==3: 
+                        ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))                             
+  
                 if target_mode==0:
                     cls_loss[i] = cls_loss[i]/counter
                     loss_sum = loss_sum + cls_loss[i]
-                if target_mode==1: 
+                if target_mode==1 or target_mode==2: 
                     # cls_loss[i] = cls_loss[i]/counter
                     loss_sum = loss_sum + ce_loss[i]
-                if target_mode==2: 
+                if target_mode==3: 
+                    cls_loss[i] = cls_loss[i]/counter
                     # cls_loss[i] = cls_loss[i]/counter
-                    loss_sum = loss_sum + fds_loss[i]
-                    
+                    loss_sum = loss_sum + ce_loss[i]    
+                # 批次内进行整体指数损失计算                
+                if target_mode==5: 
+                    main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+                    # 与整体指数目标进行比较
+                    target = index_round_target[:,main_index,i]
+                    # target = batch_normalization(target)
+                    ce_loss[i] = self.ccc_loss_comp(sw_index_data.squeeze(-1),target)
+                    # ce_loss[i] = self.mse_loss(sw_index_data,target.unsqueeze(-1))*10
+                    # ce_loss[i]  = torch.nn.L1Loss()(sw_index_data,target.unsqueeze(-1))
+                    # cls_loss[i] = cls_loss[i]/counter
+                    loss_sum = loss_sum + ce_loss[i]                      
         # if epoch_num>=self.lock_epoch_num:
         #     # 综合策略损失评判
         #     if optimizers_idx==(len(output)) or optimizers_idx==-1:

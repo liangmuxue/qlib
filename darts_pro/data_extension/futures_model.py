@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from torch.utils.data import DataLoader
 
+from sklearn.preprocessing import MinMaxScaler
+
 from .industry_model import IndustryRollModel
 from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
 from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset
@@ -301,14 +303,28 @@ class FuturesIndustryModel(FuturesModel):
         )     
         return model         
 
-    def _batch_collate_fn(self,batch):
-        """批次整合"""
+    def _batch_collate_filter(self,batch):
+        """批次整合,包含批次内数据归一化"""
         
         aggregated = []
         first_sample = batch[0]
-        for i in range(len(first_sample)):
+        sample_len = len(first_sample)
+        for i in range(sample_len):
             elem = first_sample[i]
-            if isinstance(elem, np.ndarray):
+            # 针对round数据，根据标志决定是否在批次内进行归一化
+            if i==sample_len-2:
+                sample_list = [sample[i] for sample in batch]
+                round_data = np.stack(sample_list, axis=0)
+                for j in range(len(self.past_split)):
+                    if self.scale_mode[j]==5:
+                        round_data_item = round_data[...,j]   
+                        round_future_data_item = round_data_item[:,:,-1]
+                        round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)        
+                        round_data[:,:,-1,j] = round_future_data_item                  
+                aggregated.append(
+                    torch.from_numpy(round_data)
+                )                               
+            elif isinstance(elem, np.ndarray) and i!=(sample_len-2):
                 sample_list = [sample[i] for sample in batch]
                 aggregated.append(
                     torch.from_numpy(np.stack(sample_list, axis=0))
@@ -323,6 +339,7 @@ class FuturesIndustryModel(FuturesModel):
                 aggregated.append([sample[i] for sample in batch])
             else:
                 print("no match for:",elem.dtype)
+                          
         return tuple(aggregated) 
      
     def predict(self,series,past_covariates=None,future_covariates=None,batch_size=1,num_loader_workers=1):
@@ -341,7 +358,7 @@ class FuturesIndustryModel(FuturesModel):
             num_workers=num_loader_workers,
             pin_memory=True,
             drop_last=False,
-            collate_fn=self._batch_collate_fn,
+            collate_fn=self._batch_collate_filter,
         )        
         self.trainer.predict(self.model, pred_loader)
         predictions = self.model.result_target
