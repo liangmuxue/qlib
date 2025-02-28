@@ -318,9 +318,14 @@ class FuturesIndustryModel(FuturesModel):
                 for j in range(len(self.past_split)):
                     if self.scale_mode[j]==5:
                         round_data_item = round_data[...,j]   
+                        # round_past_data_item = round_data_item[:,:,:-1]
+                        # round_past_data_item_trans = round_past_data_item.transpose(0,2,1)
+                        # round_past_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
+                        #     round_past_data_item_trans.reshape(-1,round_past_data_item_trans.shape[-1])).reshape(round_past_data_item_trans.shape).transpose(0,2,1)
                         round_future_data_item = round_data_item[:,:,-1]
                         round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)        
-                        round_data[:,:,-1,j] = round_future_data_item                  
+                        round_data[:,:,-1,j] = round_future_data_item  
+                        # round_data[:,:,:-1,j] = round_past_data_item                   
                 aggregated.append(
                     torch.from_numpy(round_data)
                 )                               
