@@ -383,12 +383,17 @@ class FuturesMappingUtil:
         return left_index.astype(np.int32)
     
     @staticmethod
+    def get_all_instrument(sw_ins_mappings):
+        ins = np.concatenate(sw_ins_mappings[:-1,2])
+        return ins
+
+    @staticmethod
     def get_industry_instrument(sw_ins_mappings,without_main=True):
         ins = sw_ins_mappings[:,2]
         if without_main:
             return ins[:-1]
         return ins
-
+    
     @staticmethod
     def get_industry_instrument_num(sw_ins_mappings):
         num = 0

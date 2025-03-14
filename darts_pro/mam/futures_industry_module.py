@@ -25,9 +25,9 @@ from .futures_module import TRACK_DATE
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-# TRACK_DATE = [20220923]
-INDEX_ITEM = 2
-DRAW_SEQ = [0,1]
+# TRACK_DATE = [20220523,20220524,20220526]
+INDEX_ITEM = 0
+DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = [0]
 
@@ -120,7 +120,8 @@ class FuturesIndustryModule(MlpModule):
                 past_target_shape
                 + past_covariates_shape
             )
-           
+            
+            main_index = FuturesMappingUtil.get_main_index_in_indus(self.train_sw_ins_mappings)
             combine_nodes = FuturesMappingUtil.get_industry_instrument(self.train_sw_ins_mappings,without_main=True)
             combine_nodes_num = np.array([ins.shape[0] for ins in combine_nodes])
             combine_nodes_num = torch.Tensor(combine_nodes_num).int().to(self.device)
@@ -128,13 +129,21 @@ class FuturesIndustryModule(MlpModule):
             industry_index = FuturesMappingUtil.get_industry_data_index_without_main(self.train_sw_ins_mappings)
             index_num = combine_nodes_num.shape[0]
             # 加入短期指标
-            if self.target_mode[seq] in [0,1,3]:
+            if self.target_mode[seq] in [0,1]:
                 pred_len = self.output_chunk_length
             if self.target_mode[seq]==2:
                 pred_len = self.cut_len     
-            if self.target_mode[seq]==5:
+            if self.target_mode[seq]==3:
                 pred_len = self.output_chunk_length    
-                index_num = 1                          
+                combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
+                combine_nodes_num = np.expand_dims(combine_nodes.shape[0],0)
+                combine_nodes_num = torch.Tensor(combine_nodes_num).int().to(self.device)   
+                instrument_index = np.expand_dims(combine_nodes,0)  
+                industry_index = [main_index]      
+                index_num = 1     
+            if self.target_mode[seq]==5:    
+                pred_len = self.output_chunk_length   
+                index_num = 1              
             # 使用混合时间序列模型
             model = FurIndustryMixer(
                 combine_nodes_num=combine_nodes_num, # 对应不同行业板块的期货品种数量
@@ -490,7 +499,6 @@ class FuturesIndustryModule(MlpModule):
                 ins_with_indus = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
                 ins_rel_index = FuturesMappingUtil.get_instrument_rel_index(sw_ins_mappings)
                 
-                
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
                     total_view_data = None
@@ -553,7 +561,8 @@ class FuturesIndustryModule(MlpModule):
                         viz_detail = viz_result_detail["all"]
                         names=["target","price"]
                         if j in DRAW_SEQ_ITEM:
-                            viz_detail.viz_matrix_var(view_data,win=win,title=target_title,names=names)                          
+                            viz_detail.viz_matrix_var(view_data,win=win,title=target_title,names=names)      
+                                        
                     # 整体指数趋势线
                     index_price_array = np.array(ts_arr[main_index]["price_array"])
                     index_price_array_norm = MinMaxScaler(feature_range=(0.001, 1)).fit_transform(np.expand_dims(index_price_array,-1)).squeeze(-1)     
@@ -571,9 +580,9 @@ class FuturesIndustryModule(MlpModule):
                     price_range_total = np.array(price_range_total)
                     win = "indus_round_target_{}_{}".format(j,viz_total_size)
                     target_title = "industry compare_{},mean_tar:{}_{},price_inf:{},date:{}".format(j,
-                                        round(ce_output[INDEX_ITEM][index][0],2),round(index_round_targets[-1,INDEX_ITEM],2),round(price_inf*100,1),int(date))
+                                        round(ce_output[INDEX_ITEM][index][0],2),round(index_round_targets[-1,INDEX_ITEM],2),round(price_inf,3),int(date))
                     if j in DRAW_SEQ:
-                        # indust_output_value = indust_output_value.repeat(6)
+                        indust_output_value = indust_output_value.repeat(6)
                         view_data = np.stack([indust_output_value,indust_target,price_range_total]).transpose(1,0)
                         tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_names.tolist()[:-1],legends=["pred","target","price"])   
                         
@@ -636,6 +645,8 @@ class FuturesIndustryModule(MlpModule):
         for index,ts in enumerate(target_info):
             ts[main_index]["price_round_data"] = price_round_data
             ts[main_index]["price_round_index"] = index
+            ts[main_index]["target_round_data"] = index_round_targets.cpu().numpy()[:,-1,-1,-1]
+            ts[main_index]["pred_round_data"] = output[-1][2].cpu().numpy().squeeze(-1)
         whole_index_round_targets = index_round_targets[:,:,:-1,:]
         # 保存数据用于后续验证
         output_res = (output,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
@@ -747,9 +758,9 @@ class FuturesIndustryModule(MlpModule):
             output_list = [output_3d[2][i],ce_index,output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
-            if not date in TRACK_DATE:
-                price_inf_list.append(None)
-                continue                
+            # if not date in TRACK_DATE:
+            #     price_inf_list.append(None)
+            #     continue                
             # 生成目标索引
             import_index,overroll_trend,trend_value,indus_top_index,price_inf = self.build_import_index(output_data=output_list,target_info=target_info_list,
                             target=whole_target,price_target=price_target_list,
@@ -775,7 +786,10 @@ class FuturesIndustryModule(MlpModule):
                 suc_cnt = np.sum(result_values>=2)
                 fail_cnt = np.sum(result_values<2)
                 if fail_cnt>0 or True:
-                    result_date_list["{}_{}/{}_{}".format(int(date),int(overroll_trend),round(trend_value,2),suc_cnt)] = \
+                    trend_str = "Rise"
+                    if overroll_trend==0:
+                        trend_str = "Fall"
+                    result_date_list["{}_{}/{}_{}".format(int(date),trend_str,round(price_inf*100,2),suc_cnt)] = \
                         import_price_result[["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
@@ -793,13 +807,13 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(overroll_trend)   
                 # Add Industry Result
                 indus_result_total[date] = indus_result
-        # print("result:",result_date_list)      
+        print("result:",result_date_list)      
 
         # 如果是预测模式，则只输出结果,不验证
         if predict_mode:
             return result_date_list
         
-        return rate_total,total_imp_cnt,indus_result_total,price_inf_list
+        return rate_total,float(total_imp_cnt),indus_result_total,price_inf_list
 
     def collect_result(self,import_index,overroll_trend=0,indus_top_index=None,target_info=None): 
         """收集预测对应的实际数据"""
@@ -892,17 +906,16 @@ class FuturesIndustryModule(MlpModule):
         # 拿到价格差分数据，并以此为衡量整体指数的口径
         price_round_data = target_info[main_index]["price_round_data"]
         price_round_index = target_info[main_index]["price_round_index"]
+        target_round_data = target_info[main_index]["target_round_data"]
+        pred_round_data = target_info[main_index]["pred_round_data"]
         price_round_data = np.delete(price_round_data, [price_round_index])
         
-        cls_2 = cls[...,0]
-        ce_indus = ce_values[1]
-        ce_index = ce_values[2]
-        ce2_index = ce_values[0]
-        ce_index_mean = ce_index.mean() #ce_values[2].mean()
-              
-        ce_index_mean_threhold = 0.55
-        ce_threhold = 0.4
-        price_inf_threhold = 0.1
+        # cls_ins = cls[...,1]
+        cls_ins = cls[...,0]
+        ce_indus = ce_values[0]
+        # 归一化批次内的预测值
+        ce_index_mean = MinMaxScaler(feature_range=(0.001, 1)).fit_transform(np.expand_dims(pred_round_data,-1)).squeeze(-1)[price_round_index]
+        price_inf_threhold = 0
         
         top_num = 3
         select_num = 3
@@ -910,8 +923,9 @@ class FuturesIndustryModule(MlpModule):
         
         # 取得行业板块中最高和最低的两个，并使用这2个中的一个作为目标行业板块
         raise_top_index = np.argsort(-ce_indus)[0] 
-        fall_top_index = np.argsort(ce_index)[0]   
-        price_inf = price_round_data.min() + (price_round_data.max()-price_round_data.min())*ce_index.mean()
+        fall_top_index = np.argsort(ce_indus)[0]   
+        # 整体指数预测数据转化为价格参考指数，并设置阈值进行涨跌判断
+        price_inf = price_round_data.min() + (price_round_data.max()-price_round_data.min())*ce_index_mean
         # trend_flag = ce_index.mean()>ce_index_mean_threhold
         trend_flag = (price_inf>price_inf_threhold)
         # trend_flag = np.sum(ce_indus>ce_index_mean_threhold)<top_num
@@ -926,12 +940,8 @@ class FuturesIndustryModule(MlpModule):
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_rel_index = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,indus_top_index)
-        ins_index = instrument_index[indus_top_index]
-        past_price = price_array[ins_index,:self.input_chunk_length]
-        cls_can = cls_2[ins_rel_index[0]:ins_rel_index[1]]
+        cls_can = cls_ins[ins_rel_index[0]:ins_rel_index[1]]
         
-        # 使用最近价格前值进行估算   
-        price_recent_can = past_price[:,-8:]
         # 取得对应行业下的品种排名，并作为候选
         if trend_type==0:
             # 看CLS指标的多方

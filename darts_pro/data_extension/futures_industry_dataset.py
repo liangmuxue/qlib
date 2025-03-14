@@ -413,10 +413,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             future_start_datetime = self.ass_data[code][3][past_end]
             # 取得整体评估量化数据
             total_target_vals = self.total_target_vals[ori_index][past_start:future_end]
-            try:
-                round_targets[keep_index] = total_target_vals    
-            except Exception:
-                print("eee")
+            round_targets[keep_index] = total_target_vals    
             short_target_vals = self.short_target_vals[ori_index][past_start:future_end]
             short_round_targets[keep_index] = short_target_vals                  
             # total_target_vals_scale = self.total_target_vals_scale[ori_index][past_start:future_end]
