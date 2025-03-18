@@ -46,7 +46,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         max_samples_per_ts: Optional[int] = None,
         covariate_type: CovariateType = CovariateType.NONE,
         use_static_covariates: bool = True,
-        load_ass_data=False,
         scale_mode=None,
         cut_len=2,
         mode="train"
@@ -585,11 +584,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     future_round_targets[index,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,i:i+1]).squeeze(-1)
                                     
         past_future_round_targets = np.concatenate([past_data_scale,np.expand_dims(future_round_targets,axis=1)],axis=1)
-        # 使用行业内的品种目标差值的均值，作为行业整体预测目标
-        # range_target = future_target_total[:self.indus_index,-1,:] - past_target_total[:self.indus_index,-1,:]
-        # 使用已经算好的最大最小值，进行归一化
-        # norm_target = 1 - (self.target_round_norm_mm[:self.indus_index,1,:] - range_target)/(self.target_round_norm_mm[:self.indus_index,1,:] - self.target_round_norm_mm[:self.indus_index,0,:] )
-        # index_round_targets = np.mean(range_target,axis=0)
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,target_info_total 

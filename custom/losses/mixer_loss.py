@@ -420,5 +420,66 @@ class FuturesIndustryLoss(UncertaintyLoss):
         #         loss_sum = loss_sum + fds_loss
             
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
-       
+
+
+class FuturesIndustryDRollLoss(UncertaintyLoss):
+    """整合不同行业板块，并基于策略选取的损失"""
+
+    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,tau=0.1,lambda_reg=0):
+        
+        super(FuturesIndustryDRollLoss, self).__init__(ref_model=ref_model,device=device)
+        
+        self.lock_epoch_num = lock_epoch_num
+        self.ref_model = ref_model
+        self.device = device  
+        self.target_mode = target_mode
+        
+        # 排序损失部分，用于整体走势衡量
+        self.listwise = ListwiseRegressionLoss(tau=tau)
+        self.lambda_reg = lambda_reg 
+        
+    def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
+        """Multiple Loss Combine"""
+
+        (output,vr_class,_) = output_ori
+        (target,target_class,future_round_targets,index_round_target) = target_ori
+        corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        cls_loss = torch.zeros([len(output)]).to(self.device)
+        fds_loss = torch.zeros([len(output)]).to(self.device)
+        ce_loss = torch.zeros([len(output)]).to(self.device)
+        loss_sum = torch.tensor(0.0).to(self.device) 
+        
+        industry_index = [i for i in range(target_class.shape[1])]
+        main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        industry_index.remove(main_index)
+        
+        for i in range(len(output)):
+            target_mode = self.target_mode[i]
+            if optimizers_idx==i or optimizers_idx==-1:
+                output_item = output[i] 
+                # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
+                _,sv,sw_index_data = output_item  
+                round_targets_item = index_round_target[...,i]
+                target_class_single = target_class[:,:,main_index]
+                round_targets_last = []
+                sw_index_last = []
+                for j in range(target_class_single.shape[0]):
+                    # 如果存在缺失值，则忽略，不比较
+                    target_class_item = target_class_single[j]
+                    keep_index = torch.where(target_class_item>=0)[0]   
+                    if keep_index.shape[0]<3:
+                        continue
+                    round_targets_inner = round_targets_item[j,keep_index]     
+                    sw_index_inner = sw_index_data[j,keep_index]       
+                    round_targets_last.append(round_targets_inner[-1])
+                    sw_index_last.append(sw_index_inner[-1])
+                    cls_loss[i] += self.ccc_loss_comp(sw_index_inner,round_targets_inner)
+                round_targets_last = torch.stack(round_targets_last)
+                sw_index_last = torch.stack(sw_index_last)
+                ce_loss[i] = self.mse_loss(sw_index_last.unsqueeze(-1),round_targets_last.unsqueeze(-1))
+                   
+                if target_mode==0:
+                    loss_sum = loss_sum + cls_loss[i]
+            
+        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]          
             

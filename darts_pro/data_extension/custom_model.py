@@ -84,6 +84,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
         del model_kwargs["model_type"]
         del model_kwargs["target_mode"]
         del model_kwargs["scale_mode"]
+        if "rolling_size" in model_kwargs:
+            del model_kwargs["rolling_size"]
         
         if "devices" in model_kwargs["pl_trainer_kwargs"]:
             self.device = "cuda:" + str(model_kwargs["pl_trainer_kwargs"]["devices"][0])
@@ -134,6 +136,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.no_dynamic_data = no_dynamic_data
         self.model_type = model_type
         self.loss_number = loss_number
+        self.kwargs = kwargs
         
     def _build_vriable_metas(self,tensors,static_covariates,seq=0):   
         

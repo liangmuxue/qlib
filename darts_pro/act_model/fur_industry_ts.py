@@ -82,6 +82,85 @@ class FurIndustryMixer(nn.Module):
         return None,cls_out_combine,index_data_combine
 
 
+
+class FurIndustryDRollMixer(nn.Module):
+    """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络.
+       使用二次滚动计算的模式，整合批次和二次序列数组
+    """
+    
+    def __init__(self, seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
+                 main_index=-1,rolling_size=18,num_nodes=6,index_num=1,device="cpu"):
+        """行业总体网络，分为子网络，以及整合网络2部分"""
+        
+        super().__init__()
+        
+        self.industry_index = industry_index
+        self.main_index = main_index
+        self.num_nodes = num_nodes
+        self.index_num = index_num
+        self.rolling_size = rolling_size
+        
+        # 循环取得不同时间段的多个下级模型
+        sub_model_list = []
+        for _ in range(rolling_size):
+            sub_model = FurTimeMixer(
+                num_nodes=num_nodes,
+                seq_len=seq_len,
+                pred_len=pred_len,
+                past_cov_dim=past_cov_dim,
+                dropout=dropout,
+                down_sampling_window=down_sampling_window,
+                device=device,
+                )
+            sub_model_list.append(sub_model)
+        self.sub_models = nn.ModuleList(sub_model_list)
+        # 整合输出网络
+        if index_num>1:
+            self.combine_layer = nn.Sequential(
+                    nn.Linear(rolling_size, hidden_size),
+                    nn.ReLU(), 
+                    nn.Linear(hidden_size,index_num),
+                    nn.LayerNorm(index_num)
+                ).to(device)
+        else:
+            self.combine_layer = nn.Sequential(
+                    nn.Linear(rolling_size, hidden_size),
+                    nn.ReLU(), 
+                    nn.Linear(hidden_size,index_num),
+                ).to(device)    
+        
+    def forward(self, x_in): 
+        """多个子模型顺序输出，整合输出形成统一输出"""
+        
+        cls_out_combine = []
+        index_data_combine = []
+        rolling_size = self.rolling_size
+        x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
+        batch_size = int(x_enc.shape[0]/rolling_size)
+        
+        x_enc_rs = x_enc.reshape(batch_size,rolling_size,*x_enc.shape[1:])
+        future_covariates_rs = future_covariates.reshape(batch_size,rolling_size,*future_covariates.shape[1:])
+        historic_future_covariates_rs = historic_future_covariates.reshape(batch_size,rolling_size,*historic_future_covariates.shape[1:])
+        past_round_targets_rs = past_round_targets.reshape(batch_size,rolling_size,*past_round_targets.shape[1:])
+        past_index_round_targets_rs = past_index_round_targets.reshape(batch_size,rolling_size,*past_index_round_targets.shape[1:])
+        # 不同日期滚动范围，使用子模型分别输出
+        for i in range(self.rolling_size):
+            m = self.sub_models[i]
+            x_enc_inner = x_enc_rs[:,i,self.industry_index,...]
+            historic_future_covariates_inner = historic_future_covariates_rs[:,i,self.industry_index,...]
+            future_covariates_inner = future_covariates_rs[:,i,self.industry_index,...]
+            past_round_targets_inner = past_round_targets_rs[:,i,self.industry_index,...]
+            past_index_round_targets_inner = past_index_round_targets_rs[:,i,self.main_index,...]
+            x_inner = (x_enc_inner,historic_future_covariates_inner,future_covariates_inner,past_round_targets_inner,past_index_round_targets_inner)
+            _,cls_out,sw_index_data = m(x_inner)
+            # 叠加归一化输出
+            # cls_out = m_after(cls_out.squeeze(-1)).unsqueeze(-1)
+            cls_out_combine.append(cls_out)
+            index_data_combine.append(sw_index_data)
+        
+        index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
+        return None,cls_out_combine,index_data_combine
+
 #####################   新增策略模型  #########################    
       
 class FurStrategy(nn.Module):

@@ -534,6 +534,8 @@ class TFTBatchModel(TFTExtModel):
         # Can be pretrain step, Or complete step
         self.step_mode = step_mode
         self.pretrain_model_name = pretrain_model_name
+        if "rolling_size" in kwargs:
+            self.rolling_size = kwargs['rolling_size']
         
         # 补充模型保存的参数
         self.checkpoint_define()

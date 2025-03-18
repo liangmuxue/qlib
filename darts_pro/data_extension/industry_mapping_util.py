@@ -338,7 +338,9 @@ class FuturesMappingUtil:
             fur_ins_mapping = [total_index,'ZS_ALL',combine_content[:,0].astype(np.int),combine_content[:,0].astype(np.int),combine_content[:,3],combine_content[:,1],'综合']
             fur_ins_mappings.append(fur_ins_mapping)
         fur_ins_mappings = np.array(fur_ins_mappings)
-        
+        # 根据编码进行排序
+        sorted_indices = np.argsort(fur_ins_mappings[:, 1])
+        fur_ins_mappings = fur_ins_mappings[sorted_indices]
         return fur_ins_mappings        
     
     @staticmethod

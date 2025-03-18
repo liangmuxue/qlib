@@ -95,7 +95,7 @@ class FurTimeMixer(nn.Module):
         self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到板块指数数据，按照不同分类板块分别投影
         self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
-        self.all_to_index_projection_layer = nn.Linear((self.num_nodes-1)*pred_len, pred_len, bias=True)          
+        self.all_to_index_projection_layer = nn.Linear(num_nodes*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
         self.index_skip_layer = nn.Linear(seq_len-pred_len, 1, bias=True)   
         self.round_skip_layer = nn.Linear(seq_len-pred_len, 1, bias=True)   
