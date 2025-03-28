@@ -386,14 +386,18 @@ class FuturesMappingUtil:
     
     @staticmethod
     def get_all_instrument(sw_ins_mappings):
-        ins = np.concatenate(sw_ins_mappings[:-1,2])
+        main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        index_rel = [i for i in range(sw_ins_mappings[:,0].shape[0])]
+        index_rel.remove(main_index)
+        ins = np.concatenate(sw_ins_mappings[index_rel,2])
         return ins
 
     @staticmethod
     def get_industry_instrument(sw_ins_mappings,without_main=True):
         ins = sw_ins_mappings[:,2]
         if without_main:
-            return ins[:-1]
+            main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+            return np.concatenate([ins[:main_index],ins[main_index+1:]])
         return ins
     
     @staticmethod
@@ -404,9 +408,12 @@ class FuturesMappingUtil:
         return num
 
     @staticmethod
-    def get_instrument_rel_index(sw_ins_mappings):
+    def get_instrument_rel_index(sw_ins_mappings,without_main=True):
         rel_index = []
-        for item in sw_ins_mappings[:,2]:
+        main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        for idx,item in enumerate(sw_ins_mappings[:,2]):
+            if without_main and idx==main_index:
+                continue
             rel_index.append(item.shape[0])
         return np.array(rel_index)
 
@@ -415,7 +422,7 @@ class FuturesMappingUtil:
         if indus_index==0:
             begin_index = 0
         else:
-            begin_index = sw_ins_mappings[indus_index-1,2].shape[0]
+            begin_index = sw_ins_mappings[indus_index,2].shape[0]
         end_index = begin_index + sw_ins_mappings[indus_index,2].shape[0]
         return [begin_index,end_index]
             

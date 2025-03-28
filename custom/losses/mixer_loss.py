@@ -442,16 +442,17 @@ class FuturesIndustryDRollLoss(UncertaintyLoss):
         """Multiple Loss Combine"""
 
         (output,vr_class,_) = output_ori
-        (target,target_class,future_round_targets,index_round_target) = target_ori
+        (target,target_class,combine_index_round_target) = target_ori
+        
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.zeros([len(output)]).to(self.device)
         fds_loss = torch.zeros([len(output)]).to(self.device)
         ce_loss = torch.zeros([len(output)]).to(self.device)
         loss_sum = torch.tensor(0.0).to(self.device) 
         
-        industry_index = [i for i in range(target_class.shape[1])]
+        industry_index = [i for i in range(target_class.shape[-1])]
         main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
-        industry_index.remove(main_index)
+        index_round_target = combine_index_round_target[:,:,main_index,:]
         
         for i in range(len(output)):
             target_mode = self.target_mode[i]
@@ -470,16 +471,32 @@ class FuturesIndustryDRollLoss(UncertaintyLoss):
                     if keep_index.shape[0]<3:
                         continue
                     round_targets_inner = round_targets_item[j,keep_index]     
-                    sw_index_inner = sw_index_data[j,keep_index]       
                     round_targets_last.append(round_targets_inner[-1])
-                    sw_index_last.append(sw_index_inner[-1])
-                    cls_loss[i] += self.ccc_loss_comp(sw_index_inner,round_targets_inner)
-                round_targets_last = torch.stack(round_targets_last)
-                sw_index_last = torch.stack(sw_index_last)
-                ce_loss[i] = self.mse_loss(sw_index_last.unsqueeze(-1),round_targets_last.unsqueeze(-1))
+                    # ce_loss[i] += self.ccc_loss_comp(sw_index_inner,round_targets_inner)
+                    # 分别衡量每个行业的时间段差分数值
+                    idx = 0
+                    for indus_index in industry_index:
+                        if indus_index==main_index:
+                            continue
+                        target_class_indus = target_class[j,:,indus_index]
+                        keep_index = torch.where(target_class_indus>=0)[0]
+                        if keep_index.shape[0]<3:
+                            continue                        
+                        sv_item = sv[j,:,idx,i]
+                        idx += 1
+                        sv_item = sv_item[keep_index]
+                        indus_round_target_item = combine_index_round_target[j,keep_index,indus_index,i]
+                        ce_loss[i] += self.ccc_loss_comp(sv_item,indus_round_target_item)
+                ce_loss[i] = ce_loss[i]/target_class_single.shape[0]
+                # 使用涨跌二分类交叉熵计算损失
+                target_class_eva = (target_class_single[:,-1]>1).long()
+                cls_loss[i] = nn.CrossEntropyLoss()(sw_index_data,target_class_eva)
+                # round_targets_last = torch.stack(round_targets_last)
+                # sw_index_last = torch.stack(sw_index_last)
+                # ce_loss[i] = self.mse_loss(sw_index_last.unsqueeze(-1),round_targets_last.unsqueeze(-1))
                    
                 if target_mode==0:
-                    loss_sum = loss_sum + cls_loss[i]
+                    loss_sum = loss_sum + cls_loss[i] + ce_loss[i]
             
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]          
             

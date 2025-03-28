@@ -114,20 +114,23 @@ class FurIndustryDRollMixer(nn.Module):
                 )
             sub_model_list.append(sub_model)
         self.sub_models = nn.ModuleList(sub_model_list)
+        
         # 整合输出网络
-        if index_num>1:
-            self.combine_layer = nn.Sequential(
+        self.combine_layer = nn.Sequential(
+                nn.Linear(rolling_size, hidden_size),
+                nn.ReLU(), 
+                nn.Linear(hidden_size,2),
+            ).to(device)   
+        indus_combine_layers = []
+        for _ in range(num_nodes):
+            indus_combine_layer = nn.Sequential(
                     nn.Linear(rolling_size, hidden_size),
                     nn.ReLU(), 
-                    nn.Linear(hidden_size,index_num),
-                    nn.LayerNorm(index_num)
-                ).to(device)
-        else:
-            self.combine_layer = nn.Sequential(
-                    nn.Linear(rolling_size, hidden_size),
-                    nn.ReLU(), 
-                    nn.Linear(hidden_size,index_num),
+                    nn.Linear(hidden_size,rolling_size),
+                    nn.LayerNorm(rolling_size)
                 ).to(device)    
+            indus_combine_layers.append(indus_combine_layer)      
+        self.indus_combine_layers = nn.ModuleList(indus_combine_layers)      
         
     def forward(self, x_in): 
         """多个子模型顺序输出，整合输出形成统一输出"""
@@ -157,9 +160,17 @@ class FurIndustryDRollMixer(nn.Module):
             # cls_out = m_after(cls_out.squeeze(-1)).unsqueeze(-1)
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
+        cls_out_combine = torch.stack(cls_out_combine).permute(1,0,2,3)
         
+        indus_out_combine = []
+        # 不同行业分别进行多时间段整合连接
+        for i in range(self.num_nodes):
+            m = self.indus_combine_layers[i]
+            indus_out_combine.append(m(cls_out_combine[:,:,i,0]))
+        indus_out_combine = torch.stack(indus_out_combine).permute(1,2,0).unsqueeze(-1)
+        # 拼接整合整体指数预测数据
         index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
-        return None,cls_out_combine,index_data_combine
+        return None,indus_out_combine,index_data_combine
 
 #####################   新增策略模型  #########################    
       
