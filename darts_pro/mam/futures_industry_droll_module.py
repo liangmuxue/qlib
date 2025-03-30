@@ -25,7 +25,7 @@ from .futures_module import TRACK_DATE
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220512]
+TRACK_DATE = [20221011]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [0]
@@ -666,8 +666,8 @@ class FuturesIndustryDRollModule(MlpModule):
             output_list = [output_3d[2][i][-indus_num:,:],ce_index]
             cur_target_info = target_info_list[main_index]
             date = int(target_info_list[main_index]["future_start_datetime"])
-            # if not date in TRACK_DATE:
-            #     continue         
+            if not date in TRACK_DATE:
+                continue         
             # 生成整体指标涨跌趋势
             trend_value,pred_detail = self.build_import_index(output_data=output_list,target_info=target_info_list,
                             target=whole_target,
@@ -696,8 +696,8 @@ class FuturesIndustryDRollModule(MlpModule):
             rate_indus_total = np.array(rate_indus_total)
             pred_detail_list[date] = (rate_indus_total,*pred_detail)      
         # 保存结果，用于二阶段使用   
-        with open(self.result_file_path, "wb") as fout:
-            pickle.dump(np.array(result_per), fout)             
+        # with open(self.result_file_path, "wb") as fout:
+        #     pickle.dump(np.array(result_per), fout)             
         return rate_total,pred_detail_list
 
     def build_import_index(self,output_data=None,target=None,target_info=None,combine_instrument=None,instrument_index=None):  
@@ -755,7 +755,7 @@ class FuturesIndustryDRollModule(MlpModule):
             trend_value = 1
         else:
             trend_value = 0        
-        trend_value = np.argmax(ce_values[0])
+        # trend_value = np.argmax(ce_values[0])
         # 分别对每个板块的涨跌趋势进行计算
         ce_indus_total = []
         price_indus_inf_total = []

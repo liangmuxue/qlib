@@ -43,12 +43,13 @@ from darts_pro.tft_futures_dataset import TFTFuturesDataset
 from cus_utils.common_compute import compute_price_class
 import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
-from trader.utils.date_util import get_tradedays,date_string_transfer
+from trader.utils.date_util import get_tradedays_dur,get_tradedays
 from .tft_process_dataframe import TftDataframeModel 
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from sklearn.preprocessing import MinMaxScaler
 from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
 from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset
+from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -92,7 +93,10 @@ class FuturesProcessModel(TftDataframeModel):
             return            
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)   
-            return           
+            return     
+        if self.type.startswith("predict"):
+            self.predict(dataset)   
+            return                 
         print("Do Nothing")
 
     def fit_futures_togather(
@@ -710,4 +714,108 @@ class FuturesProcessModel(TftDataframeModel):
                 print("no match for:",elem.dtype)
         return tuple(aggregated)   
                                 
-                    
+    def predict(self, dataset,pred_range=None):
+        """根据预测区间参数进行预测，pred_range为二元数组，数组元素类型为date。
+           需要两阶段进行
+        """
+
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]   
+        
+        if dataset is None:
+            dataset = self.dataset
+
+        if pred_range is None:
+            pred_range = dataset.kwargs["segments"]["test"] 
+        
+        input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
+        output_chunk_length = self.optargs["forecast_horizon"]
+        expand_length = 2 *(input_chunk_length + output_chunk_length)
+         
+        # 根据日期范围逐日进行预测，得到预测结果   
+        start_date = pred_range[0]
+        end_date = pred_range[1]
+        # 同时需要延长集合时间
+        total_range = dataset.segments["train"]
+        valid_range = dataset.segments["valid"]    
+        # 扩充起止时间，以进行数据集预测匹配
+        prev_day = get_tradedays_dur(start_date,-1)
+        last_day = get_tradedays_dur(start_date,3*output_chunk_length)
+        begin_day = get_tradedays_dur(end_date,-2*input_chunk_length)
+        # 以当天为数据时间终点
+        total_range[1] = prev_day
+        valid_range[0] = begin_day 
+        valid_range[1] = prev_day 
+        # 生成未扩展的真实数据
+        segments = {"train":[total_range[0],prev_day],"valid":[begin_day,prev_day]}
+        dataset.build_series_data_with_segments(segments,no_series_data=True,val_ds_filter=False,fill_future=True)
+        # 为了和训练阶段保持一致处理，需要补充模拟数据
+        df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length) 
+        # 生成模拟数据后重置日期区间,以生成足够日期范围的val_series_transformed
+        segments = {"train":[total_range[0],last_day],"valid":[begin_day,last_day]}  
+        # 在此生成序列数据            
+        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+            dataset.build_series_data_with_segments(segments,outer_df=df_expands)      
+        
+        # 分别加载两阶段模型，依次进行推理
+        best_weight = self.optargs["best_weight"]    
+        self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
+                                                         best=best_weight,batch_file_path=self.batch_file_path)
+        self.droll_model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["droll_model_name"],work_dir=self.optargs["work_dir"],
+                                                         best=best_weight,batch_file_path=self.batch_file_path)        
+        self.model.batch_size = self.batch_size     
+        self.model.mode = "predict"
+        self.model.model.monitor = None
+           
+        # 第一阶段，产生指数数据以及行业数据，执行validate,产生中间结果      
+        self.droll_model.mode = "pred_futures_droll_industry" 
+        self.droll_model.model.mode = "pred_futures_droll_industry"  
+        self.droll_model.batch_size = self.batch_size  
+        trainer,model,train_loader,val_loader = self.droll_model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)        
+        self.droll_model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+        self.droll_model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings        
+        trainer.validate(model=model,dataloaders=val_loader)        
+        
+        # 第二阶段，进行推理及预测，先fit再predict
+        self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)               
+        
+        # 进行预测           
+        pred_result = self.model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
+                                            batch_size=self.batch_size,num_loader_workers=0)
+        # 对预测结果进行评估
+        if pred_result is None:
+            print("{} pred_result None".format(pred_range))
+        else:
+            print("{} res len:{}".format(pred_range,len(pred_result)))
+        
+        # 取得实际需要的日期结果数据
+        trade_dates = np.array(get_tradedays(start_date,end_date)).astype(np.int)
+        pred_dates = np.array(list(pred_result.keys())).astype(np.int)
+        match_dates = np.intersect1d(trade_dates,pred_dates)
+        pred_result_target = {}
+        # 生成真实数据，以进行评估
+        dataset.build_series_data_with_segments(segments,no_series_data=True,val_ds_filter=False,fill_future=True)
+        df_target = dataset.df_all
+        for key in match_dates:
+            pred_result_target[key] = pred_result[key]
+            items = pred_result[key][0]
+            trend = pred_result[key][1]
+            target_class_list = []
+            for item in items:
+                item_cur_idx = df_target[(df_target['instrument']==item[-1])&(df_target['datetime_number']==key)]['time_idx'].values[0]
+                df_item = df_target[(df_target['instrument']==item[-1])&(df_target['time_idx']>=(item_cur_idx-1))]
+                price_list = df_item['CLOSE'].values
+                price_range = (price_list[4] - price_list[0])/price_list[0]
+                p_taraget_class = get_simple_class(price_range)  
+                if trend==0:
+                    p_taraget_class = [3,2,1,0][p_taraget_class] 
+                target_class_list.append(p_taraget_class)
+        return pred_result_target          
+        
+                        

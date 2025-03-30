@@ -371,6 +371,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         sv_indus = sv[0][j,inner_index,:]
                         round_targets_item = future_round_targets_factor[j,ins_index]
                         cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
+                        # for k in range(indus_data_index.shape[0]):     
+                        #     ins_index = ins_in_indus_index[k]
+                                                    
                                   
                 if target_mode==0:
                     cls_loss[i] = cls_loss[i]/counter
@@ -380,7 +383,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     loss_sum = loss_sum + ce_loss[i]
                 if target_mode==3: 
                     cls_loss[i] = cls_loss[i]/10
-                    loss_sum = loss_sum + cls_loss[i]    
+                    loss_sum = loss_sum + cls_loss[i]
                 # 批次内进行整体指数损失计算                
                 if target_mode==5: 
                     # 与整体指数目标进行比较
@@ -472,7 +475,6 @@ class FuturesIndustryDRollLoss(UncertaintyLoss):
                         continue
                     round_targets_inner = round_targets_item[j,keep_index]     
                     round_targets_last.append(round_targets_inner[-1])
-                    # ce_loss[i] += self.ccc_loss_comp(sw_index_inner,round_targets_inner)
                     # 分别衡量每个行业的时间段差分数值
                     idx = 0
                     for indus_index in industry_index:
@@ -488,12 +490,6 @@ class FuturesIndustryDRollLoss(UncertaintyLoss):
                         indus_round_target_item = combine_index_round_target[j,keep_index,indus_index,i]
                         ce_loss[i] += self.ccc_loss_comp(sv_item,indus_round_target_item)
                 ce_loss[i] = ce_loss[i]/target_class_single.shape[0]
-                # 使用涨跌二分类交叉熵计算损失
-                target_class_eva = (target_class_single[:,-1]>1).long()
-                cls_loss[i] = nn.CrossEntropyLoss()(sw_index_data,target_class_eva)
-                # round_targets_last = torch.stack(round_targets_last)
-                # sw_index_last = torch.stack(sw_index_last)
-                # ce_loss[i] = self.mse_loss(sw_index_last.unsqueeze(-1),round_targets_last.unsqueeze(-1))
                    
                 if target_mode==0:
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]

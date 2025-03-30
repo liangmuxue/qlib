@@ -80,14 +80,14 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_industryNojr_droll8_classifyStep3_202203"
+               model_name: "Futures_industryNojr_drollPriceIndusCombineStep3_202203"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
-               rolling_size : 18
+               rolling_size : 6
                hidden_size: 32
                forecast_horizon: &forecast_horizon 3
                cut_len: 3

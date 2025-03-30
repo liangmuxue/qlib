@@ -119,8 +119,9 @@ class FurIndustryDRollMixer(nn.Module):
         self.combine_layer = nn.Sequential(
                 nn.Linear(rolling_size, hidden_size),
                 nn.ReLU(), 
-                nn.Linear(hidden_size,2),
-            ).to(device)   
+                nn.Linear(hidden_size,index_num),
+                nn.LayerNorm(index_num)
+            ).to(device)
         indus_combine_layers = []
         for _ in range(num_nodes):
             indus_combine_layer = nn.Sequential(

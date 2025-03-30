@@ -25,7 +25,7 @@ from .futures_module import TRACK_DATE
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220512]
+TRACK_DATE = [20221011]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -718,7 +718,8 @@ class FuturesIndustryModule(MlpModule):
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         # 使用全部验证结果进行统一比较
-        output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_3d,_,_,index_round_targets_3d,target_info_3d  = self.combine_output_total(output_result)
+        output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_3d,_,_, \
+            index_round_targets_3d,target_info_3d  = self.combine_output_total(output_result)
         total_imp_cnt = np.where(target_class_3d==3)[0].shape[0]
         rate_total = {}
         result_date_list = {}
@@ -890,11 +891,11 @@ class FuturesIndustryModule(MlpModule):
         # 整体指数预测数据转化为价格参考指数，并设置阈值进行涨跌判断
         price_inf = price_inf_total[main_index]
         price_inf_threhold = 0
-        # trend_flag = (price_inf>price_inf_threhold)
         trend_flag = (price_inf>price_inf_threhold)
-        trend_flag = (trend_value==1)
+        # trend_flag = (trend_value==1)
         
         ce_indus = ce_values[0]
+        ce_indus = price_inf_total_real
         cls_ins = cls[...,0]
         
         # 取得行业板块中最高和最低的两个，并使用这2个中的一个作为目标行业板块
@@ -1029,15 +1030,29 @@ class FuturesIndustryModule(MlpModule):
             target_info
         ) = batch
                
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,past_future_round_targets,index_round_targets) 
+        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,past_future_round_targets,index_round_targets)     
         input_batch = self._process_input_batch(inp)
-        (outputs,vr_class,out_class_total) = self(input_batch,optimizer_idx=-1)
+        (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
+        choice_out,trend_value,combine_index = vr_class
         
-        choice_out,trend_value,combine_index = vr_class        
+        # 记录批次内价格涨跌幅，用于整体指数批次归一化数据的回溯
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+        # 只获取整体指数的价格数据
+        price_array = np.array([ts[main_index]["price_array"] for ts in target_info])
+        price_round_data = (price_array[:,-1] - price_array[:,-self.output_chunk_length-1])/price_array[:,-self.output_chunk_length-1]
+        
+        for index,ts in enumerate(target_info):
+            ts[main_index]["price_round_data"] = price_round_data
+            ts[main_index]["price_round_index"] = index
+            ts[main_index]["target_round_data"] = index_round_targets.cpu().numpy()[:,-1,-1,-1]
+            ts[main_index]["pred_round_data"] = output[-1][2].cpu().numpy().squeeze(-1)    
+        whole_index_round_targets = index_round_targets[:,:,:-1,:]  
         # 保存数据用于后续验证
-        output_res = (outputs,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
+        output_res = (output,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
                       future_target.cpu().numpy(),target_class.cpu().numpy(),
-                      price_targets.cpu().numpy(),past_future_round_targets.cpu().numpy(),index_round_targets.cpu().numpy(),target_info)
+                      price_targets.cpu().numpy(),past_future_round_targets.cpu().numpy(),whole_index_round_targets.cpu().numpy(),
+                      index_round_targets.cpu().numpy(),target_info)
         self.output_result.append(output_res)        
          
     def on_predict_epoch_end(self,args):   
