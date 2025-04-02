@@ -155,10 +155,11 @@ class TFTDataset(DatasetH):
         data["label"] = data["label"].astype("float64")
         # 使用前几天的移动平均值作为目标数值
         data["label_ori"] = data["label"]
+        data["price_norm"] = data[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5)) 
+        # Mock
+        data["diff_range"] = data["price_norm"] 
         group_column = self.get_group_column()
         data["label"] = data.groupby(group_column)["label"].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
-        # 生成价格归一化数据
-        data["price_norm"] = data[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5))    
         # 生成KDJ指标
         self.compute_kdj(data)    
         self.compute_atr(data)     

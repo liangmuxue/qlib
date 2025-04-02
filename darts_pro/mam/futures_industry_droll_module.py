@@ -74,7 +74,7 @@ class FuturesIndustryDRollModule(MlpModule):
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
                                     use_weighted_loss_func=use_weighted_loss_func,batch_file_path=batch_file_path,
                                     device=device,**kwargs)  
-        self.result_file_path = "custom/data/results/droll_rs.pkl"
+        self.result_file_path = "custom/data/results/droll_rs_price.pkl"
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -412,7 +412,7 @@ class FuturesIndustryDRollModule(MlpModule):
             self.log("corr cnt", np.sum(sr==1), prog_bar=True)  
             self.log("corr rate", np.sum(sr==1)/sr.shape[0], prog_bar=True) 
         
-        # print("err result:{}",date_list[np.where(sr==0)[0]])
+        print("err result:{}",date_list[np.where(sr==0)[0]])
           
         # 如果是测试模式，则在此进行可视化
         if self.mode is not None and self.mode.startswith("pred_") :
@@ -476,6 +476,7 @@ class FuturesIndustryDRollModule(MlpModule):
                     indus_price_array = price_targets[:,indus_index_rel] 
                     price_array_range = indus_price_array[:,:,-1] - indus_price_array[:,:,-self.output_chunk_length-1]    
                     index_price_array_range = price_array_range[:,main_index]
+                    index_price_array_range = ts_arr[-1][main_index]["price_round_data"]
                     idx = 0
                     pred_indus_mean = pred_detail[3]
                     price_indus_inf = pred_detail[4]
@@ -488,6 +489,7 @@ class FuturesIndustryDRollModule(MlpModule):
                         else:
                             output_item = cls_output[index,:,idx,j] 
                             price_array_range_item = price_array_range[:,indus_idx]
+                            price_array_range_item = ts_arr[-1][indus_idx]["price_round_data"]
                             idx += 1
                             # continue
                         corr_flag = (trend_corr_total[indus_idx]==1)
@@ -526,8 +528,8 @@ class FuturesIndustryDRollModule(MlpModule):
             # 取得行业均值作为整体指数数值
             price_array = []
             for item in ts:
-                # if int(ts[-1][0]['future_start_datetime'])==20221010:
-                #     print("ggg")
+                if int(ts[-1][0]['future_start_datetime'])==20221011:
+                    print("ggg")
                 price_array_item = np.array([item[indus_index]["price_array"] for indus_index in indus_index_rel])
                 price_array.append(price_array_item)
             price_array = np.stack(price_array)
@@ -545,7 +547,7 @@ class FuturesIndustryDRollModule(MlpModule):
             ts[-1][main_index]["price_round_data"] = price_index_round_data
             # ts[-1][main_index]["pred_round_data"] = output[-1][2][index].cpu().numpy()
             ts[-1][main_index]["pred_round_data"] = np.array(total_indus_pred).mean(axis=0)
-            ts[-1][main_index]["target_round_data"] = index_round_targets_reshape.cpu().numpy()[index,:,main_index,-1,-1]
+            ts[-1][main_index]["target_round_data"] = index_round_targets_reshape[index,:,indus_index_rel,-1,-1].cpu().numpy().mean(axis=1)
             
         whole_index_round_targets = index_round_targets[:,:,:-1,:]
         # 保存数据用于后续验证
@@ -666,12 +668,14 @@ class FuturesIndustryDRollModule(MlpModule):
             output_list = [output_3d[2][i][-indus_num:,:],ce_index]
             cur_target_info = target_info_list[main_index]
             date = int(target_info_list[main_index]["future_start_datetime"])
-            if not date in TRACK_DATE:
-                continue         
+            # if not date in TRACK_DATE:
+            #     continue         
             # 生成整体指标涨跌趋势
             trend_value,pred_detail = self.build_import_index(output_data=output_list,target_info=target_info_list,
                             target=whole_target,
                             combine_instrument=combine_content,instrument_index=instrument_in_indus_index)
+            if trend_value is None:
+                continue
             result_per.append([date,pred_detail[2],pred_detail[3],trend_value])
             price_round_data = target_info_list[main_index]["price_round_data"]
             if trend_value==1 and price_round_data[-1]>0:
@@ -703,11 +707,10 @@ class FuturesIndustryDRollModule(MlpModule):
     def build_import_index(self,output_data=None,target=None,target_info=None,combine_instrument=None,instrument_index=None):  
         """生成涨幅达标的预测数据下标"""
         
-        # return None,None,None,None,None
+        # return None,None
     
         (cls_values,ce_values) = output_data
         
-        # pred_import_index,overroll_trend = self.strategy_top(cls_values,choice,trend_value,combine_index,target=target,price_array=price_array,target_info=target_info_list)
         trend_value,pred_detail = self.strategy_top_direct(cls_values,ce_values,
                                     target=target,target_info=target_info,instrument_index=instrument_index,combine_instrument=combine_instrument)
 
@@ -745,11 +748,15 @@ class FuturesIndustryDRollModule(MlpModule):
         
         # 归一化批次内的预测值
         pred_index_round = pred_round_data_total[main_index]
+        target_index_round = target_round_data_total[main_index]
         # pred_index_round = pred_round_data_total[indus_index_without_main].mean(axis=0)
         ce_index_mean = MinMaxScaler(feature_range=(0.001, 1)).fit_transform(np.expand_dims(pred_index_round,-1)).squeeze()[-1]
+        target_index_mean = MinMaxScaler(feature_range=(0.001, 1)).fit_transform(np.expand_dims(target_index_round,-1)).squeeze()[-1]
         # 整体指数预测数据转化为价格参考指数，并设置阈值进行涨跌判断
         price_inf = price_round_data_total[main_index].min() + \
-            (price_round_data_total[main_index].max()-price_round_data_total[main_index].min())*ce_index_mean
+            (price_round_data_total[main_index].max()-price_round_data_total[main_index].min())*ce_index_mean*10
+        price_real_inf = price_round_data_total[main_index].min() + \
+            (price_round_data_total[main_index].max()-price_round_data_total[main_index].min())*target_index_mean            
         trend_flag = (price_inf>price_inf_threhold)
         if trend_flag:
             trend_value = 1

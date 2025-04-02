@@ -151,7 +151,7 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
                 series = target_series[indus_code]
                 instrument = series.instrument_code
                 price_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["price_norm"].values
+                                    &(df_data["instrument_rank"]==code)]["label_ori"].values
                 datetime_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["datetime_number"].values                                
                 # label_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
@@ -258,24 +258,27 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
             target_vals_begin = target_vals[1:-cut_len]
             target_vals_end = target_vals[cut_len+1:]
             # 计算跨预测区域差值
-            combine_value = target_vals_end - target_vals_begin
+            combine_value = target_vals_end - target_vals_begin            
+            # 计算跨预测区域差值
+            combine_value = target_vals[1:-cut_len]
+            # if i==9:
+            #     print("ggg")             
             combine_values.append(combine_value)    
-            range_value = combine_value/target_vals_begin
-            range_values.append(range_value)
             # 累加起始索引，并记录当前索引范围
             end_index = begin_index + combine_value.shape[0]
             index_range.append([begin_index,end_index])
             begin_index = end_index
-            
+
         combine_values = np.concatenate(combine_values,axis=0)
-        index_range = np.array(index_range)   
+        index_range = np.array(index_range)  
+                                
         # 根据单独指标决定如何归一化
         for i in range(combine_values.shape[-1]):
             if scale_mode[i]==1:
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
-                combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1) 
+                # combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1) 
             elif scale_mode[i]==5:
                 # 只剔除异常值，不归一化
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
@@ -294,7 +297,7 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
             idx_range = index_range[i]
             data_item = combine_values[idx_range[0]:idx_range[1],:]
             # 填充空白值
-            data_item = np.pad(data_item,((2,cut_len-1),(0,0)),mode='minimum')             
+            data_item = np.pad(data_item,((1,cut_len),(0,0)),mode='minimum')             
             total_target_vals.append(data_item)
           
         return total_target_vals  
@@ -377,8 +380,6 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
                 future_target = target_vals[future_start:future_end]
                 past_target = target_vals[past_start:past_end]
                 instrument = self.ass_data[code][0]
-                # if index==1 and k==0:
-                #     print("ggg")  
                 
                 # 重新生成价格数据，使用行业内品种的均值生成行业价格，使用所有行业的均值生成整体指标价格。先归一化再取平均值再差分。     
                 # ins_index = self.ins_in_indus_index[index]        
@@ -526,12 +527,18 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
             past_future_round_targets_total[k] = past_future_round_targets
             index_round_targets_total[k] = index_round_targets
         
+        # if future_start_datetime==20221011 and k==0:
+        #     print("ggg")          
         # 多段整体指标数据的归一化
-        rl_keep_index = np.where(target_class_total[:,self.main_index]>=0)[0]
-        if rl_keep_index.shape[0]>=3:
-            index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
-                index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:])
-        
+        # rl_keep_index = np.where(target_class_total[:,self.main_index]>=0)[0]
+        # if rl_keep_index.shape[0]>=3:
+        #     index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
+        #         index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:])
+        # for indus_index in self.indus_index_rel:
+        #     rl_keep_index = np.where(target_class_total[:,indus_index]>=0)[0]
+        #     if rl_keep_index.shape[0]>=3:
+        #         index_round_targets_total[rl_keep_index,indus_index,-1,:] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
+        #             index_round_targets_total[rl_keep_index,indus_index,-1,:])        
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets_total,\

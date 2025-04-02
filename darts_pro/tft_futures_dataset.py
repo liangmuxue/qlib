@@ -84,6 +84,20 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df = self.build_industry_mean(df,indus_info=indus_info)     
         df['industry'] = df['industry'].astype(int)          
         df[time_column] = df[time_column].astype(int)   
+        # 生成价格差分数据
+        df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
+        def rl_apply(df_target):
+            values = df_target.values
+            diff_range = (values[-1] - values[0])/values[0]
+            # df_target['diff_range'] = diff_range
+            return diff_range     
+        diff_range = df.groupby(group_column)['label_ori'].rolling(window=(self.pred_len+1)).apply(rl_apply).values
+        diff_range = np.concatenate([diff_range,np.zeros((self.pred_len-1))])[self.pred_len-1:]
+        df['diff_range'] = diff_range  
+        # 消除异常数据-Again
+        df = df[df['industry']!='None']    
+        df = df.fillna(0) 
+        df = df[df['datetime_number']!=0]                  
         # 静态协变量和未来协变量提前进行归一化
         for conv_col in self.get_static_columns():
             conv_col_scale = conv_col + "_scale"

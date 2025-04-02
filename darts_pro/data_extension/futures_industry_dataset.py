@@ -148,7 +148,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 code = int(series.static_covariates["instrument_rank"].values[0])
                 instrument = global_var.get_value("dataset").get_group_code_by_rank(code)
                 price_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["price_norm"].values
+                                    &(df_data["instrument_rank"]==code)]["label_ori"].values
                 datetime_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["datetime_number"].values                                
                 label_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)

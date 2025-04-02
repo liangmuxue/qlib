@@ -254,6 +254,9 @@ class TFTSeriesDataset(TFTDataset):
         # 在筛选的过程中，有可能产生股票个数不一致的情况，取交集
         df_train = df_train[df_train[self.get_group_column()].isin(df_val[self.get_group_column()])]
         df_val = df_val[df_val[self.get_group_column()].isin(df_train[self.get_group_column()])]
+        # 针对训练接和验证集，分别生成价格归一化数据
+        df_train["price_norm"] = df_train[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5))    
+        df_val["price_norm"] = df_val[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5))    
         # 存储数据到本地变量
         self.df_train = df_train
         self.df_val = df_val

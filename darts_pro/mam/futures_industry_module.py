@@ -749,8 +749,8 @@ class FuturesIndustryModule(MlpModule):
             output_list = [output_3d[2][i],ce_index,output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
-            if not date in TRACK_DATE:
-                continue  
+            # if not date in TRACK_DATE:
+            #     continue  
             
             # 取得一阶段结果数据，以及对应的当日结果        
             res_index = np.where(index_result[:,0]==date)
@@ -804,7 +804,7 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(overroll_trend)   
                 # Add Industry Result
                 indus_result_total[date] = indus_result
-        print("result:",result_date_list)      
+        # print("result:",result_date_list)      
 
         # 如果是预测模式，则只输出结果,不验证
         if predict_mode:
