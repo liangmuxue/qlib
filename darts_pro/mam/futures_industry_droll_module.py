@@ -74,7 +74,7 @@ class FuturesIndustryDRollModule(MlpModule):
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
                                     use_weighted_loss_func=use_weighted_loss_func,batch_file_path=batch_file_path,
                                     device=device,**kwargs)  
-        self.result_file_path = "custom/data/results/droll_rs_price.pkl"
+        self.result_file_path = "custom/data/results/droll_rs_diff.pkl"
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -328,7 +328,7 @@ class FuturesIndustryDRollModule(MlpModule):
             self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-        
+ 
         output_combine = (output,vr_class,price_targets,past_future_round_targets)
         return loss,detail_loss,output_combine       
 
@@ -528,8 +528,6 @@ class FuturesIndustryDRollModule(MlpModule):
             # 取得行业均值作为整体指数数值
             price_array = []
             for item in ts:
-                if int(ts[-1][0]['future_start_datetime'])==20221011:
-                    print("ggg")
                 price_array_item = np.array([item[indus_index]["price_array"] for indus_index in indus_index_rel])
                 price_array.append(price_array_item)
             price_array = np.stack(price_array)
@@ -548,7 +546,9 @@ class FuturesIndustryDRollModule(MlpModule):
             # ts[-1][main_index]["pred_round_data"] = output[-1][2][index].cpu().numpy()
             ts[-1][main_index]["pred_round_data"] = np.array(total_indus_pred).mean(axis=0)
             ts[-1][main_index]["target_round_data"] = index_round_targets_reshape[index,:,indus_index_rel,-1,-1].cpu().numpy().mean(axis=1)
-            
+            # if int(ts[-1][0]['future_start_datetime'])==20221011:
+            #     print("ggg")            
+                       
         whole_index_round_targets = index_round_targets[:,:,:-1,:]
         # 保存数据用于后续验证
         output_res = (output,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
@@ -700,8 +700,8 @@ class FuturesIndustryDRollModule(MlpModule):
             rate_indus_total = np.array(rate_indus_total)
             pred_detail_list[date] = (rate_indus_total,*pred_detail)      
         # 保存结果，用于二阶段使用   
-        # with open(self.result_file_path, "wb") as fout:
-        #     pickle.dump(np.array(result_per), fout)             
+        with open(self.result_file_path, "wb") as fout:
+            pickle.dump(np.array(result_per), fout)             
         return rate_total,pred_detail_list
 
     def build_import_index(self,output_data=None,target=None,target_info=None,combine_instrument=None,instrument_index=None):  

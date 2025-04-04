@@ -261,8 +261,6 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
             combine_value = target_vals_end - target_vals_begin            
             # 计算跨预测区域差值
             combine_value = target_vals[1:-cut_len]
-            # if i==9:
-            #     print("ggg")             
             combine_values.append(combine_value)    
             # 累加起始索引，并记录当前索引范围
             end_index = begin_index + combine_value.shape[0]
@@ -278,7 +276,7 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
-                # combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1) 
+                combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1) 
             elif scale_mode[i]==5:
                 # 只剔除异常值，不归一化
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
@@ -332,11 +330,11 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
         ########### 生成行业数据 #########
         sw_date_mapping = self.date_mappings[idx]
         # 轮询二次滚动中的每一个时间点并进行原数值操作
-        for k in range(-self.rolling_size+1,1):
+        for k in range(self.rolling_size):
             for index,ser_idx in enumerate(sw_date_mapping):
                 if ser_idx==-1:
                     continue  
-                ser_idx = ser_idx+k   
+                ser_idx = ser_idx - self.rolling_size + k   
                 if ser_idx<0:
                     continue                 
                 # 取得原序列索引进行series取数,目前一致
@@ -527,18 +525,18 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
             past_future_round_targets_total[k] = past_future_round_targets
             index_round_targets_total[k] = index_round_targets
         
-        # if future_start_datetime==20221011 and k==0:
+        # if future_start_datetime==20221011 and k==self.rolling_size-1:
         #     print("ggg")          
         # 多段整体指标数据的归一化
-        # rl_keep_index = np.where(target_class_total[:,self.main_index]>=0)[0]
-        # if rl_keep_index.shape[0]>=3:
-        #     index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
-        #         index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:])
-        # for indus_index in self.indus_index_rel:
-        #     rl_keep_index = np.where(target_class_total[:,indus_index]>=0)[0]
-        #     if rl_keep_index.shape[0]>=3:
-        #         index_round_targets_total[rl_keep_index,indus_index,-1,:] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
-        #             index_round_targets_total[rl_keep_index,indus_index,-1,:])        
+        rl_keep_index = np.where(target_class_total[:,self.main_index]>=0)[0]
+        if rl_keep_index.shape[0]>=3:
+            index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
+                index_round_targets_total[rl_keep_index,self.main_index_rel,-1,:])
+        for indus_index in self.indus_index_rel:
+            rl_keep_index = np.where(target_class_total[:,indus_index]>=0)[0]
+            if rl_keep_index.shape[0]>=3:
+                index_round_targets_total[rl_keep_index,indus_index,-1,:] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
+                    index_round_targets_total[rl_keep_index,indus_index,-1,:])        
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets_total,\

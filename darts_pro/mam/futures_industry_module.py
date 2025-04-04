@@ -72,7 +72,7 @@ class FuturesIndustryModule(MlpModule):
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
                                     use_weighted_loss_func=use_weighted_loss_func,batch_file_path=batch_file_path,
                                     device=device,**kwargs)  
-        self.result_file_path = "custom/data/results/droll_rs.pkl"
+        self.result_file_path = "custom/data/results/droll_rs_diff.pkl"
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -749,8 +749,8 @@ class FuturesIndustryModule(MlpModule):
             output_list = [output_3d[2][i],ce_index,output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
-            # if not date in TRACK_DATE:
-            #     continue  
+            if not date in TRACK_DATE:
+                continue  
             
             # 取得一阶段结果数据，以及对应的当日结果        
             res_index = np.where(index_result[:,0]==date)
@@ -804,7 +804,7 @@ class FuturesIndustryModule(MlpModule):
                 rate_total[date].append(overroll_trend)   
                 # Add Industry Result
                 indus_result_total[date] = indus_result
-        # print("result:",result_date_list)      
+        print("result:",result_date_list)      
 
         # 如果是预测模式，则只输出结果,不验证
         if predict_mode:
@@ -937,75 +937,6 @@ class FuturesIndustryModule(MlpModule):
         pred_import_index = pred_import_index[:select_num]
         
         return indus_top_index,pred_import_index,trend_value,price_inf_total,indus_inf_total,price_inf
-
-    def strategy_top_direct(self,cls,ce_values,target=None,price_array=None,target_info=None,instrument_index=None,combine_instrument=None):
-        """排名方式筛选候选者"""
-
-        with open(self.result_file_path, "rb") as fin:
-            # 整合第一阶段的总体指数判断，进行综合判断
-            index_result = pickle.load(fin)       
-        
-        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-        # 拿到价格差分数据，并以此为衡量整体指数的口径
-        price_round_data = target_info[main_index]["price_round_data"]
-        price_round_index = target_info[main_index]["price_round_index"]
-        target_round_data = target_info[main_index]["target_round_data"]
-        pred_round_data = target_info[main_index]["pred_round_data"]
-        price_round_data = np.delete(price_round_data, [price_round_index])
-        
-        # cls_ins = cls[...,1]
-        cls_ins = cls[...,0]
-        ce_indus = ce_values[0]
-        # 归一化批次内的预测值
-        ce_index_mean = MinMaxScaler(feature_range=(0.001, 1)).fit_transform(np.expand_dims(pred_round_data,-1)).squeeze(-1)[price_round_index]
-        price_inf_threhold = 0
-        
-        top_num = 3
-        select_num = 3
-        trend_value = 0
-        
-        # 取得行业板块中最高和最低的两个，并使用这2个中的一个作为目标行业板块
-        raise_top_index = np.argsort(-ce_indus)[0] 
-        fall_top_index = np.argsort(ce_indus)[0]   
-        # 整体指数预测数据转化为价格参考指数，并设置阈值进行涨跌判断
-        price_inf = price_round_data.min() + (price_round_data.max()-price_round_data.min())*ce_index_mean
-        # trend_flag = ce_index.mean()>ce_index_mean_threhold
-        trend_flag = (price_inf>price_inf_threhold)
-        # trend_flag = np.sum(ce_indus>ce_index_mean_threhold)<top_num
-        # trend_flag = True
-        # 整体预测均值和阈值比较，决定整体使用多方还是空方作为预测方向
-        if trend_flag:
-            trend_type = 1
-            indus_top_index = raise_top_index
-        else:
-            trend_type = 0
-            indus_top_index = fall_top_index
-        
-        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        ins_rel_index = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,indus_top_index)
-        cls_can = cls_ins[ins_rel_index[0]:ins_rel_index[1]]
-        
-        # 取得对应行业下的品种排名，并作为候选
-        if trend_type==0:
-            # 看CLS指标的多方
-            pre_index = np.argsort(cls_can)[:top_num]  
-            # 取得RSV排序靠前的记录，从而进行空方判断
-            pred_import_index = []
-            for index in pre_index:
-                pred_import_index.append(index)            
-            trend_value = 0              
-        else:
-            # 取得CLS反向排序靠前的记录，从而进行多方判断
-            pre_index = np.argsort(-cls_can)[:top_num]       
-            pred_import_index = []
-            for index in pre_index:
-                pred_import_index.append(index)
-            trend_value = 1
-        pred_import_index = np.array(pred_import_index)
-        pred_import_index = pred_import_index[:select_num]
-        
-        return indus_top_index,pred_import_index,trend_value,ce_index_mean,price_inf
 
     def on_predict_epoch_start(self):  
         self.output_result = []

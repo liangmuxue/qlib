@@ -358,6 +358,7 @@ class FuturesProcessModel(TftDataframeModel):
             self.model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=map_location)
             self.model.batch_size = self.batch_size     
+            self.model.model.batch_size = self.batch_size   
             self.model.model.monitor = monitor
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=2) 
