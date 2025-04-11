@@ -12,7 +12,7 @@ from .layers.Embed import DataEmbedding_wo_pos
 class FurTimeMixer(nn.Module):
     """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络"""
     
-    def __init__(self, c_in=10,c_out=1,seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,decomp_method='moving_avg',d_ff=2048,moving_avg=25,
+    def __init__(self, c_in=10,c_out=1,seq_len=25,round_skip_len=25,pred_len=5,past_cov_dim=12, dropout=0.3,decomp_method='moving_avg',d_ff=2048,moving_avg=25,
                  e_layers:int=3, d_model=16,down_sampling_method='avg',down_sampling_window=5,down_sampling_layers=1,hidden_size=8,
                  num_nodes=0,node_dim=16,day_of_week_size=5,temp_dim_diw=8,month_of_year_size=12,temp_dim_miy=8,day_of_month_size=31,temp_dim_dim=8,
                  device="cpu"):
@@ -41,6 +41,8 @@ class FurTimeMixer(nn.Module):
         self.temp_dim_dim = temp_dim_dim
         self.num_nodes = num_nodes
         self.node_dim = node_dim
+        self.round_skip_len = round_skip_len
+        
         ti_sp_dim = temp_dim_diw + temp_dim_miy + temp_dim_dim + node_dim
                 
         ###### TimeMixer部分 #####
@@ -97,8 +99,8 @@ class FurTimeMixer(nn.Module):
         self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
         self.all_to_index_projection_layer = nn.Linear(num_nodes*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
-        self.index_skip_layer = nn.Linear(seq_len-pred_len, 1, bias=True)   
-        self.round_skip_layer = nn.Linear(seq_len-pred_len, 1, bias=True)   
+        self.index_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
+        self.round_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
                            
     def forward(self, x_in): 
         

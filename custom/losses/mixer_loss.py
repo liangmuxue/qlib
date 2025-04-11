@@ -454,7 +454,9 @@ class FuturesIndustryDRollLoss(UncertaintyLoss):
         loss_sum = torch.tensor(0.0).to(self.device) 
         
         industry_index = [i for i in range(target_class.shape[-1])]
+        industry_rel_index = [i for i in range(target_class.shape[-1])]
         main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        industry_rel_index.remove(main_index)
         index_round_target = combine_index_round_target[:,:,main_index,:]
         
         for i in range(len(output)):
@@ -477,22 +479,30 @@ class FuturesIndustryDRollLoss(UncertaintyLoss):
                     round_targets_last.append(round_targets_inner[-1])
                     # 分别衡量每个行业的时间段差分数值
                     idx = 0
+                    indus_sv = []
+                    indus_target = []
                     for indus_index in industry_index:
                         if indus_index==main_index:
                             continue
                         target_class_indus = target_class[j,:,indus_index]
                         keep_index = torch.where(target_class_indus>=0)[0]
                         if keep_index.shape[0]<3:
-                            continue                        
+                            continue                          
                         sv_item = sv[j,:,idx,i]
                         idx += 1
                         sv_item = sv_item[keep_index]
+                        if keep_index[-1]==(combine_index_round_target.shape[1]-1):
+                            indus_sv.append(sv_item[-1])    
+                            indus_target.append(combine_index_round_target[j,-1,indus_index,i])                     
                         indus_round_target_item = combine_index_round_target[j,keep_index,indus_index,i]
-                        ce_loss[i] += self.ccc_loss_comp(sv_item,indus_round_target_item)
-                ce_loss[i] = ce_loss[i]/target_class_single.shape[0]
-                   
+                        cls_loss[i] += self.ccc_loss_comp(sv_item,indus_round_target_item)
+                cls_loss[i] = cls_loss[i]/target_class_single.shape[0]
+                # 行业类别的横向比较
+                indus_target = combine_index_round_target[:,-1,industry_rel_index,i]
+                # indus_target = normalization(indus_target,mode="torch",axis=1)
+                ce_loss[i] = self.mse_loss(sw_index_data,indus_target)
                 if target_mode==0:
-                    loss_sum = loss_sum + cls_loss[i] + ce_loss[i]
+                    loss_sum = loss_sum + cls_loss[i] # + ce_loss[i]
             
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]          
             

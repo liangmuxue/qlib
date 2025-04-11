@@ -152,6 +152,7 @@ class FuturesIndustryModule(MlpModule):
                 industry_index=industry_index,
                 seq_len=self.input_chunk_length,
                 pred_len=pred_len,
+                round_skip_len=self.input_chunk_length-pred_len,
                 down_sampling_window=pred_len,
                 past_cov_dim=input_dim,
                 dropout=dropout,

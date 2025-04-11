@@ -747,7 +747,7 @@ class FuturesProcessModel(TftDataframeModel):
         begin_day = get_tradedays_dur(end_date,-2*input_chunk_length)
         # 以当天为数据时间终点
         total_range[1] = prev_day
-        valid_range[0] = begin_day 
+        begin_day = valid_range[0]
         valid_range[1] = prev_day 
         # 生成未扩展的真实数据
         segments = {"train":[total_range[0],prev_day],"valid":[begin_day,prev_day]}

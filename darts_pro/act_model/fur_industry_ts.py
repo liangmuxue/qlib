@@ -17,7 +17,7 @@ class FurIndustryMixer(nn.Module):
        把行业板块信息融合到模型中，不同行业，权重不共享
     """
     
-    def __init__(self, seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
+    def __init__(self, seq_len=25, round_skip_len=25,pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
                  combine_nodes_num=None,instrument_index=None,index_num=1,device="cpu"):
         """行业总体网络，分为子网络，以及整合网络2部分"""
         
@@ -36,6 +36,7 @@ class FurIndustryMixer(nn.Module):
                 num_nodes=num_nodes,
                 seq_len=seq_len,
                 pred_len=pred_len,
+                round_skip_len=round_skip_len,
                 past_cov_dim=past_cov_dim,
                 dropout=dropout,
                 down_sampling_window=down_sampling_window,
@@ -88,7 +89,7 @@ class FurIndustryDRollMixer(nn.Module):
        使用二次滚动计算的模式，整合批次和二次序列数组
     """
     
-    def __init__(self, seq_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
+    def __init__(self, seq_len=25,round_skip_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
                  main_index=-1,rolling_size=18,num_nodes=6,index_num=1,device="cpu"):
         """行业总体网络，分为子网络，以及整合网络2部分"""
         
@@ -109,12 +110,20 @@ class FurIndustryDRollMixer(nn.Module):
                 pred_len=pred_len,
                 past_cov_dim=past_cov_dim,
                 dropout=dropout,
+                round_skip_len=round_skip_len,
                 down_sampling_window=down_sampling_window,
                 device=device,
                 )
             sub_model_list.append(sub_model)
         self.sub_models = nn.ModuleList(sub_model_list)
-        
+        # Last Rolling Data
+        self.indus_lst_layers = nn.Sequential(
+                nn.Linear(rolling_size*num_nodes, hidden_size),
+                nn.ReLU(), 
+                nn.Linear(hidden_size,num_nodes),
+                nn.LayerNorm(num_nodes)
+            ).to(device)
+                      
         # 整合输出网络
         self.combine_layer = nn.Sequential(
                 nn.Linear(rolling_size, hidden_size),
@@ -170,8 +179,9 @@ class FurIndustryDRollMixer(nn.Module):
             indus_out_combine.append(m(cls_out_combine[:,:,i,0]))
         indus_out_combine = torch.stack(indus_out_combine).permute(1,2,0).unsqueeze(-1)
         # 拼接整合整体指数预测数据
-        index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
-        return None,indus_out_combine,index_data_combine
+        index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))   
+        lst_data = self.indus_lst_layers(indus_out_combine.reshape([indus_out_combine.shape[0],-1]))  
+        return None,indus_out_combine,lst_data
 
 #####################   新增策略模型  #########################    
       

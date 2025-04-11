@@ -86,14 +86,20 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df[time_column] = df[time_column].astype(int)   
         # 生成价格差分数据
         df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
-        def rl_apply(df_target):
+        def rl_apply(df_target,div):
             values = df_target.values
-            diff_range = (values[-1] - values[0])/values[0]
+            if div:
+                diff_range = (values[-1] - values[0])/values[0]
+            else:
+                diff_range = (values[-1] - values[0])
             # df_target['diff_range'] = diff_range
             return diff_range     
-        diff_range = df.groupby(group_column)['label_ori'].rolling(window=(self.pred_len+1)).apply(rl_apply).values
-        diff_range = np.concatenate([diff_range,np.zeros((self.pred_len-1))])[self.pred_len-1:]
-        df['diff_range'] = diff_range  
+        def compute_diff(source_col,target_col,div=True):
+            diff_range = df.groupby(group_column)[source_col].rolling(window=self.pred_len+1).apply(rl_apply,args=(div,)).values
+            # diff_range = np.concatenate([diff_range,np.zeros((self.pred_len-1))])[self.pred_len-1:]
+            df[target_col] = diff_range  
+        compute_diff("label_ori","diff_range")
+        compute_diff("RSV5","rsv_diff",div=False)
         # 消除异常数据-Again
         df = df[df['industry']!='None']    
         df = df.fillna(0) 
