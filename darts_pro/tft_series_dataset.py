@@ -275,7 +275,6 @@ class TFTSeriesDataset(TFTDataset):
         segments = self.segments
         return self.build_series_data_with_segments(segments, outer_df=outer_df, no_series_data=no_series_data, val_ds_filter=val_ds_filter, fill_future=fill_future)
 
-        
     def create_series_data(self,df_all,df_train,df_val,fill_future=False):
         
         group_column = self.get_group_rank_column()
@@ -359,6 +358,7 @@ class TFTSeriesDataset(TFTDataset):
                 group_col_val = series.static_covariates[group_column].values[0]
                 instrument_code = self.get_group_code_by_rank(group_col_val)
                 series.instrument_code = instrument_code
+                series.last_time_idx = series.time_index.stop
 
         # 生成过去协变量，并归一化
         logger.info("begin build_covariates")
@@ -812,6 +812,9 @@ class TFTSeriesDataset(TFTDataset):
             datetime_range = get_tradedays(last_datetime,datetime_end)[1:]
             df_expand["datetime_number"] = np.array(datetime_range).astype(np.int32)
             df_expand["datetime"] = pd.to_datetime(df_expand["datetime_number"].astype(str),format="%Y%m%d")
+            df_expand["month"] = df_expand.datetime.dt.month
+            df_expand["dayofweek"] = df_expand.datetime.dt.dayofweek    
+            df_expand["dayofmonth"] = df_expand.datetime.dt.day              
             if df_expands is None:
                 df_expands = df_expand
             else:

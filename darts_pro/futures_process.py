@@ -752,35 +752,28 @@ class FuturesProcessModel(TftDataframeModel):
         # 生成未扩展的真实数据
         segments = {"train":[total_range[0],prev_day],"valid":[begin_day,prev_day]}
         dataset.build_series_data_with_segments(segments,no_series_data=True,val_ds_filter=False,fill_future=True)
+        # 记录实际截止日期对应的序列编号最大值，后续与模拟数据进行区分
+        time_idx_mapping = dataset.df_all.groupby("instrument")["time_idx"].max()
         # 为了和训练阶段保持一致处理，需要补充模拟数据
         df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length) 
         # 生成模拟数据后重置日期区间,以生成足够日期范围的val_series_transformed
         segments = {"train":[total_range[0],last_day],"valid":[begin_day,last_day]}  
         # 在此生成序列数据            
         train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
-            dataset.build_series_data_with_segments(segments,outer_df=df_expands)      
-        
+            dataset.build_series_data_with_segments(segments,outer_df=df_expands)   
+        # 给每个品种序列放入实际最大编号   
+        for series in val_series_transformed:
+            time_idx = time_idx_mapping[time_idx_mapping.index==series.instrument_code].values[0]
+            series.last_time_idx = time_idx
+            
         # 分别加载两阶段模型，依次进行推理
         best_weight = self.optargs["best_weight"]    
         self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
                                                          best=best_weight,batch_file_path=self.batch_file_path)
-        self.droll_model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["droll_model_name"],work_dir=self.optargs["work_dir"],
-                                                         best=best_weight,batch_file_path=self.batch_file_path)        
         self.model.batch_size = self.batch_size     
         self.model.mode = "predict"
         self.model.model.monitor = None
-           
-        # 第一阶段，产生指数数据以及行业数据，执行validate,产生中间结果      
-        self.droll_model.mode = "pred_futures_droll_industry" 
-        self.droll_model.model.mode = "pred_futures_droll_industry"  
-        self.droll_model.batch_size = self.batch_size  
-        trainer,model,train_loader,val_loader = self.droll_model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)        
-        self.droll_model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-        self.droll_model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings        
-        trainer.validate(model=model,dataloaders=val_loader)        
-        
+
         # 第二阶段，进行推理及预测，先fit再predict
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,

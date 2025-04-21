@@ -152,7 +152,7 @@ class FuturesIndustryModule(MlpModule):
                 industry_index=industry_index,
                 seq_len=self.input_chunk_length,
                 pred_len=pred_len,
-                round_skip_len=self.input_chunk_length-pred_len,
+                round_skip_len=self.input_chunk_length,
                 down_sampling_window=pred_len,
                 past_cov_dim=input_dim,
                 dropout=dropout,
@@ -208,12 +208,6 @@ class FuturesIndustryModule(MlpModule):
             futures_convs = x_in[2]
             # 根据优化器编号匹配计算,当编号超出模型数量时，也需要全部进行向前传播，此时没有梯度回传，主要用于生成二次模型输入数据
             if optimizer_idx==i or optimizer_idx>=sub_model_length or optimizer_idx==-1:
-                if self.target_mode[i]==2:
-                    # 如果是短期预测模式，则裁剪对应的未来协变量,并使用短期整体过去变量
-                    futures_convs = futures_convs[:,:,:self.cut_len,:]
-                    past_index_round_targets = past_index_round_targets[:,:,:self.input_chunk_length-self.cut_len]
-                if self.target_mode[i]==1 or self.target_mode[i]==3:
-                    past_index_round_targets = past_index_round_targets[:,:,:self.input_chunk_length-self.output_chunk_length]                
                 x_in_item = (past_convs_item,x_in[1],futures_convs,past_round_targets,past_index_round_targets)
                 out = m(x_in_item)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
@@ -429,7 +423,7 @@ class FuturesIndustryModule(MlpModule):
         """重载父类方法，修改指标计算部分"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        
+        return
         rate_total,total_imp_cnt,indus_result,price_inf_list = self.combine_result_data(self.output_result) 
         rate_total = dict(sorted(rate_total.items(), key=lambda x:x[0]))
         indus_result_list = np.array(list(indus_result.values()))
@@ -626,15 +620,12 @@ class FuturesIndustryModule(MlpModule):
         # 记录批次内价格涨跌幅，用于整体指数批次归一化数据的回溯
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-        # 只获取整体指数的价格数据
-        price_array = np.array([ts[main_index]["price_array"] for ts in target_info])
-        price_round_data = (price_array[:,-1] - price_array[:,-self.output_chunk_length-1])/price_array[:,-self.output_chunk_length-1]
-        
-        for index,ts in enumerate(target_info):
-            ts[main_index]["price_round_data"] = price_round_data
-            ts[main_index]["price_round_index"] = index
-            ts[main_index]["target_round_data"] = index_round_targets.cpu().numpy()[:,-1,-1,-1]
-            ts[main_index]["pred_round_data"] = output[-1][2].cpu().numpy().squeeze(-1)
+        #
+        # for index,ts in enumerate(target_info):
+        #     ts[main_index]["price_round_data"] = price_round_data
+        #     ts[main_index]["price_round_index"] = index
+        #     ts[main_index]["target_round_data"] = index_round_targets.cpu().numpy()[:,-1,-1,-1]
+        #     ts[main_index]["pred_round_data"] = output[-1][2].cpu().numpy().squeeze(-1)
         whole_index_round_targets = index_round_targets[:,:,:-1,:]
         # 保存数据用于后续验证
         output_res = (output,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
@@ -856,7 +847,7 @@ class FuturesIndustryModule(MlpModule):
     def build_import_index(self,output_data=None,target=None,price_target=None,target_info=None,combine_instrument=None,instrument_index=None,index_result=None):  
         """生成涨幅达标的预测数据下标"""
         
-        # return None,None,None,None,None
+        return None,None,None,None,None
     
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
