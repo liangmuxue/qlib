@@ -8,7 +8,6 @@ import numpy as np
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from .layers.Autoformer_EncDec import series_decomp
 from .layers.Embed import DataEmbedding_wo_pos
-from .cov_cnn import LinelessLayer
 
 class FurTimeMixer(nn.Module):
     """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络"""
@@ -95,9 +94,9 @@ class FurTimeMixer(nn.Module):
         # 未来时空投影层，整合投影到单通道
         self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, 1, bias=True)      
         
-        self.indus_projection_layer = LinelessLayer(num_nodes.item(), num_nodes.item(), device=device)    
+        self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到板块指数数据，按照不同分类板块分别投影
-        self.index_projection_layer = LinelessLayer(num_nodes.item(), 1, device=device)        
+        self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
         self.all_to_index_projection_layer = nn.Linear(num_nodes*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
         self.index_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
@@ -194,9 +193,11 @@ class FurTimeMixer(nn.Module):
         x_mar_dec_out = self.tisp_projection_layer(x_mark_dec).reshape([batch_size,node_num]).unsqueeze(-1)       
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1).unsqueeze(-1)
         # 叠加整体数值残差计算
-        comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).squeeze(-1))
+        comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).squeeze(-1)).unsqueeze(-1) + self.round_skip_layer(past_round_targets)
         # 按照不同分类板块分别投影
-        sw_index_data = self.index_projection_layer(comp_out.squeeze(-1))
+        industry_decoded_data = self.index_projection_layer(comp_out.squeeze(-1))
+        # 使用整体走势过去值,注意这里的数据做了再次拆分，以避免未来数据泄露
+        sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
         return dec_out,comp_out,sw_index_data
 
     def __multi_scale_process_inputs(self, x_enc, x_mark_enc):

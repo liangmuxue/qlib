@@ -376,8 +376,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # rank数值就是当前索引加1
             code = ori_index + 1
             instrument = self.ass_data[code][0]
-            if future_start_datetime==20221011:
-                print("ggg")                
+            # if future_start_datetime==20221011:
+            #     print("ggg")                
             price_array = self.ass_data[code][2][past_start:future_end]
             scaler = MinMaxScaler(feature_range=(1e-5, 1))
             scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))

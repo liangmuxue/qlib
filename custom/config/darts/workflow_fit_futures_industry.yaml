@@ -16,10 +16,10 @@ data_handler_config: &data_handler_config
               fields_group: feature
               # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20',''KLOW']  
               col_list: &col_list ['MACD','ATR5','RSI5','RSI20','OBV5','label_ori','price_norm','VOLUME_CLOSE','WVMA5','BETA5','RSQR5','RVI',
-              'RESI5','CLOSE','HOLD','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','AOS','HIGH_QTLU5','REV5',
+              'RESI5','CLOSE','REFCLOSE','HOLD','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','AOS','HIGH_QTLU5','REV5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
               'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
-              'IMXD5']                                 
+              'IMXD5']                                      
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -88,7 +88,7 @@ task:
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
-               forecast_horizon: &forecast_horizon 2
+               forecast_horizon: &forecast_horizon 3
                cut_len: 3
                dropout: 0.5
                past_split: [[0,15]]
@@ -131,10 +131,10 @@ task:
                 target_column: ['rsv_diff','rsv_diff','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
-                past_covariate_col: ['RSV5','CLOSE','HOLD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'RSV5','CLOSE','HOLD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'RSV5','CLOSE','HOLD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'RSV5','CLOSE','HOLD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'RSV5','CLOSE','HOLD','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                past_covariate_col: ['HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
                                   ] 
                 static_covariate_col: ['industry']    
