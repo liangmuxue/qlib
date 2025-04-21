@@ -80,10 +80,6 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df = df[df['industry']!='None']    
         df = df.fillna(0) 
         df = df[df['datetime_number']!=0]  
-        # 生成行业均值数据
-        df = self.build_industry_mean(df,indus_info=indus_info)     
-        df['industry'] = df['industry'].astype(int)          
-        df[time_column] = df[time_column].astype(int)   
         # 生成价格差分数据
         df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
         def rl_apply(df_target,div):
@@ -100,6 +96,10 @@ class TFTFuturesDataset(TFTSeriesDataset):
             df[target_col] = diff_range  
         compute_diff("label_ori","diff_range")
         compute_diff("RSV5","rsv_diff",div=False)
+        # 生成行业均值数据
+        df = self.build_industry_mean(df,indus_info=indus_info)     
+        df['industry'] = df['industry'].astype(int)          
+        df[time_column] = df[time_column].astype(int)          
         # 消除异常数据-Again
         df = df[df['industry']!='None']    
         df = df.fillna(0) 

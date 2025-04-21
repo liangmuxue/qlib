@@ -151,9 +151,11 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
                 instrument = series.instrument_code
                 price_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["label_ori"].values
+                diff_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
+                                    &(df_data["instrument_rank"]==code)]["diff_range"].values                                    
                 datetime_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["datetime_number"].values                                
-                self.ass_data[code] = (instrument,None,price_array,datetime_array)
+                self.ass_data[code] = (instrument,diff_array,price_array,datetime_array)
             # 保存到本地
             save_ass_data = global_var.get_value("save_ass_data")
             if save_ass_data:
@@ -273,8 +275,8 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
         for i in range(index_range.shape[0]):
             idx_range = index_range[i]
             data_item = combine_values[idx_range[0]:idx_range[1],:]
-            # 填充空白值
-            data_item = np.pad(data_item,((1,cut_len),(0,0)),mode='minimum')             
+            # 填充空白值--Cancel
+            # data_item = np.pad(data_item,((1,cut_len),(0,0)),mode='minimum')             
             total_target_vals.append(data_item)
           
         return total_target_vals  
@@ -361,6 +363,7 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
                 # 重新生成价格数据，使用行业内品种的均值生成行业价格，使用所有行业的均值生成整体指标价格。先归一化再取平均值再差分。     
                 # ins_index = self.ins_in_indus_index[index]        
                 price_array = self.ass_data[code][2][past_start:future_end]
+                diff_array = self.ass_data[code][1][past_start:future_end]
                 scaler = MinMaxScaler(feature_range=(1e-5, 1))
                 scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
                 price_array_norm = scaler.transform(np.expand_dims(price_array,-1)).squeeze()  
@@ -373,7 +376,7 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
                 # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
                 target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                    "future_start_datetime":future_start_datetime,"future_start":future_start_real,"future_end":future_end_real,
-                                   "price_array":price_array,"datetime_array":datetime_array,
+                                   "price_array":price_array,"diff_array":diff_array,"datetime_array":datetime_array,
                                    "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
                 
                 # 过去协变量序列数据
@@ -456,7 +459,7 @@ class FuturesIndustryDRollDataset(GenericShiftedDataset):
             
             # 行业板块数据归一化
             past_index_round_targets_ori = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
-            # 由于整体预测根据output_chunk_length进行了差分，因此过去值需要去掉后output_chunk_length个数据，以避免未来数据泄露--cancel
+            # 由于整体预测根据output_chunk_length进行了差分，因此过去值需要去掉后output_chunk_length个数据，以避免未来数据泄露--Cancel
             past_index_round_targets = past_index_round_targets_ori[:,:,:]
             future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
             for indus_index in self.indus_index_rel:

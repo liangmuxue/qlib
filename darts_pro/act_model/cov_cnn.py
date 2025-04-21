@@ -152,3 +152,36 @@ class PcaCnn(nn.Module):
         # 返回pca数据，以及隐含分类数据
         return cls,features,None
     
+
+class LinelessLayer(nn.Module):
+    """全连接加非线性"""
+
+    def __init__(self,input_num,output_num,hidden_size=16,device=None):   
+        super(LinelessLayer, self).__init__()
+        
+        if output_num>1:
+            self.combine_layer = nn.Sequential(
+                    nn.Linear(input_num, hidden_size),
+                    nn.ReLU(), 
+                    nn.Linear(hidden_size,output_num),
+                    nn.LayerNorm(output_num)
+                ).to(device)
+        else:
+            self.combine_layer = nn.Sequential(
+                    nn.Linear(input_num, hidden_size),
+                    nn.ReLU(), 
+                    nn.Linear(hidden_size,output_num)
+                ).to(device)  
+        
+        self.residual_layer = nn.Linear(input_num,output_num).to(device)
+            
+    def forward(self, input_data,res_data=None): 
+        
+        output_data = self.combine_layer(input_data)
+        if res_data is not None:
+            output_data = output_data + self.residual_layer(res_data)
+        
+        return output_data
+        
+        
+        

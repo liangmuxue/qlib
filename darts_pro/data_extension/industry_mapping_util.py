@@ -308,7 +308,7 @@ class FuturesMappingUtil:
         instrument_df[g_col] = instrument_df[g_col] - 1 
         # 排序保证后续对应关系不变
         instrument_df = instrument_df.sort_values(by=['code'], ascending=[True])
-        
+        total_begin_index = 0
         for fur_code,group in instrument_df.groupby("indus_code"):
             # 关联之前的数据，按照规范逐个生成
             indus_arr = fur_industry_index[fur_industry_index[:,0]==fur_code]
@@ -323,8 +323,12 @@ class FuturesMappingUtil:
             raise_if_not(
                 instrument_index.shape[0] == instrument_codes.shape[0],
                 f"品种编码数组长度和序号数组长度不一致"
-            )              
-            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,instrument_index,instrument_codes,instrument_names,industry_name]
+            )      
+            # 计算相对索引
+            range_end_index =  total_begin_index + instrument_index.shape[0]     
+            range_index = np.array([i for i in range(total_begin_index,range_end_index)])
+            total_begin_index += instrument_index.shape[0]
+            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,range_index,instrument_codes,instrument_names,industry_name]
             fur_ins_mappings.append(fur_ins_mapping)
         
         # 添加整体指数数据
@@ -419,12 +423,7 @@ class FuturesMappingUtil:
 
     @staticmethod
     def get_instrument_rel_index_within_industry(sw_ins_mappings,indus_index):
-        if indus_index==0:
-            begin_index = 0
-        else:
-            begin_index = sw_ins_mappings[indus_index,2].shape[0]
-        end_index = begin_index + sw_ins_mappings[indus_index,2].shape[0]
-        return [begin_index,end_index]
+        return sw_ins_mappings[indus_index,2]
             
     @staticmethod
     def get_instrument_obj_in_industry(sw_ins_mappings,indus_index):
@@ -476,5 +475,12 @@ class FuturesMappingUtil:
     def get_main_index_in_indus(sw_ins_mappings):
         index = np.where(sw_ins_mappings[:,1]=="ZS_ALL")[0][0]
         return index    
+
+    @staticmethod
+    def get_indus_instrument_range_index(sw_ins_mappings,indus_index):
+        """取得行业内品种对应的相对索引"""
         
+        instrument_index = np.array(sw_ins_mappings[indus_index,3])
+        return instrument_index
+            
     
