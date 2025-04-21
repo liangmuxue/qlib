@@ -424,7 +424,6 @@ class FuturesIndustryModule(MlpModule):
         
         return
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        
         rate_total,total_imp_cnt,indus_result,price_inf_list,overroll_trend_total = self.combine_result_data(self.output_result) 
         rate_total = dict(sorted(rate_total.items(), key=lambda x:x[0]))
         indus_result_list = np.array(list(indus_result.values()))
@@ -605,7 +604,6 @@ class FuturesIndustryModule(MlpModule):
         # 记录批次内价格涨跌幅，用于整体指数批次归一化数据的回溯
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-        # 只获取整体指数的价格数据
         whole_index_round_targets = index_round_targets[:,:,:-1,:]
         # 保存数据用于后续验证
         output_res = (output,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
@@ -828,7 +826,7 @@ class FuturesIndustryModule(MlpModule):
     def build_import_index(self,output_data=None,target=None,price_target=None,target_info=None,combine_instrument=None,instrument_index=None,index_result=None):  
         """生成涨幅达标的预测数据下标"""
         
-        # return None,None,None,None,None
+        return None,None,None,None,None
     
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
