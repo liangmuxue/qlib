@@ -330,7 +330,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
                     index_target_item = index_round_target[j,indus_rel_index,i]
-                    short_index_target_item = short_index_round_target[j,:,i]
                     if target_mode!=3:
                         # 在行业内进行品种比较    
                         for k in range(indus_data_index.shape[0]):     
@@ -346,21 +345,20 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 continue           
                             sv_indus = sv[k][j]
                             sv_indus = sv_indus[inner_index]
-                            if target_mode==0 or target_mode==3:
+                            if target_mode==2:
                                 if round_targets_item.shape[0]>1:
                                     cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
                                 else:
                                     cls_loss[i] += torch.abs(sv_indus.squeeze(-1),round_targets_item)     
-                                counter += 1   
+                        if torch.sum(index_target_item<1e-4)>2:
+                            continue   
+                        if torch.sum(index_target_item>=0.9999)>=5:
+                            continue                           
                         # 板块整体损失计算
+                        if target_mode==0: 
+                            ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item)/10  
                         if target_mode==1: 
-                            if torch.sum(index_target_item<1e-4)>2:
-                                continue   
-                            if torch.sum(index_target_item>=0.9999)>=5:
-                                print("all 1")
-                                continue                           
-                            ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item)/10
-                            # ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))    
+                            ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))/10    
                     else:
                         # 所有品种统一比较      
                         ins_class_item = target_class_item[ins_index_all]
@@ -371,33 +369,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         sv_indus = sv[0][j,inner_index,:]
                         round_targets_item = future_round_targets_factor[j,ins_index]
                         cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
-                        # for k in range(indus_data_index.shape[0]):     
-                        #     ins_index = ins_in_indus_index[k]
-                                                    
                                   
-                if target_mode==0:
-                    cls_loss[i] = cls_loss[i]/counter
-                    loss_sum = loss_sum + cls_loss[i]
-                if target_mode==1: 
-                    # cls_loss[i] = cls_loss[i]/counter
+                if target_mode in [0,1]:
+                    ce_loss[i] = ce_loss[i]
                     loss_sum = loss_sum + ce_loss[i]
                 if target_mode==3: 
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]
-                # 批次内进行整体指数损失计算                
-                if target_mode==5: 
-                    # 与整体指数目标进行比较
-                    target = index_round_target[:,main_index,i]
-                    # target = batch_normalization(target)
-                    reg_loss = self.ccc_loss_comp(sw_index_data.squeeze(-1),target)
-                    # 使用listwise排序损失，其中统一设置为同样的分组
-                    # metric_loss = self.listwise(sw_index_data.squeeze(-1), target, group_ids=torch.ones(target.shape[0]))
-                    metric_loss = listMLE(sw_index_data,target.unsqueeze(-1))
-                    ce_loss[i] =  (1-self.lambda_reg)*reg_loss + self.lambda_reg*metric_loss
-                    # ce_loss[i] = self.mse_loss(sw_index_data,target.unsqueeze(-1))*10
-                    # ce_loss[i]  = torch.nn.L1Loss()(sw_index_data,target.unsqueeze(-1))
-                    # cls_loss[i] = cls_loss[i]/counter
-                    loss_sum = loss_sum + ce_loss[i]             
                              
         # if epoch_num>=self.lock_epoch_num:
         #     # 综合策略损失评判

@@ -467,45 +467,32 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 整体目标数据拆分为过去值和目标值
         past_round_targets = round_targets[:,:self.input_chunk_length,:].copy()
         future_round_targets = round_targets[:,self.input_chunk_length,:].copy()
-        short_past_round_targets = short_round_targets[:,:self.input_chunk_length,:]
         # 预测最近几个差分的未来整体数值
         future_round_targets_for_index = np.zeros([round_targets.shape[0],self.past_target_shape[-1]])
         for i in range(self.past_target_shape[-1]):
             future_round_targets_for_index[:,i] = round_targets[:,self.input_chunk_length,i].copy()
-        short_future_round_targets = short_round_targets[:,self.input_chunk_length-self.cut_len,:]
         
         # 行业板块数据归一化
-        past_index_round_targets_ori = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
-        past_index_round_targets = past_index_round_targets_ori[:,:,:]
-        short_past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length-self.cut_len,self.past_target_shape[-1]])
+        past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
         future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.past_target_shape[-1]])
-        short_future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.past_target_shape[-1]])
         for i in range(self.ins_in_indus_index.shape[0]):
-            ins_index = self.ins_in_indus_index[i]
-            past_data = past_round_targets[ins_index,:-self.output_chunk_length,:]
             # 取得对应的行业序列数据，作为目标数据
             indus_index = self.indus_index[i]
             indus_past_round = past_round_targets[indus_index,:,:]
             indus_future_round = future_round_targets[indus_index]
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
-            # 叠加使用短期整体预测值
-            short_past_index_round_targets[i] = np.mean(short_past_round_targets[ins_index,:-self.cut_len,:],axis=0)
-            short_future_index_round_targets[i] = np.mean(short_future_round_targets[ins_index],axis=0)
         # 跨行业归一化
         past_index_round_targets_clone = past_index_round_targets.copy()
         future_index_round_targets_clone = future_index_round_targets.copy()
         scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets.reshape(-1,self.past_target_shape[-1]))  
         past_index_round_targets = scaler.transform(past_index_round_targets.reshape(-1,self.past_target_shape[-1])).reshape(past_index_round_targets.shape)
         future_index_round_targets = scaler.transform(future_index_round_targets)  
-        # 如果不需要归一化，则把原来的值拷贝回目标变量
-        for i in range(self.past_target_shape[-1]):
-            if self.scale_mode[i] in [1,5]:
-                past_index_round_targets[...,i] = past_index_round_targets_clone[...,i]
-                future_index_round_targets[...,i] = future_index_round_targets_clone[...,i]
-        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(short_past_index_round_targets.reshape(-1,self.past_target_shape[-1]))  
-        short_past_index_round_targets = scaler.transform(short_past_index_round_targets.reshape(-1,self.past_target_shape[-1])).reshape(short_past_index_round_targets.shape)
-        short_future_index_round_targets = scaler.transform(short_future_index_round_targets) 
+        # # 如果不需要归一化，则把原来的值拷贝回目标变量
+        # for i in range(self.past_target_shape[-1]):
+        #     if self.scale_mode[i] in [1,5]:
+        #         past_index_round_targets[...,i] = past_index_round_targets_clone[...,i]
+        #         future_index_round_targets[...,i] = future_index_round_targets_clone[...,i]
         
         # 保留未来round初始值用于可视化
         future_index_round_targets_ori = future_index_round_targets.copy()
@@ -513,27 +500,26 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0]:
                 future_index_round_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[:,i:i+1]).squeeze(-1)
-                short_future_index_round_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(short_future_index_round_targets[:,i:i+1]).squeeze(-1)
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
         index_round_targets = np.concatenate([past_index_round_targets,np.expand_dims(future_index_round_targets_ori,1),np.expand_dims(future_index_round_targets,1)],axis=1)
         # index_round_targets = np.concatenate([short_past_index_round_targets,np.expand_dims(short_future_index_round_targets,1)],axis=1)
 
         # 整体目标值批次内,分行业归一化
         past_data_scale = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
-        if self.scale_mode[i]==0 or self.scale_mode[i]==2:
-            for index in self.ins_in_indus_index:
-                # 使用过去数值参考,进行第一次归一化
-                target_class_ins = target_class_total[index]
-                keep_index = np.where(target_class_ins>=0)[0]
-                if keep_index.shape[0]==0:
-                    continue
-                index_real = index[keep_index]
-                past_data = past_round_targets[index_real,:,:]
-                scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data.reshape(-1,self.past_target_shape[-1]))
-                past_data_scale[index_real] = scaler.transform(past_data.reshape(-1,self.past_target_shape[-1])).reshape(past_data.shape)
-                future_round_targets[index_real] = scaler.transform(future_round_targets[index_real])
-                # 针对目标值，再次归一化以加速收敛
-                for i in range(future_round_targets.shape[-1]):
+        for index in self.ins_in_indus_index:
+            # 使用过去数值参考,进行第一次归一化
+            target_class_ins = target_class_total[index]
+            keep_index = np.where(target_class_ins>=0)[0]
+            if keep_index.shape[0]==0:
+                continue
+            index_real = index[keep_index]
+            past_data = past_round_targets[index_real,:,:]
+            scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data.reshape(-1,self.past_target_shape[-1]))
+            past_data_scale[index_real] = scaler.transform(past_data.reshape(-1,self.past_target_shape[-1])).reshape(past_data.shape)
+            future_round_targets[index_real] = scaler.transform(future_round_targets[index_real])
+            # 针对目标值，再次归一化以加速收敛
+            for i in range(self.past_target_shape[-1]):
+                if self.scale_mode[i]==0:
                     future_round_targets[index,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,i:i+1]).squeeze(-1)
                                     
         past_future_round_targets = np.concatenate([past_data_scale,np.expand_dims(future_round_targets,axis=1)],axis=1)
