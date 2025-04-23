@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_industryNojr_priceDiffIndexStep3_202203"
+               model_name: "Futures_industryNojr_priceDiffScaleStep3_202203"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -104,7 +104,7 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2016-01-01, 2022-03-31]
+                train: [2019-01-01, 2022-03-31]
                 valid: [2022-03-01, 2022-10-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False

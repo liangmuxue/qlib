@@ -300,7 +300,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         """Multiple Loss Combine"""
 
         (output,vr_class,_) = output_ori
-        (target,target_class,future_round_targets,index_round_target,short_index_round_target) = target_ori
+        (target,target_class,future_round_targets,index_round_target) = target_ori
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.zeros([len(output)]).to(self.device)
         fds_loss = torch.zeros([len(output)]).to(self.device)
@@ -358,7 +358,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         if target_mode==0: 
                             ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item)/10  
                         if target_mode==1: 
-                            ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))/10    
+                            ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))  
                     else:
                         # 所有品种统一比较      
                         ins_class_item = target_class_item[ins_index_all]

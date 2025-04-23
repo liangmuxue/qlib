@@ -94,11 +94,11 @@ SUMPMA5  0.110632  0.134215  0.122805  0.121171
 
 [indicator]
 
-行业指标 复用整体计算中的各行业数据 'RSV5' SCALE_MODE:0 TARGET_MODE:0 or 1
+行业指标 复用整体计算中的各行业数据 'diff_range' SCALE_MODE:0 TARGET_MODE:0
 
-整体指标 'price_norm' SCALE_MODE:1 TARGET_MODE:0
+整体指标 'diff_range' SCALE_MODE:1 TARGET_MODE:1
 
-分项指标  RSV5,CCI5 SCALE_MODE:0 TARGET_MODE:3 or 0
+分项指标  RSV5,CCI5 SCALE_MODE:0 TARGET_MODE:2(按照行业内计算) or 3(整个计算)
 
 
 

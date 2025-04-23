@@ -758,7 +758,7 @@ class FuturesProcessModel(TftDataframeModel):
         df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length) 
         # 生成模拟数据后重置日期区间,以生成足够日期范围的val_series_transformed
         segments = {"train":[total_range[0],last_day],"valid":[begin_day,last_day]}  
-        # 在此生成序列数据            
+        # 再次生成序列数据            
         train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
             dataset.build_series_data_with_segments(segments,outer_df=df_expands)   
         # 给每个品种序列放入实际最大编号   
@@ -766,7 +766,6 @@ class FuturesProcessModel(TftDataframeModel):
             time_idx = time_idx_mapping[time_idx_mapping.index==series.instrument_code].values[0]
             series.last_time_idx = time_idx
             
-        # 分别加载两阶段模型，依次进行推理
         best_weight = self.optargs["best_weight"]    
         self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
                                                          best=best_weight,batch_file_path=self.batch_file_path)
@@ -774,7 +773,7 @@ class FuturesProcessModel(TftDataframeModel):
         self.model.mode = "predict"
         self.model.model.monitor = None
 
-        # 第二阶段，进行推理及预测，先fit再predict
+        # 进行推理及预测，先fit再predict
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)               
