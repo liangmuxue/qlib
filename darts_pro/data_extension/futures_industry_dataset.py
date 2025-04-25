@@ -188,7 +188,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
     def get_fur_industry(self):       
         """取得板块分类"""
         
-        sql = "select upper(concat('ZS_',code)),name from futures_industry where delete_flag=0 order by code ascQ"
+        sql = "select upper(concat('ZS_',code)),name from futures_industry where delete_flag=0 order by code asc"
         result_rows = self.dbaccessor.do_query(sql)    
         results = [[row[0],row[1]] for row in result_rows]
         return np.array(results)
@@ -467,19 +467,15 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         
         # 整体目标数据拆分为过去值和目标值
         past_round_targets = round_targets[:,:self.input_chunk_length,:].copy()
-        future_round_targets = round_targets[:,self.input_chunk_length,:].copy()
-        # 预测最近几个差分的未来整体数值
-        future_round_targets_for_index = np.zeros([round_targets.shape[0],self.past_target_shape[-1]])
-        for i in range(self.past_target_shape[-1]):
-            future_round_targets_for_index[:,i] = round_targets[:,self.input_chunk_length,i].copy()
+        future_round_targets = round_targets[:,self.input_chunk_length:,:].copy()
         
         # 行业板块数据归一化
         past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
-        future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.past_target_shape[-1]])
+        future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
         for i in range(self.ins_in_indus_index.shape[0]):
             # 取得对应的行业序列数据，作为目标数据
             indus_index = self.indus_index[i]
-            indus_past_round = past_round_targets[indus_index,:,:]
+            indus_past_round = past_round_targets[indus_index]
             indus_future_round = future_round_targets[indus_index]
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
@@ -488,21 +484,19 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         future_index_round_targets_clone = future_index_round_targets.copy()
         scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets.reshape(-1,self.past_target_shape[-1]))  
         past_index_round_targets = scaler.transform(past_index_round_targets.reshape(-1,self.past_target_shape[-1])).reshape(past_index_round_targets.shape)
-        future_index_round_targets = scaler.transform(future_index_round_targets)  
+        future_index_round_targets = scaler.transform(future_index_round_targets.reshape(-1,self.past_target_shape[-1])).reshape(future_index_round_targets.shape) 
         # # 如果不需要归一化，则把原来的值拷贝回目标变量
         # for i in range(self.past_target_shape[-1]):
         #     if self.scale_mode[i] in [1,5]:
         #         past_index_round_targets[...,i] = past_index_round_targets_clone[...,i]
         #         future_index_round_targets[...,i] = future_index_round_targets_clone[...,i]
         
-        # 保留未来round初始值用于可视化
-        future_index_round_targets_ori = future_index_round_targets.copy()
         # 单独归一化未来行业板块整体预测数值
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0]:
-                future_index_round_targets[:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[:,i:i+1]).squeeze(-1)
+                future_index_round_targets[:,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[:,:,i])
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
-        index_round_targets = np.concatenate([past_index_round_targets,np.expand_dims(future_index_round_targets_ori,1),np.expand_dims(future_index_round_targets,1)],axis=1)
+        index_round_targets = np.concatenate([past_index_round_targets,future_index_round_targets],axis=1)
         # index_round_targets = np.concatenate([short_past_index_round_targets,np.expand_dims(short_future_index_round_targets,1)],axis=1)
 
         # 整体目标值批次内,分行业归一化
@@ -517,13 +511,13 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             past_data = past_round_targets[index_real,:,:]
             scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data.reshape(-1,self.past_target_shape[-1]))
             past_data_scale[index_real] = scaler.transform(past_data.reshape(-1,self.past_target_shape[-1])).reshape(past_data.shape)
-            future_round_targets[index_real] = scaler.transform(future_round_targets[index_real])
+            future_round_targets[index_real] = scaler.transform(future_round_targets[index_real].reshape(-1,self.past_target_shape[-1])).reshape(future_round_targets[index_real]   .shape)
             # 针对目标值，再次归一化以加速收敛
             for i in range(self.past_target_shape[-1]):
                 if self.scale_mode[i]==0:
-                    future_round_targets[index,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,i:i+1]).squeeze(-1)
+                    future_round_targets[index,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,:,i])
                                     
-        past_future_round_targets = np.concatenate([past_data_scale,np.expand_dims(future_round_targets,axis=1)],axis=1)
+        past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,target_info_total 
