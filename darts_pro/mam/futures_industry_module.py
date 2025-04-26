@@ -531,8 +531,6 @@ class FuturesIndustryModule(MlpModule):
                             # 行业板块数值图
                             indus_output_value = ts_arr[indus_index_item]["pred_data"]
                             indus_target = index_round_targets_3d[index,indus_rel_index[k],:,j]
-                            indus_target = np.concatenate([indus_target[:self.input_chunk_length],
-                                            np.zeros([self.output_chunk_length-1]),indus_target[-1:]])
                             price_target = ts_arr[indus_index_item]["diff_range"] * 10
                             win = "whole_round_target_{}_{}_{}".format(j,k,viz_total_size)                        
                             target_title = "target_{}_{},date:{},tv:{}".format(indus_name,j,date,round(index_round_targets[indus_rel_index[k],j],3))
@@ -543,7 +541,7 @@ class FuturesIndustryModule(MlpModule):
                                         
                     # 显示板块比对图
                     indust_output_value = ce_output[j][index]
-                    indust_target = index_round_targets[:-1,j]
+                    indust_target = index_round_targets[indus_rel_index,j]
                     price_range_total = np.array([ts["diff_range"][-1] for ts in ts_arr[indus_index[indus_rel_index]]])
                     win = "indus_round_target_{}_{}".format(j,viz_total_size)
                     target_title = "[{}-{}] trend:{}".format(int(date),j,trend_value)

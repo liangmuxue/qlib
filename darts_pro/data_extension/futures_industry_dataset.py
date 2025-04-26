@@ -480,17 +480,20 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             indus_future_round = future_round_targets[indus_index]
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
-        # 跨行业归一化
-        past_index_round_targets_clone = past_index_round_targets.copy()
-        future_index_round_targets_clone = future_index_round_targets.copy()
-        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets.reshape(-1,self.past_target_shape[-1]))  
-        past_index_round_targets = scaler.transform(past_index_round_targets.reshape(-1,self.past_target_shape[-1])).reshape(past_index_round_targets.shape)
-        future_index_round_targets = scaler.transform(future_index_round_targets.reshape(-1,self.past_target_shape[-1])).reshape(future_index_round_targets.shape) 
-        # # 如果不需要归一化，则把原来的值拷贝回目标变量
-        # for i in range(self.past_target_shape[-1]):
-        #     if self.scale_mode[i] in [1,5]:
-        #         past_index_round_targets[...,i] = past_index_round_targets_clone[...,i]
-        #         future_index_round_targets[...,i] = future_index_round_targets_clone[...,i]
+        
+        for i in range(self.past_target_shape[-1]):
+            if self.scale_mode[i] in [0]:
+                # 跨行业归一化
+                past_index_round_item = np.expand_dims(past_index_round_targets[...,i].reshape(-1),-1)
+                scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_item)  
+                past_index_round_targets[...,i] = scaler.transform(past_index_round_item).reshape(past_index_round_targets[...,i].shape)
+                future_index_round_item = np.expand_dims(future_index_round_targets[...,i].reshape(-1),-1)
+                future_index_round_targets[...,i] = scaler.transform(future_index_round_item).reshape(future_index_round_targets[...,i].shape) 
+            if self.scale_mode[i] in [1]:
+                # 分行业归一化
+                scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
+                past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
+                future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
         
         # 单独归一化未来行业板块整体预测数值
         for i in range(self.past_target_shape[-1]):
@@ -510,14 +513,20 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 continue
             index_real = index[keep_index]
             past_data = past_round_targets[index_real,:,:]
-            scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data.reshape(-1,self.past_target_shape[-1]))
-            past_data_scale[index_real] = scaler.transform(past_data.reshape(-1,self.past_target_shape[-1])).reshape(past_data.shape)
-            future_round_targets[index_real] = scaler.transform(future_round_targets[index_real].reshape(-1,self.past_target_shape[-1])).reshape(future_round_targets[index_real]   .shape)
-            # 针对目标值，再次归一化以加速收敛
+            future_data = future_round_targets[index_real,:,:]
             for i in range(self.past_target_shape[-1]):
                 if self.scale_mode[i]==0:
+                    past_data_reshape = np.expand_dims(past_data[:,:,i].reshape(-1),-1)
+                    future_data_reshape = np.expand_dims(future_data[:,:,i].reshape(-1),-1)
+                    scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_reshape)
+                    past_data_scale[index_real,:,i] = scaler.transform(past_data_reshape).reshape(past_data[:,:,i].shape)
+                    future_round_targets[index_real,:,i] = scaler.transform(future_data_reshape).reshape(future_data[:,:,i].shape)
+                    # 针对目标值，再次归一化以加速收敛                    
                     future_round_targets[index,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,:,i])
-                                    
+                if self.scale_mode[i]==1:
+                    scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data[:,:,i].transpose(1,0))
+                    past_data_scale[index_real,:,i] = scaler.transform(past_data[:,:,i].transpose(1,0)).transpose(1,0)
+                    future_round_targets[index_real,:,i] = scaler.transform(future_data[:,:,i].transpose(1,0)).transpose(1,0)
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
         if future_start_datetime==20221011:
