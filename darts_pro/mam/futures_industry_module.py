@@ -422,8 +422,6 @@ class FuturesIndustryModule(MlpModule):
     def on_validation_epoch_end(self):
         """重载父类方法，修改指标计算部分"""
         
-        return 
-        
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         rate_total,indus_result,total_imp_cnt = self.combine_result_data(self.output_result) 
         if rate_total.shape[0]>0:
