@@ -75,10 +75,10 @@ class FurIndustryMixer(nn.Module):
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             _,cls_out,sw_index_data = m(x_inner)
             # 叠加归一化输出
-            # cls_out = m_after(cls_out.squeeze(-1)).unsqueeze(-1)
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
         
+        # index_data_combine = torch.cat(index_data_combine,dim=1)
         index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
         return None,cls_out_combine,index_data_combine
 

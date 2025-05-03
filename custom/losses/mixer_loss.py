@@ -371,8 +371,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
                                   
                 if target_mode in [0,1]:
-                    ce_loss[i] = ce_loss[i]
                     loss_sum = loss_sum + ce_loss[i]
+                if target_mode==2:
+                    cls_loss[i] = cls_loss[i]/10
+                    loss_sum = loss_sum + cls_loss[i]                    
                 if target_mode==3: 
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]

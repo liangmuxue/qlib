@@ -506,7 +506,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 整体目标值批次内,分行业归一化
         past_data_scale = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
         for index in self.ins_in_indus_index:
-            # 使用过去数值参考,进行第一次归一化
             target_class_ins = target_class_total[index]
             keep_index = np.where(target_class_ins>=0)[0]
             if keep_index.shape[0]==0:
@@ -516,6 +515,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             future_data = future_round_targets[index_real,:,:]
             for i in range(self.past_target_shape[-1]):
                 if self.scale_mode[i]==0:
+                    # 使用过去数值参考,进行第一次归一化
                     past_data_reshape = np.expand_dims(past_data[:,:,i].reshape(-1),-1)
                     future_data_reshape = np.expand_dims(future_data[:,:,i].reshape(-1),-1)
                     scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_reshape)
@@ -529,8 +529,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     future_round_targets[index_real,:,i] = scaler.transform(future_data[:,:,i].transpose(1,0)).transpose(1,0)
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
-        if future_start_datetime==20221011:
-            print("ggg")    
+        # if future_start_datetime==20221011:
+        #     print("ggg")    
                         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,target_info_total 

@@ -159,6 +159,8 @@ class TFTDataset(DatasetH):
         # Mock
         data["diff_range"] = data["price_norm"] 
         data["rsv_diff"] = data["price_norm"] 
+        data["qtlu_diff"] = data["price_norm"] 
+        data["aos_diff"] = data["price_norm"] 
         
         group_column = self.get_group_column()
         data["label"] = data.groupby(group_column)["label"].rolling(window=self.pred_len,min_periods=1).mean().reset_index(0,drop=True)
