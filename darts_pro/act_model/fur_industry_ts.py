@@ -9,6 +9,7 @@ from torch import nn
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from .layers.Autoformer_EncDec import series_decomp
 from .layers.Embed import DataEmbedding_wo_pos
+from .cov_cnn import LinelessLayer
 
 from .fur_ts_inner import FurTimeMixer
 
@@ -17,7 +18,8 @@ class FurIndustryMixer(nn.Module):
        把行业板块信息融合到模型中，不同行业，权重不共享
     """
     
-    def __init__(self, seq_len=25, round_skip_len=25,pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
+    def __init__(self, seq_len=25, round_skip_len=25,pred_len=5,past_cov_dim=12,target_mode=0,
+                  dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
                  combine_nodes_num=None,instrument_index=None,index_num=1,device="cpu"):
         """行业总体网络，分为子网络，以及整合网络2部分"""
         
@@ -28,6 +30,7 @@ class FurIndustryMixer(nn.Module):
         self.industry_index = industry_index
         self.num_nodes = combine_nodes_num.sum()
         self.index_num = index_num
+        self.target_mode = target_mode
         
         # 循环取得不同行业板块的多个下级模型
         sub_model_list = []
@@ -44,21 +47,10 @@ class FurIndustryMixer(nn.Module):
                 )
             sub_model_list.append(sub_model)
         self.sub_models = nn.ModuleList(sub_model_list)
-        # self.sub_models_after = nn.ModuleList(sub_model_after_list)
         # 整合输出网络
-        if index_num>1:
-            self.combine_layer = nn.Sequential(
-                    nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
-                    nn.ReLU(), 
-                    nn.Linear(hidden_size,index_num),
-                    nn.LayerNorm(index_num)
-                ).to(device)
-        else:
-            self.combine_layer = nn.Sequential(
-                    nn.Linear(self.combine_nodes_num.shape[0], hidden_size),
-                    nn.ReLU(), 
-                    nn.Linear(hidden_size,index_num),
-                ).to(device)    
+        self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
+        if self.target_mode in [2,3]:
+            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item())
         
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""
@@ -74,12 +66,16 @@ class FurIndustryMixer(nn.Module):
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             _,cls_out,sw_index_data = m(x_inner)
+            if self.target_mode in [2,3]:
+                cls_out = self.ins_layer(cls_out)
             # 叠加归一化输出
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
         
-        # index_data_combine = torch.cat(index_data_combine,dim=1)
-        index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
+        if self.target_mode in [2,3]:
+            index_data_combine = torch.cat(index_data_combine,dim=1)
+        else:
+            index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
         return None,cls_out_combine,index_data_combine
 
 

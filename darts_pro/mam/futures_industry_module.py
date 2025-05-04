@@ -21,7 +21,6 @@ from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 
 from cus_utils.common_compute import compute_price_class
 from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
-from .futures_module import TRACK_DATE
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
@@ -132,9 +131,7 @@ class FuturesIndustryModule(MlpModule):
             # 加入短期指标
             if self.target_mode[seq] in [0,1]:
                 pred_len = self.output_chunk_length
-            if self.target_mode[seq]==2:
-                pred_len = self.cut_len     
-            if self.target_mode[seq]==3:
+            if self.target_mode[seq] in [2,3]:
                 pred_len = self.output_chunk_length    
                 combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
                 combine_nodes_num = np.expand_dims(combine_nodes.shape[0],0)
@@ -443,8 +440,8 @@ class FuturesIndustryModule(MlpModule):
             self.log("total cnt", total_cnt, prog_bar=True)  
             self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
 
-            print("trend fail date:",rate_total[rate_total['trend_correct']==0]['date'])  
-            print("indus_top fail date:",rate_total[rate_total['indus_top_class']==1][['date']])
+            # print("trend fail date:",rate_total[rate_total['trend_correct']==0]['date'])  
+            # print("indus_top fail date:",rate_total[rate_total['indus_top_class']==1][['date']])
         
         # 如果是测试模式，则在此进行可视化
         if self.mode is not None and self.mode.startswith("pred_") :
@@ -689,18 +686,21 @@ class FuturesIndustryModule(MlpModule):
         
         instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
         instrument_in_indus_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
         industry_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
         
         # 按照时间索引暂存预测数据，用于全局化共享使用
         glo_match_data = []
+        fac_index = 1
         for i in range(target_class_3d.shape[0]):
             target_class_list = target_class_3d[i]
             target_info_list = target_info_3d[i]
             ce_index = [item[i] for item in output_3d[3]]
-            ce_index_rel = ce_index[1]
-            # 只针对行业数据进行处理
-            for j,indus_index in enumerate(industry_index):
+            ce_index_rel = ce_index[fac_index]
+            # 根据配置，决定针对行业数据进行处理还是针对整体指数数据进行处理
+            container_index = industry_index if self.target_mode[fac_index] in [0,1] else [main_index]
+            for j,indus_index in enumerate(container_index):
                 target_info = target_info_list[indus_index]
                 rank_code = target_info["item_rank_code"]
                 indus_code = target_info["instrument"]
@@ -885,7 +885,7 @@ class FuturesIndustryModule(MlpModule):
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
         
-        indus_top_index,import_index,trend_value,result_list = self.strategy_top(cls_values,ce_values,
+        indus_top_index,import_index,trend_value,result_list = self.strategy_top_indus(cls_values,ce_values,
                                     target=target,target_info=target_info,
                                combine_instrument=combine_instrument)
 
@@ -896,8 +896,8 @@ class FuturesIndustryModule(MlpModule):
               
         return import_index,trend_value,indus_top_index,result_list
                                           
-    def strategy_top(self,cls,ce_values,target=None,target_info=None,combine_instrument=None):
-        """排名方式筛选候选者"""
+    def strategy_top_indus(self,cls,ce_values,target=None,target_info=None,combine_instrument=None):
+        """行业排名方式筛选候选者"""
         
         date = int(target_info[0]['future_start_datetime'])
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -986,7 +986,7 @@ class FuturesIndustryModule(MlpModule):
         import_index_real = FuturesMappingUtil.get_instrument_obj_in_industry(sw_ins_mappings, indus_rel_index)[pred_import_index][:,0].astype(int)
         
         return indus_top_index_real,import_index_real,trend_value,result_list
-
+    
     def on_predict_epoch_start(self):  
         self.output_result = []
         

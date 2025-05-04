@@ -68,6 +68,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         self.instrument_index = FuturesMappingUtil.get_instrument_index(self.sw_ins_mappings)
         self.ins_codes = FuturesMappingUtil.get_combine_industry_instrument(self.sw_ins_mappings)[:,-1]
         self.main_index = FuturesMappingUtil.get_main_index(self.sw_ins_mappings)
+        self.main_index_rel = FuturesMappingUtil.get_main_index_in_indus(self.sw_ins_mappings)
         
         if mode=="train":
             df_data_total = dataset.df_train          
@@ -269,7 +270,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         index_range = np.array(index_range)   
         # 根据单独指标决定如何归一化
         for i in range(combine_values.shape[-1]):
-            if scale_mode[i]==1:
+            if scale_mode[i] in [1,2]:
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
@@ -277,11 +278,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             elif scale_mode[i]==5:
                 # 只剔除异常值，不归一化
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
-            elif scale_mode[i]==2:
-                # 使用幅度比值代替幅度绝对数值
-                range_values = np.concatenate(range_values,axis=0)
-                range_values[:,i][np.where(range_values[:,i]>0.35)[0]] = 0.35
-                combine_values[:,i] = range_values[:,i]
             # 0值替换为非0
             zero_index = np.where(combine_values[:,i]==0)[0]
             eps_adju = np.random.uniform(low=eps,high=eps*10,size=zero_index.shape[0])
@@ -467,8 +463,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
         
         # 整体目标数据拆分为过去值和目标值
-        past_round_targets = round_targets[:,:self.input_chunk_length,:].copy()
-        future_round_targets = round_targets[:,self.input_chunk_length:,:].copy()
+        past_round_targets = round_targets[:,:self.input_chunk_length,:]
+        future_round_targets = round_targets[:,self.input_chunk_length:,:]
         
         # 行业板块数据归一化
         past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
@@ -476,8 +472,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         for i in range(self.ins_in_indus_index.shape[0]):
             # 取得对应的行业序列数据，作为目标数据
             indus_index = self.indus_index[i]
-            indus_past_round = past_round_targets[indus_index]
-            indus_future_round = future_round_targets[indus_index]
+            indus_past_round = past_round_targets[indus_index].copy()
+            indus_future_round = future_round_targets[indus_index].copy()
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
         
@@ -501,20 +497,22 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 future_index_round_targets[:,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[:,:,i])
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
         index_round_targets = np.concatenate([past_index_round_targets,future_index_round_targets],axis=1)
-        # index_round_targets = np.concatenate([short_past_index_round_targets,np.expand_dims(short_future_index_round_targets,1)],axis=1)
 
         # 整体目标值批次内,分行业归一化
         past_data_scale = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
-        for index in self.ins_in_indus_index:
-            target_class_ins = target_class_total[index]
+        for idx,ins_indus_index in enumerate(self.ins_in_indus_index):
+            # 忽略无效数值
+            target_class_ins = target_class_total[ins_indus_index]
             keep_index = np.where(target_class_ins>=0)[0]
             if keep_index.shape[0]==0:
-                continue
-            index_real = index[keep_index]
+                continue         
+            index_real = ins_indus_index[keep_index]
             past_data = past_round_targets[index_real,:,:]
-            future_data = future_round_targets[index_real,:,:]
+            future_data = future_round_targets[index_real,:,:]        
+                   
             for i in range(self.past_target_shape[-1]):
-                if self.scale_mode[i]==0:
+                # 在全品种缩放模式下，对整体指数下的品种进行归一化，忽略行业内部的归一化。在行业品种缩放模式下，针对每个行业内部的品种进行归一化
+                if (self.scale_mode[i]==0 and idx!=self.main_index_rel) or (self.scale_mode[i]==2 and idx==self.main_index_rel):
                     # 使用过去数值参考,进行第一次归一化
                     past_data_reshape = np.expand_dims(past_data[:,:,i].reshape(-1),-1)
                     future_data_reshape = np.expand_dims(future_data[:,:,i].reshape(-1),-1)
@@ -522,8 +520,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     past_data_scale[index_real,:,i] = scaler.transform(past_data_reshape).reshape(past_data[:,:,i].shape)
                     future_round_targets[index_real,:,i] = scaler.transform(future_data_reshape).reshape(future_data[:,:,i].shape)
                     # 针对目标值，再次归一化以加速收敛                    
-                    future_round_targets[index,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index,:,i])
-                if self.scale_mode[i]==1:
+                    future_round_targets[index_real,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
+                # 对于数值模式，只进行一次过去未来的归一化，区分全品种和行业内部的归一化操作
+                if (self.scale_mode[i]==1 and idx!=self.main_index_rel) or (self.scale_mode[i]==3 and idx==self.main_index_rel):
                     scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data[:,:,i].transpose(1,0))
                     past_data_scale[index_real,:,i] = scaler.transform(past_data[:,:,i].transpose(1,0)).transpose(1,0)
                     future_round_targets[index_real,:,i] = scaler.transform(future_data[:,:,i].transpose(1,0)).transpose(1,0)

@@ -84,6 +84,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
         del model_kwargs["model_type"]
         del model_kwargs["target_mode"]
         del model_kwargs["scale_mode"]
+        if "cut_len" in model_kwargs:
+            del model_kwargs["cut_len"]
+        
         if "rolling_size" in model_kwargs:
             del model_kwargs["rolling_size"]
         

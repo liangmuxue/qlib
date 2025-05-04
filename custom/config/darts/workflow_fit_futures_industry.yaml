@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_industryNojr_qtluDiffRsvTrendStep2_202203"
+               model_name: "Futures_industryNojr_qtluDiffRsvtrendStep2_202203"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False

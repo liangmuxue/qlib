@@ -19,7 +19,7 @@ from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDat
 from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset
 from darts_pro.data_extension.futures_industry_droll_dataset import FuturesIndustryDRollDataset
 from darts_pro.mam.futures_industry_droll_module import FuturesIndustryDRollModule
-from darts_pro.mam.futures_strategy_module import FuturesStrategyModule
+from darts_pro.mam.futures_module import FuturesTogeModule
 from darts_pro.mam.futures_industry_module import FuturesIndustryModule
 
 """把分阶段数据再次整合到一起"""
@@ -32,18 +32,20 @@ class FuturesModel(IndustryRollModel):
         past_covariates: Optional[Sequence[TimeSeries]],
         future_covariates: Optional[Sequence[TimeSeries]],
         max_samples_per_ts: Optional[int],
+        cut_len=2,
         mode="train"
     ):
         """使用原数据集作为训练和测试数据集"""
-        
+        self.cut_len = cut_len
         # 训练模式下，需要多放回一个静态数据对照集合
         if mode=="train":
-            ds = FuturesTogatherDataset(
+            ds = FuturesIndustryDataset(
                 target_series=target,
                 covariates=past_covariates,
                 future_covariates=future_covariates,
                 input_chunk_length=self.input_chunk_length,
                 output_chunk_length=self.output_chunk_length,
+                cut_len=cut_len,
                 max_samples_per_ts=None,
                 use_static_covariates=True,
                 target_num=len(self.past_split),
@@ -53,17 +55,17 @@ class FuturesModel(IndustryRollModel):
             # 透传行业分类和股票映射关系，后续使用
             self.train_sw_ins_mappings = ds.sw_ins_mappings            
         # 验证模式下，需要传入之前存储的静态数据集合
-        if mode=="valid":
-            ds = FuturesTogatherDataset(
+        if mode=="valid" or mode=="predict":
+            ds = FuturesIndustryDataset(
                 target_series=target,
                 covariates=past_covariates,
                 future_covariates=future_covariates,
                 input_chunk_length=self.input_chunk_length,
                 output_chunk_length=self.output_chunk_length,
+                cut_len=cut_len,
                 max_samples_per_ts=None,
                 use_static_covariates=True,
                 target_num=len(self.past_split),
-                ass_sw_ins_mappings=self.train_sw_ins_mappings, # 验证集是需要传入训练集映射关系数据，以进行审计
                 scale_mode=self.scale_mode,
                 mode=mode
             )
@@ -132,9 +134,9 @@ class FuturesModel(IndustryRollModel):
 
         self.categorical_embedding_sizes = categorical_embedding_sizes
                
-        model = FuturesStrategyModule(
-                indus_dim=past_target.shape[0],
+        model = FuturesTogeModule(
                 output_dim=self.output_dim,
+                cut_len=self.cut_len,
                 variables_meta_array=variables_meta_array,
                 num_static_components=n_static_components,
                 hidden_size=self.hidden_size,
@@ -161,7 +163,51 @@ class FuturesModel(IndustryRollModel):
                 valid_sw_ins_mappings=self.valid_sw_ins_mappings,     
                 **self.pl_module_params,
         )     
-        return model     
+        return model         
+
+    def _batch_collate_filter(self,batch):
+        """批次整合,包含批次内数据归一化"""
+        
+        aggregated = []
+        first_sample = batch[0]
+        sample_len = len(first_sample)
+        for i in range(sample_len):
+            elem = first_sample[i]
+            # 针对round数据，根据标志决定是否在批次内进行归一化
+            if i==sample_len-2:
+                sample_list = [sample[i] for sample in batch]
+                round_data = np.stack(sample_list, axis=0)
+                for j in range(len(self.past_split)):
+                    if self.scale_mode[j]==5:
+                        round_data_item = round_data[...,j]   
+                        # round_past_data_item = round_data_item[:,:,:-1]
+                        # round_past_data_item_trans = round_past_data_item.transpose(0,2,1)
+                        # round_past_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
+                        #     round_past_data_item_trans.reshape(-1,round_past_data_item_trans.shape[-1])).reshape(round_past_data_item_trans.shape).transpose(0,2,1)
+                        round_future_data_item = round_data_item[:,:,-1]
+                        round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)        
+                        round_data[:,:,-1,j] = round_future_data_item  
+                        # round_data[:,:,:-1,j] = round_past_data_item                   
+                aggregated.append(
+                    torch.from_numpy(round_data)
+                )                               
+            elif isinstance(elem, np.ndarray) and i!=(sample_len-2):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, tuple):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+            elif isinstance(elem, List):
+                aggregated.append([sample[i] for sample in batch])
+            else:
+                print("no match for:",elem.dtype)
+                          
+        return tuple(aggregated) 
 
 class FuturesIndustryModel(FuturesModel):    
 
