@@ -333,13 +333,15 @@ class FuturesMappingUtil:
         
         # 添加整体指数数据
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(np.array(fur_ins_mappings))
+        sort_index = np.argsort(combine_content[:,0])
         total_index = -1
         for i in range(len(target_series)):
             if target_series[i].instrument_code=="ZS_ALL":
                 total_index = i
                 break
         if total_index!=-1:
-            fur_ins_mapping = [total_index,'ZS_ALL',combine_content[:,0].astype(np.int),combine_content[:,0].astype(np.int),combine_content[:,3],combine_content[:,1],'综合']
+            fur_ins_mapping = [total_index,'ZS_ALL',combine_content[sort_index,0].astype(np.int),
+                        combine_content[sort_index,0].astype(np.int),combine_content[sort_index,3],combine_content[sort_index,1],'综合']
             fur_ins_mappings.append(fur_ins_mapping)
         fur_ins_mappings = np.array(fur_ins_mappings)
         # 根据编码进行排序
@@ -394,6 +396,7 @@ class FuturesMappingUtil:
         index_rel = [i for i in range(sw_ins_mappings[:,0].shape[0])]
         index_rel.remove(main_index)
         ins = np.concatenate(sw_ins_mappings[index_rel,2])
+        ins = np.sort(ins)
         return ins
 
     @staticmethod
@@ -402,6 +405,7 @@ class FuturesMappingUtil:
         if without_main:
             main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
             return np.concatenate([ins[:main_index],ins[main_index+1:]])
+        
         return ins
     
     @staticmethod

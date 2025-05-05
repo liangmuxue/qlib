@@ -270,7 +270,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         index_range = np.array(index_range)   
         # 根据单独指标决定如何归一化
         for i in range(combine_values.shape[-1]):
-            if scale_mode[i] in [1,2]:
+            if scale_mode[i] in [1,2,3]:
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
@@ -523,9 +523,15 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     future_round_targets[index_real,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
                 # 对于数值模式，只进行一次过去未来的归一化，区分全品种和行业内部的归一化操作
                 if (self.scale_mode[i]==1 and idx!=self.main_index_rel) or (self.scale_mode[i]==3 and idx==self.main_index_rel):
-                    scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data[:,:,i].transpose(1,0))
-                    past_data_scale[index_real,:,i] = scaler.transform(past_data[:,:,i].transpose(1,0)).transpose(1,0)
-                    future_round_targets[index_real,:,i] = scaler.transform(future_data[:,:,i].transpose(1,0)).transpose(1,0)
+                    for k in index_real:
+                        past_data_item = past_round_targets[k,:,i:i+1]
+                        # 过滤全部趋近于0的数据
+                        if past_data_item.max()<1e-4:
+                            continue
+                        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_item)
+                        past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
+                        scale_data= scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
+                        future_round_targets[k,:,i] = scale_data
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
         # if future_start_datetime==20221011:

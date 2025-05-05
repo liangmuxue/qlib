@@ -28,7 +28,7 @@ TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20221011]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
-DRAW_SEQ_ITEM = [1]
+DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = []
 
 class FuturesTogeModule(MlpModule):
@@ -481,7 +481,7 @@ class FuturesTogeModule(MlpModule):
                 indus_result_item = result_total[result_total['date']==date]
                 ins_with_indus = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
                 ins_rel_index = FuturesMappingUtil.get_instrument_rel_index(sw_ins_mappings)
-                
+                instruments_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
                 # 可视化相互关系
                 for j in range(len(self.past_split)):
                     total_view_data = None
@@ -489,25 +489,24 @@ class FuturesTogeModule(MlpModule):
                     futures_names_combine = None
                     futures_index_combine = None
                     price_range_total = []
-                    for k,instruments in enumerate(ins_with_indus):
+                    
+                    for k,instruments in enumerate([instruments_all]):
                         indus_index_item = indus_index[indus_rel_index[k]]
-                        ins_index = industry_instrument_index[k]
-                        inner_class_item = target_class_item[ins_index]
+                        inner_class_item = target_class_item[instruments]
                         inner_index = np.where(inner_class_item>=0)[0]           
                         instruments,k_idx,_ = np.intersect1d(instruments,keep_index,return_indices=True)
                         indus_code = indus_codes[k]
-                        indus_name = indus_names[k]
-                        futures_names = FuturesMappingUtil.get_futures_names(sw_ins_mappings,indus_rel_index[k])[k_idx].tolist()
+                        indus_name = "ALL"
+                        futures_names = FuturesMappingUtil.get_futures_names(sw_ins_mappings,1)[k_idx].tolist()
                         if k==0:
                             rel_index = [0,ins_rel_index[k]]
                         else:
                             rel_index = [ins_rel_index[k-1],ins_rel_index[k-1]+ins_rel_index[k]]
-                        ins_cls_output = cls_output[index,rel_index[0]:rel_index[1],j]
-                        ins_cls_output = ins_cls_output[inner_index]
+                        ins_cls_output = cls_output[index,inner_index,j]
                         fur_round_target = round_targets[instruments,-1,j]
                         
                         # 添加价格显示
-                        price_array_range = np.array([item["diff_range"][-1] for item in ts_arr[ins_index][inner_index]])
+                        price_array_range = np.array([item["diff_range"][-1] for item in ts_arr[instruments]])
                         view_data = np.stack([ins_cls_output,fur_round_target,price_array_range]).transpose(1,0)
                         win = "round_target_{}_{}_{}".format(j,k,viz_total_size)
                         target_title = "target{}_{},date:{}".format(j,indus_name,date)
@@ -517,58 +516,22 @@ class FuturesTogeModule(MlpModule):
                             total_view_data = view_data
                         else:
                             total_view_data = np.concatenate([total_view_data,view_data],axis=0) 
-                        if futures_names_combine is None:
-                            futures_names_combine = np.array(futures_names)
-                            futures_index_combine = np.array(instruments)
-                        else:
-                            futures_names_combine = np.concatenate([futures_names_combine,futures_names],axis=0)    
-                            futures_index_combine = np.concatenate([futures_index_combine,instruments],axis=0)    
-                        
-                        if j in DRAW_SEQ_ITEM:
-                            # 行业板块数值图
-                            indus_output_value = ts_arr[indus_index_item]["pred_data"]
-                            indus_target = index_round_targets_3d[index,indus_rel_index[k],:,j]
-                            price_target = ts_arr[indus_index_item]["diff_range"] * 10
-                            win = "whole_round_target_{}_{}_{}".format(j,k,viz_total_size)    
-                            target_title = "target_{}_{},date:{},price_inf:{}".format(indus_name,j,date,round(indus_result_item["price_inf"].values[k],3))
-                            viz_detail = viz_result_detail["all"]
-                            view_data = np.stack([indus_output_value,indus_target,price_target]).transpose(1,0)
-                            names=["pred","target","price"]                            
-                            viz_detail.viz_matrix_var(view_data,win=win,title=target_title,names=names)      
-                                        
-                    # 显示板块比对图
-                    indust_output_value = ce_output[j][index]
-                    indust_target = index_round_targets[indus_rel_index,j]
-                    price_range_total = np.array([ts["diff_range"][-1] for ts in ts_arr[indus_index[indus_rel_index]]])
-                    win = "indus_round_target_{}_{}".format(j,viz_total_size)
-                    target_title = "[{}-{}] trend:{}".format(int(date),j,trend_value)
-                    if j in DRAW_SEQ:
-                        # indust_output_value = indust_output_value.repeat(6)
-                        view_data = np.stack([indust_output_value,indust_target,price_range_total*10]).transpose(1,0)
-                        tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_names.tolist(),legends=["pred","target","price"])   
-                        
-                    # 显示预测走势数据    
-                    def show_trend_data(k,indus_code,ins_name,type=0):
-                        past_target_item = past_target_3d[index,k,:,j]
-                        future_target_item = future_target_3d[index,k,:,j]
-                        target_data = np.concatenate([past_target_item,future_target_item],axis=0)    
-                        zero_index = np.where(target_data==0)
-                        target_data[zero_index] = 0.001
-                        pad_data = np.array([0 for i in range(self.input_chunk_length)])
-                        # Add Price data and Norm
-                        price_array = ts_arr[k]["price_array"]
-                        scaler = MinMaxScaler(feature_range=(0.001, 1))
-                        scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
-                        price_array = scaler.transform(np.expand_dims(price_array,-1)).squeeze()
-                        view_data = np.stack((target_data,price_array)).transpose(1,0)
-                        win = "target_xbar_{}_{}_{}_{}".format(indus_code,k,j,date)
-                        target_title = "{}_{},date:{}".format(ins_name,j,date)
-                        if type==1:
-                            viz_detail = viz_result_detail["all"]
-                        else:
-                            viz_detail = viz_result_detail[indus_code]
-                        names=["round_target","price"]
-                        # viz_detail.viz_matrix_var(view_data,win=win,title=target_title,names=names)   
+                        # if futures_names_combine is None:
+                        #     futures_names_combine = np.array(futures_names)
+                        #     futures_index_combine = np.array(instruments)
+                        # else:
+                        #     futures_names_combine = np.concatenate([futures_names_combine,futures_names],axis=0)    
+                        #     futures_index_combine = np.concatenate([futures_index_combine,instruments],axis=0)    
+                        #
+                        # if j in DRAW_SEQ_ITEM:
+                        #     # 显示品种比对图
+                        #     indust_output_value = cls_output[j][index]
+                        #     indust_target = index_round_targets[inner_class_item,j]
+                        #     win = "indus_round_target_{}_{}".format(j,viz_total_size)
+                        #     target_title = "[{}-{}] trend:{}".format(int(date),j,trend_value)
+                        #     # indust_output_value = indust_output_value.repeat(6)
+                        #     view_data = np.stack([indust_output_value,indust_target,price_array_range*10]).transpose(1,0)
+                        #     tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_names.tolist(),legends=["pred","target","price"])   
                                     
     def dump_val_data(self,val_batch,outputs,detail_loss):
     
@@ -841,8 +804,6 @@ class FuturesTogeModule(MlpModule):
         for index,row in result_list.iterrows():
             top_index = int(row["top_index"])
             trend_flag = int(row["trend_flag"])
-            if target_info[top_index] is None:
-                print("eee")
             diff_range = target_info[top_index]["diff_range"][-1] 
             total_diff_range.append(diff_range)
             p_taraget_class = get_simple_class(diff_range)
