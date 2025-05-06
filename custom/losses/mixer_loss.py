@@ -295,6 +295,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # 排序损失部分，用于整体走势衡量
         self.listwise = ListwiseRegressionLoss(tau=tau)
         self.lambda_reg = lambda_reg 
+        # self.bce_loss = nn.BCEWithLogitsLoss()
         
     def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
         """Multiple Loss Combine"""
@@ -320,9 +321,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
         for i in range(len(output)):
             target_mode = self.target_mode[i]
             if optimizers_idx==i or optimizers_idx==-1:
+                target_item = target[:,indus_data_index,:,i]
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
-                _,sv,sw_index_data = output_item  
+                dec_out,sv,sw_index_data = output_item  
                 future_round_targets_factor = future_round_targets[...,i]
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 counter = 0
@@ -331,8 +333,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
                     index_target_item = index_round_target[j,indus_rel_index,i]
+                    indus_index = tensor_intersect(keep_index,indus_data_index).to(keep_index.device)
+                    dec_out_item = dec_out[j]
                     if target_mode in [0,1]:
-                        indus_index = tensor_intersect(keep_index,indus_data_index).to(keep_index.device)
                         if indus_index.shape[0]<2:
                             continue
                         # 板块整体损失计算
@@ -340,11 +343,25 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item)/10  
                         if target_mode==1: 
                             ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item.unsqueeze(-1))  
+                    elif target_mode==3:
+                        cls_loss[i] += self.ccc_loss_comp(dec_out_item,target_item[j])   
+                    elif target_mode==5:
+                        if indus_index.shape[0]<2:
+                            continue                        
+                        inner_class_item = target_class_item[indus_index]                            
+                        # 对应预测数据中的有效索引
+                        inner_index = torch.where(inner_class_item>=0)[0]
+                        classify_data = sw_index_data[j,inner_index]                    
+                        # dec_classify_item = dec_classify_out[j,inner_index]
+                        class_item = ((inner_class_item[inner_index]>1)+0).double()         
+                        # 使用二分类损失,对涨跌直接判断
+                        cls_loss[i] += nn.BCEWithLogitsLoss()(classify_data,class_item)                           
                     else:
                         # 在行业内进行品种比较    
                         inner_class_item = target_class_item[ins_all]
                         # 对应预测数据中的有效索引
                         inner_index = torch.where(inner_class_item>=0)[0]
+                        class_item = (target_class_item[inner_index]>1)+0
                         # 对应目标数据中的有效索引
                         ins_index = tensor_intersect(keep_index,ins_all).to(keep_index.device)
                         round_targets_item = future_round_targets_factor[j,ins_index]
@@ -360,8 +377,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 cls_loss[i] += self.ccc_loss_comp(sv_indus.squeeze(-1),round_targets_item)    
                             else:
                                 cls_loss[i] += torch.abs(sv_indus.squeeze(-1),round_targets_item)  
-                        else:
+                        elif target_mode==3:
                             cls_loss[i] += self.mse_loss(sv_indus,round_targets_item.unsqueeze(-1))  
+
                         if torch.sum(index_target_item<1e-4)>2:
                             continue   
                         if torch.sum(index_target_item>=0.9999)>=5:
@@ -372,8 +390,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if target_mode in [2]:
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]                    
-                if target_mode in [3]:
-                    cls_loss[i] = cls_loss[i]
+                if target_mode in [3,5]:
                     loss_sum = loss_sum + cls_loss[i]      
                                              
         # if epoch_num>=self.lock_epoch_num:

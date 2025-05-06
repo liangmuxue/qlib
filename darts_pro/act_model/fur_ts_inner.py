@@ -101,6 +101,7 @@ class FurTimeMixer(nn.Module):
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
         self.index_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
         self.round_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
+        # self.classify_layer = nn.Linear(num_nodes, 2, bias=True)   
                            
     def forward(self, x_in): 
         
@@ -198,6 +199,9 @@ class FurTimeMixer(nn.Module):
         industry_decoded_data = self.index_projection_layer(comp_out.squeeze(-1))
         # 使用整体走势过去值
         sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
+        # # 添加二分类层
+        # dec_out = self.classify_layer(comp_out.squeeze(-1))
+        
         return dec_out,comp_out,sw_index_data
 
     def __multi_scale_process_inputs(self, x_enc, x_mark_enc):

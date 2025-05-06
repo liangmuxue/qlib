@@ -34,6 +34,7 @@ class FurIndustryMixer(nn.Module):
         
         # 循环取得不同行业板块的多个下级模型
         sub_model_list = []
+        sub_cls_model_list = []
         for num_nodes in combine_nodes_num:
             sub_model = FurTimeMixer(
                 num_nodes=num_nodes,
@@ -46,17 +47,23 @@ class FurIndustryMixer(nn.Module):
                 device=device,
                 )
             sub_model_list.append(sub_model)
+            cls_sub_model = LinelessLayer(num_nodes,1)
+            sub_cls_model_list.append(cls_sub_model)            
         self.sub_models = nn.ModuleList(sub_model_list)
+        self.cls_sub_models = nn.ModuleList(sub_cls_model_list)
         # 整合输出网络
         self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
         if self.target_mode in [2,3]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item())
+        if self.target_mode==5:
+            self.classify_layer = nn.Linear(hidden_size,2)
         
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""
         
         cls_out_combine = []
         index_data_combine = []
+        classify_out_combine = []
         # 不同行业分别输出
         for i in range(self.combine_nodes_num.shape[0]):
             m = self.sub_models[i]
@@ -65,18 +72,21 @@ class FurIndustryMixer(nn.Module):
             x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
-            _,cls_out,sw_index_data = m(x_inner)
+            classify_out,cls_out,sw_index_data = m(x_inner)
             if self.target_mode in [2,3]:
                 cls_out = self.ins_layer(cls_out)
             # 叠加归一化输出
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
+            classify_out = self.cls_sub_models[i](classify_out.permute(0,2,1)).squeeze(-1)
+            classify_out_combine.append(classify_out)
         
+        classify_out_combine = torch.stack(classify_out_combine).permute(1,0,2)
         if self.target_mode in [2,3]:
             index_data_combine = torch.cat(index_data_combine,dim=1)
         else:
             index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
-        return None,cls_out_combine,index_data_combine
+        return classify_out_combine,cls_out_combine,index_data_combine
 
 
 
