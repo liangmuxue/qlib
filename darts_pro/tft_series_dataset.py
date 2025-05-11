@@ -24,6 +24,7 @@ from darts_pro.tft_dataset import TFTDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
 from cus_utils.db_accessor import DbAccessor
+from cus_utils.common_compute import interquartile_range
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -128,12 +129,13 @@ class TFTSeriesDataset(TFTDataset):
     def reset_outlier(self,df):
         """重置异常值"""
         
-        # RSV指标需要在0到1
-        df.loc[df['RSV5']>1,'RSV5'] = 1
-        df.loc[df['RSV5']<0,'RSV5'] = 0
-        # QTLU指标需要在0到1
-        df.loc[df['QTLU5']>2,'QTLU5'] = 2
-        df.loc[df['QTLU5']<-0.1,'QTLU5'] = -0.1 
+        # RSV指标
+        df['RSV5'] = interquartile_range(df['RSV5'].values)
+        # QTLU指标
+        df['QTLU5'] = interquartile_range(df['QTLU5'].values)
+        df['QTLUMA5'] = interquartile_range(df['QTLUMA5'].values)
+        # BULLS指标
+        df['BULLS'] = interquartile_range(df['BULLS'].values)        
         return df
     
     def filter_by_indicator(self,df):

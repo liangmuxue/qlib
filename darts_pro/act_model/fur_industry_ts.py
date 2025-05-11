@@ -80,9 +80,9 @@ class FurIndustryMixer(nn.Module):
             index_data_combine.append(sw_index_data)
             classify_out = self.cls_sub_models[i](classify_out.permute(0,2,1)).squeeze(-1)
             classify_out_combine.append(classify_out)
-        
+            
         classify_out_combine = torch.stack(classify_out_combine).permute(1,0,2)
-        if self.target_mode in [2,3]:
+        if self.target_mode in [2,3,6]:
             index_data_combine = torch.cat(index_data_combine,dim=1)
         else:
             index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     
