@@ -47,13 +47,13 @@ class FurIndustryMixer(nn.Module):
                 device=device,
                 )
             sub_model_list.append(sub_model)
-            cls_sub_model = LinelessLayer(num_nodes,1)
+            cls_sub_model = LinelessLayer(num_nodes.item(),num_nodes.item())
             sub_cls_model_list.append(cls_sub_model)            
         self.sub_models = nn.ModuleList(sub_model_list)
         self.cls_sub_models = nn.ModuleList(sub_cls_model_list)
         # 整合输出网络
         self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
-        if self.target_mode in [2,3]:
+        if self.target_mode in [3]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item())
         if self.target_mode==5:
             self.classify_layer = nn.Linear(hidden_size,2)
@@ -73,16 +73,18 @@ class FurIndustryMixer(nn.Module):
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             classify_out,cls_out,sw_index_data = m(x_inner)
-            if self.target_mode in [2,3]:
+            if self.target_mode==3:
                 cls_out = self.ins_layer(cls_out)
+            elif self.target_mode==2:
+                # 行业内品种整合输出
+                cls_out = self.cls_sub_models[i](cls_out.squeeze(-1)).unsqueeze(-1)                
             # 叠加归一化输出
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
-            classify_out = self.cls_sub_models[i](classify_out.permute(0,2,1)).squeeze(-1)
             classify_out_combine.append(classify_out)
             
-        classify_out_combine = torch.stack(classify_out_combine).permute(1,0,2)
-        if self.target_mode in [2,3,6]:
+        classify_out_combine = torch.cat(classify_out_combine,dim=1)
+        if self.target_mode in [3,6]:
             index_data_combine = torch.cat(index_data_combine,dim=1)
         else:
             index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))     

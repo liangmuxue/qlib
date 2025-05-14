@@ -98,8 +98,11 @@ class TFTFuturesDataset(TFTSeriesDataset):
             df[target_col] = diff_range  
         compute_diff("label_ori","diff_range")
         compute_diff("RSV5","rsv_diff",div=False)
-        compute_diff("QTLUMA5","qtlu_diff",div=True)
+        compute_diff("QTLUMA5","qtluma_diff",div=False)
+        compute_diff("QTLU5","qtlu_diff",div=True)
         compute_diff("CCI5","cci_diff",div=False)
+        compute_diff("BULLS","bulls_diff",div=False)
+        compute_diff("SUMPMA5","sumpma_diff",div=False)
         # 生成行业均值数据
         df = self.build_industry_mean(df,indus_info=indus_info)     
         df['industry'] = df['industry'].astype(int)          

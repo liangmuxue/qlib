@@ -199,8 +199,6 @@ class FurTimeMixer(nn.Module):
         industry_decoded_data = self.index_projection_layer(comp_out.squeeze(-1))
         # 使用整体走势过去值
         sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
-        # # 添加二分类层
-        # dec_out = self.classify_layer(comp_out.squeeze(-1))
         
         return dec_out,comp_out,sw_index_data
 

@@ -598,95 +598,35 @@ class FuturesProcessModel(TftDataframeModel):
         data_assis = StatDataAssis()
         col_list = dataset.col_def["col_list"] + ["label"]
         analysis_columns = ["label_ori","REV5","IMAX5","QTLUMA5","OBV5","CCI5","KMID","KLEN","KMID2","KUP","KUP2",
-                            "KLOW","KLOW2","KSFT","KSFT2", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
+                            "KLOW","KLOW2","KSFT","RSV5", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
-        analysis_columns = ["price","QTLUMA5","CNTN5","SUMPMA5"]
-        analysis_columns = ["price","QTLUMA5",'QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
-        # 利用dataloader进行数据拼装
-        val_loader = DataLoader(
-                custom_dataset_valid,
-                batch_size=1024,
-                shuffle=False,
-                num_workers=8,
-                pin_memory=True,
-                drop_last=False,
-                collate_fn=self._batch_collate_fn,
-            )
-        past_conv_index = past_split[0]
-        past_columns = dataset.get_past_columns()
-        past_columns = past_columns[past_conv_index[0]:past_conv_index[1]]       
-        combine_columns = ["price"] + past_columns + dataset.get_target_column() 
-        analysis_data = None
-        print("total len：",len(val_loader))
-        # 遍历数据集，并按照批次进行计算，汇总后取得平均值
-        for index,batch_data in enumerate(val_loader):
-            (
-                past_target,
-                past_covariates,
-                historic_future_covariates,
-                future_covariates,
-                static_covariates,
-                past_future_covariates,
-                future_target,
-                target_class,
-                past_round_targets,
-                _,
-                future_round_targets,
-                target_info
-            ) = batch_data
-            # if index>5:
-            #     break
-            index_filter = []
-            # 筛选指定日期数据,由于是3D模式，因此先把形状调整一下]
-            target_class_flat = target_class.flatten()
-            keep_index = np.where(target_class_flat>-1)[0]
-            future_target_flat = future_target.reshape(-1,future_target.shape[-2],future_target.shape[-1])
-            future_target = future_target_flat[keep_index]
-            price_array_list = [] 
-            for i,ti in enumerate(target_info):
-                for ts in ti: 
-                    # 忽略空值
-                    if ts is not None:
-                        # 计算价格差的时候，把前一日期也包括进来
-                        price_array = np.array(ts["price_array"][-pred_len-1:])  
-                        price_array_list.append(price_array)
-                future_start_datetime = ti[0]["future_start_datetime"]
-                if future_start_datetime<20220401 and future_start_datetime>=20220301 or True:
-                    index_filter.append(i)    
-            price_array = np.stack(price_array_list)
-            price_range = ((price_array[:,1:] - price_array[:,:-1])/price_array[:,:-1])*10
-            price_range = np.expand_dims(price_range,-1)
-            # 对价格归一化后进行比较
-            price_array_scale = MinMaxScaler().fit_transform(price_array[:,1:].transpose(1,0)).transpose(1,0)
-            price_array_scale = np.expand_dims(price_array_scale,-1)
-            past_future_covariates = past_future_covariates.reshape(past_future_covariates.shape[0]*past_future_covariates.shape[1],past_future_covariates.shape[2],-1)
-            past_future_covariates = past_future_covariates.numpy()[keep_index]
-            past_future_covariates_item = past_future_covariates[...,past_conv_index[0]:past_conv_index[1]]  
-            past_future_covariates_item_trans = past_future_covariates_item.transpose(1,0,2)
-            past_future_covariates_item_trans = past_future_covariates_item_trans.reshape(past_future_covariates_item_trans.shape[0],-1)
-            past_future_covariates_item = MinMaxScaler().fit_transform(past_future_covariates_item_trans).reshape(past_future_covariates_item_trans.shape[0],past_future_covariates_item.shape[0],past_future_covariates_item.shape[2]).transpose(1,0,2)
-            # 整合未来价格、未来目标值以及过去协变量在未来的数值，后续统一进行相关性比较
-            analysis_batch = np.concatenate([price_array_scale,past_future_covariates_item,future_target],-1)   
-            # 计算单个批次的数据
-            df_corr_batch,df_price_batch,range_cls_stat = data_assis.custom_data_corr_analysis(analysis_batch,fit_columns=combine_columns,
-                            analysis_columns=analysis_columns,target_class=target_class[index_filter],price_range=price_range)
-        # 汇总所有批次的数据
-        if analysis_data is None:
-            analysis_data = [df_corr_batch,df_price_batch,[range_cls_stat]]
-        else:
-            analysis_data[0] = pd.concat([analysis_data[0],df_corr_batch])
-            analysis_data[1] = pd.concat([analysis_data[1],df_price_batch])
-            analysis_data[2] = analysis_data[2] + [range_cls_stat]
-        print("process index:{}".format(index))           
-         
-        analysis_data_mean = [analysis_data[0].mean(),analysis_data[1].mean()]
-        analysis_data[2] = np.stack(analysis_data[2])
-        hitrate_mean = np.mean(analysis_data[2],axis=0)
-        hitrate_mean = pd.DataFrame(hitrate_mean,columns=["cls_{}".format(k) for k in range(4)],index=analysis_columns[1:])
-                
-        print("指标走势与价格走势相关度:\n",analysis_data_mean[0])
-        print("指标涨跌幅与价格涨跌幅相关度:\n",analysis_data_mean[1])
-        print("hitrate price:\n",hitrate_mean)
+        analysis_columns = ["RSV5","QTLU5","CNTN5","SUMPMA5","CCI5"]
+        # analysis_columns = ["QTLUMA5",'QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
+        # analysis_columns = ["rsv_diff","qtluma_diff",'qtlu_diff','cci_diff','bulls_diff','sumpma_diff']
+        
+        results = []
+        price_col = 'diff_range'
+        # price_col = 'CLOSE'
+        custom_date = None
+        # custom_date = [20221025]
+        
+        # 行业品种相关度横向比较
+        for i in range(len(analysis_columns)):
+            target_df = dataset.df_val
+            if custom_date is not None:
+                target_df = dataset.df_val[dataset.df_val['datetime_number'].isin(custom_date)]
+            tar_col = analysis_columns[i]
+            df_instrument = target_df[~target_df['instrument'].str.startswith('ZS_')]
+            corr_data = df_instrument[[price_col,tar_col]].corr().values
+            df_indus = target_df[(target_df['instrument'].str.startswith('ZS_'))&(target_df['instrument']!='ZS_ALL')&(target_df['instrument']!='ZS_JRQH')&(target_df['instrument']!='ZS_NMFI')]
+            corr_indus_data = df_indus[[price_col,tar_col]].corr().values
+            results.append([corr_data[0,1],corr_indus_data[0,1]])
+        results = np.array(results).transpose(1,0)
+        results = pd.DataFrame(results,index=['品种相关度','行业相关度'],columns=analysis_columns)
+        pd.set_option('expand_frame_repr', False)
+        print("指标走势与价格走势相关度:\n",results)
+        
+        # print(dataset.df_val[(dataset.df_val['datetime_number']>=20221020)&(dataset.df_val['datetime_number']<=20221028)&(dataset.df_val['instrument'].str.startswith('ZS_'))&(dataset.df_val['instrument']!='ZS_ALL')&(dataset.df_val['instrument']!='ZS_JRQH')&(dataset.df_val['instrument']!='ZS_NMFI')][['instrument','diff_range','rsv_diff','RSV5','CLOSE']])
 
     @staticmethod           
     def _batch_collate_fn(batch):
