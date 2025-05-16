@@ -9,7 +9,7 @@ from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 import geomloss
 
-from cus_utils.common_compute import tensor_intersect,batch_normalization
+from cus_utils.common_compute import tensor_intersect,normalization_axis,batch_normalization
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 
@@ -283,7 +283,7 @@ def listMLE(y_pred, y_true, eps=1e-5, padded_value_indicator=-1):
 class FuturesIndustryLoss(UncertaintyLoss):
     """整合不同行业板块，并基于策略选取的损失"""
 
-    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,tau=0.1,lambda_reg=0):
+    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,tau=0.1,output_chunk_length=2,cut_len=2):
         
         super(FuturesIndustryLoss, self).__init__(ref_model=ref_model,device=device)
         
@@ -294,14 +294,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         # 排序损失部分，用于整体走势衡量
         self.listwise = ListwiseRegressionLoss(tau=tau)
-        self.lambda_reg = lambda_reg 
-        # self.bce_loss = nn.BCEWithLogitsLoss()
+        self.output_chunk_length = output_chunk_length 
+        self.cut_len = cut_len
         
     def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
         """Multiple Loss Combine"""
 
         (output,vr_class,_) = output_ori
-        (target,target_class,future_round_targets,index_round_target) = target_ori
+        (target,target_class,future_round_targets,index_round_targets,long_diff_index_targets) = target_ori
+        future_index_round_target = index_round_targets[:,:,-self.output_chunk_length:,:]
+        diff_index_round_target = index_round_targets[:,:,-1:,:].repeat(1,1,self.cut_len,1) - index_round_targets[:,:,-self.cut_len-self.output_chunk_length:-self.output_chunk_length,:]
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.zeros([len(output)]).to(self.device)
         fds_loss = torch.zeros([len(output)]).to(self.device)
@@ -329,10 +331,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 counter = 0
                 for j in range(target_class.shape[0]):
+                    time_diff_targets = long_diff_index_targets[j,indus_rel_index,:,i]
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
-                    index_target_item = index_round_target[j,indus_rel_index,:,i]
+                    index_target_item = future_index_round_target[j,indus_rel_index,:,i]
                     indus_index = tensor_intersect(keep_index,indus_data_index).to(keep_index.device)
                     inner_class_item = target_class_item[indus_data_index]                            
                     # 对应预测数据中的有效索引
@@ -344,15 +347,17 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         if target_mode==0: 
                             ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
                         if target_mode==1: 
-                            ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item[:,-1:])  
+                            ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],time_diff_targets)  
                     elif target_mode==5:
                         if indus_index.shape[0]<2:
-                            continue                        
-                        classify_data = sw_index_data[j,inner_index]                    
-                        # dec_classify_item = dec_classify_out[j,inner_index]
-                        class_item = ((inner_class_item[inner_index]>1)+0).double()         
-                        # 使用二分类损失,对涨跌直接判断
-                        cls_loss[i] += nn.BCEWithLogitsLoss()(classify_data,class_item)                           
+                            continue        
+                        
+                        # 过去时间段数组比对模式
+                        dec_classify_item = dec_out[j,inner_index,:]
+                        diff_target = diff_index_round_target[j,inner_index,:,i]   
+                        # 归一化目标值  
+                        diff_target = normalization_axis(diff_target,axis=1)
+                        cls_loss[i] += self.ccc_loss_comp(dec_classify_item,diff_target)                           
                     else:
                         # 在行业内进行品种比较    
                         inner_class_item = target_class_item[ins_all]

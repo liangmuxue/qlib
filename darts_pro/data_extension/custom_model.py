@@ -80,6 +80,8 @@ class TFTExtModel(MixedCovariatesTorchModel):
         """重载darts相关类"""
         
         self.mode = mode
+        self.ext_kwargs = kwargs
+        
         model_kwargs = {key: val for key, val in self.model_params.items()}
         del model_kwargs["model_type"]
         del model_kwargs["target_mode"]

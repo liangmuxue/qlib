@@ -12,7 +12,7 @@ from .layers.Embed import DataEmbedding_wo_pos
 class FurTimeMixer(nn.Module):
     """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络"""
     
-    def __init__(self, c_in=10,c_out=1,seq_len=25,round_skip_len=25,pred_len=5,past_cov_dim=12, dropout=0.3,decomp_method='moving_avg',d_ff=2048,moving_avg=25,
+    def __init__(self, c_in=10,c_out=1,seq_len=25,round_skip_len=25,pred_len=5,cut_len=6,past_cov_dim=12, dropout=0.3,decomp_method='moving_avg',d_ff=2048,moving_avg=25,
                  e_layers:int=3, d_model=16,down_sampling_method='avg',down_sampling_window=5,down_sampling_layers=1,hidden_size=8,
                  num_nodes=0,node_dim=16,day_of_week_size=5,temp_dim_diw=8,month_of_year_size=12,temp_dim_miy=8,day_of_month_size=31,temp_dim_dim=8,
                  device="cpu"):
@@ -36,6 +36,7 @@ class FurTimeMixer(nn.Module):
         
         
         self.pred_len = pred_len
+        self.cut_len = cut_len
         self.temp_dim_diw = temp_dim_diw
         self.temp_dim_miy = temp_dim_miy
         self.temp_dim_dim = temp_dim_dim
@@ -92,16 +93,15 @@ class FurTimeMixer(nn.Module):
         # 空间及时间编码层   
         self.ti_sp_enc = nn.Linear(ti_sp_dim,d_model)
         # 未来时空投影层，整合投影到单通道
-        self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, 1, bias=True)      
+        self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, cut_len, bias=True)      
         
         self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到板块指数数据，按照不同分类板块分别投影
         self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
-        self.all_to_index_projection_layer = nn.Linear(num_nodes*pred_len, pred_len, bias=True)          
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
-        self.index_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
-        self.round_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
-        # self.classify_layer = nn.Linear(num_nodes, 2, bias=True)   
+        self.index_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
+        self.round_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
+        self.transfer_layer = nn.Linear(pred_len, cut_len, bias=True)   
                            
     def forward(self, x_in): 
         
@@ -171,7 +171,10 @@ class FurTimeMixer(nn.Module):
                 # x的形状：[B * N, T, past_cov_dim],输出形状: [B * N, T, d_model]
                 enc_out = self.enc_embedding(x, None)
                 # 对x_mark进行嵌入计算，原形状：[B * N, T, D]，输出形状: [B * N, T, d_model]
-                x_mark = self.ti_sp_enc(x_mark)
+                try:
+                    x_mark = self.ti_sp_enc(x_mark)
+                except Exception:
+                    print("eee")
                 # 合并两类数据,输出形状[B * N, T, d_model]
                 enc_out = enc_out + x_mark
                 enc_out_list.append(enc_out)
@@ -188,15 +191,20 @@ class FurTimeMixer(nn.Module):
             enc_out_list = self.pdm_blocks[i](enc_out_list)
         
         # 未来目标预测，所有尺度都计算，然后相加
-        dec_out_list,comp_out_list,x_mark_dec = self.future_multi_mixing(enc_out_list, len(x_list[0]),x_time_mark_future,batch_size=batch_size,node_num=node_num)
+        dec_out_list,x_mark_dec = self.future_multi_mixing(enc_out_list, len(x_list[0]),x_time_mark_future,batch_size=batch_size,node_num=node_num)
+        comp_out_list = []
+        for dec_out in dec_out_list:
+            # 整体走势预估对应的投影
+            comp_out = self.transfer_layer(dec_out).reshape(batch_size,node_num,self.cut_len)
+            comp_out_list.append(comp_out)        
         dec_out = torch.stack(dec_out_list, dim=-1).sum(-1)
         # 叠加未来时空变量投影
-        x_mar_dec_out = self.tisp_projection_layer(x_mark_dec).reshape([batch_size,node_num]).unsqueeze(-1)       
-        comp_out = torch.stack(comp_out_list, dim=-1).sum(-1).unsqueeze(-1)
+        x_mar_dec_out = self.tisp_projection_layer(x_mark_dec).reshape([batch_size,node_num,self.cut_len])   
+        comp_out = torch.stack(comp_out_list, dim=-1).sum(-1)
         # 叠加整体数值残差计算
-        comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).squeeze(-1)).unsqueeze(-1) + self.round_skip_layer(past_round_targets)
+        comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).permute(0,2,1)).permute(0,2,1) + self.round_skip_layer(past_round_targets)
         # 按照不同分类板块分别投影
-        industry_decoded_data = self.index_projection_layer(comp_out.squeeze(-1))
+        industry_decoded_data = self.index_projection_layer(comp_out.permute(0,2,1)).squeeze(-1)
         # 使用整体走势过去值
         sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
         
@@ -281,7 +289,6 @@ class FurTimeMixer(nn.Module):
         x_mark_dec = x_mark_dec.reshape(batch_size,node_num,-1) # [B*N,pred_len,时空特征维度]
                         
         dec_out_list = []
-        comp_out_list = []
         # 解码生成输出值，把不同尺度整合为统一尺度（seq_len）
         for i, enc_out in zip(range(x_len), enc_out_list):
             # 尺度整合部分，enc_out形状: [B * N, T, d_model],dec_out形状: [B * N, pred_len, d_model]
@@ -290,11 +297,7 @@ class FurTimeMixer(nn.Module):
             dec_out = self.projection_layer(dec_out)
             dec_out = dec_out.reshape(batch_size,node_num, self.pred_len)
             dec_out_list.append(dec_out)
-            # 整体走势预估对应的投影
-            comp_out = self.comp_proj_layer(dec_out)            
-            comp_out = comp_out.reshape(batch_size,node_num)
-            comp_out_list.append(comp_out)
-        return dec_out_list,comp_out_list,x_mark_dec
+        return dec_out_list,x_mark_dec
     
 class MultiScaleSeasonMixing(nn.Module):
     """

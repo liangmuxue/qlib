@@ -459,6 +459,7 @@ class FuturesProcessModel(TftDataframeModel):
             my_model = FuturesIndustryModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
+                    cut_len=self.optargs["cut_len"],
                     hidden_size=64,
                     lstm_layers=1,
                     num_attention_heads=4,

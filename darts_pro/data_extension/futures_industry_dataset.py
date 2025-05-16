@@ -125,13 +125,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         self.cut_len = cut_len
         self.total_target_vals = self.build_total_tar_scale_data(target_series,scale_mode=scale_mode,cut_len=self.output_chunk_length)
         # indus_target_vals = []
-        # # 按照行业创建整体预测数值
         # for k,instruments in enumerate(self.ins_in_indus_index):
         #     target_series_ins = target_series[instruments]
         #     indus_target_vals.append(self.build_total_tar_scale_data(target_series_ins,scale_mode=scale_mode,cut_len=self.output_chunk_length))
-        self.short_target_vals = self.build_total_tar_scale_data(target_series,scale_mode=scale_mode,cut_len=self.cut_len)
-        # 取得目标差分归一化的参考最大最小值
-        # self.target_round_norm_mm = self.get_round_norm_mm(target_series)
 
         self.mode = mode
         # 目标归一化模式： 0:单位目标归一化，round目标不归一化 2:单位目标归一化，round目标使用百分比幅度，以及未来值二次归一化 3:单位目标忽略，round目标使用百分比幅度,未来值一次归一化 
@@ -322,8 +318,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_class_total = np.ones(self.total_instrument_num)*-1
         target_class_total = target_class_total.astype(np.int8)
         round_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
-        short_round_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
-        last_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
+        long_diff_targets = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
         price_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
         price_targets_ori = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
         
@@ -369,10 +364,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # 取得整体评估量化数据
             total_target_vals = self.total_target_vals[ori_index][past_start:future_end]
             round_targets[keep_index] = total_target_vals    
-            short_target_vals = self.short_target_vals[ori_index][past_start:future_end]
-            short_round_targets[keep_index] = short_target_vals                  
-            # total_target_vals_scale = self.total_target_vals_scale[ori_index][past_start:future_end]
-            # round_targets_scale[keep_index] = total_target_vals_scale  
+            # 使用最后一个目标值分别与所有前值做差分
+            long_diff_targets[keep_index] = [abs(total_target_vals[-1] - total_target_vals[i]) for i in range(self.input_chunk_length) ]
             # 取得最后一段涨跌幅度评估
             # 预测目标，包括过去和未来数据
             future_target = target_vals[future_start:future_end]
@@ -388,10 +381,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
             price_targets_ori[keep_index] = price_array    
             datetime_array = self.ass_data[code][3][past_start:future_end]
-            # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
-            past_start_real = past_start+target_series.time_index[0]
-            future_start_real = future_start+target_series.time_index[0]
-            future_end_real = future_end+target_series.time_index[0]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
@@ -475,6 +464,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 行业板块数据归一化
         past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
         future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
+        long_diff_index_targets = np.zeros([self.ins_in_indus_index.shape[0],self.cut_len,self.past_target_shape[-1]])
         for i in range(self.ins_in_indus_index.shape[0]):
             # 取得对应的行业序列数据，作为目标数据
             indus_index = self.indus_index[i]
@@ -482,8 +472,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             indus_future_round = future_round_targets[indus_index].copy()
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
+            long_diff_index_targets[i] = long_diff_targets[indus_index][-self.cut_len:,:]
         
-        # if future_start_datetime==20221012:
+        # if future_start_datetime==20221024:
         #     print("ggg")  
             
         for i in range(self.past_target_shape[-1]):
@@ -492,7 +483,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
                 future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
-        
+                long_diff_index_targets[...,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(long_diff_index_targets[...,i].transpose(1,0)).transpose(1,0) 
+                
         # 单独归一化未来行业板块整体预测数值
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0]:
@@ -541,6 +533,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,target_info_total 
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_index_targets,target_info_total 
                             
 
