@@ -79,10 +79,10 @@ class FurIndustryMixer(nn.Module):
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             classify_out,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==3:
-                cls_out = self.ins_layer(cls_out)
+                cls_out = self.ins_layer(cls_out[:,:,-1])
             elif self.target_mode==2:
                 # 行业内品种整合输出
-                cls_out = self.cls_sub_models[i](cls_out.squeeze(-1)).unsqueeze(-1)         
+                cls_out = self.cls_sub_models[i](cls_out[:,:,-1]) 
             # 叠加归一化输出
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
@@ -95,6 +95,8 @@ class FurIndustryMixer(nn.Module):
         elif self.target_mode==1:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)
             index_data_combine = self.seq_layer(index_data_combine)
+        else:
+            index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
             
         return classify_out_combine,cls_out_combine,index_data_combine
 

@@ -348,17 +348,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
                         if target_mode==1: 
                             ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],time_diff_targets)  
-                    elif target_mode==5:
-                        if indus_index.shape[0]<2:
-                            continue        
-                        
-                        # 过去时间段数组比对模式
-                        dec_classify_item = dec_out[j,inner_index,:]
-                        diff_target = diff_index_round_target[j,inner_index,:,i]   
-                        # 归一化目标值  
-                        diff_target = normalization_axis(diff_target,axis=1)
-                        cls_loss[i] += self.ccc_loss_comp(dec_classify_item,diff_target)                           
-                    else:
+                    elif target_mode==3:
+                        # 比较全部品种
+                        sv_out_item = sv[0][j]
+                        ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
+                        if ins_rel_index.shape[0]<3:
+                            continue
+                        sv_out_item = sv_out_item[ins_rel_index]
+                        ins_all_inner = torch.Tensor(ins_all).to(sv_out_item.device).long()
+                        ins_class_item = target_class_item[ins_all_inner]
+                        inner_index = ins_all_inner[torch.where(ins_class_item>=0)[0]]
+                        round_targets_item = future_round_targets_factor[j,inner_index]    
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)           
+                    elif target_mode==2:
                         # 在行业内进行品种比较    
                         inner_class_item = target_class_item[ins_all]
                         # 对应预测数据中的有效索引
@@ -371,7 +373,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = sv[k][j].squeeze(-1)
                             # 对应目标数据中的有效索引
                             ins_index = ins_in_indus_index[k]
-                            # ins_rel_index = torch.Tensor(FuturesMappingUtil.get_indus_instrument_range_index(sw_ins_mappings,ind_idx)).to(target_class_item.device)
                             ins_rel_index = torch.where(target_class_item[ins_index]>=0)[0].long()
                             # 对应预测数据中的有效索引
                             ins_index = tensor_intersect(keep_index,ins_index)
@@ -379,12 +380,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             # 总体目标值最后几位(pred_len)会是0，不进行计算
                             if round_targets_item.shape[0]<=1 or torch.any(round_targets_item==0) or torch.sum(index_target_item<1e-4)>2 or torch.sum(index_target_item>=0.9999)>=5:
                                 continue
-                            if target_mode==2:
-                                cls_loss[i] += self.ccc_loss_comp(sv_out_item[ins_rel_index],round_targets_item)    
-                            elif target_mode==3:
-                                cls_loss[i] += self.mse_loss(sv_out_item[ins_rel_index].unsqueeze(-1),round_targets_item.unsqueeze(-1))  
-                        # # 同时计算行业整体趋势
-                        # ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),index_target_item[:,-1:]) 
+                            cls_loss[i] += self.ccc_loss_comp(sv_out_item[ins_rel_index],round_targets_item)    
                         
                 if target_mode in [0,1]:
                     loss_sum = loss_sum + ce_loss[i]
