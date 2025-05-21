@@ -89,7 +89,7 @@ task:
                wave_period : &wave_period 30
                hidden_size: 32
                forecast_horizon: &forecast_horizon 2
-               cut_len: 18
+               cut_len: 8
                dropout: 0.5
                past_split: [[0,15],[15,30],[30,45]]
                target_mode: [0,1,2,1,3]
