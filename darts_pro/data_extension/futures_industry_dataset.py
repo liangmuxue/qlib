@@ -464,7 +464,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 行业板块数据归一化
         past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
         future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
-        long_diff_index_targets = np.zeros([self.ins_in_indus_index.shape[0],self.cut_len,self.past_target_shape[-1]])
+        long_diff_seq_targets = long_diff_targets[:,-self.cut_len:,:]
+        
         for i in range(self.ins_in_indus_index.shape[0]):
             # 取得对应的行业序列数据，作为目标数据
             indus_index = self.indus_index[i]
@@ -472,7 +473,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             indus_future_round = future_round_targets[indus_index].copy()
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
-            long_diff_index_targets[i] = long_diff_targets[indus_index][-self.cut_len:,:]
         
         # if future_start_datetime==20221024:
         #     print("ggg")  
@@ -483,7 +483,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
                 future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
-                long_diff_index_targets[...,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(long_diff_index_targets[...,i].transpose(1,0)).transpose(1,0) 
+                long_diff_seq_targets[:,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
                 
         # 单独归一化未来行业板块整体预测数值
         for i in range(self.past_target_shape[-1]):
@@ -533,6 +533,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_index_targets,target_info_total 
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
                             
 

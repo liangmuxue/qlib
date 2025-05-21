@@ -301,7 +301,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         """Multiple Loss Combine"""
 
         (output,vr_class,_) = output_ori
-        (target,target_class,future_round_targets,index_round_targets,long_diff_index_targets) = target_ori
+        (target,target_class,future_round_targets,index_round_targets,long_diff_seq_targets) = target_ori
         future_index_round_target = index_round_targets[:,:,-self.output_chunk_length:,:]
         diff_index_round_target = index_round_targets[:,:,-1:,:].repeat(1,1,self.cut_len,1) - index_round_targets[:,:,-self.cut_len-self.output_chunk_length:-self.output_chunk_length,:]
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
@@ -331,7 +331,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 counter = 0
                 for j in range(target_class.shape[0]):
-                    time_diff_targets = long_diff_index_targets[j,indus_rel_index,:,i]
+                    time_diff_targets = long_diff_seq_targets[j,indus_data_index,:,i]
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
@@ -378,16 +378,37 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             ins_index = tensor_intersect(keep_index,ins_index)
                             round_targets_item = future_round_targets_factor[j,ins_index]  
                             # 总体目标值最后几位(pred_len)会是0，不进行计算
-                            if round_targets_item.shape[0]<=1 or torch.any(round_targets_item==0) or torch.sum(index_target_item<1e-4)>2 or torch.sum(index_target_item>=0.9999)>=5:
+                            if round_targets_item.shape[0]<=3 or torch.any(round_targets_item==0) or torch.sum(round_targets_item<1e-4)>2 or torch.sum(round_targets_item>=0.9999)>=5:
                                 continue
                             cls_loss[i] += self.ccc_loss_comp(sv_out_item[ins_rel_index],round_targets_item)    
-                        
+                    elif target_mode==5:
+                        # 在行业内进行品种时间序列比较    
+                        inner_class_item = target_class_item[ins_all]
+                        # 对应预测数据中的有效索引
+                        inner_index = torch.where(inner_class_item>=0)[0]
+                        class_item = (target_class_item[inner_index]>-1)+0
+                        # sv_indus = sv[0][j]
+                        # sv_indus = sv_indus[inner_index]
+                        # 使用第一类输出数据，进行行业内品种比较
+                        for k,ind_idx in enumerate(indus_rel_index):
+                            sv_out_item = sv[k][j].squeeze(-1)
+                            # 对应目标数据中的有效索引
+                            ins_index = ins_in_indus_index[k]
+                            ins_rel_index = torch.where(target_class_item[ins_index]>=0)[0].long()
+                            # 对应预测数据中的有效索引
+                            ins_index = tensor_intersect(keep_index,ins_index)
+                            round_targets_item = future_round_targets_factor[j,ins_index]  
+                            diff_seq_targets = long_diff_seq_targets[j,ins_index,:,i]
+                            # 总体目标值最后几位(pred_len)会是0，不进行计算
+                            if diff_seq_targets.shape[0]<=1:
+                                continue
+                            cls_loss[i] += self.ccc_loss_comp(sv_out_item[ins_rel_index],diff_seq_targets)                           
                 if target_mode in [0,1]:
                     loss_sum = loss_sum + ce_loss[i]
                 if target_mode in [2]:
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]                    
-                if target_mode in [3,5,6]:
+                if target_mode in [3,5]:
                     loss_sum = loss_sum + cls_loss[i]      
                                              
         # if epoch_num>=self.lock_epoch_num:

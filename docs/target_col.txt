@@ -9,11 +9,13 @@
 
 [indicator]
 
-行业指标 复用整体计算中的各行业数据 'CCI5' SCALE_MODE:0 TARGET_MODE:0
+行业指标 复用整体计算中的各行业数据 'CCI5' SCALE_MODE:0 , TARGET_MODE:0
 
-整体指标 'diff_range' SCALE_MODE:1 TARGET_MODE:1
+整体指标 'diff_range' SCALE_MODE:1 , TARGET_MODE:1
 
-分项指标  'CCI5' SCALE_MODE:2 TARGET_MODE:2(按照行业内计算) or 3(整个计算)
+分项指标  'CCI5' SCALE_MODE:0(按照行业内计算) or 2(整个计算), TARGET_MODE:2(按照行业内计算) or 3(整个计算)
 
 
+
+Futures_industryAdj_rsvTimediff8DetailIndus_Step2_202203
 
