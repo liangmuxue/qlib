@@ -427,10 +427,12 @@ class FuturesMappingUtil:
     def get_instrument_rel_index(sw_ins_mappings,without_main=True):
         rel_index = []
         main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        cursor = 0
         for idx,item in enumerate(sw_ins_mappings[:,2]):
             if without_main and idx==main_index:
                 continue
-            rel_index.append(item.shape[0])
+            cursor += item.shape[0]
+            rel_index.append(cursor)
         return np.array(rel_index)
 
     @staticmethod

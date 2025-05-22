@@ -80,16 +80,16 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_industryAdj_rsvTimediffLin8DetailRsv_Step2_202203"
+               model_name: "Futures_industryAdj_rsvTimediff10DetailIndus_Step2_202203"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                step_mode: 'complete'
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
                forecast_horizon: &forecast_horizon 2
-               cut_len: 8
+               cut_len: 10
                dropout: 0.5
                past_split: [[0,15],[15,30],[30,45]]
                target_mode: [0,1,2,1,3]
