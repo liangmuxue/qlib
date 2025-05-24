@@ -717,7 +717,7 @@ class FuturesIndustryModule(MlpModule):
     def combine_result_data(self,output_result=None,predict_mode=False):
         """计算涨跌幅分类准确度以及相关数据"""
         
-        # return None,None,None
+        # return None,None,None,None
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         # 使用全部验证结果进行统一比较
@@ -989,13 +989,14 @@ class FuturesIndustryModule(MlpModule):
         ce_indus = ce_values[0]
         trend_indus = ce_values[1]
         trend_past_target = industry_target[:,:self.input_chunk_length,1]
-        cls_ins = cls[2]
+        # cls_ins = cls[2]
+        cls_ins = cls[1][:,-1]
         
         # 根据趋势预测数据在历史数据中的相对位置，并参照历史实际数据走势，判断涨跌趋势。并综合多个行业判断整体涨跌趋势。
         trend_flag_indus = []
         result_list = []
         price_round_data_indus = []
-        trend_can_num = 3
+        trend_can_num = 1
         for i,idx in enumerate(industry_index):
             index_round_targets_item = index_round_targets[idx][-self.cut_len-self.output_chunk_length:-self.output_chunk_length,1]
             target_info_item = target_info[industry_index_real[idx]]
@@ -1005,9 +1006,10 @@ class FuturesIndustryModule(MlpModule):
             match_index = np.argsort(trend_indus[i])[:trend_can_num]
             # match_index = np.abs(index_round_targets_item-pred_data[-1]).argmin()
             price_indus_inf = np.mean(price_round_data[match_index])
-            trend_flag = np.sum(price_indus_inf>price_inf_threhold)>(trend_can_num/2)
+            # trend_flag = np.sum(price_round_data[match_index]>price_inf_threhold)>(trend_can_num/2)
+            trend_flag = np.sum(price_round_data[match_index])>0
             trend_flag_indus.append(trend_flag)
-            result_list.append([date,industry_index_real[idx],trend_flag,np.mean(price_round_data[match_index]),match_index[0]])
+            result_list.append([date,industry_index_real[idx],trend_flag,price_indus_inf,price_indus_inf])
         price_round_data_indus = np.array(price_round_data_indus)
         trend_real = (np.sum(price_round_data_indus>0)>(len(industry_index)//2))+0
         

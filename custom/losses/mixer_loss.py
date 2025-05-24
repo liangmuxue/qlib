@@ -346,8 +346,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 板块整体损失计算
                         if target_mode==0: 
                             ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
-                        if target_mode==1: 
-                            ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],time_diff_targets)  
+                        # if target_mode==1: 
+                        #     ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),time_diff_targets.unsqueeze(-1))  
                     elif target_mode==3:
                         # 比较全部品种
                         sv_out_item = sv[0][j]
@@ -403,8 +403,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             if diff_seq_targets.shape[0]<=1:
                                 continue
                             cls_loss[i] += self.ccc_loss_comp(sv_out_item[ins_rel_index],diff_seq_targets)                           
-                if target_mode in [0,1]:
+                if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]
+                if target_mode==1: 
+                    ce_loss[i] = self.mse_loss(sw_index_data,long_diff_seq_targets[:,indus_data_index,:,i])        
+                    loss_sum = loss_sum + ce_loss[i]             
                 if target_mode in [2]:
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]                    
