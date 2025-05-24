@@ -183,5 +183,3 @@ class LinelessLayer(nn.Module):
         
         return output_data
         
-        
-        

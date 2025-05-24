@@ -296,6 +296,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         self.listwise = ListwiseRegressionLoss(tau=tau)
         self.output_chunk_length = output_chunk_length 
         self.cut_len = cut_len
+        # 用于多标签分类损失
+        self.ml_loss = nn.MultiLabelSoftMarginLoss(reduction='mean')
         
     def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
         """Multiple Loss Combine"""
@@ -340,14 +342,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     inner_class_item = target_class_item[indus_data_index]                            
                     # 对应预测数据中的有效索引
                     inner_index = torch.where(inner_class_item>=0)[0]                    
-                    if target_mode in [0,1]:
+                    if target_mode in [0]:
                         if indus_index.shape[0]<2:
                             continue
                         # 板块整体损失计算
-                        if target_mode==0: 
-                            ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
-                        # if target_mode==1: 
-                        #     ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),time_diff_targets.unsqueeze(-1))  
+                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
                     elif target_mode==3:
                         # 比较全部品种
                         sv_out_item = sv[0][j]
@@ -406,8 +405,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]
                 if target_mode==1: 
-                    ce_loss[i] = self.mse_loss(sw_index_data,long_diff_seq_targets[:,indus_data_index,:,i])        
-                    loss_sum = loss_sum + ce_loss[i]             
+                    sw_index_data_ml = sw_index_data[...,-1]
+                    sw_index_data_seq = sw_index_data[...,:-1]
+                    ce_loss[i] = self.mse_loss(sw_index_data_seq,long_diff_seq_targets[:,indus_data_index,:,i])   
+                    # 叠加多标签分类损失
+                    indus_class = ((target_class[:,indus_rel_index]>1)+0).long()
+                    cls_loss[i] = self.ml_loss(sw_index_data_ml,indus_class)      
+                    loss_sum = loss_sum + cls_loss[i]              
                 if target_mode in [2]:
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]                    

@@ -57,8 +57,11 @@ class FurIndustryMixer(nn.Module):
         if self.target_mode in [1]:
             # 多段时间比对模式
             self.seq_layer = LinelessLayer(cut_len,cut_len)        
+            # 对应多标签分类模式
+            self.seq_ml_layer = LinelessLayer(cut_len*index_num,index_num)   
         if self.target_mode in [2]:
-            self.cls_sub_models = nn.ModuleList(sub_cls_model_list)                 
+            self.cls_sub_models = nn.ModuleList(sub_cls_model_list)     
+            self.cls_sub_mlcombine_models = LinelessLayer(cut_len,cut_len)              
         if self.target_mode in [3]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item())
 
@@ -69,14 +72,14 @@ class FurIndustryMixer(nn.Module):
         cls_out_combine = []
         index_data_combine = []
         classify_out_combine = []
+        x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
+    
         # 不同行业分别输出
         for i in range(self.combine_nodes_num.shape[0]):
             m = self.sub_models[i]
-            # m_after = self.sub_models_after[i]
             instrument_index = self.combine_instrument_index[i]
-            x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
-                        future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
+                        future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])                
             classify_out,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==3:
                 cls_out = self.ins_layer(cls_out[:,:,-1])
@@ -95,6 +98,9 @@ class FurIndustryMixer(nn.Module):
         elif self.target_mode==1:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)
             index_data_combine = self.seq_layer(index_data_combine)
+            # 多标签分类模式，整合多个行业数据，每个分类输出为1维，后续做多标签分类损失
+            index_data_combine_ml = self.seq_ml_layer(index_data_combine.reshape(index_data_combine.shape[0],-1),res_data=past_index_round_targets[:,:,-self.cut_len:].reshape(past_index_round_targets.shape[0],-1))
+            index_data_combine = torch.cat([index_data_combine,index_data_combine_ml.unsqueeze(-1)],dim=-1)
         else:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
             

@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 from .mlp_module import MlpModule
 import cus_utils.global_var as global_var
@@ -435,6 +436,7 @@ class FuturesIndustryModule(MlpModule):
             total_cnt = rate_total['total_cnt'].sum()
             trend_corr_cnt = rate_total['trend_correct'].sum()
             yield_rate = rate_total['yield_rate'].sum()
+            f1_scores = rate_total['f1_score'].mean()
             for i in range(len(CLASS_SIMPLE_VALUES.keys())):
                 name = "cls{}_cnt".format(i)
                 cnt = rate_total[name].sum()
@@ -454,6 +456,7 @@ class FuturesIndustryModule(MlpModule):
             self.log("trend corr rate", round(trend_corr_cnt/rate_total.shape[0],3), prog_bar=True)  
             # self.log("total cnt", total_cnt, prog_bar=True)  
             # self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
+            self.log("f1_scores", round(f1_scores,3), prog_bar=True)  
             self.log("yield_rate", yield_rate, prog_bar=True)  
 
         
@@ -761,7 +764,8 @@ class FuturesIndustryModule(MlpModule):
         import_price_result_list = None
         indus_result_total_list = None
         rate_columns = ["date"] + ["cls{}_cnt".format(i) for i in range(len(CLASS_SIMPLE_VALUES.keys()))] + \
-                ["total_cnt","trend_value","trend_correct","indus_top_class","indus_top_diff","indus_bitop_diff","indus_fall_top_corr","indus_raise_top_corr","yield_rate"]   
+                ["total_cnt","trend_value","trend_correct","indus_top_class","indus_top_diff",
+                 "indus_bitop_diff","indus_fall_top_corr","indus_raise_top_corr","yield_rate","f1_score"]   
         # 遍历按日期进行评估
         for i in range(target_class_3d.shape[0]):
             future_target = future_target_3d[i]
@@ -805,7 +809,7 @@ class FuturesIndustryModule(MlpModule):
                     target_info["pred_data"] = data.values[:,-1].astype(float)      
             
             # 生成目标索引
-            import_index,trend_value,indus_top_index,indus_result_list = self.build_import_index(output_data=output_list,target_info=target_info_list,
+            import_index,trend_value,indus_top_index,indus_result_list,ml_pred = self.build_import_index(output_data=output_list,target_info=target_info_list,
                             target=whole_target,price_target=price_target_list,index_round_targets=index_round_targets,
                             combine_instrument=combine_content,instrument_index=instrument_in_indus_index)
         
@@ -819,9 +823,15 @@ class FuturesIndustryModule(MlpModule):
                 result_date_list[date] = [import_index,trend_value]
                 continue
   
-            # Compute Acc Result
+            # Compute Acc Resultes
             import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr = self.collect_result(import_index,overroll_trend=trend_value,
                                             indus_top_index=indus_top_index,target_info=target_info_list,indus_result_list=indus_result_list)
+            # 计算多标签分类评估指标
+            indus_rel_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
+            y_true = ((target_class_list[indus_rel_index]>1)+0)
+            y_pred = (ml_pred>0.5) + 0
+            f1score = f1_score(y_true,y_pred,average='binary')
+            
             import_price_result['date'] = date
             # 把结果数据整合到预测记录中
             if indus_result_total_list is None:
@@ -866,6 +876,7 @@ class FuturesIndustryModule(MlpModule):
                 rate_item.append(indus_top_corr[0]) 
                 rate_item.append(indus_top_corr[1]) 
                 rate_item.append(import_price_result['yield_rate'].values[0]) 
+                rate_item.append(f1score) 
                 rate_total.append(rate_item)
         rate_total = np.array(rate_total)
         if rate_total.shape[0]==0:
@@ -952,12 +963,10 @@ class FuturesIndustryModule(MlpModule):
     def build_import_index(self,output_data=None,target=None,price_target=None,target_info=None,combine_instrument=None,instrument_index=None,index_round_targets=None):  
         """生成涨幅达标的预测数据下标"""
         
-        # return None,None,None,None,None
-    
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
         
-        indus_top_index,import_index,trend_value,result_list = self.strategy_top_bidi(cls_values,ce_values,
+        indus_top_index,import_index,trend_value,result_list,ml_pred = self.strategy_top_bidi(cls_values,ce_values,
                                     target=target,target_info=target_info,index_round_targets=index_round_targets,
                                combine_instrument=combine_instrument)
 
@@ -966,7 +975,7 @@ class FuturesIndustryModule(MlpModule):
         if import_index is None or import_index.shape[0]==0:
             return None,None,None,None,None
               
-        return import_index,trend_value,indus_top_index,result_list
+        return import_index,trend_value,indus_top_index,result_list,ml_pred
 
     def strategy_top_bidi(self,cls,ce_values,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
         """行业排名方式筛选候选者,双向模式"""
@@ -987,8 +996,9 @@ class FuturesIndustryModule(MlpModule):
         # 整体指数预测数据转化为价格参考指数，并设置阈值进行涨跌判断
         price_inf_threhold = 0
         ce_indus = ce_values[0]
-        trend_indus = ce_values[1]
-        trend_past_target = industry_target[:,:self.input_chunk_length,1]
+        trend_indus_total = ce_values[1]
+        trend_indus_ml = trend_indus_total[:,-1]
+        trend_indus = trend_indus_total[:,-1:]
         # cls_ins = cls[2]
         cls_ins = cls[1][:,-1]
         
@@ -1028,6 +1038,7 @@ class FuturesIndustryModule(MlpModule):
         # trend_value = (price_indus_inf_list.sum()>0)
         # 超出一半上涨，则认为整体上涨
         trend_value = (np.sum(trend_flag_indus)>(len(industry_index)//2))+0
+        trend_value = (np.sum(cls_ins>0.5)>(len(industry_index)//2))+0
         # Make All Trend Correct
         # trend_value = trend_real
         
@@ -1078,7 +1089,7 @@ class FuturesIndustryModule(MlpModule):
         pred_import_index = pred_import_index[:select_num]
         import_index_real = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings, indus_rel_index)[pred_import_index].astype(int)
         
-        return indus_top_index_real,import_index_real,trend_value,result_list
+        return indus_top_index_real,import_index_real,trend_value,result_list,trend_indus_ml
                                               
     def on_predict_epoch_start(self):  
         self.output_result = []
