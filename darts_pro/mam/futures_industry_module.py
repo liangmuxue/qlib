@@ -901,10 +901,81 @@ class FuturesIndustryModule(MlpModule):
         rate_total = pd.DataFrame(rate_total,columns=rate_columns)
         
         return rate_total,indus_result_total_list,total_imp_cnt,import_price_result_list
-    
+
+    # def collect_result(self,import_index,overroll_trend=0,indus_top_index=None,target_info=None,indus_result_list=None): 
+    #     """收集预测对应的实际数据"""
+    #
+    #     sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
+    #     # 对于预测数据，生成对应涨跌幅类别
+    #     import_price_result = []
+    #     total_yield_rate = 0
+    #     for i,imp_idx in enumerate(import_index):
+    #         ts = target_info[imp_idx]
+    #         price_array = ts["price_array"][self.input_chunk_length-1:]
+    #         diff_range = (price_array[-1] - price_array[0])/price_array[0]
+    #         p_taraget_class = compute_price_class(price_array,mode="first_last")
+    #         # 根据多空判断取得实际对应的类别
+    #         if overroll_trend==0:
+    #             diff_range = -diff_range
+    #             p_taraget_class = np.array([3,2,1,0])[p_taraget_class]
+    #         import_price_result.append([imp_idx,ts["instrument"],diff_range,p_taraget_class])    
+    #     import_price_result = np.array(import_price_result)  
+    #     if import_price_result.shape[0]==0:
+    #         return None,None,None
+    #     import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","yield_rate","result"])     
+    #     import_price_result["result"] = import_price_result["result"].astype(np.int64)      
+    #     import_price_result["yield_rate"] = import_price_result["yield_rate"].astype(np.float)   
+    #
+    #     # 同时计算行业趋势判断准确率
+    #     trend_results = []
+    #     total_diff_range = []
+    #     indus_bitop_diff = 0
+    #     indus_top_corr = [None,None]
+    #     for index,row in indus_result_list.iterrows():
+    #         indus_index = int(row["indus_index"])
+    #         trend_flag = int(row["trend_flag"])
+    #         diff_range = target_info[indus_index]["diff_range"][-1] 
+    #         total_diff_range.append(diff_range)
+    #         p_taraget_class = get_simple_class(diff_range)
+    #         if trend_flag==0:
+    #             p_taraget_class = np.array([3,2,1,0])[p_taraget_class]                
+    #         trend_results.append(p_taraget_class)
+    #         # 针对行业top预测进行判断
+    #         top_flag = row['top_flag']
+    #         p_taraget_class = get_simple_class(diff_range)
+    #         if top_flag==1:
+    #             indus_top_corr[1] = (diff_range>0)
+    #             indus_bitop_diff += diff_range
+    #         if top_flag==0:
+    #             indus_top_corr[0] = (diff_range<0)
+    #             indus_bitop_diff -= diff_range               
+    #     total_diff_range = np.array(total_diff_range)
+    #     # 新增行业预测结果到原结果集
+    #     indus_result_list["trend_result"] = np.array(trend_results)
+    #     # 计算行业top准确率,以及幅度
+    #     diff_range = target_info[indus_top_index]["diff_range"][-1] 
+    #     indus_top_diff = 0
+    #     indus_top_class = get_simple_class(diff_range)      
+    #     if overroll_trend==0:
+    #         indus_top_class = np.array([3,2,1,0])[indus_top_class]  
+    #         indus_top_diff -= diff_range 
+    #     else:
+    #         indus_top_diff += diff_range 
+    #     # 计算整体趋势准确率
+    #     main_trend_correct = 0
+    #     raise_num = np.sum(total_diff_range>=0)
+    #     if overroll_trend==1 and raise_num>=3:
+    #         main_trend_correct = 1
+    #     elif overroll_trend==0 and raise_num<3:
+    #         main_trend_correct = 1
+    #     else:
+    #         main_trend_correct = 0        
+    #
+    #     return import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr
+       
     def collect_result(self,import_index,overroll_trend=0,indus_top_index=None,target_info=None,indus_result_list=None): 
         """收集预测对应的实际数据"""
-
+    
         import_price_result = None
         if self.step_mode!=1:
             import_price_result = []
@@ -925,7 +996,7 @@ class FuturesIndustryModule(MlpModule):
             import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","yield_rate","result"])     
             import_price_result["result"] = import_price_result["result"].astype(np.int64)      
             import_price_result["yield_rate"] = import_price_result["yield_rate"].astype(np.float)   
-        
+    
         # 同时计算行业趋势判断准确率
         trend_results = []
         total_diff_range = []
@@ -970,7 +1041,7 @@ class FuturesIndustryModule(MlpModule):
             main_trend_correct = 1
         else:
             main_trend_correct = 0        
-                     
+    
         return import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr
     
     def build_import_index(self,date=None,output_data=None,target=None,price_target=None,target_info=None,combine_instrument=None,instrument_index=None,index_round_targets=None):  
@@ -979,10 +1050,15 @@ class FuturesIndustryModule(MlpModule):
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
         # 不同阶段，使用不同的策略
-        if self.step_mode in[0,1]:
+        if self.step_mode==0:
             indus_top_index,trend_value,result_list = self.strategy_top_indus(cls_values,ce_values,
                                         target=target,target_info=target_info,index_round_targets=index_round_targets,
                                    combine_instrument=combine_instrument)
+        elif self.step_mode==1:
+            indus_top_index,trend_value,result_list = self.strategy_top_indus(cls_values,ce_values,
+                                        target=target,target_info=target_info,index_round_targets=index_round_targets,
+                                   combine_instrument=combine_instrument)           
+            return None,trend_value, indus_top_index,result_list
         else:
             # 第二阶段时，先加载第一阶段结果，然后再延续使用
             result_list = self.result_data[self.result_data['date']==date]
@@ -1114,7 +1190,8 @@ class FuturesIndustryModule(MlpModule):
         import_index_real = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings, indus_rel_index)[pred_import_index].astype(int)
         
         return import_index_real
-                                              
+
+
     def on_predict_epoch_start(self):  
         self.output_result = []
         
