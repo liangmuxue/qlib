@@ -340,12 +340,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     inner_class_item = target_class_item[indus_data_index]                            
                     # 对应预测数据中的有效索引
                     inner_index = torch.where(inner_class_item>=0)[0]                    
-                    if target_mode in [0,1]:
+                    if target_mode==0:
                         if indus_index.shape[0]<2:
                             continue
                         # 板块整体损失计算
-                        if target_mode==0: 
-                            ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
+                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
                         # if target_mode==1: 
                         #     ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),time_diff_targets.unsqueeze(-1))  
                     elif target_mode==3:

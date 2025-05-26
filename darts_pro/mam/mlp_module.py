@@ -84,7 +84,6 @@ class MlpModule(_TFTModuleBatch):
         # 切换标志，决定训练阶段是否只计算不回传梯度的方式进行,0训练模式1计算模式
         self.switch_flag = 0
         # 模型训练模式
-        self.step_mode=step_mode
         self.mode = None
         # 初始化中间结果数据
         self.training_step_outputs = [[] for _ in range(self.output_data_len)]

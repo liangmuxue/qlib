@@ -264,6 +264,7 @@ class FuturesProcessModel(TftDataframeModel):
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=map_location)
             self.model.batch_size = self.batch_size     
             self.model.model.monitor = monitor
+            self.model.model.step_mode = self.optargs["step_mode"]
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
             self.model.monitor = monitor        
@@ -456,6 +457,7 @@ class FuturesProcessModel(TftDataframeModel):
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==1:  
+            step_mode = self.optargs["step_mode"]
             my_model = FuturesIndustryModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
@@ -492,6 +494,7 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
+                    step_mode=step_mode,
                     pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
