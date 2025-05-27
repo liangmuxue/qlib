@@ -84,7 +84,7 @@ task:
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               step_mode: 'complete'
+               step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32

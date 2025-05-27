@@ -360,7 +360,16 @@ class FuturesMappingUtil:
         main_index_rel = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
         names = sw_ins_mappings[:,5][main_index_rel]
         return names
-       
+
+    @staticmethod
+    def get_all_instrument_code_names(sw_ins_mappings,indus_index=0):
+        """取得品种名称列表"""
+        
+        main_index_rel = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        names = sw_ins_mappings[:,5][main_index_rel]
+        codes = sw_ins_mappings[main_index_rel,4] + "_"
+        return codes + names
+           
     @staticmethod
     def get_futures_names(sw_ins_mappings,indus_index=0):
         """取得某个行业的期货品种名称列表"""
