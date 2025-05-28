@@ -717,7 +717,9 @@ class FuturesProcessModel(TftDataframeModel):
         self.model.batch_size = self.batch_size     
         self.model.mode = "predict"
         self.model.model.monitor = None
-
+        self.model.model.train_sw_ins_mappings = self.model.train_sw_ins_mappings
+        self.model.model.valid_sw_ins_mappings = self.model.valid_sw_ins_mappings   
+        
         # 进行推理及预测，先fit再predict
         self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
@@ -749,7 +751,7 @@ class FuturesProcessModel(TftDataframeModel):
                 item_cur_idx = df_target[(df_target['instrument']==item[-1])&(df_target['datetime_number']==key)]['time_idx'].values[0]
                 df_item = df_target[(df_target['instrument']==item[-1])&(df_target['time_idx']>=(item_cur_idx-1))]
                 price_list = df_item['CLOSE'].values
-                price_range = (price_list[4] - price_list[0])/price_list[0]
+                price_range = (price_list[2] - price_list[0])/price_list[0]
                 p_taraget_class = get_simple_class(price_range)  
                 if trend==0:
                     p_taraget_class = [3,2,1,0][p_taraget_class] 

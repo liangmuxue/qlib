@@ -26,15 +26,12 @@ from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20221015]
-STAT_DATE = [20220501,20221030]
+TRACK_DATE = [20220615]
+STAT_DATE = [20220611,20220620]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
 DRAW_SEQ_DETAIL = [0]
-
-MODEL_NAME_MATCH_ALL = "Futures_industryAdj_s2CciAll_Step2_202203"
-MODEL_NAME_MATCH_DETAIL = "Futures_industryAdj_s2CciDetail_Step2_202203"
 
 warnings.filterwarnings("ignore", category=pd.core.common.SettingWithCopyWarning)
 
@@ -547,7 +544,7 @@ class FuturesIndustryModule(MlpModule):
                     futures_index_combine = None
                     price_range_total = []
                     
-                    if j in DRAW_SEQ_DETAIL and self.step_mode==2 and self.model_name==MODEL_NAME_MATCH_ALL:
+                    if j in DRAW_SEQ_DETAIL and self.step_mode==2:
                         # 所有品种的比对图
                         instruments = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
                         ins_output = cls_output[j][index]
@@ -581,7 +578,7 @@ class FuturesIndustryModule(MlpModule):
                         fur_round_target = round_targets[instruments,-1,j]
 
                         # 行业内品种比对图
-                        if j in DRAW_SEQ_DETAIL and len(futures_names)>1 and self.step_mode==2 and self.model_name==MODEL_NAME_MATCH_DETAIL:
+                        if j in DRAW_SEQ_DETAIL and len(futures_names)>1 and self.step_mode==2:
                             price_array_range = np.array([item["diff_range"][-1] for item in ts_arr[ins_index][inner_index]])
                             view_data = np.stack([ins_output,fur_round_target,price_array_range]).transpose(1,0)
                             win = "round_target_{}_{}_{}".format(j,k,viz_total_size)
@@ -802,7 +799,7 @@ class FuturesIndustryModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            if not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
                 continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
@@ -903,13 +900,16 @@ class FuturesIndustryModule(MlpModule):
             rate_item.append(indus_top_corr[1]) 
             rate_item.append(0) 
             rate_total.append(rate_item)
+            
+        if predict_mode:
+            return result_date_list     
+               
         rate_total = np.array(rate_total)
         if rate_total.shape[0]==0:
             return None,None,None,None
         rate_total = pd.DataFrame(rate_total,columns=rate_columns)
         
         return rate_total,indus_result_total_list,total_imp_cnt,import_price_result_list
-
        
     def collect_result(self,import_index,overroll_trend=0,indus_top_index=None,target_info=None,indus_result_list=None): 
         """收集预测对应的实际数据"""
@@ -1003,16 +1003,12 @@ class FuturesIndustryModule(MlpModule):
             trend_value = (np.sum(result_list['trend_flag']>0)>result_list.shape[0]//2) + 0
             indus_top_index = result_list[result_list['top_flag']==trend_value]['indus_index'].values[0]
 
-        if self.model_name==MODEL_NAME_MATCH_DETAIL:
-            # 叠加进行品种明细计算
-            import_index_real = self.strategy_top(cls_values,ce_values,indus_top_index=indus_top_index,trend_value=trend_value,
-                                            target=target,target_info=target_info,index_round_targets=index_round_targets,result_list=result_list,
-                                       combine_instrument=combine_instrument)
-        else:
-            import_index_real = self.strategy_top_all(cls_values,ce_values,indus_top_index=indus_top_index,trend_value=trend_value,
-                                            target=target,target_info=target_info,index_round_targets=index_round_targets,result_list=result_list,
-                                       combine_instrument=combine_instrument)
-        
+        import_index_real = self.strategy_top_all(cls_values,ce_values,indus_top_index=indus_top_index,trend_value=trend_value,
+                                        target=target,target_info=target_info,index_round_targets=index_round_targets,result_list=result_list,
+                                   combine_instrument=combine_instrument)
+        # import_index_real = self.strategy_top(cls_values,ce_values,indus_top_index=indus_top_index,trend_value=trend_value,
+        #                                 target=target,target_info=target_info,index_round_targets=index_round_targets,result_list=result_list,
+        #                            combine_instrument=combine_instrument)        
         return import_index_real,trend_value,indus_top_index,result_list
         
     def strategy_top_indus(self,cls,ce_values,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
@@ -1193,6 +1189,7 @@ class FuturesIndustryModule(MlpModule):
             price_targets,
             past_future_round_targets,
             index_round_targets,
+            long_diff_index_targets,
             target_info
         ) = batch
                
@@ -1201,24 +1198,13 @@ class FuturesIndustryModule(MlpModule):
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         choice_out,trend_value,combine_index = vr_class
         
-        # 记录批次内价格涨跌幅，用于整体指数批次归一化数据的回溯
-        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
         # 只获取整体指数的价格数据
-        price_array = np.array([ts[main_index]["price_array"] for ts in target_info])
-        price_round_data = (price_array[:,-1] - price_array[:,-self.output_chunk_length-1])/price_array[:,-self.output_chunk_length-1]
-        
-        for index,ts in enumerate(target_info):
-            ts[main_index]["price_round_data"] = price_round_data
-            ts[main_index]["price_round_index"] = index
-            ts[main_index]["target_round_data"] = index_round_targets.cpu().numpy()[:,-1,-1,-1]
-            ts[main_index]["pred_round_data"] = output[-1][2].cpu().numpy().squeeze(-1)    
-        whole_index_round_targets = index_round_targets[:,:,:-1,:]  
+        whole_index_round_targets = index_round_targets[:,:,:-1,:]
         # 保存数据用于后续验证
         output_res = (output,choice_out.cpu().numpy(),trend_value.cpu().numpy(),combine_index.cpu().numpy(),past_target.cpu().numpy(),
                       future_target.cpu().numpy(),target_class.cpu().numpy(),
                       price_targets.cpu().numpy(),past_future_round_targets.cpu().numpy(),whole_index_round_targets.cpu().numpy(),
-                      index_round_targets.cpu().numpy(),target_info)
+                      index_round_targets.cpu().numpy(),long_diff_index_targets.cpu().numpy(),target_info)
         self.output_result.append(output_res)        
          
     def on_predict_epoch_end(self,args):   
