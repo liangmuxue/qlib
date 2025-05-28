@@ -262,6 +262,7 @@ class FuturesProcessModel(TftDataframeModel):
             best_weight = self.optargs["best_weight"]    
             self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=map_location)
+            self.model.model.model_name = self.optargs["model_name"]
             self.model.batch_size = self.batch_size     
             self.model.model.monitor = monitor
             self.model.model.step_mode = self.optargs["step_mode"]
