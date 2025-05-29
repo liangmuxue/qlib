@@ -814,7 +814,7 @@ class TFTSeriesDataset(TFTDataset):
             datetime_range = get_tradedays(last_datetime,datetime_end)[1:]
             df_expand["datetime_number"] = np.array(datetime_range).astype(np.int32)
             df_expand["datetime"] = pd.to_datetime(df_expand["datetime_number"].astype(str),format="%Y%m%d")
-            df_expand["month"] = df_expand.datetime.dt.month
+            df_expand["month"] = df_expand.datetime.dt.month - 1
             df_expand["dayofweek"] = df_expand.datetime.dt.dayofweek    
             df_expand["dayofmonth"] = df_expand.datetime.dt.day              
             if df_expands is None:

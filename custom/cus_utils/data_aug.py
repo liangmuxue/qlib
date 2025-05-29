@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import pandas as pd
 import random
+import pickle
 
 def random_int_list(start, stop, length):
     start, stop = (int(start), int(stop)) if start <= stop else (int(stop), int(start))
@@ -81,7 +82,28 @@ def aug_data_process(file_path,train_path=None,test_path=None,sp_rate=0.7):
     test_data = data[train_len:,:,:]   
     np.save(train_path,train_data)
     np.save(test_path,test_data)
+
+def compare_dataset_consistence():
+    """比较验证数据与推理数据的一致性"""
     
+    val_file_path = "custom/data/results/data_compare_val_20220613.pkl"
+    pred_file_path = "custom/data/results/data_compare_pred_20220613.pkl"
+    with open(val_file_path, "rb") as fin:
+        result_data_val = pickle.load(fin)           
+    with open(pred_file_path, "rb") as fin:
+        result_data_pred = pickle.load(fin) 
+
+    names = ["target_info","past_target_total", "past_covariate_total", "historic_future_covariates_total","future_covariates_total","static_covariate_total"
+               ,"covariate_future_total","past_future_round_targets","index_round_targets"]
+    eps = 1e-3
+    for i in range(1,len(result_data_val)):
+        val_item = result_data_val[i]
+        pred_item = result_data_pred[i]
+        diff = np.abs(val_item - pred_item)
+        compare_rs = np.where(diff>eps)
+        if np.sum(compare_rs)>1:
+            print("{} difference:{}".format(names[i],compare_rs))
+        
 if __name__ == "__main__":
     file_path = "custom/data/aug/test_100.npy"
     pd_file_path = "custom/data/aug/test_100.pkl"
@@ -90,7 +112,8 @@ if __name__ == "__main__":
     # aug_data_process(file_path,train_path=train_path,test_path=test_path)
     # aug_data_view(file_path)
     # aug_data_to_pd(file_path,pd_file_path,['datetime','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label','ori_label'])\
-    aug_pd_data_view(pd_file_path)
+    # aug_pd_data_view(pd_file_path)
+    compare_dataset_consistence()
     
        
     

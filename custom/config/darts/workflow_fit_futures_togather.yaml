@@ -1,7 +1,7 @@
 qlib_init:
     provider_uri: '/home/qdata/qlib_data/futures_data'
     region: cn
-market: &market all_adj
+market: &market clean_data
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_industryAdj_s2CciAll_Step2_202203"
+               model_name: "Futures_cleanData_s2CciAll_Step2_202203"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False

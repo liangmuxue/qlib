@@ -348,55 +348,54 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             target_vals = target_series.random_component_values(copy=False)[...,:self.target_num]
             # 对应的起始索引号属于future_datetime,因此减去序列输入长度，即为计算序列起始索引
             past_start = ser_idx - self.input_chunk_length
-            # 由于品种交易日期不一致，会导致实际序号不统一，因此在这里校正
-            missing_cnt = np.sum(sw_date_mapping[:ser_idx]==-1)    
-            # past_start = past_start + missing_cnt        
-            # 需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量
-            past_start = past_start - target_series.time_index[0]
-            # 后续索引计算都以past_start为基准
             past_end = past_start + self.input_chunk_length
             future_start = past_end
             future_end = future_start + self.output_chunk_length
-            covariate_start = past_start
-            covariate_end = past_end
+            # 对于series序列，需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量。（注意对于协变量序列，仍然沿用原始编号）
+            past_start_ser = past_start - target_series.time_index[0]
+            # 后续索引计算都以past_start为基准
+            past_end_ser = past_start_ser + self.input_chunk_length
+            future_start_ser = past_end_ser
+            future_end_ser = future_start_ser + self.output_chunk_length
+            
             # 记录预测未来第一天的关联日期，用于后续数据对齐
-            future_start_datetime = self.ass_data[code][3][past_end]
+            future_start_datetime = self.ass_data[code][3][past_end_ser]
             # 取得整体评估量化数据
-            total_target_vals = self.total_target_vals[ori_index][past_start:future_end]
+            total_target_vals = self.total_target_vals[ori_index][past_start_ser:future_end_ser]
             round_targets[keep_index] = total_target_vals    
             # 使用最后一个目标值分别与所有前值做差分
             long_diff_targets[keep_index] = [abs(total_target_vals[-1] - total_target_vals[i]) for i in range(self.input_chunk_length) ]
             # 取得最后一段涨跌幅度评估
             # 预测目标，包括过去和未来数据
-            future_target = target_vals[future_start:future_end]
-            past_target = target_vals[past_start:past_end]
+            future_target = target_vals[future_start_ser:future_end_ser]
+            past_target = target_vals[past_start_ser:past_end_ser]
             # rank数值就是当前索引加1
             code = ori_index + 1
             instrument = self.ass_data[code][0]
-            price_array = self.ass_data[code][2][past_start:future_end]
-            diff_range = self.ass_data[code][1][past_start:future_end]
-            rsv_diff = self.ass_data[code][4][past_start:future_end]
+            price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
+            diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
+            rsv_diff = self.ass_data[code][4][past_start_ser:future_end_ser]
             scaler = MinMaxScaler(feature_range=(1e-5, 1))
             scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
             price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
             price_targets_ori[keep_index] = price_array    
-            datetime_array = self.ass_data[code][3][past_start:future_end]
+            datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
                                "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"rsv_diff":rsv_diff,
                                "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
-            
+          
             # 过去协变量序列数据
             covariate_series = self.covariates[ori_index] 
             raise_if_not(
-                covariate_end <= len(covariate_series),
+                past_end <= len(covariate_series),
                 f"The dataset contains covariates "
                 f"that don't extend far enough into the future. ({idx}-th sample)",
             )
     
             covariate_total = covariate_series.random_component_values(copy=False)[
-                covariate_start:covariate_end + self.output_chunk_length
+                past_start:future_end
             ]
             # 过去协变量的过去数值以及未来数值
             covariate = covariate_total[:self.input_chunk_length]
@@ -418,6 +417,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             f_conv_values = self.future_covariates[ori_index].random_component_values(copy=False)
             future_covariate = f_conv_values[future_start:future_end]
             historic_future_covariate = f_conv_values[past_start:past_end]
+            
             past_target_total[keep_index] = past_target
             past_covariate_total[keep_index] = covariate
             target_info_total[keep_index] = target_info
@@ -474,8 +474,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
         
-        # if future_start_datetime==20221024:
-        #     print("ggg")  
             
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0,1]:
@@ -532,6 +530,14 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                         future_round_targets[k,:,i] = scale_data
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
+        # if future_start_datetime==20220613:
+        #     result_file_path = "custom/data/results/data_compare_val_20220613.pkl"
+        #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
+        #                ,covariate_future_total,past_future_round_targets,index_round_targets]
+        #     with open(result_file_path, "wb") as fout:
+        #         pickle.dump(results, fout)    
+        #     print("ggg")  
+                
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
                             
