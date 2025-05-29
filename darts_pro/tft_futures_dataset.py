@@ -148,7 +148,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df_mean = pd.merge(indus_info_merge,df_mean,on=["industry"],how="left",validate="one_to_many")  
         df_mean['time_idx'] = df_mean['datetime'].groupby(df_mean['industry']).rank(method='dense',ascending=True)
         df_mean = df_mean[~df_mean['time_idx'].isna()]
-        df_mean['time_idx'] = df_mean['time_idx'].astype(int)
+        df_mean['time_idx'] = df_mean['time_idx'].astype(int) - 1
         df = pd.concat([df,df_mean])
         return df
     
