@@ -217,7 +217,8 @@ class FuturesIndustryModel(FuturesModel):
         future_covariates: Optional[Sequence[TimeSeries]],
         max_samples_per_ts: Optional[int],
         cut_len=2,
-        mode="train"
+        mode="train",
+        pred_date_begin=None
     ):
         """使用原数据集作为训练和测试数据集"""
         self.cut_len = self.ext_kwargs['cut_len']
@@ -251,6 +252,7 @@ class FuturesIndustryModel(FuturesModel):
                 use_static_covariates=True,
                 target_num=len(self.past_split),
                 scale_mode=self.scale_mode,
+                pred_date_begin=pred_date_begin,
                 mode=mode
             )
             # 透传行业分类和股票映射关系，后续使用
@@ -394,14 +396,15 @@ class FuturesIndustryModel(FuturesModel):
                           
         return tuple(aggregated) 
      
-    def predict(self,series,past_covariates=None,future_covariates=None,batch_size=1,num_loader_workers=1):
+    def predict(self,series,past_covariates=None,future_covariates=None,pred_date_begin=None,batch_size=1,num_loader_workers=1):
         
         dataset = self._build_train_dataset(
             target=series,
             past_covariates=past_covariates,
             future_covariates=future_covariates,
             max_samples_per_ts=10,
-            mode="predict"
+            mode="predict",
+            pred_date_begin=pred_date_begin
         )
         pred_loader = DataLoader(
             dataset,

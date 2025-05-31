@@ -727,7 +727,7 @@ class FuturesProcessModel(TftDataframeModel):
         
         # 进行预测           
         pred_result = self.model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
-                                            batch_size=self.batch_size,num_loader_workers=0)
+                                            batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(start_date.strftime("%Y%m%d")))
         # 对预测结果进行评估
         if pred_result is None:
             print("{} pred_result None".format(pred_range))
