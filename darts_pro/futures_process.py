@@ -742,20 +742,32 @@ class FuturesProcessModel(TftDataframeModel):
         # 生成真实数据，以进行评估
         dataset.build_series_data_with_segments(segments,no_series_data=True,val_ds_filter=False,fill_future=True)
         df_target = dataset.df_all
+        import_price_result = []
         for key in match_dates:
             pred_result_target[key] = pred_result[key]
-            items = pred_result[key][0]
-            trend = pred_result[key][1]
             target_class_list = []
-            for item in items:
-                item_cur_idx = df_target[(df_target['instrument']==item[-1])&(df_target['datetime_number']==key)]['time_idx'].values[0]
-                df_item = df_target[(df_target['instrument']==item[-1])&(df_target['time_idx']>=(item_cur_idx-1))]
+            for index,row in pred_result[key].iterrows():
+                instrument = row['instrument']
+                trend = row['top_flag']
+                item_cur_idx = df_target[(df_target['instrument']==instrument)&(df_target['datetime_number']==key)]['time_idx'].values[0]
+                df_item = df_target[(df_target['instrument']==instrument)&(df_target['time_idx']>=(item_cur_idx-1))]
                 price_list = df_item['CLOSE'].values
-                price_range = (price_list[2] - price_list[0])/price_list[0]
-                p_taraget_class = get_simple_class(price_range)  
+                diff_range = (price_list[output_chunk_length] - price_list[0])/price_list[0]
+                p_taraget_class = get_simple_class(diff_range)  
                 if trend==0:
                     p_taraget_class = [3,2,1,0][p_taraget_class] 
+                    diff_range = -diff_range
                 target_class_list.append(p_taraget_class)
-        return pred_result_target          
+                import_price_result.append([key,instrument,trend,p_taraget_class,diff_range])
+        import_price_result = np.array(import_price_result)
+        import_price_result = pd.DataFrame(import_price_result,
+            columns=["date","instrument","trend","result","yield_rate"])
+        import_price_result['trend'] = import_price_result['trend'].astype(int)
+        import_price_result['result'] = import_price_result['result'].astype(int)
+        import_price_result['yield_rate'] = import_price_result['yield_rate'].astype(float)
+        
+        print("total yield:{}".format(import_price_result["yield_rate"].sum()))
+        
+        return import_price_result          
         
                         
