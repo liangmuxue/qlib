@@ -4,6 +4,7 @@ from darts.utils.data.sequential_dataset import (
 
 import pickle
 import os
+from datetime import datetime
 from typing import Optional, List, Tuple, Union
 import numpy as np
 import pandas as pd
@@ -12,9 +13,10 @@ import torch
 from typing import Optional, Sequence, Tuple, Union
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
+from trader.utils.date_util import get_tradedays_dur,get_tradedays
 from darts.utils.data.shifted_dataset import GenericShiftedDataset,MixedCovariatesTrainingDataset
 from darts.utils.data.utils import CovariateType
-from darts.logging import raise_if_not
+from darts.logging import raise_if_not,raise_if
 from darts import TimeSeries
 from cus_utils.common_compute import normalization_except_outlier,interquartile_range
 from tft.class_define import CLASS_VALUES,get_simple_class,get_complex_class
@@ -49,7 +51,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         scale_mode=None,
         cut_len=2,
         mode="train",
-        pred_date_begin=None,
     ):  
         """兼顾期货品种和板块指数的映射"""
 
@@ -58,6 +59,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 
         self.dbaccessor = DbAccessor({})
         self.future_covariates = future_covariates
+        self.input_chunk_length = input_chunk_length
+        self.output_chunk_length = output_chunk_length
 
         # 取得DataFrame数据，统一评估日期
         dataset = global_var.get_value("dataset")   
@@ -89,37 +92,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 重新生成编号
         df_data[g_col] = df_data[group_column].rank(method='dense',ascending=True).astype("int")  
         self.df_data = df_data
-        # 通过最小最大日期，生成所有交易日期列表
-        datetime_col = dataset.get_datetime_index_column()   
-        time_column = dataset.get_time_column()   
-        date_list = df_data[datetime_col].unique()      
-        date_list = np.sort(date_list)
-        # 由于使用future_datetime方式对齐，因此从前面截取input序列长度,后面截取output序列长度用于预测长度预留
-        date_list = date_list[input_chunk_length:-output_chunk_length]        
-        self.date_list = date_list
-        # 取得行业和品种分类数量
         rank_num_max = df_data['instrument'].unique().shape[0]
-        date_mappings = np.ones([date_list.shape[0],rank_num_max])*(-1)
-        date_mappings_ext = date_mappings.copy()
-        sec_len = input_chunk_length + output_chunk_length
-        # 遍历行业分类数据集，填入对应序号
-        for index,date in enumerate(date_list):
-            instrument_rank_nums = df_data[df_data[datetime_col]==date][[g_col,time_column]].values
-            instrument_rank_nums[:,0] = instrument_rank_nums[:,0] - 1
-            # 通过索引映射到指定数据上，而缺失的值仍保持-1的初始值
-            date_mappings[index,instrument_rank_nums[:,0]] = instrument_rank_nums[:,1] 
-            # 推理模式，未来日期的数据都设置为不可见
-            if mode=="predict" and date>=pred_date_begin:
-                date_mappings[index] = -1
-            date_mappings_ext[index] = date_mappings[index].copy()
-            if index<sec_len:
-                continue
-            # 针对中间没有数据的情况，填充为上一具备数据的索引 
-            lack_index = np.where(date_mappings_ext[index]==-1)[0]
-            for l_index in lack_index:
-                prev_index = self.get_prevdate_index(index,l_index,date_mappings=date_mappings)  
-                date_mappings_ext[index,l_index] = prev_index
-                         
+        # 生成日期映射关系
+        date_mappings,date_mappings_ext = self.build_date_mappings(df_data,dataset=dataset,instrument_number=rank_num_max)
         self.date_mappings = date_mappings.astype(np.int32)
         self.date_mappings_ext = date_mappings_ext.astype(np.int32)
 
@@ -175,7 +150,55 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 ass_data_path = os.path.join(global_var.get_value("ass_data_path"),"ass_data_{}.pkl".format(mode))
                 with open(ass_data_path, "wb") as fout:
                     pickle.dump(self.ass_data, fout) 
-                                    
+    
+    def build_date_mappings(self,df_data,dataset=None,instrument_number=None):
+        """生成日期映射关系"""
+        
+        g_col = dataset.get_group_rank_column()
+        # 通过最小最大日期，生成所有交易日期列表
+        datetime_col = dataset.get_datetime_index_column()   
+        time_column = dataset.get_time_column()   
+        date_list = df_data[datetime_col].unique()      
+        date_list = np.sort(date_list)
+        # 由于使用future_datetime方式对齐，因此从前面截取input序列长度,后面截取output序列长度用于预测长度预留
+        date_list = date_list[self.input_chunk_length:-self.output_chunk_length]        
+        self.date_list = date_list
+        # 生成对应的时间协变量映射数据
+        date_conv_columns = dataset.get_future_columns()
+        self.date_conv_columns = date_conv_columns
+        date_container = pd.to_datetime(pd.Series(date_list.tolist()),format='%Y%m%d')
+        date_covs_list = [date_container]
+        for col in date_conv_columns:
+            if col=='dayofweek':
+                s = pd.Series(date_container.dt.dayofweek,name='dayofweek')
+            if col=='dayofmonth':
+                s = pd.Series(date_container.dt.day,name='dayofmonth')       
+            if col=='month':
+                s = pd.Series(date_container.dt.month-1,name='month')                             
+            date_covs_list.append(s)
+        self.date_covs_list = pd.concat(date_covs_list,axis=1,ignore_index=False)       
+                
+        # 取得行业和品种分类数量
+        date_mappings = np.ones([date_list.shape[0],instrument_number])*(-1)
+        date_mappings_ext = date_mappings.copy()
+        sec_len = self.input_chunk_length + self.output_chunk_length
+        # 遍历行业分类数据集，填入对应序号
+        for index,date in enumerate(date_list):
+            instrument_rank_nums = df_data[df_data[datetime_col]==date][[g_col,time_column]].values
+            instrument_rank_nums[:,0] = instrument_rank_nums[:,0] - 1
+            # 通过索引映射到指定数据上，而缺失的值仍保持-1的初始值
+            date_mappings[index,instrument_rank_nums[:,0]] = instrument_rank_nums[:,1] 
+            date_mappings_ext[index] = date_mappings[index].copy()
+            if index<sec_len:
+                continue
+            # 针对中间没有数据的情况，填充为上一具备数据的索引 
+            lack_index = np.where(date_mappings_ext[index]==-1)[0]
+            for l_index in lack_index:
+                prev_index = self.get_prevdate_index(index,l_index,date_mappings=date_mappings)  
+                date_mappings_ext[index,l_index] = prev_index      
+        
+        return date_mappings,date_mappings_ext
+                                   
     def get_variety_list_with_indus(self):       
         """取得期货品种列表,包含行业板块"""
         
@@ -318,7 +341,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         prev_index_list = np.where(series_mapping[:total_index]!=-1)[0]
         if prev_index_list.shape[0] ==0:
             return -1
-        return series_mapping[prev_index_list[-1]]
+        return series_mapping[prev_index_list[-1]] + 1
     
                
     def __len__(self):
@@ -351,6 +374,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         for index,ser_idx_infer in enumerate(sw_date_mapping):
             # 记录预测未来第一天的关联日期，用于后续数据对齐
             future_start_datetime = self.date_list[idx]
+            
             # 取得原序列索引进行series取数,目前一致
             ori_index = index
             if self.total_target_vals[ori_index] is None:
@@ -417,6 +441,308 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 f"The dataset contains covariates "
                 f"that don't extend far enough into the future. ({idx}-th sample)",
             )
+            covariate_total = covariate_series.random_component_values(copy=False)[
+                past_start:future_end
+            ]
+            # 过去协变量的过去数值以及未来数值
+            covariate = covariate_total[:self.input_chunk_length]
+            covariate_future = covariate_total[self.input_chunk_length:]
+            raise_if_not(
+                len(covariate)
+                == (
+                    self.output_chunk_length
+                    if self.shift_covariates
+                    else self.input_chunk_length
+                ),
+                f"The dataset contains covariates "
+                f"whose time axis doesn't allow to obtain the input (or output) chunk relative to the "
+                f"target series.",
+            )
+            # 静态协变量
+            static_covariate = target_series.static_covariates_values(copy=False)
+            # 未来协变量的过去值和未来值
+            f_conv_values = self.future_covariates[ori_index].random_component_values(copy=False)
+            future_covariate = f_conv_values[future_start:future_end]
+            historic_future_covariate = f_conv_values[past_start:past_end]
+            # 直接从映射数据中取得当前日期对应的未来协变量
+            date_covs = self.date_covs_list.iloc[idx:idx+2]
+            future_covariate = date_covs[self.date_conv_columns].values
+                        
+            past_target_total[keep_index] = past_target
+            past_covariate_total[keep_index] = covariate
+            target_info_total[keep_index] = target_info
+            future_target_total[keep_index] = future_target
+            future_covariates_total[keep_index] = future_covariate
+            static_covariate_total[keep_index] = static_covariate
+            covariate_future_total[keep_index] = covariate_future
+            historic_future_covariates_total[keep_index] = historic_future_covariate
+
+            # 缩短未来计算周期，使用倒数第1天计算涨跌幅
+            raise_range = (price_array[-1] - price_array[-self.output_chunk_length-1])/price_array[-self.output_chunk_length-1]*100
+            p_target_class = get_simple_class(raise_range)
+            target_class_total[keep_index] = p_target_class
+            
+        ######### 分别对目标值和协变量，在个体范围层面进行归一化 #########
+        
+        real_index = np.where(target_class_total>=0)[0]
+        real_past_target = past_target_total[real_index]
+        real_future_target = future_target_total[real_index]
+        # 目标值逐个进行归一化,过去和未来值需要共用scaler   
+        for i in range(real_past_target.shape[0]):
+            real_past_target_item = real_past_target[i]
+            real_future_reshape_item = real_future_target[i]
+            target_scaler = MinMaxScaler(feature_range=(1e-5, 1))
+            target_scaler.fit(real_past_target_item)
+            scale_data_past = target_scaler.transform(real_past_target_item)
+            scale_data_future = target_scaler.transform(real_future_reshape_item)
+            past_target_total[real_index[i]] = scale_data_past
+            future_target_total[real_index[i]] = scale_data_future
+        
+        # 过去协变量的归一化处理，逐个进行
+        real_covariate_total= past_covariate_total[real_index]
+        for i in range(real_covariate_total.shape[0]):
+            real_past_conv = real_covariate_total[i]
+            past_conv_scale = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
+            past_covariate_total[real_index[i]] = past_conv_scale
+            
+        # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
+        
+        # 整体目标数据拆分为过去值和目标值
+        past_round_targets = round_targets[:,:self.input_chunk_length,:]
+        future_round_targets = round_targets[:,self.input_chunk_length:,:]
+        
+        # 行业板块数据归一化
+        past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
+        future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
+        long_diff_seq_targets = long_diff_targets[:,-self.cut_len:,:]
+        
+        for i in range(self.ins_in_indus_index.shape[0]):
+            # 取得对应的行业序列数据，作为目标数据
+            indus_index = self.indus_index[i]
+            indus_past_round = past_round_targets[indus_index].copy()
+            indus_future_round = future_round_targets[indus_index].copy()
+            past_index_round_targets[i] = indus_past_round
+            future_index_round_targets[i] = indus_future_round
+            
+        for i in range(self.past_target_shape[-1]):
+            if self.scale_mode[i] in [0,1]:
+                # 分行业归一化
+                scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
+                past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
+                future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
+                long_diff_seq_targets[:,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
+                
+        # 单独归一化未来行业板块整体预测数值
+        for i in range(self.past_target_shape[-1]):
+            if self.scale_mode[i] in [0]:
+                future_index_round_targets[self.indus_rel_index,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[self.indus_rel_index,:,i])
+        # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
+        index_round_targets = np.concatenate([past_index_round_targets,future_index_round_targets],axis=1)
+
+        # 整体目标值批次内,分行业归一化
+        past_data_scale = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
+        for inner_idx,ins_indus_index in enumerate(self.ins_in_indus_index):
+            # 忽略无效数值
+            target_class_ins = target_class_total[ins_indus_index]
+            keep_index = np.where(target_class_ins>=0)[0]
+            if keep_index.shape[0]==0:
+                continue         
+            index_real = ins_indus_index[keep_index]
+            past_data = past_round_targets[index_real,:,:]
+            future_data = future_round_targets[index_real,:,:]        
+                   
+            for i in range(self.past_target_shape[-1]):
+                # 在全品种缩放模式下，对整体指数下的品种进行归一化，忽略行业内部的归一化。在行业品种缩放模式下，针对每个行业内部的品种进行归一化
+                if (self.scale_mode[i]==0 and inner_idx!=self.main_index_rel) or (self.scale_mode[i]==2 and inner_idx==self.main_index_rel):
+                    # 使用过去数值参考,进行第一次归一化
+                    for k in index_real:
+                        past_data_item = past_round_targets[k,:,i:i+1]
+                        # 过滤全部趋近于0的数据
+                        if past_data_item.max()<1e-4:
+                            continue
+                        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_item)
+                        past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
+                        scale_data = scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
+                        future_round_targets[k,:,i] = scale_data
+                    # 针对目标值，再次归一化以加速收敛                    
+                    future_round_targets[index_real,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
+                # 对于数值模式，只进行一次过去未来的归一化，区分全品种和行业内部的归一化操作
+                if (self.scale_mode[i]==1 and inner_idx!=self.main_index_rel) or (self.scale_mode[i]==3 and inner_idx==self.main_index_rel):
+                    for k in index_real:
+                        past_data_item = past_round_targets[k,:,i:i+1]
+                        # 过滤全部趋近于0的数据
+                        if past_data_item.max()<1e-4:
+                            continue
+                        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_item)
+                        past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
+                        scale_data= scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
+                        future_round_targets[k,:,i] = scale_data
+        past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
+
+        # 如果当天没有交易，则保留空值
+        ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
+        target_class_total[ser_lack_idx] = -1
+        
+        if future_start_datetime==20220616:
+            result_file_path = "custom/data/results/data_compare_val_20220616.pkl"
+            results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
+                       ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
+            with open(result_file_path, "wb") as fout:
+                pickle.dump(results, fout)    
+            print("ggg")  
+                
+        return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
+                            
+
+class FuturesInferenceDataset(FuturesIndustryDataset):
+    """推理数据集"""
+    
+    def __init__(
+         self,
+         target_series,
+         covariates=None,
+         future_covariates=None,
+         input_chunk_length: int = 12,
+         output_chunk_length: int = 1,
+         shift: int = 1,
+         shift_covariates: bool = False,
+         max_samples_per_ts: Optional[int] = None,
+         covariate_type: CovariateType = CovariateType.NONE,
+         use_static_covariates: bool = True,
+         scale_mode=None,
+         target_num=0,
+         cut_len=2,
+         mode="predict",
+         pred_date=None,
+     ):  
+        """兼顾期货品种和板块指数的映射"""
+
+        self.pred_date =  pred_date 
+        super().__init__(target_series,covariates=covariates,future_covariates=future_covariates,input_chunk_length=input_chunk_length,output_chunk_length=output_chunk_length,
+                         shift=shift,shift_covariates=shift_covariates,mode=mode,target_num=target_num,
+                         max_samples_per_ts=max_samples_per_ts,covariate_type=covariate_type,use_static_covariates=use_static_covariates,scale_mode=scale_mode,
+                         cut_len=cut_len)
+        
+           
+
+    def build_date_mappings(self,df_data,dataset=None,instrument_number=None):
+        """生成日期映射关系"""
+        
+        # 推理模式下，只使用推理日期一个日期
+        date_list = [self.pred_date]        
+        self.date_list = np.array(date_list)
+        g_col = dataset.get_group_rank_column()
+        datetime_col = dataset.get_datetime_index_column()   
+        time_column = dataset.get_time_column()  
+        # 取得上一交易日数据
+        prev_day = get_tradedays_dur(datetime.strptime(str(self.pred_date),'%Y%m%d'),-1)
+        prev_day = int(datetime.strftime(prev_day, '%Y%m%d'))
+        # 取得行业和品种分类数量
+        date_mappings = np.ones([1,instrument_number])*(-1)
+        date_mappings_ext = date_mappings.copy()
+        
+        instrument_rank_nums = df_data[df_data[datetime_col]==prev_day][[g_col,time_column]].values
+        instrument_rank_nums[:,0] = instrument_rank_nums[:,0] - 1
+        # 通过索引映射到指定数据上，而缺失的值仍保持-1的初始值
+        date_mappings[0,instrument_rank_nums[:,0]] = instrument_rank_nums[:,1] 
+        date_mappings_ext[0] = date_mappings[0].copy()
+        
+        return date_mappings,date_mappings_ext       
+        
+    def __getitem__(
+        self, idx
+    ):
+        """以日期为单位,整合行业分类数据"""
+        
+        past_target_total = np.zeros(self.past_target_shape)
+        past_covariate_total = np.zeros(self.covariates_shape)
+        target_info_total = [None for _ in range(self.past_target_shape[0])]
+        future_target_total = np.zeros(self.future_target_shape)
+        static_covariate_total = np.zeros(self.static_covariate_shape)
+        covariate_future_total = np.zeros(self.covariates_future_shape)
+        future_covariates_total = np.zeros(self.future_covariates_shape)
+        historic_future_covariates_total = np.zeros(self.historic_future_covariates_shape)
+        target_class_total = np.ones(self.total_instrument_num)*-1
+        target_class_total = target_class_total.astype(np.int8)
+        round_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
+        long_diff_targets = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
+        price_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
+        price_targets_ori = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
+        
+        ########### 生成行业数据 #########
+        sw_date_mapping = self.date_mappings_ext[idx]
+        
+        for index,ser_idx_infer in enumerate(sw_date_mapping):
+            # 记录预测未来第一天的关联日期，用于后续数据对齐
+            future_start_datetime = self.date_list[idx]
+            # 取得原序列索引进行series取数,目前一致
+            ori_index = index
+            if self.total_target_vals[ori_index] is None:
+                continue            
+            code = ori_index + 1
+            target_series = self.target_series[ori_index]        
+            # 如果最后的序列号与当前序列号的差值不足序列输出长度(注意，这里以实际最大序列编号来衡量)，则忽略
+            offset_end = target_series.time_index.stop - ser_idx_infer
+            raise_if(
+                offset_end<self.output_chunk_length,
+                "offset_end too small",
+            )            
+            # 如果开始的序列号与当前序列号的差值不足序列输入长度，则忽略
+            offset_begin = ser_idx_infer - target_series.time_index[0]
+            raise_if(
+                offset_begin<self.input_chunk_length,
+                "offset_begin too small",
+            )   
+            
+            # 使用实际对照索引（刨除指数索引）        
+            keep_index = self.keep_index[index]  
+            # 目标序列
+            target_vals = target_series.random_component_values(copy=False)[...,:self.target_num]
+            # 推理模式下，索引相对于训练阶段向后多数1个
+            past_start = ser_idx_infer - self.input_chunk_length + 1
+            past_end = past_start + self.input_chunk_length
+            future_start = past_end
+            future_end = future_start + self.output_chunk_length
+            # 对于series序列，需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量。（注意对于协变量序列，仍然沿用原始编号）
+            past_start_ser = past_start - target_series.time_index[0]
+            # 后续索引计算都以past_start为基准
+            past_end_ser = past_start_ser + self.input_chunk_length
+            future_start_ser = past_end_ser
+            future_end_ser = future_start_ser + self.output_chunk_length
+            
+            # 取得整体评估量化数据
+            total_target_vals = self.total_target_vals[ori_index][past_start_ser:future_end_ser]
+            round_targets[keep_index] = total_target_vals    
+            # 使用最后一个目标值分别与所有前值做差分
+            long_diff_targets[keep_index] = [abs(total_target_vals[-1] - total_target_vals[i]) for i in range(self.input_chunk_length) ]
+            # 取得最后一段涨跌幅度评估
+            # 预测目标，包括过去和未来数据
+            future_target = target_vals[future_start_ser:future_end_ser]
+            past_target = target_vals[past_start_ser:past_end_ser]
+            # rank数值就是当前索引加1
+            code = ori_index + 1
+            instrument = self.ass_data[code][0]
+            price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
+            diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
+            rsv_diff = self.ass_data[code][4][past_start_ser:future_end_ser]
+            scaler = MinMaxScaler(feature_range=(1e-5, 1))
+            scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
+            price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
+            price_targets_ori[keep_index] = price_array    
+            datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
+            # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
+            target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
+                               "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
+                               "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"rsv_diff":rsv_diff,
+                               "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
+            # 过去协变量序列数据
+            covariate_series = self.covariates[ori_index] 
+            raise_if_not(
+                past_end <= len(covariate_series),
+                f"The dataset contains covariates "
+                f"that don't extend far enough into the future. ({idx}-th sample)",
+            )
             # 没有对齐？？？前移一位
             covariate_total = covariate_series.random_component_values(copy=False)[
                 past_start:future_end
@@ -441,7 +767,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             f_conv_values = self.future_covariates[ori_index].random_component_values(copy=False)
             future_covariate = f_conv_values[future_start:future_end]
             historic_future_covariate = f_conv_values[past_start:past_end]
-            
             past_target_total[keep_index] = past_target
             past_covariate_total[keep_index] = covariate
             target_info_total[keep_index] = target_info
@@ -553,19 +878,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                         future_round_targets[k,:,i] = scale_data
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
-        # 如果当天没有交易，则保留空值
-        ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
-        target_class_total[ser_lack_idx] = -1
-        
-        if future_start_datetime==20220616:
-            result_file_path = "custom/data/results/data_compare_val_20220616.pkl"
-            results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
-                       ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
-            with open(result_file_path, "wb") as fout:
-                pickle.dump(results, fout)    
-            print("ggg")  
-                
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
-                            
-
+                target_class_total,past_future_round_targets,index_round_targets,target_info_total 
+            
+        
