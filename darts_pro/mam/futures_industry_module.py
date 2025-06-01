@@ -799,7 +799,7 @@ class FuturesIndustryModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]) and self.mode!="predict":
                 continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
