@@ -80,9 +80,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_s2PriceAll_Step2_202203"
+               model_name: "Futures_cleanData_s2RsvAll_Step2_202205"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
                step_mode: 2
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
@@ -104,8 +104,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2022-03-31]
-                valid: [2022-03-01, 2022-10-31]
+                train: [2006-01-01, 2022-05-31]
+                valid: [2022-05-01, 2022-12-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -128,7 +128,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['diff_range','diff_range','CCI5','SUMPMA5','RSV5']
+                target_column: ['RSV5','diff_range','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
                 past_covariate_col: ['HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'

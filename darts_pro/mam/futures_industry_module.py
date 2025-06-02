@@ -26,8 +26,8 @@ from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220616]
-STAT_DATE = [20220616,20220616]
+TRACK_DATE = [20220601]
+STAT_DATE = [20220601,20220630]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -799,8 +799,8 @@ class FuturesIndustryModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]) and self.mode!="predict":
-                continue  
+            # if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+            #     continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
                 if target_info is None:

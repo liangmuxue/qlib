@@ -265,14 +265,13 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.model_name = self.optargs["model_name"]
             self.model.batch_size = self.batch_size     
             self.model.model.monitor = monitor
-            
+            self.model.model.mode = self.type 
             self.model.model.step_mode = self.optargs["step_mode"]
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
             self.model.monitor = monitor     
                
         self.model.mode = self.type 
-        self.model.model.mode = self.type 
         
         if self.type=="pred_futures_industry":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
