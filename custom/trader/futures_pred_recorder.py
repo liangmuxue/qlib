@@ -81,12 +81,11 @@ class FuturesPredRecorder(TftRecorder):
     def generate(self, **kwargs):
         """执行预测数据生成的过程"""
         
-        start_time = self.backtest_config["pred_start_time"]
-        end_time = self.backtest_config["pred_end_time"]
+        start_date = self.backtest_config["pred_start_date"]
+        end_date = self.backtest_config["pred_end_date"]
  
         # 生成预测数据
-        self.pred_data = self.build_pred_result(start_time,end_time)
-        return self.pred_data
+        return self.build_pred_result(start_date,end_date)
     
     def load_pred_data(self,pred_data_file=None):
         if pred_data_file is None:
@@ -97,15 +96,21 @@ class FuturesPredRecorder(TftRecorder):
         df_pred["vr_class"] = df_pred["vr_class"].astype(int) 
         return df_pred
                     
-    def build_pred_result(self,start_time,end_time):
+    def build_pred_result(self,start_date,end_date):
         """逐天生成预测数据"""
         
         dataset = self.dataset
-        pred_range=[start_time,end_time]        
+        trade_dates = np.array(get_tradedays(str(start_date),str(end_date))).astype(np.int)  
+        pred_result_list = None
         # 进行预测，取得预测结果
-        pred_data = self.predict_process(pred_range=pred_range)
-        # 生成加工后的预测数据
-        combine_result = self.build_pred_data(pred_data,df_ref=dataset.df_all)
+        for pred_date in trade_dates:
+            pred_result = self.model.build_pred_result(str(pred_date),dataset=dataset)
+            if pred_result_list is None:
+                pred_result_list = pred_result[pred_date]
+            else:
+                pred_result_list = pd.concat([pred_result_list,pred_result[pred_date]])
+        if pred_result_list is None or pred_result_list.shape[0]==0:
+            return None 
         # 保存数据      
         pred_data_path = self.pred_data_path + "/" + self.pred_data_file
         # 首先取得之前已经有的数据，把此次数据按照日期进行覆盖
@@ -116,10 +121,10 @@ class FuturesPredRecorder(TftRecorder):
                 pred_data_df = pickle.load(fin)     
         pred_data_result = None  
         if pred_data_df is None:
-            pred_data_result = combine_result
+            pred_data_result = pred_result_list
         else:
-            pred_data_result_filter = pred_data_df[~pred_data_df['pred_date'].isin(combine_result['pred_date'])]
-            pred_data_result = pd.concat([pred_data_result_filter,combine_result])
+            pred_data_result_filter = pred_data_df[~pred_data_df['date'].isin(pred_result_list['date'])]
+            pred_data_result = pd.concat([pred_data_result_filter,pred_result_list])
         with open(pred_data_path, "wb") as fout:
             pickle.dump(pred_data_result, fout)     
         return pred_data_result
@@ -151,13 +156,6 @@ class FuturesPredRecorder(TftRecorder):
         data_path = pred_data_path + "/" + str(cur_date) + ".pkl"
         return data_path
     
-    def predict_process(self,pred_range):
-        """根据日期进行预测，得到预测结果 """
-        
-        # 调用模型进行预测
-        pred_result = self.model.predict(pred_range=pred_range)
-        return pred_result
-
     def combine_complex_df_data(self,pred_date,instrument,pred_df=None,df_ref=None,ext_length=25,type="combine"):
         """合并预测数据,实际行情数据,价格数据等
            Params:

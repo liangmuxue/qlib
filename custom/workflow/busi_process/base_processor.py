@@ -5,7 +5,6 @@ from qlib.workflow import R
 from qlib.utils import flatten_dict, get_callable_kwargs, init_instance_by_config
 from qlib.model.trainer import fill_placeholder
 
-
 import time
 import sys, os
 from pathlib import Path

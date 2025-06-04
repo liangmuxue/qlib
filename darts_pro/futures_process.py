@@ -61,6 +61,7 @@ class FuturesProcessModel(TftDataframeModel):
         self,
         dataset: TFTFuturesDataset,
     ):
+        self.dataset = dataset
         global_var.set_value("dataset", dataset)
         viz_data = TensorViz(env="viz_data")
         viz_result = TensorViz(env="viz_result")
@@ -660,11 +661,9 @@ class FuturesProcessModel(TftDataframeModel):
             else:
                 print("no match for:",elem.dtype)
         return tuple(aggregated)   
-                                
-    def predict(self, dataset,pred_range=None):
-        """根据预测区间参数进行预测，pred_range为二元数组，数组元素类型为date。
-           需要两阶段进行
-        """
+
+    def build_pred_result(self,pred_date,dataset=None):    
+        """根据预测区间参数进行预测，pred_range为二元数组，数组元素类型为date"""        
 
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.batch_file_path = self.kwargs["batch_file_path"]
@@ -673,24 +672,19 @@ class FuturesProcessModel(TftDataframeModel):
         
         if dataset is None:
             dataset = self.dataset
-
-        if pred_range is None:
-            pred_range = dataset.kwargs["segments"]["test"] 
         
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
         output_chunk_length = self.optargs["forecast_horizon"]
         expand_length = 2 *(input_chunk_length + output_chunk_length)
          
         # 根据日期范围逐日进行预测，得到预测结果   
-        start_date = pred_range[0]
-        end_date = pred_range[1]
+        start_date = pred_date
         # 同时需要延长集合时间
         total_range = dataset.segments["train"]
         valid_range = dataset.segments["valid"]    
         # 扩充起止时间，以进行数据集预测匹配
         prev_day = get_tradedays_dur(start_date,-1)
         last_day = get_tradedays_dur(start_date,3*output_chunk_length)
-        begin_day = get_tradedays_dur(end_date,-2*input_chunk_length)
         # 以当天为数据时间终点
         total_range[1] = prev_day
         begin_day = valid_range[0]
@@ -729,26 +723,45 @@ class FuturesProcessModel(TftDataframeModel):
         
         # 进行预测           
         pred_result = self.model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
-                                            batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(start_date.strftime("%Y%m%d")))
-        # 对预测结果进行评估
-        if pred_result is None:
-            print("{} pred_result None".format(pred_range))
-        else:
-            print("{} res len:{}".format(pred_range,len(pred_result)))
+                                            batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))
         
-        # 取得实际需要的日期结果数据
+        return pred_result        
+                             
+    def predict(self, dataset,pred_range=None):
+        """根据预测区间参数进行预测并进行评估，pred_range为二元数组，数组元素类型为date"""
+
+        if pred_range is None:
+            pred_range = dataset.kwargs["segments"]["test"] 
+            
+        start_date = pred_range[0]
+        end_date = pred_range[1]
         trade_dates = np.array(get_tradedays(start_date,end_date)).astype(np.int)
-        pred_dates = np.array(list(pred_result.keys())).astype(np.int)
+        
+        input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
+        output_chunk_length = self.optargs["forecast_horizon"]
+        pred_result_list = {}
+        for pred_date in trade_dates:
+            pred_result = self.build_pred_result(str(pred_date),dataset=dataset)
+            pred_result_list[pred_date] = pred_result[pred_date]
+            
+        # 对预测结果进行评估
+        pred_dates = np.array(list(pred_result_list.keys())).astype(np.int)
+        # 取得实际需要的日期结果数据
         match_dates = np.intersect1d(trade_dates,pred_dates)
         pred_result_target = {}
         # 生成真实数据，以进行评估
+        total_range = dataset.segments["train"]
+        valid_range = dataset.segments["valid"]    
+        # 扩充起止时间，以进行数据集预测匹配
+        last_day = get_tradedays_dur(end_date,3*output_chunk_length)      
+        segments = {"train":[total_range[0],last_day],"valid":[valid_range[0],last_day]}  
         dataset.build_series_data_with_segments(segments,no_series_data=True,val_ds_filter=False,fill_future=True)
         df_target = dataset.df_all
         import_price_result = []
         for key in match_dates:
-            pred_result_target[key] = pred_result[key]
+            pred_result_target[key] = pred_result_list[key]
             target_class_list = []
-            for index,row in pred_result[key].iterrows():
+            for index,row in pred_result_list[key].iterrows():
                 instrument = row['instrument']
                 trend = row['top_flag']
                 item_cur_idx = df_target[(df_target['instrument']==instrument)&(df_target['datetime_number']==key)]['time_idx'].values[0]
@@ -769,7 +782,6 @@ class FuturesProcessModel(TftDataframeModel):
         import_price_result['yield_rate'] = import_price_result['yield_rate'].astype(float)
         
         print("total yield:{}".format(import_price_result["yield_rate"].sum()))
-        
         return import_price_result          
         
                         

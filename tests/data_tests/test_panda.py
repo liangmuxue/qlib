@@ -327,10 +327,15 @@ def test_timequery():
     test_df = pd.read_csv("/home/liang/test/test_df.csv")
     ret = test_df[(test_df['timestamp']==int(query_date.timestamp()))]
     print(ret)
+
+def test_data():
+    data = pd.read_pickle("/home/qdata/workflow/fur_backtest_flow_2022/task/159/dump_data/pred_result.pkl")    
+    print(data)    
             
 if __name__ == "__main__":
     # test_scipy_peak()
-    test_timequery()
+    test_data()
+    # test_timequery()
     # test_peak_combine()
     # test_pd_index()
     # test_pd_timeser()

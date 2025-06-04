@@ -17,6 +17,8 @@ logger = AppLogger()
 
 # 交易扩展信息用于统计，字段包括：买入价，差价、盈亏金额, 购买日期，买卖间隔天数
 TRADE_EXT_COLUMNS = ["buy_price","differ_range","gain","buy_date","duration"]
+# 期货交易扩展信息用于统计，字段包括：开仓价，差幅、盈亏金额, 开仓日期，买卖间隔天数
+FUTURE_TRADE_EXT_COLUMNS = ["open_price","differ_range","gain","open_date","duration"]
 
 class ExtDataMod(AbstractMod):
     """用于加载自定义数据源"""
@@ -130,7 +132,58 @@ class ExtDataMod(AbstractMod):
         total_gain = stat_df["gain"].sum()
         logger.info("total_gain:{}".format(total_gain))
         stat_df.to_csv(save_path,index=False)
+
+    def analysis_futures_stat_offline(self,file_path,save_path):   
+        """离线分析存储的期货历史交易数据"""
         
+        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)   
+        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+        # 只统计已完成订单
+        target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
+        # 以品种为维度聚合，进行分析
+        group_df = target_df.groupby("order_book_id")
+        new_columns = TRADE_COLUMNS + FUTURE_TRADE_EXT_COLUMNS
+        stat_data = []
+        for name,instrument_df in group_df:
+            instrument_df = instrument_df.sort_values(by=["trade_date"]).reset_index(drop=True)
+            last_item = None
+            for index,row in instrument_df.iterrows():
+                # 买卖分别配对，进行额度计算
+                if last_item is None:
+                    last_item = row
+                    continue
+                # 如果相邻的记录都是同一买卖方向，则不计算
+                if row["side"]==last_item['side']:
+                    logger.warning("same side for:{}".format(row))
+                    continue
+                # 取得开仓时记录，并计算差价
+                prev_open_row = last_item
+                open_price = prev_open_row["price"]
+                differ = (row["price"] - open_price)
+                # 根据买卖方向计算实际盈亏差价
+                if row["side"]==SIDE.BUY:
+                    differ = -differ
+                differ_range = differ/open_price
+                # 计算手续费
+                commission = (row["price"] + open_price) * row["quantity"] * row['multiplier'] * 0.03/100
+                # 此次盈亏金额
+                gain = differ * row["quantity"] * row['multiplier'] - commission
+                # 统计买卖周期
+                open_day = last_item["trade_date"].strftime('%Y%m%d')
+                close_day = row["trade_date"].strftime('%Y%m%d')
+                duration = tradedays(open_day,close_day)
+                new_row = row.values.tolist() + [open_price,differ_range,gain,open_day,duration]
+                stat_data.append(new_row)
+                # 清空配对项
+                last_item = None
+        stat_df = pd.DataFrame(np.array(stat_data),columns = new_columns)
+        # 按照盈亏排序
+        stat_df = stat_df.sort_values(by=["trade_date"],ascending=True)
+        # 计算汇总数据
+        total_gain = stat_df["gain"].sum()
+        logger.info("total_gain:{}".format(total_gain))
+        stat_df.to_csv(save_path,index=False)
+                
     def build_stat_df(self,strategy_obj,load_trade_df=False,load_cache=False):
         """生成统计数据"""
         
@@ -189,11 +242,11 @@ if __name__ == "__main__":
     ext_mod = ExtDataMod()
     file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/trade_data.csv"
     stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/stat_data.csv"
-    file_path = "/home/qdata/workflow/wf_review_flow_2023/trader_data/03/trade_data.csv"
-    stat_path = "/home/qdata/workflow/wf_review_flow_2023/trader_data/03/stat_data.csv"
-    file_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/07/trade_data.csv"
-    stat_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/07/stat_data.csv"    
-    ext_mod.analysis_stat_offline(file_path,stat_path)
-    
+    file_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/06/trade_data.csv"
+    stat_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/06/stat_data.csv"
+    # file_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/07/trade_data.csv"
+    # stat_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/07/stat_data.csv"    
+    # ext_mod.analysis_stat_offline(file_path,stat_path)
+    ext_mod.analysis_futures_stat_offline(file_path,stat_path)
     
     

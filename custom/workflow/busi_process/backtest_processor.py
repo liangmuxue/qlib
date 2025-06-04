@@ -3,10 +3,10 @@ import datetime
 from datetime import timedelta
 import os
 
-from rqalpha import run_file
+from trader.rqalpha import run_file
 
 from .base_processor import BaseProcessor
-from trader.utils.date_util import get_first_and_last_day,get_tradedays_dur
+from trader.utils.date_util import get_first_and_last_day,date_string_transfer,get_tradedays_dur
 from workflow.constants_enum import WorkflowStatus,WorkflowSubStatus,FrequencyType,WorkflowType
 import cus_utils.global_var as global_var
 
@@ -29,7 +29,9 @@ class BacktestProcessor(BaseProcessor):
         # 设置预测数据路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 计算开始结束日期
-        start_date,end_date = self.get_first_and_last_day(working_day)  
+        start_date,end_date = self.wf_task.config['start_date'],self.wf_task.config['end_date']
+        start_date = date_string_transfer(str(start_date))
+        end_date = date_string_transfer(str(end_date))
         # start_date = datetime.date(2021,1,day=5)  
         # 回测开始和结束日期为本期（月、季、年）第一天和最后一天
         backtest_template["rqalpha"]["base"]["start_date"] = start_date
@@ -47,6 +49,10 @@ class BacktestProcessor(BaseProcessor):
         backtest_template["rqalpha"]["extra"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
         backtest_template["rqalpha"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path
+        # 根据回测日期段，设置加载的主力合约范围(在起始日期前提1个月，结束日期后置6个月)
+        simdata_date_begin = get_tradedays_dur(start_date,-3)
+        simdata_date_end = get_tradedays_dur(end_date,3*30)
+        backtest_template["rqalpha"]["extra"]["simdata_date"] = [simdata_date_begin,simdata_date_end]
         # 映射数据文件路径
         backtest_template["rqalpha"]["extra"]["stock_data_path"] = self.wf_task.get_stock_data_path()
         # 映射预测数据文件路径

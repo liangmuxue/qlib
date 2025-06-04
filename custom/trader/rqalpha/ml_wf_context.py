@@ -60,13 +60,12 @@ class MlWorkflowIntergrate(MlIntergrate):
     def prepare_data(self,pred_date):   
         """数据准备"""
         
-        columns = ["pred_date","instrument"]
         # 根据日期，累加当前上下文的预测数据
         # pred_data_file = self.model_cfg["kwargs"]["pred_data_file"]
         date_pred_df_file = "{}/{}".format(self.pred_data_path,self.pred_data_file)
         with open(date_pred_df_file, "rb") as fin:
             pred_df = pickle.load(fin)     
-            self.pred_df = pred_df[pred_df['pred_date']==pred_date]
+            self.pred_df = pred_df[pred_df['date']==pred_date]
         
     def filter_buy_candidate(self,pred_date):
         """根据预测计算，筛选可以买入的品种"""
@@ -77,7 +76,7 @@ class MlWorkflowIntergrate(MlIntergrate):
     def filter_futures_buy_candidate(self,pred_date):
         """根据预测计算，筛选可以买入的品种"""
         
-        inst_list = self.pred_df[["trend","code"]]  
+        inst_list = self.pred_df[["top_flag","instrument"]]  
         return inst_list.values
                        
     def filter_buy_candidate_old(self,pred_date):

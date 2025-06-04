@@ -48,6 +48,8 @@ class JuejinFuturesExtractor(HisDataExtractor):
                 base_name = file.name.split('.')[0]
                 # 去掉4位后缀，就是合约编码
                 s_name = base_name[:-4]
+                if s_name=='TA':
+                    print("ggg")
                 # 只使用指定日期内的数据
                 date_name = base_name[-4:]
                 if int(date_name)<begin or int(date_name)>end:
@@ -57,7 +59,9 @@ class JuejinFuturesExtractor(HisDataExtractor):
                     continue
                 filepath = file
                 item_df = pd.read_csv(filepath,dtype=self.col_data_types,parse_dates=['date'])  
-                item_df["symbol"] = s_name
+                # 填入品种编码
+                item_df["v_symbol"] = s_name
+                item_df["symbol"] = base_name
                 if sim_data is None:
                     sim_data = item_df
                 else:
@@ -170,6 +174,7 @@ class JuejinFuturesExtractor(HisDataExtractor):
             'low': sqlalchemy.FLOAT,
             'volume': sqlalchemy.FLOAT,
             'hold': sqlalchemy.FLOAT,   
+            'settle': sqlalchemy.FLOAT,  
         }      
                 
         # 从分时数据中累加得到日K数据
@@ -185,9 +190,11 @@ class JuejinFuturesExtractor(HisDataExtractor):
             df_sum = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["volume", "money", "open_interest"].apply(lambda x : x.sum())
             df_open = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["open"].first()
             df_close = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["close"].last()
+            # 使用收盘价作为结算价
+            df_settle = df_close.copy()
             df_high = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["high"].max()
             df_low = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["low"].min()
-            df_concat = pd.concat([df_sum,df_open,df_close,df_high,df_low],axis=1)
+            df_concat = pd.concat([df_sum,df_open,df_close,df_high,df_low,df_settle],axis=1)
             df_concat = df_concat.drop('money', axis=1)
             df_concat = df_concat.reset_index()
             df_concat = df_concat.rename(columns={"open_interest": "hold", "symbol": "code"})
@@ -216,7 +223,8 @@ class JuejinFuturesExtractor(HisDataExtractor):
             'high': sqlalchemy.FLOAT,
             'low': sqlalchemy.FLOAT,
             'volume': sqlalchemy.FLOAT,
-            'hold': sqlalchemy.FLOAT,   
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
         }      
                 
         # 从分时数据中累加得到日K数据
@@ -246,6 +254,9 @@ class JuejinFuturesExtractor(HisDataExtractor):
                 print("{} ok,shape:{}".format(filepath,df_concat.shape[0]))
         # 关联字段挂接
         upt_sql = "update dominant_real_data d set d.var_id=(select id from trading_variety t where t.code=LEFT(d.code, LENGTH(d.code)-4))"
+        self.dbaccessor.do_updateto(upt_sql)   
+        # 使用收盘价作为结算价
+        upt_sql = "update dominant_real_data set settle=close"        
         self.dbaccessor.do_updateto(upt_sql)    
         
                     
@@ -253,5 +264,11 @@ if __name__ == "__main__":
     
     extractor = JuejinFuturesExtractor(savepath="/home/qdata/futures_data",sim_path="/home/qdata/futures_data/juejin/main_1min")   
     save_path = "custom/data/results/futures"
-    extractor.import_main_his_data_local()
+    # extractor.import_main_his_data_local()
+    
+    begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()
+    end = datetime.datetime.strptime("20220701", "%Y%m%d").date()
+    simdata_date = [begin,end]
+    extractor.load_sim_data(simdata_date)
+    extractor.get_time_data_by_day('AP2205',20220505)
             

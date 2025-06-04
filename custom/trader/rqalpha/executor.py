@@ -46,6 +46,40 @@ class Executor(object):
         if self._env.trading_dt.date() == conf.end_date:
             self._split_and_publish(Event(EVENT.SETTLEMENT))
 
+    def bt_run(self, bar_dict):
+        """回测模式的事件发布"""
+        
+        conf = self._env.config.base
+        for event in self._env.event_source.events(conf.start_date, conf.end_date, conf.frequency):
+            # 回测模式，临时限制时间,加速运行
+            now = self._env.trading_dt
+            if event.event_type == EVENT.BAR and (now.hour>=10 or (now.hour==9 and now.minute>5)):
+                continue         
+            # 轮询各个事件并进行处理 
+            if event.event_type == EVENT.TICK:
+                if self._ensure_before_trading(event):
+                    self._split_and_publish(event)
+            elif event.event_type == EVENT.BAR:
+                if self._ensure_before_trading(event):
+                    bar_dict.update_dt(event.calendar_dt)
+                    event.bar_dict = bar_dict
+                    self._split_and_publish(event)
+            elif event.event_type == EVENT.OPEN_AUCTION:
+                if self._ensure_before_trading(event):
+                    bar_dict.update_dt(event.calendar_dt)
+                    event.bar_dict = bar_dict
+                    self._split_and_publish(event)
+            elif event.event_type == EVENT.BEFORE_TRADING:
+                self._ensure_before_trading(event)
+            elif event.event_type == EVENT.AFTER_TRADING:
+                self._split_and_publish(event)
+            else:
+                self._env.event_bus.publish_event(event)
+
+        # publish settlement after last day
+        if self._env.trading_dt.date() == conf.end_date:
+            self._split_and_publish(Event(EVENT.SETTLEMENT))
+            
     def _ensure_before_trading(self, event):
         # return True if before_trading won't run this time
         if self._last_before_trading == event.trading_dt.date() or self._env.config.extra.is_hold:

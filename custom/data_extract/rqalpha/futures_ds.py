@@ -117,18 +117,20 @@ class FuturesDataSource(BaseDataSource):
         if frequency=="1m":
             period = PeriodType.MIN1.value
             item_data = self.extractor.load_item_df(instrument,period=period)   
+            item_data["last"] = item_data["close"]                    
         # 日线数据使用akshare的数据源
         if frequency=="1d":
             start_dt = dt_obj(start_dt.year, start_dt.month, start_dt.day).date() 
             end_dt = dt_obj(end_dt.year, end_dt.month, end_dt.day).date()
             item_data = self.load_item_allday_data(instrument.order_book_id)
+            # 使用结算价作为当日最终价格
+            item_data["last"] = item_data["settle"]            
             item_data = item_data.rename(columns={"date":"datetime"})
         # 筛选对应日期以及合约的相关数据
         item_data = item_data[(item_data["datetime"]>=start_dt)&(item_data["datetime"]<=end_dt)]
         if item_data.shape[0]==0:
-            return None
-        # 改变为rqalpha格式
-        item_data["last"] = item_data["close"]
+            return None    
+
         # 取得前一个交易时段收盘
         item_data["prev_close"]= np.NaN
         if need_prev:
@@ -140,13 +142,13 @@ class FuturesDataSource(BaseDataSource):
         if frequency != '1m' and frequency != '1d':
             return super(FuturesDataSource, self).get_bar(instrument, dt, frequency)
         
-        if dt.hour<=9 and dt.minute<35:
+        if dt.hour<=8 and dt.minute<35:
             # 如果不在交易时间，则取上一日，否则取上一个分时
             dt = get_tradedays_dur(dt,-1)
             frequency = "1d"
             bar_data = self.get_k_data(instrument, dt, dt,frequency=frequency,need_prev=need_prev)
         else:
-            bar_data = self.get_k_data(instrument, dt, dt,frequency=frequency,need_prev=need_prev)
+            bar_data = self.get_k_data(instrument, dt, dt,frequency=frequency,need_prev=False)
 
         if bar_data is None or bar_data.empty:
             return None

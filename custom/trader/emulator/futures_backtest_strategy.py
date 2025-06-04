@@ -143,10 +143,6 @@ class FurBacktestStrategy(SimStrategy):
         
         self.logger_info("handle_bar.now:{}".format(context.now))
         
-        # 临时限制时间
-        if context.now.hour>=10 or (context.now.hour==9 and context.now.minute>35):
-            return
-        
         # 首先进行撮合，然后进行策略
         env = Environment.get_instance()
         env.broker.trade_proxy.handler_bar(context.now)
@@ -206,10 +202,7 @@ class FurBacktestStrategy(SimStrategy):
             price = order.kwargs["price"]
             # 买入数量需要根据当前额度进行计算,还需要兼顾合约乘数
             multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
-            try:
-                quantity = int(self.single_value/price/multiplier)
-            except Exception as e:
-                print("eee")
+            quantity = int(self.single_value/price/multiplier)
             # if price*quantity>30000:
             #     print("nnn")
             # 资金不足时，不进行处理
@@ -272,7 +265,7 @@ class FurBacktestStrategy(SimStrategy):
                 continue
             # 检查是否超期，以决定是否平仓
             dur_days = tradedays(trade_date,now_date)
-            if dur_days>keep_day_number:
+            if dur_days>=keep_day_number:
                 if dur_days>4:
                     logger.warning("dur_days exceed,trade_date:{},dur_day:{},order_book_id:{}".format(trade_date,dur_days,order_book_id))
                 self.logger_info("expire,trade_date:{},and dur_day:{},order_book_id:{}".format(trade_date,dur_days,order_book_id))
@@ -407,13 +400,14 @@ class FurBacktestStrategy(SimStrategy):
             price_now = cur_snapshot.last
             dt = env.calendar_dt
             prev_day = get_tradedays_dur(dt,-1)
-            h_bar = env.data_proxy.history_bars(open_item.order_book_id,1,"1d","close",prev_day)
+            # 使用结算价作为上一日的价格
+            h_bar = env.data_proxy.history_bars(open_item.order_book_id,1,"1d","settle",prev_day)
             price_last_day = h_bar[0]               
             pred_buy_exceed_rate = self.strategy.buy_opt.pred_buy_exceed_rate
             pred_buy_ignore_rate = self.strategy.buy_opt.pred_buy_ignore_rate
             try_cnt_limit = self.strategy.buy_opt.try_cnt_limit
-            side_flag = 1 if open_order.direction==POSITION_DIRECTION.LONG else -1
-            # 如果超出昨日收盘2个百分点(配置项)，则等待
+            side_flag = 1 if open_order.side==SIDE.BUY else -1
+            # 如果超出昨日收盘一定范围(配置项)，则等待
             if (price_now - price_last_day)*side_flag/price_last_day*100>pred_buy_ignore_rate:
                 self.logger_info("pred_buy_exceed ,now:{},price_last_day:{}".format(price_now,price_last_day))
             else:

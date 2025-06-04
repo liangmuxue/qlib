@@ -9,6 +9,7 @@ import six
 from rqalpha import const
 from .executor import Executor
 from trader.rqalpha.core.strategy import Strategy
+from rqalpha.const import RUN_TYPE
 from rqalpha.core.strategy_context import StrategyContext
 from rqalpha.core.strategy_loader import FileStrategyLoader, SourceCodeStrategyLoader, UserFuncStrategyLoader
 from rqalpha.data.base_data_source import BaseDataSource
@@ -200,7 +201,10 @@ def run(config, source_code=None, user_funcs=None):
         init_succeed = True
 
         bar_dict = BarMap(env.data_proxy, config.base.frequency)
-        executor.run(bar_dict)
+        if config.base.run_type==RUN_TYPE.BACKTEST:
+            executor.bt_run(bar_dict)
+        else:
+            executor.run(bar_dict)
         env.event_bus.publish_event(Event(EVENT.POST_STRATEGY_RUN))
 
         if env.profile_deco:

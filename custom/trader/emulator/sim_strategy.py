@@ -442,7 +442,7 @@ class SimStrategy(BaseStrategy):
         try:
             bar = env.get_bar(order_book_id)
             limit_up = bar.limit_up
-            if limit_up is not None:
+            if limit_up is not None and not np.isnan(bar.open):
                 return True
             return False
         except Exception as e:

@@ -29,28 +29,20 @@ class PredResultProcessor(BaseProcessor):
         # 结束时间取当前日期
         pred_len = dataset_template["kwargs"]["pred_len"]
         end_date = str(working_day)
-        end_date_fmt = date_string_transfer(end_date)
+        end_date_fmt = datetime.strptime(end_date, "%Y%m%d").date()
         # 总数据集定义的开始结束时间,其中结束日期与当前任务日期匹配
         real_template["data_handler_config"]["end_date"] = end_date_fmt
-        # dataset数据集定义的开始结束时间
-        # 完整数据集结束日期前推12个月
-        total_start_date = get_tradedays_dur(end_date,-30*12)        
-        dataset_template["kwargs"]["segments"]["train_total"] = [total_start_date,end_date_fmt]
+        # dataset数据集定义的开始结束时间   
         # 验证集开始日期前推3个月
         valid_start_date = get_tradedays_dur(end_date,-30*3)
         # 验证集结束日期为当日
-        valid_end_date = end_date_fmt
-        # 直接使用当前日期作为开始和结束日期
-        dataset_template["kwargs"]["segments"]["valid"] = [valid_end_date,valid_end_date]
+        valid_end_date = get_tradedays_dur(end_date,30*1)
+        dataset_template["kwargs"]["segments"]["valid"] = [valid_start_date,valid_end_date]
         # 预测开始和结束日期都为当天
-        working_day_list = self.wf_task.get_calendar_by_seq(self.wf_task.task_entity["sequence"])
-        if len(working_day_list)>0:
-            # pred_begin_date = str(working_day_list[0])
-            pred_begin_date = datetime.strptime(str(working_day),"%Y%m%d")       
-            # pred_end_date = str(working_day_list[-1])
-            # pred_end_date = datetime.strptime(pred_end_date,"%Y%m%d")
-            real_template["port_analysis_config"]["backtest"]["pred_start_time"] = pred_begin_date
-            real_template["port_analysis_config"]["backtest"]["pred_end_time"] = pred_begin_date
+        pred_begin_date = working_day
+        pred_end_date = pred_begin_date
+        real_template["port_analysis_config"]["backtest"]["pred_start_date"] = pred_begin_date
+        real_template["port_analysis_config"]["backtest"]["pred_end_date"] = pred_end_date        
         # 设置内部数据存储路径
         model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 辅助数据存储目录
