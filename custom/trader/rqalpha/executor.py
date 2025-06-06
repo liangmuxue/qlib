@@ -50,11 +50,14 @@ class Executor(object):
         """回测模式的事件发布"""
         
         conf = self._env.config.base
-        for event in self._env.event_source.events(conf.start_date, conf.end_date, conf.frequency):
-            # 回测模式，临时限制时间,加速运行
-            now = self._env.trading_dt
-            if event.event_type == EVENT.BAR and (now.hour>=10 or (now.hour==9 and now.minute>5)):
-                continue         
+        for index,event in enumerate(list(self._env.event_source.events(conf.start_date, conf.end_date, conf.frequency))):
+            # 回测模式，临时限制时间,加速运行(先不考虑夜盘)
+            now = event.trading_dt
+            begin_time = datetime(now.year,now.month,now.day,9,3,0) 
+            end_time = datetime(now.year,now.month,now.day,14,50,0) 
+            night_time = datetime(now.year,now.month,now.day,15,10,0) 
+            if event.event_type == EVENT.BAR and ((now<=end_time and now>=begin_time) or now>=night_time):
+                continue        
             # 轮询各个事件并进行处理 
             if event.event_type == EVENT.TICK:
                 if self._ensure_before_trading(event):

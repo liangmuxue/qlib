@@ -11,8 +11,8 @@ from .trade_entity import TradeEntity
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-# 交易信息表字段，分别为交易日期，品种代码，买卖类型，多空类型，成交价格，成交量,总价格，成交状态，订单编号,卖出原因,附加订单编号
-TRADE_COLUMNS = ["trade_date","order_book_id","side","long_short","price","quantity","total_price","status","order_id","sell_reason","secondary_order_id"]
+# 交易信息表字段，分别为交易日期，品种代码，买卖类型，多空类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
+TRADE_COLUMNS = ["trade_date","order_book_id","side","long_short","price","quantity","total_price","status","order_id","close_reason","secondary_order_id"]
 TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
 
 class FuturesTradeEntity(TradeEntity):
@@ -49,8 +49,12 @@ class FuturesTradeEntity(TradeEntity):
         # 存储对于实际仿真或实盘系统的交易订单号
         secondary_order_id = order.secondary_order_id
         if secondary_order_id is None:
-            secondary_order_id = 0        
-        row_data = [trade_date,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,order.sell_reason,secondary_order_id]
+            secondary_order_id = 0       
+        if "close_reason" in order:
+            close_reason = order['close_reason'] 
+        else:
+            close_reason = None
+        row_data = [trade_date,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,close_reason,secondary_order_id]
         # 使用订单号查询并更新记录
         self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
         # 变更后保存数据

@@ -124,7 +124,9 @@ class FuturesDataSource(BaseDataSource):
             end_dt = dt_obj(end_dt.year, end_dt.month, end_dt.day).date()
             item_data = self.load_item_allday_data(instrument.order_book_id)
             # 使用结算价作为当日最终价格
-            item_data["last"] = item_data["settle"]            
+            item_data["last"] = item_data["settle"]    
+            # 字段和rq统一
+            item_data['symbol'] = item_data['code']        
             item_data = item_data.rename(columns={"date":"datetime"})
         # 筛选对应日期以及合约的相关数据
         item_data = item_data[(item_data["datetime"]>=start_dt)&(item_data["datetime"]<=end_dt)]
@@ -170,21 +172,40 @@ class FuturesDataSource(BaseDataSource):
             return bar_data[fields].values
     
     def current_snapshot(self,instrument, frequency, dt):
-        """取得指定股票的当前交易信息快照"""
+        """取得指定品种的当前交易信息快照"""
         
         order_book_id = instrument.order_book_id
         symbol = instrument.trading_code
-        
-        if frequency!="1m":
-            return super(TdxDataSource, self).current_snapshot(instrument, frequency, dt)
-        
+
         if self.frequency_sim:   
             # 如果实时模式，则取得实时数据      
             market = judge_market(order_book_id)    
             bar = self.get_real_data(symbol,market)
         else:
             bar = self.get_bar(instrument,dt,frequency)
-        tick_obj = TickObject(instrument, bar)
+            
+        if not bar:
+            return None
+            
+        def tick_fields_for(ins):
+            _STOCK_FIELD_NAMES = [
+                'datetime', 'open', 'high', 'low', 'last', 'volume', 'total_turnover', 'prev_close',
+                'limit_up', 'limit_down'
+            ]
+            _FUTURE_FIELD_NAMES = _STOCK_FIELD_NAMES + ['open_interest', 'prev_settlement']
+
+            if ins.type == 'Future':
+                return _STOCK_FIELD_NAMES
+            else:
+                return _FUTURE_FIELD_NAMES
+                        
+        d = {k: bar[k] for k in tick_fields_for(instrument) if k in list(bar.keys())}
+        d['last'] = bar['close']
+        d['prev_close'] = bar['prev_close'] 
+        # if 'code' in bar:
+        #     d['symbol'] = bar['code'] 
+           
+        tick_obj = TickObject(instrument, d)
         return tick_obj
 
     def _get_prev_close(self, instrument, dt,frequency=None):
@@ -284,10 +305,20 @@ class FuturesDataSource(BaseDataSource):
                 
         return contract_names
     
+    def get_trading_minutes_list(self,instrument, trading_dt):
+        """取得对应合约的交易时间段,返回排序列表"""
+        
+        trading_minutes = self.get_trading_minutes_for(instrument, trading_dt)
+        return sorted(trading_minutes)
+        
+        
     def get_trading_minutes_for(self,instrument, trading_dt):
         """取得对应合约的交易时间段"""
         
-        contract_symbol = instrument.order_book_id
+        if isinstance(instrument,str):
+            contract_symbol = instrument
+        else:
+            contract_symbol = instrument.order_book_id
         code = contract_symbol[:-4]
         # 从数据库取得对应品种的交易时间范围
         sql = "select code,ac_time_range,day_time_range,night_time_range from trading_variety where code='{}' ".format(code)

@@ -32,41 +32,51 @@ class JuejinFuturesExtractor(HisDataExtractor):
                                "volume":float,"hold":float}        
         self.sim_path = sim_path
     
-    def load_sim_data(self,simdata_date,dataset=None):
+    def load_sim_data(self,simdata_date,dataset=None,folder_name=None,contract_name=None):
         """从存储中加载对应的主力合约数据"""
         
         data_path = self.sim_path
         sim_data = None
-        df_data = dataset.df_all
         begin = int(simdata_date[0].strftime('%y%m'))
         end = int(simdata_date[1].strftime('%y%m'))
         # 筛选主力合约数据，只获取数据集中具备的品种
-        instrument_arr = df_data['instrument'].unique()
-        # 循环取得所有数据文件并获取对应数据
-        for p in Path(data_path).iterdir():
-            for file in p.rglob('*.csv'):  
-                base_name = file.name.split('.')[0]
-                # 去掉4位后缀，就是合约编码
-                s_name = base_name[:-4]
-                if s_name=='TA':
-                    print("ggg")
-                # 只使用指定日期内的数据
-                date_name = base_name[-4:]
-                if int(date_name)<begin or int(date_name)>end:
-                    continue
-                # 筛选出名字匹配的品种
-                if not np.any(instrument_arr==s_name):
-                    continue
-                filepath = file
-                item_df = pd.read_csv(filepath,dtype=self.col_data_types,parse_dates=['date'])  
-                # 填入品种编码
-                item_df["v_symbol"] = s_name
-                item_df["symbol"] = base_name
-                if sim_data is None:
-                    sim_data = item_df
-                else:
-                    sim_data = pd.concat([sim_data,item_df])
-                    
+        if dataset is not None:
+            instrument_arr = dataset.df_all['instrument'].unique()
+        else:
+            instrument_arr = None
+            
+        if contract_name is not None:
+            s_name = contract_name[:-4]
+            filepath = os.path.join(data_path,folder_name,s_name,"{}.{}.csv".format(contract_name,folder_name))
+            item_df = pd.read_csv(filepath,dtype=self.col_data_types,parse_dates=['date'])  
+            # 填入品种编码
+            item_df["v_symbol"] = s_name
+            item_df["symbol"] = contract_name        
+            sim_data = item_df  
+        else:
+            # 循环取得所有数据文件并获取对应数据
+            for p in Path(data_path).iterdir():
+                for file in p.rglob('*.csv'):  
+                    base_name = file.name.split('.')[0]
+                    # 去掉4位后缀，就是合约编码
+                    s_name = base_name[:-4]
+                    # 只使用指定日期内的数据
+                    date_name = base_name[-4:]
+                    if int(date_name)<begin or int(date_name)>end:
+                        continue
+                    # 筛选出名字匹配的品种
+                    if instrument_arr is not None and not np.any(instrument_arr==s_name):
+                        continue
+                    filepath = file
+                    item_df = pd.read_csv(filepath,dtype=self.col_data_types,parse_dates=['date'])  
+                    # 填入品种编码
+                    item_df["v_symbol"] = s_name
+                    item_df["symbol"] = base_name
+                    if sim_data is None:
+                        sim_data = item_df
+                    else:
+                        sim_data = pd.concat([sim_data,item_df])
+                        
         sim_data = sim_data.rename(columns={"date":"datetime"})
         # 生成时间戳方便后续时间比较,注意需要提前转换时区
         sim_data['timestamp'] = sim_data['datetime'].dt.tz_localize(tz='Asia/Shanghai').astype(np.int64)//10 ** 9
@@ -114,7 +124,7 @@ class JuejinFuturesExtractor(HisDataExtractor):
         
         return [instrument+cur_month,instrument+next_month,instrument+next_two_month]
 
-    def get_time_data_by_day(self,symbol,day,period=None):
+    def get_time_data_by_day(self,symbol,day,period=PeriodType.MIN1.value):
         """取得指定品种和对应日期的分时交易记录"""
         
         if period==PeriodType.MIN1.value:
@@ -269,6 +279,12 @@ if __name__ == "__main__":
     begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()
     end = datetime.datetime.strptime("20220701", "%Y%m%d").date()
     simdata_date = [begin,end]
-    extractor.load_sim_data(simdata_date)
-    extractor.get_time_data_by_day('AP2205',20220505)
+    folder_name = 'XZCE'
+    contract_name = 'AP2205'
+    symbol_name = contract_name[:-4]
+    extractor.load_sim_data(simdata_date,folder_name=folder_name,contract_name=contract_name)
+    data = extractor.get_time_data_by_day(symbol_name,20220505)
+    date = datetime.datetime.strptime("20220505 09:01:00", "%Y%m%d %H:%M:%S")
+    data = extractor.get_time_data(contract_name,date)
+    print("data len:{}".format(data.shape[0]))
             

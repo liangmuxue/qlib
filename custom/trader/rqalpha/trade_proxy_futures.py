@@ -2,6 +2,7 @@ from enum import Enum, unique
 import time
 import threading
 import copy
+import numpy as np
 
 from rqalpha.apis import Environment
 from rqalpha.const import SIDE,ORDER_STATUS as RQ_ORDER_STATUS
@@ -51,7 +52,7 @@ class FuturesTrade(BaseTrade):
             if order.status==RQ_ORDER_STATUS.ACTIVE:
                 # 取得当前价格，如果小于订单报价，则成单处理
                 cur_price = env.get_last_price(order.order_book_id)  
-                if cur_price is None:
+                if cur_price is None or np.isnan(cur_price):
                     continue
                 # 卖单的挂单价需要小于等于当前价格
                 if order.price>cur_price and order.side==SIDE.SELL:
