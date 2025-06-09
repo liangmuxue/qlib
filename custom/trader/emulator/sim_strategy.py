@@ -473,7 +473,13 @@ class SimStrategy(BaseStrategy):
     def has_current_data(self,day,symbol):
         """当日是否开盘交易"""
         return True
-            
+    
+    def get_total_value(self):
+        """获取当前总市值"""
+        
+        portfolio = self.get_portfolio()  
+        return portfolio.total_value
+        
     def get_cash(self):
         """获取当前现金"""
         

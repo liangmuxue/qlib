@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 from sklearn.metrics import accuracy_score
 import sklearn.neighbors
 
@@ -84,10 +85,26 @@ def test_busi_data():
     
     logger.debug("\n2. Nearest neighbor classification using DTW")
     logger.debug("Correct classification rate:{}".format(accuracy_score(y_test, predicted_labels)))
-        
+
+def test_pred_data():
+    result_file_path = "custom/data/results/pred_coll.pkl"
+    with open(result_file_path, "rb") as fin:
+        result_data = pickle.load(fin)    
+    result_data = result_data[(result_data['date']>=20220505)&(result_data['date']<=20220531)]
+    result_data.to_csv("custom/data/results/pred_coll.csv")
+
+def test_predResult_data():
+    result_file_path = "/home/qdata/workflow/fur_backtest_flow_2022/task/159/dump_data/pred_result.pkl"
+    with open(result_file_path, "rb") as fin:
+        result_data = pickle.load(fin)    
+    result_data = result_data[(result_data['date']>=20220505)&(result_data['date']<=20220531)]
+    result_data.to_csv("custom/data/results/pred_result.csv")
+           
 if __name__ == "__main__":
     # test_ori()
-    test_busi_data()
+    # test_pred_data()
+    test_predResult_data()
+    # test_busi_data()
     
     
     

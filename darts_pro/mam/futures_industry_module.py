@@ -27,7 +27,7 @@ from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20220505]
-STAT_DATE = [20220505,20220505]
+STAT_DATE = [20220505,20220531]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -479,13 +479,16 @@ class FuturesIndustryModule(MlpModule):
                     pickle.dump(indus_result, fout)  
 
 
-            rate_total_stat = rate_total[(rate_total['date']>=STAT_DATE[0])&(rate_total['date']<=STAT_DATE[1])]
+            # rate_total_stat = rate_total[(rate_total['date']>=STAT_DATE[0])&(rate_total['date']<=STAT_DATE[1])]
             # print("trend fail date:\n",rate_total_stat[rate_total_stat['trend_correct']==0]['date'])  
             # print("indus_top fail date:\n",rate_total_stat[rate_total_stat['indus_top_class']==1][['date']])
 
             if import_price_result is not None:
                 import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
                 print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
+                result_file_path = "custom/data/results/pred_coll.pkl"
+                with open(result_file_path, "wb") as fout:
+                    pickle.dump(import_price_result_item, fout)                  
                                         
             tar_viz = global_var.get_value("viz_data")
             viz_result = global_var.get_value("viz_result_detail")
@@ -799,8 +802,8 @@ class FuturesIndustryModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
-                continue  
+            # if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+            #     continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
                 if target_info is None:
@@ -838,7 +841,7 @@ class FuturesIndustryModule(MlpModule):
                 result_date_list[date] = ins_result_list
                 continue
   
-            collect_mode = 2
+            collect_mode = 2 # 使用双向模式进行准确率计算
             # Compute Acc Resultes
             if collect_mode==1:
                 import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr = self.collect_result(import_index,overroll_trend=trend_value,
@@ -1002,8 +1005,11 @@ class FuturesIndustryModule(MlpModule):
             trend_flag = result_list[result_list['top_index']==imp_idx]['top_flag'].values[0]
             ts = target_info[imp_idx]
             price_array = ts["price_array"][self.input_chunk_length-1:]
+            # 加入开盘数据，计算开盘目标价格与前边的收盘价格的差值
+            open_array = ts["open_array"][self.input_chunk_length-1:]
             diff_range = (price_array[-1] - price_array[0])/price_array[0]
-            p_taraget_class = compute_price_class(price_array,mode="first_last")
+            diff_range = (open_array[-1] - price_array[0])/price_array[0]
+            p_taraget_class = get_simple_class(diff_range) 
             # 根据多空判断取得实际对应的类别
             if trend_flag==0:
                 diff_range = -diff_range
@@ -1179,7 +1185,7 @@ class FuturesIndustryModule(MlpModule):
         ins_index = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
 
         cls_ins = cls[0]
-        top_num = 3
+        top_num = 5
         
         # 分别取得最高和最低，同时进行多方和空方操作
         raise_top_index = np.argsort(-cls_ins)[:top_num]

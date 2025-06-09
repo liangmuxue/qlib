@@ -53,10 +53,11 @@ class Executor(object):
         for index,event in enumerate(list(self._env.event_source.events(conf.start_date, conf.end_date, conf.frequency))):
             # 回测模式，临时限制时间,加速运行(先不考虑夜盘)
             now = event.trading_dt
+            first_time = datetime(now.year,now.month,now.day,9,0,0) 
             begin_time = datetime(now.year,now.month,now.day,9,3,0) 
             end_time = datetime(now.year,now.month,now.day,14,50,0) 
             night_time = datetime(now.year,now.month,now.day,15,10,0) 
-            if event.event_type == EVENT.BAR and ((now<=end_time and now>=begin_time) or now>=night_time):
+            if event.event_type == EVENT.BAR and ((now<=end_time and now>=begin_time) or now>=night_time or now==first_time):
                 continue        
             # 轮询各个事件并进行处理 
             if event.event_type == EVENT.TICK:

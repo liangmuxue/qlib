@@ -139,10 +139,10 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 datetime_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["datetime_number"].values                                
                 diff_range = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["diff_range"].values         
-                rsv_diff = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["rsv_diff"].values                                           
-                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,rsv_diff)
+                                    &(df_data["instrument_rank"]==code)]["diff_range"].values        
+                open_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
+                                    &(df_data["instrument_rank"]==code)]["OPEN"].values                                           
+                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array)
             # 保存到本地
             save_ass_data = global_var.get_value("save_ass_data")
             if save_ass_data:
@@ -423,7 +423,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             instrument = self.ass_data[code][0]
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
-            rsv_diff = self.ass_data[code][4][past_start_ser:future_end_ser]
+            open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
             scaler = MinMaxScaler(feature_range=(1e-5, 1))
             scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
             price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
@@ -432,7 +432,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
-                               "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"rsv_diff":rsv_diff,
+                               "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"open_array":open_array,
                                "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
             # 过去协变量序列数据
             covariate_series = self.covariates[ori_index] 

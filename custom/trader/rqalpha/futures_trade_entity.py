@@ -87,6 +87,16 @@ class FuturesTradeEntity(TradeEntity):
         if self.trade_data_df.shape[0]==0:
             return self.trade_data_df
         trade_data_df = self.trade_data_df
+        target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&
+                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]                  
+        return target_df  
+    
+    def get_open_list_filled(self,trade_date):   
+        """取得所有已成交订单"""
+
+        if self.trade_data_df.shape[0]==0:
+            return self.trade_data_df
+        trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.FILLED)&
                                       (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]                  
         return target_df  

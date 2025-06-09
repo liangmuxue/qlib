@@ -260,4 +260,3 @@ class TradeEntity():
         self.trade_log_df = pd.concat([self.trade_log_df,pd.DataFrame(log_row_data,columns=TRADE_LOG_COLUMNS)], axis=0)
         self.trade_log_df.to_csv(self.log_save_path,index=False)
         
-          
