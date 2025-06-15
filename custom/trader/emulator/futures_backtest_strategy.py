@@ -1,30 +1,56 @@
 import time
 import os
 import datetime
+from datetime import timedelta
 from rqalpha.apis import *
-import rqalpha
 from rqalpha.const import SIDE,ORDER_STATUS
+from rqalpha.data.bar_dict_price_board import BarDictPriceBoard
 from trader.rqalpha.strategy_class.backtest_base import BaseStrategy,SellReason
 from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
 from trader.rqalpha.futures_trade_entity import FuturesTradeEntity
 from trader.emulator.sim_strategy import SimStrategy
 from trader.utils.date_util import tradedays,get_tradedays_dur
 
+from data_extract.rqalpha.fur_ds_proxy import FurDataProxy
 from data_extract.his_data_extractor import PeriodType
 from cus_utils.data_filter import get_topN_dict
 from cus_utils.log_util import AppLogger
 from gunicorn import instrument
 logger = AppLogger()
 
+def get_time(f):
+    def inner(*arg,**kwarg):
+        s_time = time.time()
+        res = f(*arg,**kwarg)
+        e_time = time.time()
+        if f.__name__=="build_hot_loading_data":
+            print('func:{},time:{}'.format(f.__name__,(e_time - s_time)))
+        return res
+    return inner
+
 class FurBacktestStrategy(SimStrategy):
     """回测交易策略，分钟级别，继承回测基类"""
     
     def __init__(self,proxy_name="qidian"):
         super().__init__(proxy_name=proxy_name)
+        self.time_begin = None
     
+    def time_inject(self,code_name=None,begin=False):
+        if begin:
+            self.time_begin = time.time()
+        else:
+            if self.time_begin is None:
+                self.time_begin = time.time()
+            elapsed_time = time.time() - self.time_begin   
+            self.time_begin = time.time()
+            # print("{} Elapsed time: {} seconds".format(code_name,elapsed_time))    
+        
     def init_env(self):
         
         self.data_source = Environment.get_instance().data_source
+        price_board = BarDictPriceBoard()
+        data_proxy = FurDataProxy(self.data_source,price_board)
+        Environment.get_instance().set_data_proxy(data_proxy)
         # 初始化交易代理对象
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
         # 根据标志，决定是否清空目录下的历史交易记录
@@ -101,6 +127,8 @@ class FurBacktestStrategy(SimStrategy):
         position_max_number = self.strategy.position_max_number
         self.open_list = {} 
         self.close_list = {}     
+        # 撤单列表
+        self.cancel_list = []        
         # 综合候选品种以及当前已持仓品种，生成维护开仓和平仓列表
         positions = self.get_positions()
         pos_number = len(positions)
@@ -114,22 +142,14 @@ class FurBacktestStrategy(SimStrategy):
             candidate_order = self.get_next_candidate()
             if candidate_order is not None:
                 pos_number += 1
-                
-        # # 生成平仓列表
-        # for pos in positions:
-        #     order_book_id = pos.order_book_id
-        #     if order_book_id in self.lock_list:
-        #         continue
-        #     price = self.get_last_or_prevday_bar(order_book_id)['close']
-        #     if pos.direction==POSITION_DIRECTION.LONG:
-        #         side = SIDE.SELL
-        #     else:
-        #         side = SIDE.BUY            
-        #     order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.CLOSE)
-        #     self.close_list[order_book_id] = order
-            
-        # 撤单列表
-        self.cancel_list = []
+        
+        # 生成热加载数据，提升查询性能
+        self.data_source.build_hot_loading_data(pred_date,self.close_list,reset=True) 
+        self.data_source.build_hot_loading_data(pred_date,self.open_list)        
+        self.data_source.build_hot_loading_data(pred_date,self.get_positions())    
+
+        if pred_date==20220510:
+            print("ggg")
         
     def after_trading(self,context):
         logger.info("after_trading in")
@@ -175,6 +195,312 @@ class FurBacktestStrategy(SimStrategy):
         
     ########################################逻辑判断部分################################################# 
 
+    @get_time
+    def open_order(self,context):
+        """开仓挂单"""
+        
+        # 如果持仓品种超过指定数量，则不操作
+        position_number = len(self.get_positions())
+        position_max_number = self.strategy.position_max_number
+        opened_list = self.trade_entity.get_open_list_filled(self.trade_day)
+        if opened_list is None:
+            return
+        # 进行中的订单加上已持仓订单数量，不能大于规定数量阈值 
+        if position_number+len(opened_list)>=position_max_number:
+            self.logger_info("full pos")
+            return
+        
+        # 轮询候选列表进行买入操作
+        for order in self.get_need_open_list():
+            # 只对待开仓状态进行挂单
+            self.logger_debug("open order loop,order_book_id:{},status:{}".format(order.order_book_id,order.status))
+            if order.status!=ORDER_STATUS.PENDING_NEW:
+                continue
+            # 以昨日收盘价格挂单买入
+            order_book_id = order.order_book_id
+            price = order.kwargs["price"]
+            # 买入数量需要根据当前额度进行计算,还需要兼顾合约乘数
+            multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
+            # 实时计算单个品种购买的额度
+            single_value = self.compute_build_quantity()
+            quantity = int(single_value/price/multiplier)
+            # if price*quantity>30000:
+            #     print("nnn")
+            # 资金不足时，不进行处理
+            if quantity==0:
+                logger.warning("volume exceed,order_book_id:{}".format(order_book_id))
+                continue
+            order = self.submit_order(quantity,order_in=order)
+            if order is None:
+                logger.warning("open order submit fail,order_book_id:{}".format(order_book_id))
+                continue
+            # 手动累加，如果购买不成功，后续还需要有流程进行再次购买
+            position_number += 1
+            if position_number>=position_max_number:
+                self.logger_info("full pos in buy list")
+                break        
+    
+    @get_time       
+    def close_order(self,context):
+        """平仓挂单"""
+
+        # 检查待卖出列表，匹配卖出
+        for order in self.get_need_close_list():
+            order_book_id = order.order_book_id
+            # 如果是当日开仓的，则不处理
+            if self.get_today_opened_order(order_book_id, context) is not None:
+                continue
+            # # 检查可平仓数量是否大于0
+            # if order.closable==0:
+            #     self.logger_info("closable 0 with:{}".format(order_book_id))
+            #     continue
+            pos_info = self.get_position(order_book_id)
+            # 从待平仓列表中取得相关订单
+            close_order = self.get_today_closed_order(order_book_id)
+            # 只对待平仓状态进行挂单
+            if close_order is not None and close_order.status==ORDER_STATUS.PENDING_NEW:
+                # 全部挂单
+                amount = pos_info.quantity
+                # 挂单卖出
+                order = self.submit_order(amount,order_in=close_order)
+                if order is None:
+                    logger.warning("close order submit fail,order_book_id:{}".format(order_book_id))
+                    continue               
+                order.close_reason = close_order.kwargs["close_reason"]
+                
+    @get_time
+    def expire_day_logic(self,context,bar_dict=None):
+        """持有品种超期平仓逻辑"""
+        
+        keep_day_number = self.strategy.keep_day_number
+        expire_raise_percent = self.strategy.close_opt.expire_raise_percent
+        
+        for position in self.get_ava_positions():
+            order_book_id = position.order_book_id
+            if self.get_today_closed_order(order_book_id,context=context) is not None:
+                # 如果已经在平仓列表中，则不操作
+                continue
+            # 如果在锁仓列表中，则不处理
+            if order_book_id in self.lock_list:
+                continue            
+            pos_info = self.get_position(order_book_id)
+            amount = pos_info.quantity
+            now_date = context.now.strftime('%Y%m%d')
+            # 通过之前存储的交易信息，查找到对应交易
+            trade_date = self.trade_entity.get_trade_date_by_instrument(order_book_id,POSITION_EFFECT.OPEN,context.now)
+            if trade_date is None:
+                logger.warning("trade not found:{},{}".format(order_book_id,now_date))
+                continue
+            # 检查是否超期，以决定是否平仓
+            dur_days = tradedays(trade_date,now_date)
+            if dur_days>=keep_day_number:
+                # 检查当前时间段是否可以挂单平仓
+                if not self.is_trade_opening(context.now):
+                    continue
+                # 早盘不进行超期平仓
+                if context.now.hour<=12:
+                    continue
+                # 根据开盘价格挂单
+                price = self.get_last_price(order_book_id)
+                # 根据原持仓品种的多空类别决定平仓相关参数
+                if pos_info.direction==POSITION_DIRECTION.LONG:
+                    side = SIDE.SELL
+                    side_flag = 1
+                else:
+                    side = SIDE.BUY
+                    side_flag = -1
+                check_time = datetime.datetime(context.now.year,context.now.month,context.now.day,14,30,0)
+                last_price = self.get_last_price(order_book_id)
+                if last_price is None:
+                    continue
+                # 如果还未临近收盘，并且幅度不够，也不进行平仓
+                if (side_flag*(last_price-pos_info.avg_price)/last_price*100<expire_raise_percent) and \
+                        context.now<=check_time:
+                    continue
+                # 生成订单
+                order = self.create_order(position.order_book_id, amount, side,price,
+                                position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.EXPIRE_DAY.value)  
+                self.append_to_close_list(order)
+    
+    @get_time                                  
+    def stop_fall_logic(self,context,bar_dict=None):
+        """止跌卖出逻辑"""
+        
+        stop_threhold = self.strategy.close_opt.stop_fall_percent
+        for position in self.get_ava_positions():
+            self.time_inject(begin=True)
+            order_book_id = position.order_book_id
+            if self.get_today_closed_order(order_book_id,context=context) is not None:
+                # 如果已经在平仓列表中，则不操作
+                continue
+            self.time_inject(code_name="get_today_closed_order")
+            pos_info = self.get_position(order_book_id)
+            amount = pos_info.quantity
+            self.time_inject(code_name="get_position")
+            # 根据原持仓品种的多空类别决定平仓相关参数
+            if pos_info.direction==POSITION_DIRECTION.LONG:
+                side = SIDE.SELL
+                side_flag = 1
+            else:
+                side = SIDE.BUY  
+                side_flag = -1       
+            last_price = self.get_last_price(order_book_id)
+            self.time_inject(code_name="get_last_price")
+            if last_price is None:
+                continue
+            # 如果下跌幅度(与开仓价格比较)超过阈值(百分点)，则以当前收盘价格卖出
+            if side_flag*(last_price-pos_info.avg_price)/pos_info.avg_price*100<stop_threhold:
+                order = self.create_order(position.order_book_id, amount, side, last_price,
+                                          position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.STOP_FALL.value)    
+                # 当日开仓的不能平仓
+                if self.check_close_order_contraint(order):
+                    self.append_to_close_list(order)
+                self.time_inject(code_name="create_order")
+                                           
+    @get_time  
+    def stop_raise_logic(self,context,bar_dict=None):
+        """止盈卖出逻辑"""
+        
+        stop_threhold = self.strategy.close_opt.stop_raise_percent
+        for position in self.get_ava_positions():
+            order_book_id = position.order_book_id
+            if self.get_close_order(order_book_id,context=context) is not None:
+                # 如果已经在平仓列表中，则不操作
+                continue
+            if self.get_today_opened_order(order_book_id,context=context) is not None:
+                # 当日开仓，不操作
+                continue            
+            # 如果在锁仓列表中，则不处理
+            if order_book_id in self.lock_list:
+                continue             
+            pos_info = self.get_position(order_book_id)
+            amount = pos_info.quantity
+            # 根据原持仓品种的多空类别决定平仓相关参数
+            if pos_info.direction==POSITION_DIRECTION.LONG:
+                side = SIDE.SELL
+                side_flag = 1
+            else:
+                side = SIDE.BUY  
+                side_flag = -1         
+                
+            last_price = self.get_last_price(order_book_id)
+            if last_price is None:
+                continue 
+            # 如果上涨幅度(与开仓价格比较)超过阈值(百分点)，则以当前价格卖出
+            if side_flag*(last_price-pos_info.avg_price)/pos_info.avg_price*100>stop_threhold:
+                order = self.create_order(position.order_book_id, amount, side, last_price,
+                                          position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.STOP_RAISE.value)              
+                # 当日开仓的不能平仓
+                if self.check_close_order_contraint(order):
+                    self.append_to_close_list(order)
+    
+    def reset_order_list(self,order_item):
+        """重置当天的挂单数据"""
+        
+        if order_item.order_book_id in self.open_list:
+            self.open_list[order_item.order_book_id].kwargs["need_resub"] = True   
+        else:
+            self.close_list[order_item.order_book_id].kwargs["need_resub"] = True   
+    
+    @get_time            
+    def verify_order_closing(self,context):
+        """核查平仓订单"""
+        
+        close_list_active = self.trade_entity.get_close_list_active(str(self.trade_day))
+        if close_list_active is None or close_list_active.shape[0]==0:
+            return
+        for index,close_item in close_list_active.iterrows():
+            close_order = self.get_today_closed_order(close_item.order_book_id,context=context)
+            price_now = self.get_last_price(close_item.order_book_id)
+            # 止盈平仓未成交，以当前价格重新挂单
+            if close_order.kwargs["close_reason"]==SellReason.STOP_RAISE.value:
+                # 更新挂单列表，后续统一处理
+                close_order.kwargs["price"] = price_now    
+                self.reset_order_list(close_item)
+                # 撤单
+                self.cancel_order(close_order)
+            # 止损卖出未成交，以当前价格重新挂单 
+            if close_order.kwargs["close_reason"]==SellReason.STOP_FALL.value:
+                # 更新挂单列表，后续统一处理
+                close_order.kwargs["price"] = price_now    
+                self.reset_order_list(close_item)              
+                # 撤单
+                self.cancel_order(close_order)
+            # 超期未成交，以当前价格重新挂单 
+            if close_order.kwargs["close_reason"]==SellReason.EXPIRE_DAY.value:
+                # 更新挂单列表，后续统一处理
+                close_order.kwargs["price"] = price_now    
+                self.reset_order_list(close_item)              
+                # 撤单
+                self.cancel_order(close_order)
+    
+    @get_time
+    def verify_order_opening(self,context):
+        """核查开仓订单"""
+
+        try_cnt_limit = self.strategy.open_opt.try_cnt_limit
+        pred_open_exceed_rate = self.strategy.open_opt.pred_open_exceed_rate
+        pred_open_ignore_rate = self.strategy.open_opt.pred_open_ignore_rate     
+        pred_open_wait_rate = self.strategy.open_opt.pred_open_wait_rate      
+        env = Environment.get_instance()
+        open_list_active = self.trade_entity.get_open_list_active(str(self.trade_day))
+        # 已下单未成交的处理
+        for index,open_item in open_list_active.iterrows():
+            self.logger_info("check active,open_item.order_book_id:{}".format(open_item.order_book_id))
+            sys_order = self.trade_entity.get_sys_order(open_item.order_book_id)
+            open_order = self.get_today_opened_order(open_item.order_book_id,context=context)
+            price_now = self.get_last_price(open_item.order_book_id)
+            if price_now is None:
+                continue
+            dt = env.calendar_dt
+            bar = self.get_prevday_bar(open_item.order_book_id)
+            price_last_day = bar['close']               
+            side_flag = 1 if open_order.side==SIDE.BUY else -1
+            # 如果超出昨日收盘,价格在可变范围内(配置项)，则按照新价格重新挂单
+            if (price_now - price_last_day)*side_flag/price_last_day*100<pred_open_ignore_rate \
+                and (price_now - price_last_day)*side_flag/price_last_day*100>pred_open_wait_rate:
+                self.logger_info("pred_open_ignore_rate ,now:{},price_last_day:{}".format(price_now,price_last_day))
+                # 设置重新挂单标志，并发起撤单
+                self.reset_order_list(open_order)
+                self.cancel_order(open_order)                  
+                continue
+            # 如果超出太多，则更换品种
+            if (price_now - price_last_day)*side_flag/price_last_day*100>pred_open_exceed_rate:
+                self.logger_info("pred_buy_exceed_rate ,now:{},price_last_day:{}".format(price_now,price_last_day))          
+                # 发起撤单
+                self.cancel_order(open_order)    
+            # 如果超过等待时间次数，则更换品种
+            if open_order.kwargs['try_cnt'] > try_cnt_limit:
+                self.logger_info("try_cnt expire:{}".format(open_order.kwargs['try_cnt']))
+                # 设置重新挂单标志，并发起撤单
+                self.reset_order_list(open_order)
+                self.cancel_order(open_order)                  
+                continue      
+            # 等待,累加等待时间值
+            open_order.kwargs['try_cnt']  += 1               
+        
+        # 已拒绝订单，重新按照现在价格下单
+        open_list_reject = self.trade_entity.get_open_list_reject(str(self.trade_day))
+        for index,open_item in open_list_reject.iterrows():
+            try:
+                cur_snapshot = self.get_current_snapshot(open_item.order_book_id)
+                price_now = cur_snapshot.last
+            except Exception as e:
+                logger.error("cur_snapshot err:{}".format(e))
+                continue
+            # 修改状态    
+            self.update_order_status(open_item,ORDER_STATUS.PENDING_NEW,side=open_item.side, context=context)      
+            # 更新报价     
+            self.open_list[open_item.order_book_id].kwargs["price"] = price_now                         
+                                
+    ###############################数据逻辑处理部分########################################  
+    
+    def get_last_price(self,order_book_id):
+        """取得指定标的最近报价信息"""
+
+        env = Environment.get_instance()
+        return self.data_source.get_last_price(order_book_id,env.trading_dt)
+    
     def compute_build_quantity(self):
         """计算可以买入的单个品种的金额限制"""
         
@@ -245,270 +571,7 @@ class FurBacktestStrategy(SimStrategy):
         if context.now > minutes_match[-10]:
             return True
         return False
-        
     
-    def open_order(self,context):
-        """开仓挂单"""
-        
-        # 如果持仓品种超过指定数量，则不操作
-        position_number = len(self.get_positions())
-        position_max_number = self.strategy.position_max_number
-        opened_list = self.trade_entity.get_open_list_filled(self.trade_day)
-        if opened_list is None:
-            return
-        # 进行中的订单加上已持仓订单数量，不能大于规定数量阈值 
-        if position_number+len(opened_list)>=position_max_number:
-            self.logger_info("full pos")
-            return
-        
-        # 轮询候选列表进行买入操作
-        for order in self.get_need_open_list():
-            # 只对待开仓状态进行挂单
-            self.logger_debug("open order loop,order_book_id:{},status:{}".format(order.order_book_id,order.status))
-            if order.status!=ORDER_STATUS.PENDING_NEW:
-                continue
-            # 以昨日收盘价格挂单买入
-            order_book_id = order.order_book_id
-            price = order.kwargs["price"]
-            # 买入数量需要根据当前额度进行计算,还需要兼顾合约乘数
-            multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
-            # 实时计算单个品种购买的额度
-            single_value = self.compute_build_quantity()
-            quantity = int(single_value/price/multiplier)
-            # if price*quantity>30000:
-            #     print("nnn")
-            # 资金不足时，不进行处理
-            if quantity==0:
-                logger.warning("volume exceed,order_book_id:{}".format(order_book_id))
-                continue
-            order = self.submit_order(quantity,order_in=order)
-            if order is None:
-                logger.warning("open order submit fail,order_book_id:{}".format(order_book_id))
-                continue
-            # 手动累加，如果购买不成功，后续还需要有流程进行再次购买
-            position_number += 1
-            if position_number>=position_max_number:
-                self.logger_info("full pos in buy list")
-                break        
-            
-    def close_order(self,context):
-        """平仓挂单"""
-
-        # 检查待卖出列表，匹配卖出
-        for order in self.get_need_close_list():
-            order_book_id = order.order_book_id
-            if order_book_id=='RR2206':
-                print("ggg")
-            # 如果是当日开仓的，则不处理
-            if self.get_today_opened_order(order_book_id, context) is not None:
-                continue
-            # # 检查可平仓数量是否大于0
-            # if order.closable==0:
-            #     self.logger_info("closable 0 with:{}".format(order_book_id))
-            #     continue
-            pos_info = self.get_position(order_book_id)
-            # 从待平仓列表中取得相关订单
-            close_order = self.get_today_closed_order(order_book_id)
-            # 只对待平仓状态进行挂单
-            if close_order is not None and close_order.status==ORDER_STATUS.PENDING_NEW:
-                # 全部挂单
-                amount = pos_info.quantity
-                # 挂单卖出
-                order = self.submit_order(amount,order_in=close_order)
-                if order is None:
-                    logger.warning("close order submit fail,order_book_id:{}".format(order_book_id))
-                    continue               
-                order.close_reason = close_order.kwargs["close_reason"]
-
-    def expire_day_logic(self,context,bar_dict=None):
-        """持有品种超期平仓逻辑"""
-        
-        keep_day_number = self.strategy.keep_day_number
-        for position in self.get_ava_positions():
-            order_book_id = position.order_book_id
-            if self.get_today_closed_order(order_book_id,context=context) is not None:
-                # 如果已经在平仓列表中，则不操作
-                continue
-            # 如果在锁仓列表中，则不处理
-            if order_book_id in self.lock_list:
-                continue            
-            pos_info = self.get_position(order_book_id)
-            amount = pos_info.quantity
-            now_date = context.now.strftime('%Y%m%d')
-            # 通过之前存储的交易信息，查找到对应交易
-            trade_date = self.trade_entity.get_trade_date_by_instrument(order_book_id,POSITION_EFFECT.OPEN,context.now)
-            if trade_date is None:
-                logger.warning("trade not found:{},{}".format(order_book_id,now_date))
-                continue
-            # 检查是否超期，以决定是否平仓
-            dur_days = tradedays(trade_date,now_date)
-            if dur_days>=keep_day_number:
-                # 检查当前时间段是否可以挂单平仓
-                if not self.is_trade_opening(context.now):
-                    continue
-                # 根据开盘价格挂单
-                price = self.get_last_price(order_book_id)
-                # 根据原持仓品种的多空类别决定平仓相关参数
-                if pos_info.direction==POSITION_DIRECTION.LONG:
-                    side = SIDE.SELL
-                else:
-                    side = SIDE.BUY
-                # 生成订单
-                order = self.create_order(position.order_book_id, amount, side,price,
-                                position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.EXPIRE_DAY.value)  
-                self.append_to_close_list(order)
-                                         
-    def stop_fall_logic(self,context,bar_dict=None):
-        """止跌卖出逻辑"""
-        
-        stop_threhold = self.strategy.close_opt.stop_fall_percent
-        for position in self.get_ava_positions():
-            order_book_id = position.order_book_id
-            if self.get_today_closed_order(order_book_id,context=context) is not None:
-                # 如果已经在平仓列表中，则不操作
-                continue
-            pos_info = self.get_position(order_book_id)
-            amount = pos_info.quantity
-            # 根据原持仓品种的多空类别决定平仓相关参数
-            if pos_info.direction==POSITION_DIRECTION.LONG:
-                side = SIDE.SELL
-                side_flag = 1
-            else:
-                side = SIDE.BUY  
-                side_flag = -1          
-            # 如果下跌幅度(与开仓价格比较)超过阈值(百分点)，则以当前收盘价格卖出
-            if side_flag*(pos_info.last_price-pos_info.avg_price)/pos_info.avg_price*100<stop_threhold:
-                price = self.get_last_price(order_book_id)
-                order = self.create_order(position.order_book_id, amount, side, price,
-                                          position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.STOP_FALL.value)    
-                # 当日开仓的不能平仓
-                if self.check_close_order_contraint(order):
-                    self.append_to_close_list(order)
-                                           
-        
-    def stop_raise_logic(self,context,bar_dict=None):
-        """止盈卖出逻辑"""
-        
-        stop_threhold = self.strategy.close_opt.stop_raise_percent
-        
-        for position in self.get_ava_positions():
-            order_book_id = position.order_book_id
-            if self.get_close_order(order_book_id,context=context) is not None:
-                # 如果已经在平仓列表中，则不操作
-                continue
-            if self.get_today_opened_order(order_book_id,context=context) is not None:
-                # 当日开仓，不操作
-                continue            
-            pos_info = self.get_position(order_book_id)
-            amount = pos_info.quantity
-            # 根据原持仓品种的多空类别决定平仓相关参数
-            if pos_info.direction==POSITION_DIRECTION.LONG:
-                side = SIDE.SELL
-                side_flag = 1
-            else:
-                side = SIDE.BUY  
-                side_flag = -1               
-            # 如果上跌幅度(与开仓价格比较)超过阈值(百分点)，则以当前价格卖出
-            if side_flag*(pos_info.last_price-pos_info.avg_price)/pos_info.avg_price*100>stop_threhold:
-                price = self.get_last_price(order_book_id)
-                order = self.create_order(position.order_book_id, amount, side, price,
-                                          position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.STOP_RAISE.value)              
-                # 当日开仓的不能平仓
-                if self.check_close_order_contraint(order):
-                    self.append_to_close_list(order)
-    
-    def reset_order_list(self,order_item):
-        """重置当天的挂单数据"""
-        
-        if order_item.order_book_id in self.open_list:
-            self.open_list[order_item.order_book_id].kwargs["need_resub"] = True   
-        else:
-            self.close_list[order_item.order_book_id].kwargs["need_resub"] = True   
-                   
-    def verify_order_closing(self,context):
-        """核查平仓订单"""
-        
-        close_list_active = self.trade_entity.get_close_list_active(str(self.trade_day))
-        if close_list_active is None or close_list_active.shape[0]==0:
-            return
-        for index,close_item in close_list_active.iterrows():
-            close_order = self.get_today_closed_order(close_item.order_book_id,context=context)
-            price_now = self.get_last_price(close_item.order_book_id)
-            # 止盈平仓未成交，以当前价格重新挂单
-            if close_order.kwargs["close_reason"]==SellReason.STOP_RAISE.value:
-                # 更新挂单列表，后续统一处理
-                close_order.kwargs["price"] = price_now    
-                self.reset_order_list(close_item)
-                # 撤单
-                self.cancel_order(close_order)
-            # 止损卖出未成交，以当前价格重新挂单 
-            if close_order.kwargs["close_reason"]==SellReason.STOP_FALL.value:
-                # 更新挂单列表，后续统一处理
-                close_order.kwargs["price"] = price_now    
-                self.reset_order_list(close_item)              
-                # 撤单
-                self.cancel_order(close_order)
-            # 超期未成交，以当前价格重新挂单 
-            if close_order.kwargs["close_reason"]==SellReason.EXPIRE_DAY.value:
-                # 更新挂单列表，后续统一处理
-                close_order.kwargs["price"] = price_now    
-                self.reset_order_list(close_item)              
-                # 撤单
-                self.cancel_order(close_order)
-
-    def verify_order_opening(self,context):
-        """核查开仓订单"""
-
-        env = Environment.get_instance()
-        open_list_active = self.trade_entity.get_open_list_active(str(self.trade_day))
-        # 已下单未成交的处理
-        for index,open_item in open_list_active.iterrows():
-            self.logger_info("check active,open_item.order_book_id:{}".format(open_item.order_book_id))
-            sys_order = self.trade_entity.get_sys_order(open_item.order_book_id)
-            open_order = self.get_today_opened_order(open_item.order_book_id,context=context)
-            cur_snapshot = self.get_current_snapshot(open_item.order_book_id)
-            if cur_snapshot is None:
-                logger.warning("cur_snapshot None in verify_order_buying:{}".format(open_item))
-                continue            
-            price_now = cur_snapshot.last
-            dt = env.calendar_dt
-            prev_day = get_tradedays_dur(dt,-1)
-            # 使用结算价作为上一日的价格
-            h_bar = env.data_proxy.history_bars(open_item.order_book_id,1,"1d","settle",prev_day)
-            price_last_day = h_bar[0]               
-            pred_open_exceed_rate = self.strategy.open_opt.pred_open_exceed_rate
-            pred_open_ignore_rate = self.strategy.open_opt.pred_open_ignore_rate
-            side_flag = 1 if open_order.side==SIDE.BUY else -1
-            # 如果超出昨日收盘,单在可变范围内(配置项)，则按照新价格重新挂单
-            if (price_now - price_last_day)*side_flag/price_last_day*100<pred_open_ignore_rate:
-                self.logger_info("pred_open_ignore_rate ,now:{},price_last_day:{}".format(price_now,price_last_day))
-                # 设置重新挂单标志，并发起撤单
-                self.reset_order_list(open_order)
-                self.cancel_order(open_order)                  
-                continue
-            # 如果超出太多，则更换品种
-            if (price_now - price_last_day)*side_flag/price_last_day*100>pred_open_exceed_rate:
-                self.logger_info("pred_buy_exceed_rate ,now:{},price_last_day:{}".format(price_now,price_last_day))          
-                # 发起撤单
-                self.cancel_order(open_order)    
-            # 等待            
-        
-        # 已拒绝订单，重新按照现在价格下单
-        open_list_reject = self.trade_entity.get_open_list_reject(str(self.trade_day))
-        for index,open_item in open_list_reject.iterrows():
-            try:
-                cur_snapshot = self.get_current_snapshot(open_item.order_book_id)
-                price_now = cur_snapshot.last
-            except Exception as e:
-                logger.error("cur_snapshot err:{}".format(e))
-                continue
-            # 修改状态    
-            self.update_order_status(open_item,ORDER_STATUS.PENDING_NEW,side=open_item.side, context=context)      
-            # 更新报价     
-            self.open_list[open_item.order_book_id].kwargs["price"] = price_now                         
-                                
-    ###############################数据逻辑处理部分########################################  
-
     def update_order_status(self,order,status,side=SIDE.BUY,context=None,price=0):
         """修改订单状态"""
         
@@ -540,16 +603,29 @@ class FurBacktestStrategy(SimStrategy):
         """根据当前时间点，取得昨天或上一交易时间段的数据"""
 
         env = Environment.get_instance()
-        instrument = env.data_proxy.instrument(order_book_id)
+        self.time_inject(code_name="data_proxy.instrument")
         # 如果还没有开盘，取上一交易日数据，否则取上一交易时间段数据
         if self.is_trade_opening(env.trading_dt):
-            bar = self.data_source.get_bar(instrument,env.trading_dt,"1m")
+            # last_dt = env.trading_dt + timedelta(minutes=-1)
+            bar = self.data_source.get_bar(order_book_id,env.trading_dt,"1m")
         else:
-            bar = self.data_source.get_bar(instrument,env.trading_dt,"1d")
+            prev_day = get_tradedays_dur(self.context.now, -1)
+            bar = self.data_source.get_bar(order_book_id,prev_day,"1d")            
+        self.time_inject(code_name="get_bar")
         if bar is not None and not np.isnan(bar['open']):
             return bar       
         return None
-      
+
+    def get_prevday_bar(self,order_book_id):
+        """根据当前时间点，取得昨天的数据"""
+
+        env = Environment.get_instance()
+        prev_date = get_tradedays_dur(env.trading_dt,-1)
+        bar = self.data_source.get_bar(order_book_id,prev_date,"1d")
+        if bar is not None and not np.isnan(bar['open']):
+            return bar       
+        return None      
+    
     def can_submit_order(self,order_book_id):
         """重载父类方法，检查是否可以提交订单"""
         
@@ -567,37 +643,22 @@ class FurBacktestStrategy(SimStrategy):
         exchange_code = self.data_source.get_exchange_from_instrument(order_book_id)
         
         style = cal_style(price, None)
-        if side==SIDE.BUY:
-            order = Order.__from_create__(
-                order_book_id=order_book_id,
-                quantity=amount,
-                side=side,
-                style=style,
-                position_effect=position_effect,
-                # 自定义属性
-                price=price,
-                multiplier=multiplier,
-                try_cnt=0, 
-                close_reason=None,  
-                need_resub=False, 
-                exchange_id=exchange_code      
-            )   
-        else:
-            order = Order.__from_create__(
-                order_book_id=order_book_id,
-                quantity=amount,
-                side=side,
-                style=style,
-                position_effect=position_effect,
-                # 自定义属性
-                price=price,
-                multiplier=multiplier,
-                try_cnt=0, 
-                close_reason=close_reason,  
-                need_resub=False, 
-                exchange_id=exchange_code           
-            )    
-        order.set_frozen_cash(0)          
+        order = Order.__from_create__(
+            order_book_id=order_book_id,
+            quantity=amount,
+            side=side,
+            style=style,
+            position_effect=position_effect,
+            # 自定义属性
+            price=price,
+            multiplier=multiplier,
+            try_cnt=0, 
+            close_reason=close_reason,  
+            need_resub=False, 
+            exchange_id=exchange_code      
+        )   
+        order.set_frozen_cash(0)    
+              
         return order
     
     def get_today_opened_order(self,order_book_id,context=None):
@@ -705,19 +766,6 @@ class FurBacktestStrategy(SimStrategy):
             return False           
         return False
     
-    def get_last_price(self,order_book_id):
-        """重载，这里为取得最近分钟行情"""
-        
-        env = Environment.get_instance()
-        # market_price = env.get_last_price(order_book_id)
-        # instrument = env.data_proxy.instruments(order_book_id)
-        # market_price = self.get_current_snapshot(instrument)
-        current_snapshot = self.get_current_snapshot(order_book_id)
-        if current_snapshot is None:
-            return None
-        
-        return current_snapshot.last 
-    
     ############################事件注册部分######################################
     
     def on_trade_handler(self,context, event):
@@ -766,10 +814,9 @@ class FurBacktestStrategy(SimStrategy):
                 if self.open_list[order.order_book_id].kwargs["need_resub"]:
                     self.logger_info("need resub order:{}".format(order))
                     # 如果具备重新报单标志，则以最新价格重新生成订单
-                    cur_snapshot = self.get_current_snapshot(order.order_book_id)
-                    price_now = cur_snapshot.last
+                    price_now = self.get_last_price(order.order_book_id)
                     # 创建新订单对象并重置原数据
-                    order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now)
+                    order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,position_effect=POSITION_EFFECT.OPEN)
                     self.open_list[order.order_book_id] = order_resub
                     self.logger_debug("resub open list set end:{}".format(order.order_book_id))
                 else:
@@ -779,10 +826,9 @@ class FurBacktestStrategy(SimStrategy):
                 # 平仓撤单，按照当前时间段的价格重新挂单        
                 self.logger_info("need resub close order:{}".format(order))
                 # 如果具备重新报单标志，则以最新价格重新生成订单
-                cur_snapshot = self.get_current_snapshot(order.order_book_id)
-                price_now = cur_snapshot.last
+                price_now = self.get_last_price(order.order_book_id)
                 # 创建新订单对象并重置原数据
-                order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,close_reason=order.kwargs['close_reason'])
+                order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,close_reason=order.kwargs['close_reason'],position_effect=POSITION_EFFECT.OPEN)
                 self.close_list[order.order_book_id] = order_resub
                 self.logger_debug("resub closelist set end:{}".format(order.order_book_id))            
                     

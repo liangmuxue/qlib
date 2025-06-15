@@ -31,6 +31,7 @@ class JuejinFuturesExtractor(HisDataExtractor):
         self.col_data_types = {"symbol":str,"open":float,"high":float,"low":float,"close":float,
                                "volume":float,"hold":float}        
         self.sim_path = sim_path
+        self.folder_mapping = self.build_main1m_folder_mapping()
     
     def load_sim_data(self,simdata_date,dataset=None,folder_name=None,contract_name=None):
         """从存储中加载对应的主力合约数据"""
@@ -115,7 +116,7 @@ class JuejinFuturesExtractor(HisDataExtractor):
     def get_likely_main_contract_names(self,instrument,date):
         """根据品种编码和指定日期，取得可能的主力合约名称"""
         
-        #取得 当前月，下个月，下下个月3个月份合约名称
+        #取得当前月，下个月，下下个月3个月份合约名称
         cur_month = date.strftime('%y%m')
         next_month = get_next_month(date,next=1)
         next_month = next_month.strftime("%y%m")
@@ -124,15 +125,28 @@ class JuejinFuturesExtractor(HisDataExtractor):
         
         return [instrument+cur_month,instrument+next_month,instrument+next_two_month]
 
-    def get_time_data_by_day(self,symbol,day,period=PeriodType.MIN1.value):
+    def get_time_data_by_symbol_and_day(self,symbol,day,contract_name=None,period=PeriodType.MIN1.value):
         """取得指定品种和对应日期的分时交易记录"""
         
         if period==PeriodType.MIN1.value:
             sim_data = self.sim_data
             date = datetime.datetime.strptime(str(day), '%Y%m%d')
             # 根据日期和品种名称，取得可能的合约名称,使用合约名称和日期进行筛选
-            contract_names = self.get_likely_main_contract_names(symbol,date)
+            if contract_name is not None:
+                contract_names = [contract_name]
+            else:
+                contract_names = self.get_likely_main_contract_names(symbol,date)
             item_df = sim_data[(sim_data['symbol'].isin(contract_names))&(sim_data['datetime'].dt.strftime('%Y%m%d')==str(day))]
+            return item_df
+        
+        return None
+    
+    def get_time_data_by_day(self,contract_names,day,contract_name=None,period=PeriodType.MIN1.value):
+        """取得指定品种和对应日期的分时交易记录"""
+        
+        if period==PeriodType.MIN1.value:
+            sim_data = self.sim_data
+            item_df = sim_data[(sim_data['symbol']==contract_names)&(sim_data['datetime'].dt.strftime('%Y%m%d')==str(day))]
             return item_df
         
         return None
@@ -161,58 +175,18 @@ class JuejinFuturesExtractor(HisDataExtractor):
         else:
             item_df = None
         return item_df
-    
+
+    def load_item_by_time(self,instrument,datetime,period=PeriodType.MIN5.value):
+        """加载单个品种指定时间的数据"""
+        
+        if period==PeriodType.MIN1.value:
+            sim_data = self.sim_data
+            item_df = sim_data[(sim_data['symbol']==instrument.order_book_id)&(sim_data['datetime']==datetime)]
+        else:
+            item_df = None
+        return item_df
+  
     ####################### 数据导入部分 #########################################
-
-    def import_continues_his_data_local(self,date_range=[2201,2412]):
-        """从本地导入主力连续历史行情数据"""
-        
-        data_path = self.sim_path
-        list_dir = os.listdir(data_path)
-        begin_date = datetime.datetime.strptime(str(date_range[0]), '%y%m')
-        end_date = datetime.datetime.strptime(str(date_range[1]), '%y%m')
-        
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
-
-        dtype = {
-            'symbol': sqlalchemy.String,
-            "datetime": sqlalchemy.DateTime,
-            'open': sqlalchemy.FLOAT,
-            'close': sqlalchemy.FLOAT,
-            'high': sqlalchemy.FLOAT,
-            'low': sqlalchemy.FLOAT,
-            'volume': sqlalchemy.FLOAT,
-            'hold': sqlalchemy.FLOAT,   
-            'settle': sqlalchemy.FLOAT,  
-        }      
-                
-        # 从分时数据中累加得到日K数据
-        for file in list_dir:
-            filepath = os.path.join(data_path,file)
-            base_name = file.split('.')[0]
-            # 去掉后缀9999，就是品种名称
-            s_name = base_name[:-4]
-            item_df = pd.read_csv(filepath,dtype=self.col_data_types,parse_dates=['date'])  
-            # 只使用指定日期内的数据
-            item_df = item_df[(item_df['datetime']>=pd.to_datetime(begin_date))&(item_df['datetime']<=pd.to_datetime(end_date))]
-            # 按照日期累加，并入库
-            df_sum = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["volume", "money", "open_interest"].apply(lambda x : x.sum())
-            df_open = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["open"].first()
-            df_close = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["close"].last()
-            # 使用收盘价作为结算价
-            df_settle = df_close.copy()
-            df_high = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["high"].max()
-            df_low = item_df.groupby(["symbol",item_df.date.dt.date],as_index=True)["low"].min()
-            df_concat = pd.concat([df_sum,df_open,df_close,df_high,df_low,df_settle],axis=1)
-            df_concat = df_concat.drop('money', axis=1)
-            df_concat = df_concat.reset_index()
-            df_concat = df_concat.rename(columns={"open_interest": "hold", "symbol": "code"})
-            df_concat.to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
-            print("{} ok,shape:{}".format(filepath,df_concat.shape[0]))
-        # 关联字段挂接
-        upt_sql = "update dominant_real_data d set d.var_id=(select id from trading_variety t where t.code=LEFT(d.code, LENGTH(d.code)-4))"
-        self.dbaccessor.do_updateto(upt_sql)                
 
     def import_main_his_data_local(self,date_range=[2201,2512]):
         """从本地导入主力合约历史行情数据"""
@@ -224,7 +198,9 @@ class JuejinFuturesExtractor(HisDataExtractor):
         
         engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
             self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
-
+        pd.set_option('display.unicode.ambiguous_as_wide', True)
+        pd.set_option('display.unicode.east_asian_width', True)
+        
         dtype = {
             'symbol': sqlalchemy.String,
             "datetime": sqlalchemy.DateTime,
@@ -268,23 +244,154 @@ class JuejinFuturesExtractor(HisDataExtractor):
         # 使用收盘价作为结算价
         upt_sql = "update dominant_real_data set settle=close"        
         self.dbaccessor.do_updateto(upt_sql)    
+
+    def import_continues_data_local_by_main(self,date_range=[201301,202512]):
+        """参考主力合约，从本地导入主力连续历史行情数据"""
         
+        dtype = {
+            'code': sqlalchemy.String,
+            "date": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
+        }    
+        d_list = list(dtype.keys())
+        column_str = ','.join([str(i) for i in d_list])
+
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+                
+        ins_file_path = "/home/qdata/qlib_data/futures_data/instruments/clean_data.txt"
+        # 从品种列表文件中选取需要导入的品种
+        ins_data = pd.read_table(ins_file_path,sep='\t',header=None)
+        sql = "select distinct(date) from dominant_real_data"
+        results = self.dbaccessor.do_query(sql)
+        date_list = [item[0] for item in results]
+        # 循环取得对应品种，并根据逻辑导入对应的主力合约数据
+        with engine.begin() as conn:
+            for row in ins_data.values:
+                symbol = row[0]
+                combine_data = []
+                for date in date_list:
+                    contract_names = self.get_likely_main_contract_names(symbol,date)
+                    contract_names_str = "('" + "','".join([i for i in contract_names if i is not None]) + "')"
+                    c_sql = "select {} from dominant_real_data where date='{}' and code in {}".format(column_str,date,contract_names_str)
+                    SQL_Query = pd.read_sql_query(c_sql, conn)
+                    item_data = pd.DataFrame(SQL_Query, columns=d_list)   
+                    if item_data.shape[0]==0:
+                        continue 
+                    max_idx = np.argmax(item_data['volume'].values)        
+                    # 选择成交量最多的作为主力合约数据源
+                    main_contract_data = item_data.iloc[max_idx]
+                    # 编码转换为连续品种编码
+                    main_contract_data = main_contract_data.replace(to_replace='code',value=main_contract_data['code'][:-4])
+                    combine_data.append(main_contract_data.values)
                     
+                if len(combine_data)==0:
+                    continue
+                combine_data = pd.DataFrame(np.stack(combine_data),columns=item_data.columns)        
+                combine_data.to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
+                print("{} ok".format(symbol))
+            
+        # # 关联字段挂接
+        # upt_sql = "update dominant_continues_data d set d.var_id=(select id from trading_variety t where t.code=LEFT(d.code, LENGTH(d.code)-4))"
+        # self.dbaccessor.do_updateto(upt_sql)   
+        # # 使用收盘价作为结算价
+        # upt_sql = "update dominant_continues_data set settle=close"        
+        # self.dbaccessor.do_updateto(upt_sql)   
+        
+    def import_main_1min_data_local(self,date_range=[202201,202512]):
+        """从本地导入主力合约历史1分钟行情数据"""
+        
+        data_path = self.sim_path
+        list_dir = os.listdir(data_path)
+        begin_date = datetime.datetime.strptime(str(date_range[0]), '%Y%m')
+        end_date = datetime.datetime.strptime(str(date_range[1]), '%Y%m')
+        
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+
+        dtype = {
+            'symbol': sqlalchemy.String,
+            "datetime": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
+        }      
+
+        data_path = self.sim_path
+        sim_data = None
+        # 循环取得所有数据文件并获取对应数据
+        for p in Path(data_path).iterdir():
+            for file in p.rglob('*.csv'):  
+                base_name = file.name.split('.')[0]
+                # 去掉4位后缀，就是合约编码
+                s_name = base_name[:-4]
+                # 只使用指定日期内的数据
+                date_name = base_name[-4:]
+                date_name_compare = "20" + date_name
+                if int(date_name_compare)<date_range[0] or int(date_name_compare)>date_range[1]:
+                    continue
+                filepath = file
+                item_df = pd.read_csv(filepath,dtype=self.col_data_types,parse_dates=['date'])  
+                item_df = item_df.drop('money', axis=1)
+                item_df = item_df.rename(columns={"open_interest": "hold"})
+                item_df = item_df.rename(columns={"date": "datetime"})
+                item_df['code'] = base_name
+                item_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)
+                print("{} ok,shape:{}".format(filepath,item_df.shape[0]))
+        # 关联字段挂接
+        upt_sql = "update dominant_real_data_1min d set d.var_id=(select id from trading_variety t where t.code=LEFT(d.code, LENGTH(d.code)-4))"
+        self.dbaccessor.do_updateto(upt_sql)   
+        # 使用收盘价作为结算价
+        upt_sql = "update dominant_real_data_1min set settle=close"        
+        self.dbaccessor.do_updateto(upt_sql)   
+                
+    def build_main1m_folder_mapping(self,):
+        """生成主力1分钟数据目录与品种的映射关系"""
+        
+        mappings = []
+        list_dir = os.listdir(self.sim_path)
+        for file in list_dir:
+            folder_name = file
+            folder = os.path.join(self.sim_path,folder_name)
+            sub_list_dir = os.listdir(folder)
+            for sub_file in sub_list_dir:  
+                mappings.append([folder_name,sub_file])
+        
+        mappings = pd.DataFrame(np.array(mappings),columns=["cate","instrument"])
+        return mappings
+                   
 if __name__ == "__main__":    
     
     extractor = JuejinFuturesExtractor(savepath="/home/qdata/futures_data",sim_path="/home/qdata/futures_data/juejin/main_1min")   
     save_path = "custom/data/results/futures"
-    # extractor.import_main_his_data_local()
     
-    begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()
-    end = datetime.datetime.strptime("20220701", "%Y%m%d").date()
-    simdata_date = [begin,end]
-    folder_name = 'XZCE'
-    contract_name = 'AP2205'
-    symbol_name = contract_name[:-4]
-    extractor.load_sim_data(simdata_date,folder_name=folder_name,contract_name=contract_name)
-    data = extractor.get_time_data_by_day(symbol_name,20220505)
-    date = datetime.datetime.strptime("20220505 09:01:00", "%Y%m%d %H:%M:%S")
-    data = extractor.get_time_data(contract_name,date)
-    print("data len:{}".format(data.shape[0]))
+    # 导入主力合约历史日行情数据
+    # extractor.import_main_his_data_local()
+    # 导入主力合约1分钟历史行情数据
+    # extractor.import_main_1min_data_local()
+    # 根据主力合约数据，导入主力连续日行情数据
+    extractor.import_continues_data_local_by_main()
+        
+    # begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()
+    # end = datetime.datetime.strptime("20220701", "%Y%m%d").date()
+    # simdata_date = [begin,end]
+    # ins_name = "CJ"
+    # contract_name = 'CJ2207'
+    # folder_name = extractor.folder_mapping[extractor.folder_mapping['instrument']==ins_name]['cate'].values[0]
+    # symbol_name = contract_name[:-4]
+    # extractor.load_sim_data(simdata_date,folder_name=folder_name,contract_name=contract_name)
+    # date = datetime.datetime.strptime("20220505 09:01:00", "%Y%m%d %H:%M:%S")
+    # # data = extractor.get_time_data(contract_name,date)
+    # data = extractor.get_time_data_by_symbol_and_day(ins_name,20220505,contract_name=contract_name)
+    # print("data len:{}".format(data.shape[0]))
             

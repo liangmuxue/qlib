@@ -26,8 +26,8 @@ from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220505]
-STAT_DATE = [20220505,20220531]
+TRACK_DATE = [20220605]
+STAT_DATE = [20220601,20220630]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -483,12 +483,12 @@ class FuturesIndustryModule(MlpModule):
             # print("trend fail date:\n",rate_total_stat[rate_total_stat['trend_correct']==0]['date'])  
             # print("indus_top fail date:\n",rate_total_stat[rate_total_stat['indus_top_class']==1][['date']])
 
-            if import_price_result is not None:
-                import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
-                print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
-                result_file_path = "custom/data/results/pred_coll.pkl"
-                with open(result_file_path, "wb") as fout:
-                    pickle.dump(import_price_result_item, fout)                  
+            # if import_price_result is not None:
+            #     import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
+            #     print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
+            #     result_file_path = "custom/data/results/pred_coll.pkl"
+            #     with open(result_file_path, "wb") as fout:
+            #         pickle.dump(import_price_result_item, fout)                  
                                         
             tar_viz = global_var.get_value("viz_data")
             viz_result = global_var.get_value("viz_result_detail")
@@ -802,8 +802,8 @@ class FuturesIndustryModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            # if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
-            #     continue  
+            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+                continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
                 if target_info is None:

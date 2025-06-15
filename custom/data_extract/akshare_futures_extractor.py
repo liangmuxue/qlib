@@ -394,7 +394,7 @@ if __name__ == "__main__":
     # 导入交易时间表
     # extractor.import_variety_trade_schedule()    
     # 导入主力连续历史数据
-    # extractor.import_his_data()
+    extractor.import_his_data()
     # 导入主力合约历史数据
     # extractor.import_main_his_data()    
     # 导入历史拓展数据
@@ -404,6 +404,6 @@ if __name__ == "__main__":
     # 导入外盘数据
     # extractor.extract_outer_data()
     # 导出到qlib
-    extractor.export_to_qlib()
+    # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
             

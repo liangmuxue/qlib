@@ -176,7 +176,7 @@ class ExtDataMod(AbstractMod):
             with open(data_file, "wb") as fout:
                 pickle.dump(stat_df, fout)          
         return stat_df
-                    
+    
 def load_mod():
     return ExtDataMod()   
 
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     stat_path = "/home/qdata/workflow/wf_review_flow_2023/trader_data/03/stat_data.csv"
     file_path = "/home/qdata/workflow/wf_backtest_flow_2023/trader_data/05/trade_data.csv"
     stat_path = "/home/qdata/workflow/wf_backtest_flow_2023/trader_data/05/stat_data.csv"    
-    ext_mod.analysis_stat_offline(file_path,stat_path)
+    # ext_mod.analysis_stat_offline(file_path,stat_path)
     
     
     

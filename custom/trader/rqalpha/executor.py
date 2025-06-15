@@ -57,8 +57,13 @@ class Executor(object):
             begin_time = datetime(now.year,now.month,now.day,9,3,0) 
             end_time = datetime(now.year,now.month,now.day,14,50,0) 
             night_time = datetime(now.year,now.month,now.day,15,10,0) 
-            if event.event_type == EVENT.BAR and ((now<=end_time and now>=begin_time) or now>=night_time or now==first_time):
-                continue        
+            # 从第二个时间段进入
+            if event.event_type == EVENT.BAR and (now<=first_time):
+                continue   
+            
+            # 限定在3分钟的间隔频次  
+            if event.event_type == EVENT.BAR and (now.minute%3!=0):
+                continue                  
             # 轮询各个事件并进行处理 
             if event.event_type == EVENT.TICK:
                 if self._ensure_before_trading(event):

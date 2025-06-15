@@ -2,6 +2,8 @@ from trader.utils.date_util import tradedays
 from datetime import datetime
 import math
 import pickle
+import numpy as np
+import time
 
 def test_days_dur():
     trade_date = 20230508
@@ -81,12 +83,37 @@ def test_math():
     x1, y1, x2, y2 = line
     angle = np.rad2deg(np.arctan2(y2 - y1, x2 - x1))
     
+def get_time(f):
+
+    def inner(*arg,**kwarg):
+        s_time = time.time()
+        res = f(*arg,**kwarg)
+        e_time = time.time()
+        print('func f:{},time:{}'.format(f.__name__,(e_time - s_time)))
+        return res
+    return inner
+
+def test_time_compute():
+    
+    @get_time
+    def tt():
+        time.sleep(1)
+        
+    class Cls():
+        @get_time
+        def inner_func(self):
+            time.sleep(1)
+    
+    # tt()
+    cls = Cls()
+    cls.inner_func()
      
 if __name__ == "__main__":
     # test_days_dur()
 
     # test_import()
     # test_date()
-    test_math()
+    # test_math()
+    test_time_compute()
     # debug_data()
     

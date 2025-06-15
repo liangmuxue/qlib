@@ -7,7 +7,7 @@ from rqalpha.interface import AbstractMod
 from rqalpha.const import ORDER_STATUS
 from rqalpha.const import SIDE
 
-from data_extract.rqalpha.futures_ds import FuturesDataSource
+from data_extract.rqalpha.futures_ds import FuturesDataSource,FuturesDataSourceSql
 from trader.rqalpha.trade_entity import TRADE_COLUMNS
 from trader.utils.date_util import tradedays
 from trader.data_viewer import DataViewer
@@ -31,11 +31,11 @@ class ExtDataMod(AbstractMod):
         if not os.path.exists(self.report_save_path):
             os.makedirs(self.report_save_path)  
         self.env = env
-        ds = FuturesDataSource(env.config.base.data_bundle_path,stock_data_path=env.config.extra.stock_data_path,
+        ds = FuturesDataSourceSql(env.config.base.data_bundle_path,stock_data_path=env.config.extra.stock_data_path,
                             sim_path=env.config.extra.stock_data_path,frequency_sim=env.config.base.frequency_sim)
         simdata_date = env.config.extra.simdata_date
         # 根据配置日期加载主力合约数据
-        ds.load_sim_data(simdata_date)
+        # ds.load_sim_data(simdata_date)
         env.set_data_source(ds)
 
     def tear_down(self, code, exception=None):
@@ -234,7 +234,56 @@ class ExtDataMod(AbstractMod):
             with open(data_file, "wb") as fout:
                 pickle.dump(stat_df, fout)          
         return stat_df
-                    
+
+    def compare_pred_backtest(self,pred_path,file_path,save_path=None):
+        """比较预测数值和回测数值的生成结果"""
+    
+        pred_result_data = pd.read_csv(pred_path) 
+        pred_result_data = pred_result_data.sort_values(by=["date","instrument"])
+        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)   
+        trade_data_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
+        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+
+        result_data = []
+        columns = ['date','instrument','yield_rate','trend_flag']
+        result_columns = columns + ['has_trading','order_book_id','open_price','close_price','quantity','bt_yield_rate','close_date']
+        # 遍历预测数据，并分别与实际回测数据结果匹配
+        for index,row in pred_result_data.iterrows():
+            date = row['date']
+            instrument = row['instrument']
+            result_row = row[columns].values.tolist()
+            result_data.append(result_row)
+            # 匹配对应的当日主力合约的开仓交易数据
+            trade_row = trade_data_df[(trade_data_df['order_book_id'].str[:-4]==instrument)
+                                      &(trade_data_df['position_effect']=='OPEN')
+                                      &(trade_data_df['trade_date'].dt.strftime('%Y%m%d')==str(date))]
+            # 如果没有交易则填充空数值
+            if trade_row.shape[0]==0:
+                result_row += [0,'',0,0,0,0,0]
+                continue
+            # 向后查找到对应的平仓交易并记录
+            order_book_id = trade_row['order_book_id'].values[0]
+            match_rows = trade_data_df[(trade_data_df['order_book_id']==order_book_id)
+                                      &(trade_data_df['position_effect']=='CLOSE')
+                                      &(pd.to_numeric(trade_data_df['trade_date'].dt.strftime('%Y%m%d'))>date)]
+            # 如果没有交易则填充空数值
+            if match_rows.shape[0]==0:
+                result_row += [-1,order_book_id,trade_row['price'].values[0],0,trade_row['quantity'].values[0],0,0]
+                continue
+            # 通过排序取得最近的配对交易
+            match_row = match_rows.sort_values(by=["trade_date"],ascending=True).iloc[0]
+            price = trade_row['price'].values[0]
+            close_price = match_row['price']
+            quantity = trade_row['quantity'].values[0]
+            bt_yield_rate = (close_price-price)/price
+            if trade_row['side'].values[0]==SIDE.SELL:
+                bt_yield_rate = -bt_yield_rate
+            close_date = match_row['trade_date']
+            result_row += [1,order_book_id,price,close_price,quantity,bt_yield_rate,close_date]
+            
+        stat_df = pd.DataFrame(np.array(result_data),columns = result_columns)
+        stat_df.to_csv(save_path,index=False)   
+                           
 def load_mod():
     return ExtDataMod()   
 
@@ -247,6 +296,11 @@ if __name__ == "__main__":
     # file_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/07/trade_data.csv"
     # stat_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/07/stat_data.csv"    
     # ext_mod.analysis_stat_offline(file_path,stat_path)
-    ext_mod.analysis_futures_stat_offline(file_path,stat_path)
+    # ext_mod.analysis_futures_stat_offline(file_path,stat_path)
+    stat_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/06/pred_stat_data.csv"   
+    bt_savepath = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/06/compare_data.csv"  
+    pred_path = "custom/data/results/pred_coll.csv"
+    # ext_mod.analysis_futures_stat_offline(file_path,stat_path)
+    ext_mod.compare_pred_backtest(pred_path,file_path,save_path=bt_savepath)
     
     
