@@ -53,11 +53,11 @@ task:
         module_path: darts_pro.futures_process
         kwargs:
             GPU: 0
-            batch_size: 6
+            batch_size: 16
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'pred_futures_industry'
+            type: 'pred_futures_droll_industry'
             n_epochs : 200
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
@@ -80,19 +80,19 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_rsvTimediff8Mse_Step1_202203"
+               model_name: "Futures_cleanData_rsvDetail_Step2_202203"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               step_mode: 1
+               step_mode: 2
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
                forecast_horizon: &forecast_horizon 2
                cut_len: 8
                dropout: 0.5
-               past_split: [[0,15],[15,30]]
-               target_mode: [0,1,2,1,3]
+               past_split: [[0,15]]
+               target_mode: [2,1,2,1,3]
                scale_mode: [0,1,0,2,0]
                filter_conv_index: -1
     dataset:
@@ -105,7 +105,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train: [2006-01-01, 2022-03-31]
-                valid: [2022-02-01, 2022-12-31]
+                valid: [2022-03-01, 2022-10-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

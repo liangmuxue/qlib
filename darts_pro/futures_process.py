@@ -502,10 +502,11 @@ class FuturesProcessModel(TftDataframeModel):
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==2:  
+            step_mode = self.optargs["step_mode"]
             my_model = FuturesIndustryDRollModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
-                    rolling_size=self.optargs["rolling_size"],
+                    cut_len=self.optargs["cut_len"],
                     hidden_size=64,
                     lstm_layers=1,
                     num_attention_heads=4,
@@ -538,9 +539,10 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
+                    step_mode=step_mode,
                     pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
-                )                        
+                )     
         return my_model
                     
     def data_corr(
