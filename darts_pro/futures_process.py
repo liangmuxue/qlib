@@ -95,9 +95,12 @@ class FuturesProcessModel(TftDataframeModel):
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)   
             return     
-        if self.type.startswith("predict"):
+        if self.type=="predict":
             self.predict(dataset)   
-            return                 
+            return   
+        if self.type=="predict_indus_and_detail":
+            self.predict_indus_and_detail(dataset)   
+            return                           
         print("Do Nothing")
 
     def fit_futures_togather(
@@ -785,5 +788,143 @@ class FuturesProcessModel(TftDataframeModel):
         
         print("total yield:{}".format(import_price_result["yield_rate"].sum()))
         return import_price_result          
+
+    def build_pred_result_2step(self,pred_date,dataset=None):    
+        """使用二阶段模式，根据预测区间参数进行预测。pred_range为二元数组，数组元素类型为date"""        
+
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]   
         
+        if dataset is None:
+            dataset = self.dataset
+        
+        input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
+        output_chunk_length = self.optargs["forecast_horizon"]
+        expand_length = 2 *(input_chunk_length + output_chunk_length)
+         
+        # 根据日期范围逐日进行预测，得到预测结果   
+        start_date = pred_date
+        # 同时需要延长集合时间
+        total_range = dataset.segments["train"]
+        valid_range = dataset.segments["valid"]    
+        # 扩充起止时间，以进行数据集预测匹配
+        prev_day = get_tradedays_dur(start_date,-1)
+        last_day = get_tradedays_dur(start_date,3*output_chunk_length)
+        # 以当天为数据时间终点
+        total_range[1] = prev_day
+        begin_day = valid_range[0]
+        valid_range[1] = prev_day 
+        # 生成未扩展的真实数据
+        segments = {"train":[total_range[0],prev_day],"valid":[begin_day,prev_day]}
+        dataset.build_series_data_with_segments(segments,no_series_data=True,val_ds_filter=False,fill_future=True)
+        # 记录实际截止日期对应的序列编号最大值，后续与模拟数据进行区分
+        time_idx_mapping = dataset.df_all.groupby("instrument")["time_idx"].max()
+        # 为了和训练阶段保持一致处理，需要补充模拟数据
+        df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length) 
+        # 生成模拟数据后重置日期区间,以生成足够日期范围的val_series_transformed
+        segments = {"train":[total_range[0],last_day],"valid":[begin_day,last_day]}  
+        # 再次生成序列数据            
+        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
+            dataset.build_series_data_with_segments(segments,outer_df=df_expands)   
+        # 给每个品种序列放入实际最大编号   
+        for series in val_series_transformed:
+            time_idx = time_idx_mapping[time_idx_mapping.index==series.instrument_code].values[0]
+            series.last_time_idx = time_idx
+            
+        best_weight = self.optargs["best_weight"]  
+        # 首先使用总体模型生成总体趋势结果
+        model_name_step1 = self.optargs["model_name_step1"]  
+        model = FuturesIndustryModel.load_from_checkpoint(model_name_step1,work_dir=self.optargs["work_dir"],
+                                                         best=best_weight,batch_file_path=self.batch_file_path)
+        model.model.step_mode = 1
+        model.batch_size = self.batch_size     
+        model.mode = "predict"
+        model.model.mode = "predict"
+        model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
+        model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
+        model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings   
+        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)              
+        model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
+                                                    batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))        
+        # 再用第二阶段模型生成实际品种结果
+        model_name_step2 = self.optargs["model_name_step2"]  
+        model = FuturesIndustryModel.load_from_checkpoint(model_name_step2,work_dir=self.optargs["work_dir"],
+                                                         best=best_weight,batch_file_path=self.batch_file_path)
+        model.model.step_mode = 2
+        model.batch_size = self.batch_size     
+        model.mode = "predict"
+        model.model.mode = "predict"
+        model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
+        model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
+        model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings   
+        # 进行推理及预测，先fit再predict
+        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)               
+        pred_result = model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
+                                            batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))
+        
+        return pred_result 
+    
+    def predict_indus_and_detail(self, dataset,pred_range=None):
+        """使用二阶段模型，根据预测区间参数进行预测并进行评估，pred_range为二元数组，数组元素类型为date"""
+
+        if pred_range is None:
+            pred_range = dataset.kwargs["segments"]["test"] 
+            
+        start_date = pred_range[0]
+        end_date = pred_range[1]
+        trade_dates = np.array(get_tradedays(start_date,end_date)).astype(np.int)
+        
+        input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
+        output_chunk_length = self.optargs["forecast_horizon"]
+        pred_result_list = {}
+        for pred_date in trade_dates:
+            pred_result = self.build_pred_result_2step(str(pred_date),dataset=dataset)
+            pred_result_list[pred_date] = pred_result[pred_date]
+            
+        # 对预测结果进行评估
+        pred_dates = np.array(list(pred_result_list.keys())).astype(np.int)
+        # 取得实际需要的日期结果数据
+        match_dates = np.intersect1d(trade_dates,pred_dates)
+        pred_result_target = {}
+        # 生成真实数据，以进行评估
+        total_range = dataset.segments["train"]
+        valid_range = dataset.segments["valid"]    
+        # 扩充起止时间，以进行数据集预测匹配
+        last_day = get_tradedays_dur(end_date,3*output_chunk_length)      
+        segments = {"train":[total_range[0],last_day],"valid":[valid_range[0],last_day]}  
+        dataset.build_series_data_with_segments(segments,no_series_data=True,val_ds_filter=False,fill_future=True)
+        df_target = dataset.df_all
+        import_price_result = []
+        for key in match_dates:
+            pred_result_target[key] = pred_result_list[key]
+            target_class_list = []
+            for index,row in pred_result_list[key].iterrows():
+                instrument = row['instrument']
+                trend = row['top_flag']
+                item_cur_idx = df_target[(df_target['instrument']==instrument)&(df_target['datetime_number']==key)]['time_idx'].values[0]
+                df_item = df_target[(df_target['instrument']==instrument)&(df_target['time_idx']>=(item_cur_idx-1))]
+                price_list = df_item['CLOSE'].values
+                diff_range = (price_list[output_chunk_length] - price_list[0])/price_list[0]
+                p_taraget_class = get_simple_class(diff_range)  
+                if trend==0:
+                    p_taraget_class = [3,2,1,0][p_taraget_class] 
+                    diff_range = -diff_range
+                target_class_list.append(p_taraget_class)
+                import_price_result.append([key,instrument,trend,p_taraget_class,diff_range])
+        import_price_result = np.array(import_price_result)
+        import_price_result = pd.DataFrame(import_price_result,
+            columns=["date","instrument","trend","result","yield_rate"])
+        import_price_result['trend'] = import_price_result['trend'].astype(int)
+        import_price_result['result'] = import_price_result['result'].astype(int)
+        import_price_result['yield_rate'] = import_price_result['yield_rate'].astype(float)
+        
+        print("total yield:{}".format(import_price_result["yield_rate"].sum()))
+        return import_price_result    
+           
                         

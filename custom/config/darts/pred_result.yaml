@@ -57,7 +57,7 @@ task:
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'predict'
+            type: 'predict_indus_and_detail'
             n_epochs : 200
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
@@ -80,11 +80,13 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_s2RsvAll_Step2_202205"
+               model_name_step1: "Futures_cleanData_rsvTimediff8Mse_Step1_202203"
+               model_name_step2: "Futures_cleanData_rsvDetail_Step2_202203"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
                step_mode: 2
+               inter_rs_filepath: "custom/data/results/step1_rs.pkl"
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
@@ -106,7 +108,7 @@ task:
             segments:
                 train: [2021-01-01, 2022-03-31]
                 valid: [2022-03-01, 2022-07-31]
-                test: [2022-05-11, 2022-05-11]
+                test: [2022-05-01, 2022-05-31]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

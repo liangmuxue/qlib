@@ -26,8 +26,8 @@ from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220505]
-STAT_DATE = [20220501,20220530]
+TRACK_DATE = [20220511]
+STAT_DATE = [20220511,20220511]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -82,10 +82,6 @@ class FuturesIndustryDRollModule(MlpModule):
         self.result_file_path = "custom/data/results/step1_rs.pkl"
         self.result_columns = ["date","indus_index","trend_flag","price_inf","ce_inf"]
         
-        if self.step_mode==2:
-            # 第二阶段，首先加载预存结果
-            with open(self.result_file_path, "rb") as fin:
-                self.result_data = pickle.load(fin)           
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -264,15 +260,20 @@ class FuturesIndustryDRollModule(MlpModule):
         
         return out_total,vr_class,out_class_total  
 
-    def on_train_epoch_start(self):  
-        self.loss_data = []
+    def on_validation_start(self):  
+        self.output_result = []
+        if self.step_mode==2:
+            # 第二阶段，首先加载预存结果
+            with open(self.result_file_path, "rb") as fin:
+                self.result_data = pickle.load(fin)    
         
-    def on_train_epoch_end(self):  
+    def on_validation_end(self):  
         pass
         
     def on_validation_epoch_start(self):  
         self.import_price_result = None
         self.total_imp_cnt = 0
+        
     
     def get_optimizer_size(self):
         return len(self.past_split) + 1
@@ -748,7 +749,7 @@ class FuturesIndustryDRollModule(MlpModule):
             index_round_targets_3d,target_info_3d  = self.combine_output_total(output_result)
         total_imp_cnt = np.where(target_class_3d==3)[0].shape[0]
         rate_total = []
-        result_date_list = {}
+        result_date_list = None
         
         instrument_index = FuturesMappingUtil.get_instrument_index(sw_ins_mappings)
         instrument_in_indus_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
@@ -802,8 +803,8 @@ class FuturesIndustryDRollModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
-                continue  
+            # if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+            #     continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
                 if target_info is None:
@@ -837,8 +838,14 @@ class FuturesIndustryDRollModule(MlpModule):
                 
             # 如果是预测模式，则只输出结果,不验证
             if predict_mode:
-                # result_date_list[date] = [import_index,trend_value]
-                result_date_list[date] = ins_result_list
+                if self.step_mode==1:
+                    result_date_item = result_list
+                else:
+                    result_date_item = ins_result_list
+                if result_date_list is None:
+                    result_date_list = result_date_item
+                else:
+                    result_date_list = pd.concat([result_date_list,result_date_item])
                 continue
   
             collect_mode = 1
@@ -1052,8 +1059,13 @@ class FuturesIndustryDRollModule(MlpModule):
         #                            combine_instrument=combine_instrument)
         import_index_real = self.strategy_top(cls_values,ce_values,indus_top_index=indus_top_index,trend_value=trend_value,
                                         target=target,target_info=target_info,index_round_targets=index_round_targets,result_list=result_list,
-                                   combine_instrument=combine_instrument)        
-        return import_index_real,trend_value,indus_top_index,result_list,None
+                                   combine_instrument=combine_instrument)    
+        # 构建结果集
+        trend_value_data = np.array([trend_value for _ in range(import_index_real.shape[0])])
+        ins_result_list = np.stack([import_index_real,trend_value_data]).transpose(1,0)
+        ins_result_list = pd.DataFrame(ins_result_list,columns=['top_index','top_flag'])
+        ins_result_list['date'] = date            
+        return import_index_real,trend_value,indus_top_index,result_list,ins_result_list
         
     def strategy_top_indus(self,cls,ce_values,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
         """行业排名方式筛选候选者"""
@@ -1242,8 +1254,15 @@ class FuturesIndustryDRollModule(MlpModule):
         import_index_real = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings, main_index)[pred_import_index].astype(int)
         
         return import_index_real
+    
+    ##############################  Predict Part ################################
 
-
+    def on_predict_start(self):  
+        if self.step_mode==2:
+            # 第二阶段，首先加载预存结果
+            with open(self.result_file_path, "rb") as fin:
+                self.result_data = pickle.load(fin)   
+                
     def on_predict_epoch_start(self):  
         self.output_result = []
         
@@ -1289,9 +1308,18 @@ class FuturesIndustryDRollModule(MlpModule):
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
         result_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
         result_target = {}
+        if self.step_mode==1:
+            with open(self.result_file_path, "wb") as fout:
+                pickle.dump(result_date_list, fout)     
+            self.result_target = None
+            return    
         # 根据原始数组，生成实际品种信息
-        for date in list(result_date_list.keys()):
-            res_arr = result_date_list[date].sort_values(by=['top_index'])
+        if result_date_list is None:
+            self.result_target = None
+            return                
+        dates = result_date_list['date'].unique()
+        for date in dates:
+            res_arr = result_date_list[result_date_list['date']==date].sort_values(by=['top_index'])
             res_index = res_arr['top_index']
             target = combine_content[np.isin(combine_content[:,0],res_index.values)]
             target = target[np.argsort(target[:,0])]
