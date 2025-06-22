@@ -104,7 +104,8 @@ class FuturesPredRecorder(TftRecorder):
         pred_result_list = None
         # 进行预测，取得预测结果
         for pred_date in trade_dates:
-            pred_result = self.model.build_pred_result(str(pred_date),dataset=dataset)
+            # pred_result = self.model.build_pred_result(str(pred_date),dataset=dataset)
+            pred_result = self.model.build_pred_result_2step(str(pred_date),dataset=dataset)
             if pred_result_list is None:
                 pred_result_list = pred_result[pred_date]
             else:
@@ -128,28 +129,6 @@ class FuturesPredRecorder(TftRecorder):
         with open(pred_data_path, "wb") as fout:
             pickle.dump(pred_data_result, fout)     
         return pred_data_result
-    
-    def build_pred_data(self,pred_combine_data,df_ref=None):
-        """预测数据生成,pandas格式"""
-        
-        pred_dates = np.array(list(pred_combine_data.keys())).astype(np.int)
-        pred_combine_result = None
-        for date in pred_dates:
-            pred_res = pred_combine_data[date]
-            pred_data = pred_res[0]
-            pred_trend = pred_res[1]
-            if pred_data.shape[0]==0:
-                continue
-            # 拼接日期和趋势字段，整合为数据表格式
-            pred_trend_arr = np.array([[pred_trend] for _ in range(pred_data.shape[0])])
-            pred_trend_date = np.array([[date] for _ in range(pred_data.shape[0])])
-            pred_combine_item = np.concatenate([pred_trend_date,pred_trend_arr,pred_data],axis=1)
-            if pred_combine_result is None:
-                pred_combine_result = pred_combine_item
-            else:
-                pred_combine_result = np.concatenate((pred_combine_result,pred_combine_item),axis=0)
-        pred_combine_result = pd.DataFrame(pred_combine_result,columns=self.pred_result_columns)
-        return pred_combine_result
     
     def _get_pickle_path(self,cur_date):
         pred_data_path = self.pred_data_path

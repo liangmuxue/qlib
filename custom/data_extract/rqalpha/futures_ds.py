@@ -36,7 +36,7 @@ class FuturesDataSource(BaseDataSource):
         
         self.dbaccessor = DbAccessor({})
         self.busi_columns = ["code","datetime","open","high","low","close","volume","hold","settle"]
-        self.day_contract_columns = ["symbol","contract"]
+        self.day_contract_columns = ["symbol","contract","volume"]
         
         self.extractor = JuejinFuturesExtractor(savepath=stock_data_path,sim_path=sim_path)
         self.extractor_ak = AkFuturesExtractor(savepath=stock_data_path)
@@ -83,7 +83,7 @@ class FuturesDataSource(BaseDataSource):
                 # 查看合约当日的日线数据，如果有则记录
                 contract_data = self.get_contract_data_by_day(symbol, date)     
                 if contract_data is not None:
-                    results.append([item['code'],symbol])
+                    results.append([item['code'],symbol,contract_data['volume'].values[0]])
         results = pd.DataFrame(np.array(results),columns=self.day_contract_columns)
         results['date'] = date.date()
         return results

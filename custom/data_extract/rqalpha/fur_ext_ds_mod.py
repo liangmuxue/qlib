@@ -8,7 +8,7 @@ from rqalpha.const import ORDER_STATUS
 from rqalpha.const import SIDE
 
 from data_extract.rqalpha.futures_ds import FuturesDataSource,FuturesDataSourceSql
-from trader.rqalpha.trade_entity import TRADE_COLUMNS
+from trader.rqalpha.futures_trade_entity import TRADE_COLUMNS
 from trader.utils.date_util import tradedays
 from trader.data_viewer import DataViewer
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
@@ -246,6 +246,7 @@ class ExtDataMod(AbstractMod):
 
         result_data = []
         columns = ['date','instrument','yield_rate','trend_flag']
+        # has_trading 0:没有交易 1:有交易
         result_columns = columns + ['has_trading','order_book_id','open_price','close_price','quantity','bt_yield_rate','close_date']
         # 遍历预测数据，并分别与实际回测数据结果匹配
         for index,row in pred_result_data.iterrows():
@@ -283,7 +284,14 @@ class ExtDataMod(AbstractMod):
             
         stat_df = pd.DataFrame(np.array(result_data),columns = result_columns)
         stat_df.to_csv(save_path,index=False)   
-                           
+
+    def pred_coll_data(self,pred_coll_path):
+        result_file_path = "custom/data/results/pred_coll.pkl"
+        with open(result_file_path, "rb") as fin:
+            result_data = pickle.load(fin)    
+        result_data = result_data[(result_data['date']>=20220505)&(result_data['date']<=20220531)]
+        result_data.to_csv(pred_coll_path)
+                                  
 def load_mod():
     return ExtDataMod()   
 
@@ -301,6 +309,7 @@ if __name__ == "__main__":
     bt_savepath = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/06/compare_data.csv"  
     pred_path = "custom/data/results/pred_coll.csv"
     # ext_mod.analysis_futures_stat_offline(file_path,stat_path)
+    # ext_mod.pred_coll_data(pred_path)
     ext_mod.compare_pred_backtest(pred_path,file_path,save_path=bt_savepath)
     
     

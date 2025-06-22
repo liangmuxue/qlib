@@ -4,6 +4,14 @@ import pandas as pd
 import random
 import pickle
 
+class DictToObject:
+    def __init__(self, dictionary):
+        for key, value in dictionary.items():
+            if isinstance(value, dict):
+                setattr(self, key, DictToObject(value))
+            else:
+                setattr(self, key, value)
+                
 def random_int_list(start, stop, length):
     start, stop = (int(start), int(stop)) if start <= stop else (int(stop), int(start))
     length = int(abs(length)) if length else 0

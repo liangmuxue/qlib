@@ -27,7 +27,7 @@ from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20220511]
-STAT_DATE = [20220511,20220511]
+STAT_DATE = [20220501,20220531]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -479,17 +479,13 @@ class FuturesIndustryDRollModule(MlpModule):
                 with open(self.result_file_path, "wb") as fout:
                     pickle.dump(indus_result, fout)  
 
-
-            # rate_total_stat = rate_total[(rate_total['date']>=STAT_DATE[0])&(rate_total['date']<=STAT_DATE[1])]
-            # print("trend fail date:\n",rate_total_stat[rate_total_stat['trend_correct']==0]['date'])  
-            # print("indus_top fail date:\n",rate_total_stat[rate_total_stat['indus_top_class']==1][['date']])
-
-            # if import_price_result is not None:
-            #     import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
-            #     print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
-            #     result_file_path = "custom/data/results/pred_coll.pkl"
-            #     with open(result_file_path, "wb") as fout:
-            #         pickle.dump(import_price_result_item, fout)                  
+            if self.step_mode==2:
+                if import_price_result is not None:
+                    import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
+                    print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
+                    result_file_path = "custom/data/results/pred_coll.pkl"
+                    with open(result_file_path, "wb") as fout:
+                        pickle.dump(import_price_result_item, fout)                  
                                         
             tar_viz = global_var.get_value("viz_data")
             viz_result = global_var.get_value("viz_result_detail")
@@ -803,8 +799,8 @@ class FuturesIndustryDRollModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            # if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
-            #     continue  
+            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+                continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
                 if target_info is None:
@@ -848,14 +844,9 @@ class FuturesIndustryDRollModule(MlpModule):
                     result_date_list = pd.concat([result_date_list,result_date_item])
                 continue
   
-            collect_mode = 1
             # Compute Acc Resultes
-            if collect_mode==1:
-                import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr = self.collect_result(import_index,overroll_trend=trend_value,
+            import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr = self.collect_result(import_index,overroll_trend=trend_value,
                                                 indus_top_index=indus_top_index,target_info=target_info_list,indus_result_list=result_list)
-            else:
-                import_price_result = self.collect_result_bidi(import_index,target_info=target_info_list,result_list=ins_result_list)            
-            
             # 把结果数据整合到预测记录中
             if indus_result_total_list is None:
                 indus_result_total_list = result_list
@@ -875,13 +866,6 @@ class FuturesIndustryDRollModule(MlpModule):
                     import_price_result_list = pd.concat([import_price_result_list,import_price_result])
                 result_values = import_price_result["result"].values
                 suc_cnt = np.sum(result_values>=2)
-                fail_cnt = np.sum(result_values<2)
-                if fail_cnt>0 or True:
-                    trend_str = "Rise"
-                    if trend_value==0:
-                        trend_str = "Fall"
-                    result_date_list["{}_{}/{}".format(int(date),trend_str,suc_cnt)] = \
-                        import_price_result[["instrument","result"]].values
                 res_group = import_price_result.groupby("result")
                 ins_unique = res_group.nunique()
                 total_cnt = ins_unique.values[:,1].sum()
@@ -899,26 +883,17 @@ class FuturesIndustryDRollModule(MlpModule):
                 rate_columns = ["date"] + ["trend_value","trend_correct","indus_top_class","indus_top_diff",
                          "indus_bitop_diff","fall_top_corr","raise_top_corr","f1_score"]                   
             # 添加多空判断预测信息 
-            if collect_mode==1:
-                rate_item.append(trend_value)   
-                rate_item.append(main_trend_correct)
-                rate_item.append(indus_top_class)   
-                rate_item.append(indus_top_diff)   
-                rate_item.append(indus_bitop_diff) 
-                rate_item.append(indus_top_corr[0]) 
-                rate_item.append(indus_top_corr[1]) 
-            else:
-                rate_item.append(0) 
-                rate_item.append(0) 
-                rate_item.append(0) 
-                rate_item.append(0) 
-                rate_item.append(0) 
-                trend_fall_result = import_price_result[import_price_result['trend_flag']==0]
-                trend_raise_result = import_price_result[import_price_result['trend_flag']==1]
-                fall_corr = np.sum(trend_fall_result['yield_rate'].values>0)/trend_fall_result.shape[0]
-                rate_item.append(fall_corr) 
-                raise_corr = np.sum(trend_raise_result['yield_rate'].values>0)/trend_raise_result.shape[0]
-                rate_item.append(raise_corr) 
+            rate_item.append(0) 
+            rate_item.append(0) 
+            rate_item.append(0) 
+            rate_item.append(0) 
+            rate_item.append(0) 
+            trend_fall_result = import_price_result[import_price_result['trend_flag']==0]
+            trend_raise_result = import_price_result[import_price_result['trend_flag']==1]
+            fall_corr = np.sum(trend_fall_result['yield_rate'].values>0)/trend_fall_result.shape[0]
+            rate_item.append(fall_corr) 
+            raise_corr = np.sum(trend_raise_result['yield_rate'].values>0)/trend_raise_result.shape[0]
+            rate_item.append(raise_corr) 
             rate_item.append(0) 
             rate_total.append(rate_item)
             
@@ -955,6 +930,7 @@ class FuturesIndustryDRollModule(MlpModule):
             import_price_result = pd.DataFrame(import_price_result,columns=["imp_index","instrument","yield_rate","result"])     
             import_price_result["result"] = import_price_result["result"].astype(np.int64)      
             import_price_result["yield_rate"] = import_price_result["yield_rate"].astype(np.float)   
+            import_price_result["trend_flag"] = overroll_trend.astype(np.int64)  
     
         # 同时计算行业趋势判断准确率
         trend_results = []
@@ -1160,8 +1136,8 @@ class FuturesIndustryDRollModule(MlpModule):
         
         cls_ins = cls[0]
         
-        top_num = 3
-        select_num = 3
+        top_num = 5
+        select_num = top_num
         indus_rel_index = industry_index[np.where(indus_index==indus_top_index)[0][0]]
         ins_rel_index = FuturesMappingUtil.get_indus_instrument_range_index(sw_ins_mappings,indus_rel_index)
         cls_can = cls_ins[ins_rel_index]

@@ -102,8 +102,8 @@ def test_predResult_data():
            
 if __name__ == "__main__":
     # test_ori()
-    test_pred_data()
-    # test_predResult_data()
+    # test_pred_data()
+    test_predResult_data()
     # test_busi_data()
     
     

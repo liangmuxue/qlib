@@ -13,6 +13,7 @@ from trader.utils.date_util import tradedays,get_tradedays_dur
 
 from data_extract.rqalpha.fur_ds_proxy import FurDataProxy
 from data_extract.his_data_extractor import PeriodType
+from cus_utils.data_aug import DictToObject
 from cus_utils.data_filter import get_topN_dict
 from cus_utils.log_util import AppLogger
 from gunicorn import instrument
@@ -28,12 +29,17 @@ def get_time(f):
         return res
     return inner
 
+POS_COLUMNS = ['order_book_id', 'quantity','side', 'direction', 'avg_price', 'datetime', 'order_id']
+
 class FurBacktestStrategy(SimStrategy):
     """回测交易策略，分钟级别，继承回测基类"""
     
     def __init__(self,proxy_name="qidian"):
         super().__init__(proxy_name=proxy_name)
         self.time_begin = None
+        
+        # 设置策略模拟仓位，用于策略逻辑判断
+        self.sim_position = pd.DataFrame(columns=POS_COLUMNS)        
     
     def time_inject(self,code_name=None,begin=False):
         if begin:
@@ -75,6 +81,8 @@ class FurBacktestStrategy(SimStrategy):
         self.time_line = 0
         pred_date = int(context.now.strftime('%Y%m%d'))
         self.trade_day = pred_date
+        if pred_date==20220511:
+            print("ggg")        
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = get_previous_trading_date(self.trade_day)
         # 初始化当日合约对照表
@@ -136,7 +144,7 @@ class FurBacktestStrategy(SimStrategy):
         self.prev_side = SIDE.BUY
         
         # 循环从候选中取数，直到取完或者超出开仓数量为止
-        while pos_number<position_max_number or len(self.candidate_list)==0:
+        while pos_number<position_max_number and len(self.candidate_list)>0:
             order_book_id = order.order_book_id
             # 依次从候选中选取对应品种并放入开仓列表
             candidate_order = self.get_next_candidate()
@@ -148,8 +156,6 @@ class FurBacktestStrategy(SimStrategy):
         self.data_source.build_hot_loading_data(pred_date,self.open_list)        
         self.data_source.build_hot_loading_data(pred_date,self.get_positions())    
 
-        if pred_date==20220510:
-            print("ggg")
         
     def after_trading(self,context):
         logger.info("after_trading in")
@@ -164,9 +170,6 @@ class FurBacktestStrategy(SimStrategy):
         
         self.logger_info("handle_bar.now:{}".format(context.now))
         
-        # 首先进行撮合，然后进行策略
-        env = Environment.get_instance()
-        env.broker.trade_proxy.handler_bar(context.now)
         self.time_line = 2
         
         # 如果非实时模式，则需要在相应前等待几秒，以保证先处理外部通知事件
@@ -185,7 +188,10 @@ class FurBacktestStrategy(SimStrategy):
         
         # 统一执行买卖挂单处理
         self.order_process(context)
-        
+ 
+        # 首先进行策略，然后进行撮合
+        env = Environment.get_instance()
+        env.broker.trade_proxy.handler_bar(context.now)       
 
     def order_process(self,context):
         """挂单流程，先平仓后开仓"""
@@ -300,8 +306,6 @@ class FurBacktestStrategy(SimStrategy):
                 # 早盘不进行超期平仓
                 if context.now.hour<=12:
                     continue
-                # 根据开盘价格挂单
-                price = self.get_last_price(order_book_id)
                 # 根据原持仓品种的多空类别决定平仓相关参数
                 if pos_info.direction==POSITION_DIRECTION.LONG:
                     side = SIDE.SELL
@@ -309,18 +313,16 @@ class FurBacktestStrategy(SimStrategy):
                 else:
                     side = SIDE.BUY
                     side_flag = -1
-                check_time = datetime.datetime(context.now.year,context.now.month,context.now.day,14,30,0)
+                # 根据当前价格挂单
                 last_price = self.get_last_price(order_book_id)
                 if last_price is None:
                     continue
-                # 如果还未临近收盘，并且幅度不够，也不进行平仓
-                if (side_flag*(last_price-pos_info.avg_price)/last_price*100<expire_raise_percent) and \
-                        context.now<=check_time:
-                    continue
-                # 生成订单
-                order = self.create_order(position.order_book_id, amount, side,price,
-                                position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.EXPIRE_DAY.value)  
-                self.append_to_close_list(order)
+                # 如果幅度足够，则进行平仓,如果接近收盘，也进行平仓--Cancel
+                if (side_flag*(pos_info.avg_price-last_price)/last_price*100>expire_raise_percent) or True:
+                    # 生成订单
+                    order = self.create_order(position.order_book_id, amount, side,last_price,
+                                    position_effect=POSITION_EFFECT.CLOSE,close_reason=SellReason.EXPIRE_DAY.value)  
+                    self.append_to_close_list(order)
     
     @get_time                                  
     def stop_fall_logic(self,context,bar_dict=None):
@@ -345,6 +347,7 @@ class FurBacktestStrategy(SimStrategy):
                 side = SIDE.BUY  
                 side_flag = -1       
             last_price = self.get_last_price(order_book_id)
+            # open_price = self.trade_entity.get_trade_in_pos(order_book_id)
             self.time_inject(code_name="get_last_price")
             if last_price is None:
                 continue
@@ -494,12 +497,25 @@ class FurBacktestStrategy(SimStrategy):
             self.open_list[open_item.order_book_id].kwargs["price"] = price_now                         
                                 
     ###############################数据逻辑处理部分########################################  
-    
+
+    def get_position(self,order_book_id):
+        """取得指定品种的持仓信息，使用当前策略维护的仓位数据"""
+        
+        # 通过代理类，取得仿真环境的数据
+        sim_position = self.sim_position
+        pos = sim_position[sim_position['order_book_id']==order_book_id]
+        if pos.shape[0]!=1:
+            return None
+        dict_data = pos.iloc[0].to_dict()
+        pos_obj = DictToObject(dict_data)    
+        return pos_obj  
+        
     def get_last_price(self,order_book_id):
         """取得指定标的最近报价信息"""
 
         env = Environment.get_instance()
-        return self.data_source.get_last_price(order_book_id,env.trading_dt)
+        last_dt = env.trading_dt + timedelta(minutes=-1)
+        return self.data_source.get_last_price(order_book_id,last_dt)
     
     def compute_build_quantity(self):
         """计算可以买入的单个品种的金额限制"""
@@ -589,6 +605,17 @@ class FurBacktestStrategy(SimStrategy):
             return True
         return False
 
+    def is_approch_closing(self):
+        """检查当前时间是否接近收盘"""
+        
+        # 下午2点半以后接近收盘
+        env = Environment.get_instance()
+        dt = env.trading_dt
+        closing_timing = datetime.datetime(dt.year,dt.month,dt.day,14,30,0)
+        if dt>closing_timing:
+            return True
+        return False
+       
     def get_close_order(self,order_book_id,context=None):
         if order_book_id in self.close_list:
             return self.close_list[order_book_id]
@@ -606,8 +633,8 @@ class FurBacktestStrategy(SimStrategy):
         self.time_inject(code_name="data_proxy.instrument")
         # 如果还没有开盘，取上一交易日数据，否则取上一交易时间段数据
         if self.is_trade_opening(env.trading_dt):
-            # last_dt = env.trading_dt + timedelta(minutes=-1)
-            bar = self.data_source.get_bar(order_book_id,env.trading_dt,"1m")
+            last_dt = env.trading_dt + timedelta(minutes=-1)
+            bar = self.data_source.get_bar(order_book_id,last_dt,"1m")
         else:
             prev_day = get_tradedays_dur(self.context.now, -1)
             bar = self.data_source.get_bar(order_book_id,prev_day,"1d")            
@@ -755,16 +782,17 @@ class FurBacktestStrategy(SimStrategy):
             # 品种模式查询，需要先根据品种取得合约代码再查询
             symbol = self.data_source.get_main_contract_name(code,day_date)
             data = date_trading_mappings[(date_trading_mappings['date']==day_date)&(date_trading_mappings['contract']==symbol)]
-            if data.shape[0]>0:
-                return True
-            return False
         else:
             # 合约模式查询，直接查询
             data = date_trading_mappings[(date_trading_mappings['date']==day_date)&(date_trading_mappings['contract']==code)]
-            if data.shape[0]>0:
-                return True
-            return False           
-        return False
+            
+        if data.shape[0]>0:
+            # 有些数据交易量很小，则不计入
+            if float(data['volume'].values[0])<=0:
+                return False
+            return True
+        
+        return False        
     
     ############################事件注册部分######################################
     
@@ -772,15 +800,48 @@ class FurBacktestStrategy(SimStrategy):
         trade = event.trade
         order = event.order
         account = event.account
+        account.get_positions()
         self.logger_debug("on_trade_handler in,order:{}".format(order))
         # 保存成单交易对象
         self.trade_entity.add_trade(trade,multiplier=order.kwargs['multiplier'])
         # 修改当日仓位列表中的状态为已成交
         self.update_order_status(order,ORDER_STATUS.FILLED,side=order.side, context=self.context)     
+        # 维护仓位数据
+        self.apply_trade_pos(trade)
         # 平仓一个，就可以再开仓一个。从候选列表中挑选新的品种，放入待开仓列表中
         if order.position_effect==POSITION_EFFECT.CLOSE:
             self.get_next_candidate()              
     
+    def apply_trade_pos(self,trade):
+        """维护仓位数据"""
+        
+        sim_position = self.sim_position
+        if trade.position_effect==POSITION_EFFECT.OPEN:
+            item = pd.DataFrame(np.array([[trade.order_book_id,trade.last_quantity,trade.side,
+                            trade.position_direction,trade.last_price,trade.datetime,trade.order_id]]),columns=POS_COLUMNS)
+            # 开仓时添加到模拟仓位
+            remain_pos = sim_position[sim_position['order_book_id']==trade.order_book_id]
+            # 如果原仓位有数据，则累加合并
+            if remain_pos.shape[0]==0:
+                sim_position = pd.concat([sim_position,item])
+            else:
+                remain_pos['quantity'] = remain_pos['quantity'].values[0] + trade.last_quantity
+                # 计算综合成本
+                remain_pos['avg_price'] = (remain_pos['avg_price'].values[0]*remain_pos['quantity'].values[0] + 
+                        trade.last_quantity*trade.last_price)/(remain_pos['quantity'].values[0]+trade.last_quantity)
+                sim_position[sim_position['order_book_id']==trade.order_book_id] = remain_pos
+        else:
+            # 平仓时消除原仓位数据
+            remain_pos = sim_position[sim_position['order_book_id']==trade.order_book_id]
+            remain_quantity = remain_pos['quantity'].values[0]
+            if remain_quantity==trade.last_quantity:
+                sim_position = sim_position[sim_position['order_book_id']!=trade.order_book_id]
+            else:
+                remain_pos['quantity'] = remain_pos['quantity'].values[0] - trade.last_quantity
+                sim_position[sim_position['order_book_id']==trade.order_book_id] = remain_pos
+            
+        self.sim_position = sim_position
+               
     def on_order_handler(self,context, event):
         order = event.order
         self.logger_info("order handler,order:{}".format(order))
@@ -828,7 +889,7 @@ class FurBacktestStrategy(SimStrategy):
                 # 如果具备重新报单标志，则以最新价格重新生成订单
                 price_now = self.get_last_price(order.order_book_id)
                 # 创建新订单对象并重置原数据
-                order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,close_reason=order.kwargs['close_reason'],position_effect=POSITION_EFFECT.OPEN)
+                order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,close_reason=order.kwargs['close_reason'],position_effect=POSITION_EFFECT.CLOSE)
                 self.close_list[order.order_book_id] = order_resub
                 self.logger_debug("resub closelist set end:{}".format(order.order_book_id))            
                     

@@ -24,9 +24,21 @@ class FuturesTradeEntity(TradeEntity):
         log_save_path=None,
         **kwargs,
     ):
-        super().__init__(save_path,log_save_path,**kwargs)
-        
+        if save_path is not None:
+            self.trade_data_df = self.imp_trade_data(save_path)
+            if self.trade_data_df is None or self.trade_data_df.shape[0]==0:
+                self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+                self.sys_orders = {} 
+        else:
+            self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+            # 映射系统订单
+            self.sys_orders = {}            
 
+        self.save_path = save_path
+        # 初始化交易日志数据
+        self.trade_log_df = pd.DataFrame(columns=TRADE_LOG_COLUMNS)
+        self.log_save_path = log_save_path
+        
     def add_trade(self,trade,multiplier=1,default_status=ORDER_STATUS.FILLED):
         """添加交易信息，需要先具备订单信息"""
         
@@ -80,7 +92,15 @@ class FuturesTradeEntity(TradeEntity):
         # 取得最后一个交易
         return target_df["trade_date"].dt.to_pydatetime().tolist()[-1].strftime('%Y%m%d') 
 
+    def get_trade_in_pos(self,order_book_id):   
+        """取得指定的已持仓交易订单"""
 
+        if self.trade_data_df.shape[0]==0:
+            return self.trade_data_df
+        trade_data_df = self.trade_data_df
+        target_df = trade_data_df[(trade_data_df["order_book_id"]==order_book_id)]               
+        return target_df  
+    
     def get_open_list(self,trade_date):   
         """取得所有已开仓订单"""
 

@@ -25,7 +25,7 @@ class TradeEntity():
     ):
         if save_path is not None:
             self.trade_data_df = self.imp_trade_data(save_path)
-            if self.trade_data_df is None:
+            if self.trade_data_df is None or self.trade_data_df.shape[0]==0:
                 self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
                 self.sys_orders = {} 
         else:

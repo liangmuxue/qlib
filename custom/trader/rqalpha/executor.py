@@ -5,6 +5,8 @@ from rqalpha.core.events import EVENT, Event
 from rqalpha.utils.rq_json import convert_dict_to_json, convert_json_to_dict
 from rqalpha.utils.logger import system_log
 
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
 
 class Executor(object):
     def __init__(self, env):
@@ -62,7 +64,7 @@ class Executor(object):
                 continue   
             
             # 限定在3分钟的间隔频次  
-            if event.event_type == EVENT.BAR and (now.minute%3!=0):
+            if event.event_type == EVENT.BAR and (now.minute%1!=0):
                 continue                  
             # 轮询各个事件并进行处理 
             if event.event_type == EVENT.TICK:

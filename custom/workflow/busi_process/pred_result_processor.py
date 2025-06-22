@@ -53,10 +53,8 @@ class PredResultProcessor(BaseProcessor):
                                                                     task_type=CommonDictEnum.WORK_TYPE__PRED.value)) 
         record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 设置模型路径
-        model_template["kwargs"]["optargs"]["work_dir"] = self.wf_task.get_model_path()
-        # 设置模型名称
-        model_template["kwargs"]["optargs"]["model_name"] = self.wf_task.get_matched_model_file_name(working_day,
-                                                                    task_type=CommonDictEnum.WORK_TYPE__TRAIN.value)  
+        model_template["kwargs"]["optargs"]["work_dir"] = os.path.join(self.wf_task.get_model_path(),self.wf_task.get_matched_model_file_name(working_day,
+                                                                    task_type=CommonDictEnum.WORK_TYPE__TRAIN.value)) 
         return real_template
 
     def before_run(self,working_day=None):
