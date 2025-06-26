@@ -308,8 +308,8 @@ if __name__ == "__main__":
     stat_path = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/06/pred_stat_data.csv"   
     bt_savepath = "/home/qdata/workflow/fur_backtest_flow_2022/trader_data/06/compare_data.csv"  
     pred_path = "custom/data/results/pred_coll.csv"
-    # ext_mod.analysis_futures_stat_offline(file_path,stat_path)
+    ext_mod.analysis_futures_stat_offline(file_path,stat_path)
     # ext_mod.pred_coll_data(pred_path)
-    ext_mod.compare_pred_backtest(pred_path,file_path,save_path=bt_savepath)
+    # ext_mod.compare_pred_backtest(pred_path,file_path,save_path=bt_savepath)
     
     

@@ -505,7 +505,7 @@ class FuturesProcessModel(TftDataframeModel):
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==2:  
-            step_mode = self.optargs["step_mode"]
+            train_step_mode = self.optargs["step_mode"]
             my_model = FuturesIndustryDRollModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
@@ -542,7 +542,7 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
-                    step_mode=step_mode,
+                    train_step_mode=train_step_mode,
                     pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )     

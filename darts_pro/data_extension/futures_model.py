@@ -535,7 +535,7 @@ class FuturesIndustryDRollModel(FuturesIndustryModel):
                 filter_conv_index=self.filter_conv_index,
                 device=self.device,
                 batch_file_path=self.batch_file_path,
-                step_mode=self.step_mode,
+                train_step_mode=self.ext_kwargs['train_step_mode'],
                 model_type=self.model_type,
                 train_sample=self.train_sample,
                 train_sw_ins_mappings=self.train_sw_ins_mappings,     

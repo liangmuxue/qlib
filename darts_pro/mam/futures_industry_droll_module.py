@@ -26,8 +26,8 @@ from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20220511]
-STAT_DATE = [20220501,20220531]
+TRACK_DATE = [20220611]
+STAT_DATE = [20220401,20221031]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -54,7 +54,7 @@ class FuturesIndustryDRollModule(MlpModule):
         add_relative_index: bool,
         norm_type: Union[str, nn.Module],
         cut_len=2,
-        step_mode='complete',
+        train_step_mode=1,
         use_weighted_loss_func=False,
         past_split=None,
         target_mode=None,
@@ -72,7 +72,7 @@ class FuturesIndustryDRollModule(MlpModule):
         self.scale_mode = scale_mode
         self.cut_len = cut_len
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
-        self.step_mode = step_mode
+        self.train_step_mode = train_step_mode
         
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
@@ -262,7 +262,7 @@ class FuturesIndustryDRollModule(MlpModule):
 
     def on_validation_start(self):  
         self.output_result = []
-        if self.step_mode==2:
+        if self.train_step_mode==2:
             # 第二阶段，首先加载预存结果
             with open(self.result_file_path, "rb") as fin:
                 self.result_data = pickle.load(fin)    
@@ -446,9 +446,7 @@ class FuturesIndustryDRollModule(MlpModule):
             # indus_bitop_diff = rate_total['indus_bitop_diff'].sum()
             indus_top_diff = rate_total['indus_top_diff'].sum()
             trend_corr_cnt = rate_total['trend_correct'].sum()
-            fall_top_corr_cnt = rate_total['fall_top_corr'].sum()
-            raise_top_corr_cnt = rate_total['raise_top_corr'].sum()
-            if self.step_mode!=1:
+            if self.train_step_mode!=1:
                 total_cnt = rate_total['total_cnt'].sum()
                 yield_rate = rate_total['yield_rate'].sum()
                 self.log("yield_rate", yield_rate, prog_bar=True) 
@@ -463,8 +461,6 @@ class FuturesIndustryDRollModule(MlpModule):
                     self.log("indus_top_{} rate".format(i), cnt/rate_total.shape[0], prog_bar=True)                 
                 # self.log("score_{} min rate".format(i), combine_rate_min[i], prog_bar=True) 
             # self.log("indus_bitop_diff", round(indus_bitop_diff,3), prog_bar=True)  
-            # self.log("fall_top_corr", fall_top_corr_cnt/rate_total.shape[0], prog_bar=True)  
-            # self.log("raise_top_corr", raise_top_corr_cnt/rate_total.shape[0], prog_bar=True)  
             self.log("indus_top_diff", round(indus_top_diff,3), prog_bar=True)  
             self.log("trend corr rate", round(trend_corr_cnt/rate_total.shape[0],3), prog_bar=True)  
             # self.log("total cnt", total_cnt, prog_bar=True)  
@@ -475,11 +471,11 @@ class FuturesIndustryDRollModule(MlpModule):
         if self.mode is not None and self.mode.startswith("pred_") :
             
             # 第一阶段，存储结果
-            if self.step_mode==1:
+            if self.train_step_mode==1:
                 with open(self.result_file_path, "wb") as fout:
                     pickle.dump(indus_result, fout)  
 
-            if self.step_mode==2:
+            if self.train_step_mode==2:
                 if import_price_result is not None:
                     import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
                     print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
@@ -544,7 +540,7 @@ class FuturesIndustryDRollModule(MlpModule):
                     futures_index_combine = None
                     price_range_total = []
                     
-                    if j in DRAW_SEQ_DETAIL and self.step_mode==2:
+                    if j in DRAW_SEQ_DETAIL and self.train_step_mode==2:
                         # 所有品种的比对图
                         instruments = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
                         ins_output = cls_output[j][index]
@@ -578,7 +574,7 @@ class FuturesIndustryDRollModule(MlpModule):
                         fur_round_target = round_targets[instruments,-1,j]
 
                         # 行业内品种比对图
-                        if j in DRAW_SEQ_DETAIL and len(futures_names)>1 and self.step_mode==2:
+                        if j in DRAW_SEQ_DETAIL and len(futures_names)>1 and self.train_step_mode==2:
                             price_array_range = np.array([item["diff_range"][-1] for item in ts_arr[ins_index][inner_index]])
                             view_data = np.stack([ins_output,fur_round_target,price_array_range]).transpose(1,0)
                             win = "round_target_{}_{}_{}".format(j,k,viz_total_size)
@@ -586,7 +582,7 @@ class FuturesIndustryDRollModule(MlpModule):
                             viz_result.viz_bar_compare(view_data,win=win,title=target_title,rownames=futures_names,legends=["pred","target","price"])   
                             
 
-                        if j in DRAW_SEQ_ITEM and self.step_mode!=2:
+                        if j in DRAW_SEQ_ITEM and self.train_step_mode!=2:
                             # 行业板块历史推理数值图
                             indus_output_value = ts_arr[indus_index_item]["pred_data"]
                             indus_target = index_round_targets_3d[index,indus_rel_index[k],:,j]
@@ -628,7 +624,7 @@ class FuturesIndustryDRollModule(MlpModule):
                     price_range_total = np.array([ts["diff_range"][-1] for ts in ts_arr[indus_index[indus_rel_index]]])
                     win = "indus_round_target_{}_{}".format(j,viz_total_size)
                     target_title = "[{}-{}] trend:{},diff:{}".format(int(date),j,trend_value,round(indus_top_diff,3))
-                    if j in DRAW_SEQ and self.step_mode!=2:
+                    if j in DRAW_SEQ and self.train_step_mode!=2:
                         # indust_output_value = indust_output_value.repeat(6)
                         view_data = np.stack([indust_output_value,indust_target,price_range_total*10]).transpose(1,0)
                         tar_viz.viz_bar_compare(view_data,win=win,title=target_title,rownames=indus_names.tolist(),legends=["pred","target","price"])   
@@ -799,8 +795,8 @@ class FuturesIndustryDRollModule(MlpModule):
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
-            if self.step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
-                continue  
+            # if self.train_step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
+            #     continue  
             # 把之前生成的预测值，植入到target_info基础信息中，后续使用
             for target_info in target_info_list[industry_index]:
                 if target_info is None:
@@ -834,7 +830,7 @@ class FuturesIndustryDRollModule(MlpModule):
                 
             # 如果是预测模式，则只输出结果,不验证
             if predict_mode:
-                if self.step_mode==1:
+                if self.train_step_mode==1:
                     result_date_item = result_list
                 else:
                     result_date_item = ins_result_list
@@ -857,8 +853,7 @@ class FuturesIndustryDRollModule(MlpModule):
             rate_item.append(date)
             if import_price_result is not None:
                 rate_columns = ["date"] + ["cls{}_cnt".format(i) for i in range(len(CLASS_SIMPLE_VALUES.keys()))] + \
-                        ["total_cnt","yield_rate","trend_value","trend_correct","indus_top_class","indus_top_diff",
-                         "indus_bitop_diff","fall_top_corr","raise_top_corr","f1_score"]                   
+                        ["total_cnt","yield_rate","trend_value","trend_correct","indus_top_class","indus_top_diff"]                   
                 import_price_result['date'] = date
                 if import_price_result_list is None:
                     import_price_result_list = import_price_result
@@ -878,23 +873,18 @@ class FuturesIndustryDRollModule(MlpModule):
                     rate_item.append(cnt)
                 # 预测数量以及总数量
                 rate_item.append(total_cnt.item())   
-                rate_item.append(import_price_result['yield_rate'].sum()) 
+                rate_item.append(import_price_result['yield_rate'].sum())      
+                rate_item.append(trend_value) 
+                rate_item.append(main_trend_correct)          
+                rate_item.append(indus_top_class) 
+                rate_item.append(indus_top_diff)                                    
             else:
-                rate_columns = ["date"] + ["trend_value","trend_correct","indus_top_class","indus_top_diff",
-                         "indus_bitop_diff","fall_top_corr","raise_top_corr","f1_score"]                   
-            # 添加多空判断预测信息 
-            rate_item.append(0) 
-            rate_item.append(0) 
-            rate_item.append(0) 
-            rate_item.append(0) 
-            rate_item.append(0) 
-            trend_fall_result = import_price_result[import_price_result['trend_flag']==0]
-            trend_raise_result = import_price_result[import_price_result['trend_flag']==1]
-            fall_corr = np.sum(trend_fall_result['yield_rate'].values>0)/trend_fall_result.shape[0]
-            rate_item.append(fall_corr) 
-            raise_corr = np.sum(trend_raise_result['yield_rate'].values>0)/trend_raise_result.shape[0]
-            rate_item.append(raise_corr) 
-            rate_item.append(0) 
+                rate_columns = ["date"] + ["trend_value","trend_correct","indus_top_class","indus_top_diff"]                   
+                # 添加多空判断预测信息 
+                rate_item.append(trend_value) 
+                rate_item.append(main_trend_correct) 
+                rate_item.append(indus_top_class) 
+                rate_item.append(indus_top_diff)     
             rate_total.append(rate_item)
             
         if predict_mode:
@@ -911,7 +901,7 @@ class FuturesIndustryDRollModule(MlpModule):
         """收集预测对应的实际数据"""
     
         import_price_result = None
-        if self.step_mode!=1:
+        if self.train_step_mode!=1:
             import_price_result = []
             # 对于预测数据，生成对应涨跌幅类别
             for i,imp_idx in enumerate(import_index):
@@ -1015,11 +1005,11 @@ class FuturesIndustryDRollModule(MlpModule):
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
         # 不同阶段，使用不同的策略
-        if self.step_mode==0:
+        if self.train_step_mode==0:
             indus_top_index,trend_value,result_list = self.strategy_top_indus(cls_values,ce_values,
                                         target=target,target_info=target_info,index_round_targets=index_round_targets,
                                    combine_instrument=combine_instrument)
-        elif self.step_mode==1:
+        elif self.train_step_mode==1:
             indus_top_index,trend_value,result_list = self.strategy_top_indus(cls_values,ce_values,
                                         target=target,target_info=target_info,index_round_targets=index_round_targets,
                                    combine_instrument=combine_instrument)           
@@ -1234,7 +1224,7 @@ class FuturesIndustryDRollModule(MlpModule):
     ##############################  Predict Part ################################
 
     def on_predict_start(self):  
-        if self.step_mode==2:
+        if self.train_step_mode==2:
             # 第二阶段，首先加载预存结果
             with open(self.result_file_path, "rb") as fin:
                 self.result_data = pickle.load(fin)   
@@ -1284,7 +1274,7 @@ class FuturesIndustryDRollModule(MlpModule):
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
         result_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
         result_target = {}
-        if self.step_mode==1:
+        if self.train_step_mode==1:
             with open(self.result_file_path, "wb") as fout:
                 pickle.dump(result_date_list, fout)     
             self.result_target = None

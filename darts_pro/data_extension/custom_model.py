@@ -86,6 +86,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         del model_kwargs["model_type"]
         del model_kwargs["target_mode"]
         del model_kwargs["scale_mode"]
+        del model_kwargs["train_step_mode"]
         if "cut_len" in model_kwargs:
             del model_kwargs["cut_len"]
         if "step_mode" in model_kwargs:
@@ -105,15 +106,6 @@ class TFTExtModel(MixedCovariatesTorchModel):
             # This is the default if no loss information is provided
             model_kwargs["loss_fn"] = None
             model_kwargs["likelihood"] = QuantileRegression()
-            
-        # 单独定制不确定损失
-        # if self.use_weighted_loss_func:
-        #     # 定义损失函数种类数量
-        #     params = torch.ones(loss_number, requires_grad=True)
-        #     loss_fn = UncertaintyLoss(device=self.device)    
-        #     model_kwargs["loss_fn"] = loss_fn 
-        #     model_kwargs["likelihood"] = likelihood
-        #     self.loss_number = loss_number
             
         super().__init__(**self._extract_torch_model_params(**model_kwargs))
 

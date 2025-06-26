@@ -64,7 +64,7 @@ class Executor(object):
                 continue   
             
             # 限定在3分钟的间隔频次  
-            if event.event_type == EVENT.BAR and (now.minute%1!=0):
+            if event.event_type == EVENT.BAR and (now.minute%3!=0):
                 continue                  
             # 轮询各个事件并进行处理 
             if event.event_type == EVENT.TICK:
