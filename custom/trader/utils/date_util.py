@@ -1,3 +1,4 @@
+import time
 import datetime as dt
 from datetime import datetime,timedelta
 import calendar
@@ -103,6 +104,18 @@ def get_first_and_last_day(year,month):
     firstDay = dt.date(year,month,day=1)
     lastDay = dt.date(year,month,day=monthCountDay)
     return firstDay,lastDay
+
+def get_first_and_last_datetime(day):
+    """取得指定日期的第一分钟，和最后一分钟的时间戳"""
+    
+    first_time = dt.datetime(day.year,day.month,day.day,0,0,0)
+    timeArray = time.strptime(first_time, "%Y-%m-%d %H:%M:%S")
+    first_timestamp = time.mktime(timeArray)
+    last_time = dt.datetime(day.year,day.month,day.day,23,59,59)
+    timeArray = time.strptime(last_time, "%Y-%m-%d %H:%M:%S")
+    last_timestamp = time.mktime(timeArray)
+    
+    return first_timestamp,last_timestamp
 
 def get_previous_month(date):
     """取得上个月月份字符串"""

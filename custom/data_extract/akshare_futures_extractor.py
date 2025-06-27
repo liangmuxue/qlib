@@ -347,8 +347,8 @@ if __name__ == "__main__":
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2501", period="1")
     # print(futures_zh_minute_sina_df)
     # 历史行情
-    # futures_zh_daily_sina_df = ak.futures_zh_daily_sina(symbol="BR2201")
-    # print(futures_zh_daily_sina_df)
+    futures_zh_daily_sina_df = ak.futures_zh_daily_sina(symbol="BR2201")
+    print(futures_zh_daily_sina_df)
     # 外盘品种
     # futures_hq_subscribe_exchange_symbol_df = ak.futures_hq_subscribe_exchange_symbol()
     # print(futures_hq_subscribe_exchange_symbol_df)
@@ -394,7 +394,7 @@ if __name__ == "__main__":
     # 导入交易时间表
     # extractor.import_variety_trade_schedule()    
     # 导入主力连续历史数据
-    extractor.import_his_data()
+    # extractor.import_his_data()
     # 导入主力合约历史数据
     # extractor.import_main_his_data()    
     # 导入历史拓展数据

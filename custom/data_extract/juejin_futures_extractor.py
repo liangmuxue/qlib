@@ -1,7 +1,7 @@
 from data_extract.his_data_extractor import HisDataExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
 from trader.utils.date_util import get_previous_month,get_next_month
-from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
+from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType,get_period_name
 
 import os
 from pathlib import Path
@@ -18,9 +18,6 @@ import pandas as pd
 import datetime
 import time
 import sqlalchemy
-
-from cus_utils.log_util import AppLogger
-from data_extract.his_data_extractor import HisDataExtractor,get_period_name
 
 class JuejinFuturesExtractor(HisDataExtractor):
     """掘金期货数据源"""
@@ -349,8 +346,8 @@ class JuejinFuturesExtractor(HisDataExtractor):
                 item_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)
                 print("{} ok,shape:{}".format(filepath,item_df.shape[0]))
         # 关联字段挂接
-        upt_sql = "update dominant_real_data_1min d set d.var_id=(select id from trading_variety t where t.code=LEFT(d.code, LENGTH(d.code)-4))"
-        self.dbaccessor.do_updateto(upt_sql)   
+        # upt_sql = "update dominant_real_data_1min d set d.var_id=(select id from trading_variety t where t.code=LEFT(d.code, LENGTH(d.code)-4))"
+        # self.dbaccessor.do_updateto(upt_sql)   
         # 使用收盘价作为结算价
         upt_sql = "update dominant_real_data_1min set settle=close"        
         self.dbaccessor.do_updateto(upt_sql)   
@@ -378,9 +375,9 @@ if __name__ == "__main__":
     # 导入主力合约历史日行情数据
     # extractor.import_main_his_data_local()
     # 导入主力合约1分钟历史行情数据
-    # extractor.import_main_1min_data_local()
+    extractor.import_main_1min_data_local()
     # 根据主力合约数据，导入主力连续日行情数据
-    extractor.import_continues_data_local_by_main()
+    # extractor.import_continues_data_local_by_main()
         
     # begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()
     # end = datetime.datetime.strptime("20220701", "%Y%m%d").date()
