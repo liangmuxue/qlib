@@ -4,11 +4,6 @@ from qlib.log import get_module_logger
 from typing import Union, List, Tuple, Dict, Text, Optional
 from inspect import getfullargspec
 
-from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
-from tft.timeseries_cus import TimeSeriesCusDataset
-from tft.timeseries_crf import TimeSeriesCrfDataset
-from tft.timeseries_numpy import TimeSeriesNumpyDataset
-
 import bisect
 from typing import Any, Callable, Dict, List, Tuple, Union
 from copy import deepcopy
@@ -142,60 +137,6 @@ class TFTDataset(DatasetH):
         data["month"] = data["month"].str.slice(5,7)
         data["dayofweek"] = data.datetime.dt.dayofweek.astype("str").astype("category")    
         return data
-            
-    def get_ts_dataset(self,data,mode="train",train_ts=None):
-        """
-        取得TimeSeriesDataSet对象
-
-        Parameters
-        ----------
-        data : DataFrame 已经生成的panda数据
-        """     
-        
-        # return self.get_ts_dataset_test(data,mode=mode)
-        # 每批次的训练长度
-        max_encoder_length = self.step_len
-        # 每批次的预测长度
-        max_prediction_length = self.pred_len
-        # 取得各个因子名称，组装为动态连续变量
-        time_varying_unknown_reals = self.reals_cols.tolist()
-        # 商品价格指数，用于静态连续变量
-        qyspjg = ["qyspjg_total","qyspjg_yoy","qyspjg_mom"]
-        qyspjg = []
-        # 动态离散变量，可以使用财务数据
-        time_varying_unknown_categoricals = []
-        # 获取配置文件参数，生成TimeSeriesDataSet类型的对象
-        special_days = []
-        tsdata = TimeSeriesCusDataset(
-            data,
-            time_idx="time_idx",
-            target="label",
-            # 分组字段: 股票代码
-            group_ids=["instrument"],
-            min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
-            max_encoder_length=max_encoder_length,
-            min_prediction_length=1,
-            max_prediction_length=max_prediction_length,
-            # 静态固定变量: 股票代码
-            static_categoricals=["instrument"], # ["instrument"],
-            # 静态连续变量:每年的股市整体和外部经济环境数据
-            static_reals=qyspjg,
-            # 动态离散变量:日期
-            time_varying_known_categoricals=["dayofweek"],
-            # 动态已知离散变量: 节假日
-            # variable_groups={"special_days": special_days},
-            time_varying_known_reals=["time_idx"],
-            time_varying_unknown_categoricals=time_varying_unknown_categoricals,
-            time_varying_unknown_reals=time_varying_unknown_reals,
-            target_normalizer=GroupNormalizer(groups=["instrument"],transformation="softplus", center=False),
-            add_relative_time_idx=False,
-            add_target_scales=True,
-            add_encoder_length=False,
-            viz=self.viz,
-        )
-        if mode=="valid":
-            tsdata = TimeSeriesCusDataset.from_dataset(tsdata, data, predict=True, stop_randomization=True)
-        return tsdata     
 
         
     

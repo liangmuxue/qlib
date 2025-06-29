@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import torch.optim  as optim
 import numpy as np
-from losses.crf_loss import CrfLoss
 
 class Net(nn.Module):
     def __init__(self,n_input,n_hidden,n_output):

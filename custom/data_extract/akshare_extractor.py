@@ -1,4 +1,4 @@
-from data_extract.his_data_extractor import HisDataExtractor
+from data_extract.his_data_extractor import FutureExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 
@@ -7,9 +7,6 @@ import pickle
 import os
 
 import akshare as ak
-from akshare.stock_feature.stock_hist_em import (
-    code_id_map_em
-)
 from bs4 import BeautifulSoup
 
 import numpy as np
@@ -112,6 +109,9 @@ class AkExtractor(HisDataExtractor):
         adjust: str = "",
     ) -> pd.DataFrame:
         """重载原方法，改进连接问题"""
+        from akshare.stock_feature.stock_hist_em import (
+            code_id_map_em
+        )        
         code_id_dict = code_id_map_em()
         adjust_dict = {"qfq": "1", "hfq": "2", "": "0"}
         period_dict = {"daily": "101", "weekly": "102", "monthly": "103"}

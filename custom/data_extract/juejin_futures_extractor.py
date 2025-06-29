@@ -1,17 +1,11 @@
 from data_extract.his_data_extractor import HisDataExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
-from trader.utils.date_util import get_previous_month,get_next_month
-from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType,get_period_name
+from data_extract.his_data_extractor import FutureExtractor,PeriodType,MarketType,get_period_name
 
 import os
 from pathlib import Path
 import csv
 from sqlalchemy import create_engine
-
-from akshare.stock_feature.stock_hist_em import (
-    code_id_map_em
-)
-from bs4 import BeautifulSoup
 
 import numpy as np
 import pandas as pd
@@ -19,7 +13,7 @@ import datetime
 import time
 import sqlalchemy
 
-class JuejinFuturesExtractor(HisDataExtractor):
+class JuejinFuturesExtractor(FutureExtractor):
     """掘金期货数据源"""
 
     def __init__(self, backend_channel="juejin",savepath=None,sim_path=None,**kwargs):
@@ -110,18 +104,6 @@ class JuejinFuturesExtractor(HisDataExtractor):
         sim_data['timestamp'] = sim_data['datetime'].dt.tz_localize(tz='Asia/Shanghai').astype(np.int64)//10 ** 9
         self.sim_data = sim_data
             
-    def get_likely_main_contract_names(self,instrument,date):
-        """根据品种编码和指定日期，取得可能的主力合约名称"""
-        
-        #取得当前月，下个月，下下个月3个月份合约名称
-        cur_month = date.strftime('%y%m')
-        next_month = get_next_month(date,next=1)
-        next_month = next_month.strftime("%y%m")
-        next_two_month = get_next_month(date,next=2)
-        next_two_month = next_two_month.strftime("%y%m")
-        
-        return [instrument+cur_month,instrument+next_month,instrument+next_two_month]
-
     def get_time_data_by_symbol_and_day(self,symbol,day,contract_name=None,period=PeriodType.MIN1.value):
         """取得指定品种和对应日期的分时交易记录"""
         

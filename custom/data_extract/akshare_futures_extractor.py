@@ -12,10 +12,6 @@ from sqlalchemy import create_engine
 import sqlalchemy
 
 import akshare as ak
-from akshare.stock_feature.stock_hist_em import (
-    code_id_map_em
-)
-from bs4 import BeautifulSoup
 
 import numpy as np
 import pandas as pd
@@ -23,10 +19,10 @@ import requests
 
 from trader.utils.date_util import get_previous_month,get_next_month
 from cus_utils.log_util import AppLogger
-from data_extract.akshare_extractor import AkExtractor
-from data_extract.his_data_extractor import get_period_name
+from data_extract.his_data_extractor import FutureExtractor,get_period_name
+from data_extract.akshare.futures_daily_bar import get_futures_daily,futures_hist_em,futures_zh_minute_sina
 
-class AkFuturesExtractor(AkExtractor):
+class AkFuturesExtractor(FutureExtractor):
     """akshare期货数据源"""
 
     def __init__(self, backend_channel="ak",savepath=None,**kwargs):
@@ -327,8 +323,145 @@ class AkFuturesExtractor(AkExtractor):
         # 然后导出到qlib
         qlib_dir = "/home/qdata/qlib_data/futures_data"
         super().export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=False)        
-        
     
+    def import_day_range_contract_data(self,begin_date,end_date):
+        """导入指定日期范围的合约数据"""
+        
+        begin_date = datetime.datetime.strptime(str(begin_date), '%Y%m%d').date()
+        end_date = datetime.datetime.strptime(str(end_date), '%Y%m%d').date()
+
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        pd.set_option('display.unicode.ambiguous_as_wide', True)
+        pd.set_option('display.unicode.east_asian_width', True)
+        dtype = {
+            'code': sqlalchemy.String,
+            "date": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
+        }  
+        tar_cols = list(dtype.keys())                
+        date_sql = "select max(date) from dominant_real_data"
+        result_rows = self.dbaccessor.do_query(date_sql) 
+        max_date = result_rows[0][0]          
+        # 如果日期范围内包含了记录中的日期，则修改起始日期
+        if max_date>end_date:
+            print("exceed end date,max date:{}".format(max_date))
+            return        
+        if max_date>begin_date:
+            begin_date = max_date
+        
+        market_sql = "select code from futures_exchange"
+        result_rows = self.dbaccessor.do_query(market_sql) 
+        # 依次轮询各个市场，取得对应合约并插入数据库  
+        for row in result_rows:
+            market_code = row[0]
+            # 先不使用金融期货数据
+            if market_code in ['CFFEX']:
+                continue
+            get_futures_daily_df = get_futures_daily(start_date=begin_date, end_date=end_date, market=market_code)
+            get_futures_daily_df = get_futures_daily_df.rename(columns={"turnover": "hold","symbol": "code"})
+            get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
+
+    def import_day_range_continues_data(self,begin_date,end_date):
+        """导入指定日期范围的主连数据"""
+        
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        pd.set_option('display.unicode.ambiguous_as_wide', True)
+        pd.set_option('display.unicode.east_asian_width', True)
+        dtype = {
+            'code': sqlalchemy.String(10),
+            "date": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
+        }  
+        tar_cols = list(dtype.keys())                
+        date_sql = "select max(date) from dominant_continues_data"
+        result_rows = self.dbaccessor.do_query(date_sql) 
+        max_date = int(result_rows[0][0].strftime("%Y%m%d"))      
+        # 如果日期范围内包含了记录中的日期，则修改起始日期
+        if max_date>end_date:
+            print("exceed end date,max date:{}".format(max_date))
+            return        
+        if max_date>begin_date:
+            begin_date = max_date
+        
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        result_rows = self.dbaccessor.do_query(variety_sql)   
+        # 依次轮询各个品种，取得对应数据并插入数据库  
+        for row in result_rows:
+            var_code = row[0]
+            futures_hist_em_df = futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date))
+            if futures_hist_em_df is None:
+                continue
+            futures_hist_em_df = futures_hist_em_df.rename(
+                columns={"时间": "date","开盘": "open","最高": "high","最低": "low","收盘": "close",
+                         "成交量": "volume","持仓量": "hold"})
+            futures_hist_em_df['code'] = var_code
+            futures_hist_em_df['settle'] = futures_hist_em_df['close']
+            futures_hist_em_df.drop(columns=['涨跌','涨跌幅','成交额'])
+            futures_hist_em_df[tar_cols].to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
+            print("{} import ok".format(var_code))
+            time.sleep(2)
+
+    def import_day_range_1min_data(self):
+        """导入分钟历史数据"""
+        
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        pd.set_option('display.unicode.ambiguous_as_wide', True)
+        pd.set_option('display.unicode.east_asian_width', True)
+        
+        dtype = {
+            'code': sqlalchemy.String,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,   
+            'settle': sqlalchemy.FLOAT,          
+            "date": sqlalchemy.DateTime
+        }        
+        cur_date = datetime.date.today()
+        date_sql = "select max(datetime) from dominant_real_data_1min"
+        result_rows = self.dbaccessor.do_query(date_sql) 
+        max_date = int(result_rows[0][0].strftime("%Y%m%d")) 
+        # 不下载期权数据
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        result_rows = self.dbaccessor.do_query(variety_sql)            
+        # 遍历所有品种，并分别取得历史数据
+        for result in result_rows:
+            code = result[0]
+            # 取得比较接近的合约
+            contract_names = self.get_likely_main_contract_names(code,cur_date)
+            for contract_name in contract_names:
+                status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=contract_name, period="1")
+                # 如果频繁调用限制，则等一会儿再试
+                if status_code==-1:
+                    print("try again later")
+                    time.sleep(60)
+                    futures_zh_minute_sina_df,status_code = futures_zh_minute_sina(symbol=contract_name, period="1")
+                if status_code==0:
+                    print("contract {} has no data".format(contract_name))
+                    continue                    
+                # 只取超出原有数据日期的数据
+                futures_zh_minute_sina_df = futures_zh_minute_sina_df[pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))>max_date]
+                futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
+                time.sleep(5)
+            print("code:{} ok".format(code))
+                           
 if __name__ == "__main__":    
     
     extractor = AkFuturesExtractor(savepath="/home/qdata/futures_data")   
@@ -347,8 +480,14 @@ if __name__ == "__main__":
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2501", period="1")
     # print(futures_zh_minute_sina_df)
     # 历史行情
-    futures_zh_daily_sina_df = ak.futures_zh_daily_sina(symbol="BR2201")
-    print(futures_zh_daily_sina_df)
+    # futures_hist_em_df = futures_hist_em(symbol="CU", period="daily")
+    # print(futures_hist_em_df)    
+    # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="RB0", period="1")
+    # print(futures_zh_minute_sina_df)
+    # get_futures_daily_df = get_futures_daily(start_date="20250501", end_date="20250516", market="DCE")
+    # print(get_futures_daily_df)    
+    # futures_zh_daily_em_df = ak.futures_hist_em(symbol="BR2201")
+    # print(futures_zh_daily_em_df)
     # 外盘品种
     # futures_hq_subscribe_exchange_symbol_df = ak.futures_hq_subscribe_exchange_symbol()
     # print(futures_hq_subscribe_exchange_symbol_df)
@@ -406,4 +545,8 @@ if __name__ == "__main__":
     # 导出到qlib
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
+    
+    # extractor.import_day_range_contract_data(20250503,20250515)
+    # extractor.import_day_range_continues_data(20250603,20250628)
+    extractor.import_day_range_1min_data()
             

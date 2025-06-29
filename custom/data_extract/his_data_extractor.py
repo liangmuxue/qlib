@@ -11,13 +11,14 @@ import datetime
 from tqdm import tqdm
 import pandas as pd
 import pickle
-
-from cus_utils.db_accessor import DbAccessor
-from cus_utils.log_util import AppLogger
 from persistence.common_dict import CommonDictType,CommonDict
 from pandas._libs.tslibs import period
 from trader.utils.date_util import get_tradedays_dur,date_string_transfer
 from scripts.dump_bin import DumpDataAll
+
+from cus_utils.db_accessor import DbAccessor
+from cus_utils.log_util import AppLogger
+from trader.utils.date_util import get_previous_month,get_next_month
 
 logger = AppLogger()
 
@@ -520,6 +521,28 @@ class HisDataExtractor():
     def code_transfer_to_string(self,int_code):
         return str(int_code).zfill(6)
 
+class FutureExtractor(HisDataExtractor):
+    """Future Extractor Parent"""
+    
+    def __init__(self, backend_channel=None,savepath=None,sim_path=None,**kwargs):
+        super().__init__(backend_channel=backend_channel,savepath=savepath,kwargs=kwargs)
+        self.busi_columns = ["datetime","open","high","low","close","volume","hold","settle"]
+        self.col_data_types = {"symbol":str,"open":float,"high":float,"low":float,"close":float,
+                               "volume":float,"hold":float}        
+        self.sim_path = sim_path
+
+    def get_likely_main_contract_names(self,instrument,date):
+        """根据品种编码和指定日期，取得可能的主力合约名称"""
+        
+        #取得当前月，下个月，下下个月3个月份合约名称
+        cur_month = date.strftime('%y%m')
+        next_month = get_next_month(date,next=1)
+        next_month = next_month.strftime("%y%m")
+        next_two_month = get_next_month(date,next=2)
+        next_two_month = next_two_month.strftime("%y%m")
+        
+        return [instrument+cur_month,instrument+next_month,instrument+next_two_month]
+            
 if __name__ == "__main__":    
     
     from data_extract.akshare_extractor import AkExtractor

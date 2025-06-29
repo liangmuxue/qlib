@@ -4,6 +4,7 @@ from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketTy
 
 import time
 import datetime
+from datetime import timedelta
 import math
 import pickle
 import os
@@ -19,7 +20,7 @@ from tqsdk import TqApi, TqAuth
 
 import numpy as np
 import pandas as pd
-import requests
+from pandas import Timestamp
 
 from trader.utils.date_util import get_first_and_last_datetime,tradedays,get_next_month
 from cus_utils.log_util import AppLogger
@@ -30,6 +31,8 @@ class TqFuturesExtractor(HisDataExtractor):
     """天勤期货数据源"""
 
     def __init__(self, backend_channel="tq",savepath=None,**kwargs):
+        
+        super().__init__(backend_channel=backend_channel,savepath=savepath,**kwargs)
         self.busi_columns = ["code","date","open","high","low","close","volume","hold","settle"]
         self.api = TqApi(auth=TqAuth("liangmuxue", "182828"))
           
@@ -51,7 +54,10 @@ class TqFuturesExtractor(HisDataExtractor):
         # 一天按照360分钟交易时间粗略评估
         minute_numbers = 360*date_duration
         # 取得一直到目前的所有数据，并按照日期筛选实际结果
-        klines = api.get_kline_serial(tq_symbol, 60,minute_numbers)
+        klines = api.get_kline_serial(tq_symbol, 60,100)
+        klines["real_datetime"]: datetime = klines[
+                    "datetime"].apply(
+                    lambda x: Timestamp(x).to_pydatetime() + timedelta(hours=8))
         first_timestamp,last_timestamp = get_first_and_last_datetime(date)
         klines = klines[(klines['datetime']>=first_timestamp)&(klines['datetime']<=last_timestamp)]
                  
@@ -60,7 +66,8 @@ class TqFuturesExtractor(HisDataExtractor):
     def transfer_symbol_code(self,symbol_code): 
         """标准合约名称转换为天勤对应的合约名称"""      
         
-        sql = "select f.code as ex_code from future_exchange f,trading_variety t where t.exchange_id=f.id and f.code='{}'".format(symbol_code)
+        code = symbol_code[:-4]
+        sql = "select f.code as ex_code from futures_exchange f,trading_variety t where t.exchange_id=f.id and t.code='{}'".format(code)
         results = self.dbaccessor.do_query(sql)
         if len(results)==0:
             return None
@@ -160,25 +167,6 @@ class TqFuturesExtractor(HisDataExtractor):
         upt_sql = "update dominant_real_data_sina set settle=close where settle=0 and close>0 "
         self.dbaccessor.do_updateto(upt_sql)
 
-    def build_industry_data(self):
-        """生成行业板块历史行情数据"""
-        
-        # 汇总每天每个行业板块的成交信息（忽略已经生成的行业数据）
-        combine_sql = "select d.date,concat('ZS_',i.code) as v_code,avg(d.open),avg(d.close),avg(d.high), "\
-            "avg(d.low),avg(d.volume),avg(hold),avg(settle) " \
-            "from dominant_continues_data d,trading_variety v,futures_industry i where d.var_id=v.id and v.industry_id=i.id " \
-            " and v.available=1 and v.magin_radio is not null" \
-            " and d.date not in(select date from dominant_continues_data where code like 'ZS_%') group by d.date,v.industry_id"
-        combine_sql = "insert into dominant_continues_data(date,code,open,close,high,low,volume,hold,settle) ({})".format(combine_sql)
-        self.dbaccessor.do_inserto(combine_sql)    
-        # 生成总体指数数据
-        # combine_sql = "select d.date,'ZS_all' as v_code,avg(d.open),avg(d.close),avg(d.high), "\
-        #     "avg(d.low),avg(d.volume),avg(hold),avg(settle) from dominant_continues_data d where d.code like 'ZS_%' and d.code<>'ZS_all'" \
-        #     " and d.date not in(select date from dominant_continues_data where code='ZS_all') group by d.date"
-        # combine_sql = "insert into dominant_continues_data(date,code,open,close,high,low,volume,hold,settle) ({})".format(combine_sql)
-        # self.dbaccessor.do_inserto(combine_sql)   
-                  
-
     def test_api(self):
         api = self.api
         # quote = self.api.get_quote("SHFE.ni2206")        
@@ -194,7 +182,9 @@ if __name__ == "__main__":
     
     extractor = TqFuturesExtractor(savepath="/home/qdata/futures_data")   
     save_path = "custom/data/results/futures"
-    extractor.test_api()
+    # extractor.test_api()
+    date = datetime.datetime(2025,6,25).date()
+    extractor.extract_item_data("CU2505", date)
     
     # 期货规则-交易日历表,交易品种
     # futures_rule_df = ak.futures_rule(date="20231205")

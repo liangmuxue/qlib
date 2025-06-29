@@ -5,11 +5,6 @@ from qlib.log import get_module_logger
 from typing import Union, List, Tuple, Dict, Text, Optional
 from inspect import getfullargspec
 
-from pytorch_forecasting.data.encoders import TorchNormalizer,GroupNormalizer
-from tft.timeseries_cus import TimeSeriesCusDataset
-from tft.timeseries_crf import TimeSeriesCrfDataset
-from tft.timeseries_numpy import TimeSeriesNumpyDataset
-
 import bisect
 from typing import Any, Callable, Dict, List, Tuple, Union
 from copy import deepcopy

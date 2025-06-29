@@ -35,8 +35,6 @@ from qlib.contrib.model.pytorch_utils import count_parameters
 from qlib.model.base import Model
 from qlib.data.dataset import DatasetH, TSDatasetH
 from qlib.data.dataset.handler import DataHandlerLP
-from pytorch_forecasting.metrics import MAE, RMSE, SMAPE, PoissonLoss, QuantileLoss
-from pytorch_forecasting import GroupNormalizer, TemporalFusionTransformer, TimeSeriesDataSet
 from torch.optim.lr_scheduler import CosineAnnealingLR,CosineAnnealingWarmRestarts,StepLR,MultiStepLR
 
 from tft.tft_dataset import TFTDataset
