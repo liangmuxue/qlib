@@ -5,6 +5,17 @@ import calendar
 from chinese_calendar import is_holiday
 from dateutil.relativedelta import relativedelta
 
+def get_next_working_day(day):
+    """取得指定日期的下一工作日"""
+    
+    cur_day = day
+    while(True):
+        next_day = cur_day + timedelta(days=1)
+        if is_working_day(next_day):
+            return next_day
+        cur_day = next_day
+        
+    
 def is_working_day(day):
     """判断是否节假日"""
     

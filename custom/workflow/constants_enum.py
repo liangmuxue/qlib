@@ -6,7 +6,7 @@ from enum import Enum, unique
 class WorkflowType(Enum):
     """工作流类别，1回测 2实盘"""
     backtest = 1 
-    offer = 0
+    offer = 2
 
 @unique
 class WorkflowStatus(Enum):

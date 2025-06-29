@@ -1,6 +1,4 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
-
+import argparse
 import os
 import shutil
 import glob
@@ -24,7 +22,7 @@ from workflow.busi_process.predict_processor import PredictProcessor
 from workflow.busi_process.pred_result_processor import PredResultProcessor
 from workflow.busi_process.backtest_processor import BacktestProcessor
 from workflow.busi_process.offer_processor import OfferProcessor
-from workflow.busi_process.data_processor import DataProcessor
+from workflow.busi_process.futures_data_processor import FuturesDataProcessor
 from workflow.busi_process.classify_processor import ClassifyProcessor
 from workflow.busi_process.simulation_processor import SimulationProcessor
 from workflow.busi_process.replay_processor import ReplayProcessor
@@ -150,7 +148,7 @@ class WorkflowTask(object):
                 logger.debug("wait for next day:{}".format(datetime.now()))
                 time.sleep(60)
             # 如果超出结束日期，则退出
-            if next_working_day>self.config["end_date"]:
+            if self.config["type"]!=WorkflowType.offer.value and next_working_day>self.config["end_date"]:
                 break
 
     def start_single_task(self,detail_task_name):
@@ -452,7 +450,7 @@ class WorkflowSubTask(object):
         dict_code = self.common_dict.get_dict_by_id(self.config["type"])["code"]
         
         if dict_code=="data":
-            processor = DataProcessor(self)        
+            processor = FuturesDataProcessor(self)        
         if dict_code=="train":
             processor = TrainProcessor(self)
         if dict_code=="predict":
@@ -575,7 +573,16 @@ class WorkflowSubTask(object):
 
             
 if __name__ == "__main__":    
+
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--task_batch", type=int, default=0, help="对应批次号，如果新批次则此处为0")
+    parser.add_argument("--workflow_name", type=str, default="", help="流程编码")
+    parser.add_argument("--resume", action='store_true', help="是否为恢复模式")
+    args = parser.parse_args()
     
+    task = WorkflowTask(task_batch=args.task_batch,workflow_name=args.workflow_name,resume=args.resume)
+    task.start_task()
+       
     # For Test
     # task = WorkflowTask(task_batch=76,workflow_name="wf_test",resume=True)
     # task = WorkflowTask(task_batch=0,workflow_name="wf_test",resume=False)
@@ -589,7 +596,7 @@ if __name__ == "__main__":
     # task = WorkflowTask(task_batch=86,workflow_name="wf_data_import_daily",resume=False)
     
     # auto导入
-    # task = WorkflowTask(task_batch=0,workflow_name="wf_data_import_auto",resume=False)
+    # task = WorkflowTask(task_batch=123,workflow_name="wf_data_import_auto",resume=True)
     # task = WorkflowTask(task_batch=91,workflow_name="wf_data_import_increment",resume=True)
 
                 
@@ -599,11 +606,12 @@ if __name__ == "__main__":
     
     # 2022回测工作流
     # task = WorkflowTask(task_batch=0,workflow_name="fur_backtest_flow_2022",resume=False)
-    task = WorkflowTask(task_batch=159,workflow_name="fur_backtest_flow_2022",resume=True)    
+    # task = WorkflowTask(task_batch=159,workflow_name="fur_backtest_flow_2022",resume=True)    
 
     # 2025仿真工作流
     # task = WorkflowTask(task_batch=0,workflow_name="fur_sim_flow_2025",resume=False)
     # task = WorkflowTask(task_batch=162,workflow_name="fur_sim_flow_2025",resume=True)    
         
-    task.start_task()
+    
         
+    

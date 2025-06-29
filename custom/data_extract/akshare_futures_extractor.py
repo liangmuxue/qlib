@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from trader.utils.date_util import get_previous_month,get_next_month
+from trader.utils.date_util import get_next_working_day,get_next_month,is_working_day
 from cus_utils.log_util import AppLogger
 from data_extract.his_data_extractor import FutureExtractor,get_period_name
 from data_extract.akshare.futures_daily_bar import get_futures_daily,futures_hist_em,futures_zh_minute_sina
@@ -324,9 +324,10 @@ class AkFuturesExtractor(FutureExtractor):
         qlib_dir = "/home/qdata/qlib_data/futures_data"
         super().export_to_qlib(qlib_dir,PeriodType.DAY.value,file_name="all.txt",institution=False)        
     
-    def import_day_range_contract_data(self,begin_date,end_date):
+    def import_day_range_contract_data(self,data_range=None):
         """导入指定日期范围的合约数据"""
         
+        begin_date,end_date = data_range
         begin_date = datetime.datetime.strptime(str(begin_date), '%Y%m%d').date()
         end_date = datetime.datetime.strptime(str(end_date), '%Y%m%d').date()
 
@@ -365,12 +366,19 @@ class AkFuturesExtractor(FutureExtractor):
             if market_code in ['CFFEX']:
                 continue
             get_futures_daily_df = get_futures_daily(start_date=begin_date, end_date=end_date, market=market_code)
+            if get_futures_daily_df.shape[0]==0:
+                continue
             get_futures_daily_df = get_futures_daily_df.rename(columns={"turnover": "hold","symbol": "code"})
+            if get_futures_daily_df['open'].dtypes.hasobject:
+                get_futures_daily_df['open'] = get_futures_daily_df['open'].astype(str)
+                get_futures_daily_df = get_futures_daily_df[get_futures_daily_df['open'].str.len()>0]
+                get_futures_daily_df['open'] = get_futures_daily_df['open'].astype(float)
             get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
 
-    def import_day_range_continues_data(self,begin_date,end_date):
+    def import_day_range_continues_data(self,data_range=None):
         """导入指定日期范围的主连数据"""
         
+        begin_date,end_date = data_range
         engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
             self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
         pd.set_option('display.unicode.ambiguous_as_wide', True)
@@ -391,11 +399,15 @@ class AkFuturesExtractor(FutureExtractor):
         result_rows = self.dbaccessor.do_query(date_sql) 
         max_date = int(result_rows[0][0].strftime("%Y%m%d"))      
         # 如果日期范围内包含了记录中的日期，则修改起始日期
-        if max_date>end_date:
+        if max_date>=end_date:
             print("exceed end date,max date:{}".format(max_date))
             return        
         if max_date>begin_date:
-            begin_date = max_date
+            begin_date = get_next_working_day(max_date)
+        
+        if begin_date==end_date and not is_working_day(str(end_date)):
+            print("not working day:{}".format(end_date))
+            return
         
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(variety_sql)   
@@ -415,9 +427,10 @@ class AkFuturesExtractor(FutureExtractor):
             print("{} import ok".format(var_code))
             time.sleep(2)
 
-    def import_day_range_1min_data(self):
+    def import_day_range_1min_data(self,data_range=None):
         """导入分钟历史数据"""
         
+        begin_date,end_date = data_range
         engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
             self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
         pd.set_option('display.unicode.ambiguous_as_wide', True)
@@ -438,6 +451,11 @@ class AkFuturesExtractor(FutureExtractor):
         date_sql = "select max(datetime) from dominant_real_data_1min"
         result_rows = self.dbaccessor.do_query(date_sql) 
         max_date = int(result_rows[0][0].strftime("%Y%m%d")) 
+        if max_date>=end_date:
+            print("exceed date:{}".format(max_date))
+            return
+        if max_date>begin_date:
+            begin_date = max_date      
         # 不下载期权数据
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(variety_sql)            
@@ -457,11 +475,15 @@ class AkFuturesExtractor(FutureExtractor):
                     print("contract {} has no data".format(contract_name))
                     continue                    
                 # 只取超出原有数据日期的数据
-                futures_zh_minute_sina_df = futures_zh_minute_sina_df[pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))>max_date]
+                futures_zh_minute_sina_df = futures_zh_minute_sina_df[
+                    (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))>begin_date)&
+                    (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))<=end_date)]
                 futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
                 time.sleep(5)
             print("code:{} ok".format(code))
-                           
+    
+    
+                        
 if __name__ == "__main__":    
     
     extractor = AkFuturesExtractor(savepath="/home/qdata/futures_data")   
@@ -546,7 +568,7 @@ if __name__ == "__main__":
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     
-    # extractor.import_day_range_contract_data(20250503,20250515)
-    # extractor.import_day_range_continues_data(20250603,20250628)
-    extractor.import_day_range_1min_data()
+    # extractor.import_day_range_contract_data(data_range=(20250503,20250515))
+    # extractor.import_day_range_continues_data(data_range=(20250603,20250628))
+    # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
             
