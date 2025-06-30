@@ -17,12 +17,42 @@ import numpy as np
 import pandas as pd
 import requests
 
-from akshare.futures.futures_hist_em import __get_exchange_symbol_map,__futures_hist_separate_char_and_numbers_em
 from akshare.futures import cons
 from akshare.futures.requests_fun import requests_link
 
 calendar = cons.get_calendar()
 
+def __futures_hist_separate_char_and_numbers_em(symbol: str = "焦煤2506") -> tuple:
+    """
+    东方财富网-期货行情-交易所品种对照表原始数据
+    https://quote.eastmoney.com/qihuo/al2505.html
+    :param symbol: 股票代码
+    :type symbol: str
+    :return: 交易所品种对照表原始数据
+    :rtype: pandas.DataFrame
+    """
+    char = re.findall(pattern="[\u4e00-\u9fa5a-zA-Z]+", string=symbol)
+    numbers = re.findall(pattern=r"\d+", string=symbol)
+    return char[0], numbers[0]
+
+def __get_exchange_symbol_map() -> Tuple[Dict, Dict, Dict, Dict]:
+    """
+    东方财富网-期货行情-交易所品种映射
+    https://quote.eastmoney.com/qihuo/al2505.html
+    :return: 交易所品种映射
+    :rtype: pandas.DataFrame
+    """
+    all_exchange_symbol_list = __fetch_exchange_symbol_raw_em()
+    c_contract_mkt = {}
+    c_contract_to_e_contract = {}
+    e_symbol_mkt = {}
+    c_symbol_mkt = {}
+    for item in all_exchange_symbol_list:
+        c_contract_mkt[item["name"]] = item["mktid"]
+        c_contract_to_e_contract[item["name"]] = item["code"]
+        e_symbol_mkt[item["vcode"]] = item["mktid"]
+        c_symbol_mkt[item["vname"]] = item["mktid"]
+    return c_contract_mkt, c_contract_to_e_contract, e_symbol_mkt, c_symbol_mkt
 
 def _futures_daily_czce(
     date: str = "20100824", dataset: str = "datahistory2010"
