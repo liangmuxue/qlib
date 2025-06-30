@@ -14,7 +14,11 @@ def get_next_working_day(day):
         if is_working_day(next_day):
             return next_day
         cur_day = next_day
-        
+
+def get_previous_day(day):
+    """取得指定日期的上一日"""
+    
+    return day + timedelta(days=-1)
     
 def is_working_day(day):
     """判断是否节假日"""

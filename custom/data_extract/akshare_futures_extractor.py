@@ -568,7 +568,7 @@ if __name__ == "__main__":
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     
-    # extractor.import_day_range_contract_data(data_range=(20250503,20250515))
+    extractor.import_day_range_contract_data(data_range=(20250503,20250515))
     # extractor.import_day_range_continues_data(data_range=(20250603,20250628))
     # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
             

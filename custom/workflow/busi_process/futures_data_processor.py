@@ -8,9 +8,8 @@ import json
 
 from .base_processor import BaseProcessor
 from cus_utils.db_accessor import DbAccessor
-from workflow.constants_enum import LocalDataSourceType
 from data_extract.his_data_extractor import get_period_value
-from trader.utils.date_util import get_tradedays_dur
+from trader.utils.date_util import get_previous_day
 
 import warnings
 
@@ -55,10 +54,11 @@ class FuturesDataProcessor(BaseProcessor):
             t = init_instance_by_config(
                 config,
             )           
-            # 如果自动导入模式，则从原数据中找到最近日期作为开始日期，以当前日工作日前一天作为结束日期
+            # 如果自动导入模式，则以当前日工作日前一天作为开始结束日期
             if self.auto_import:
-                start_date = working_day
-                end_date = working_day       
+                prev_day = datetime.strptime(str(working_day), '%Y%m%d').date()
+                start_date = int(get_previous_day(prev_day).strftime('%Y%m%d'))
+                end_date = int(get_previous_day(prev_day).strftime('%Y%m%d'))
             
             # 动态调用导入数据对应的类方法 
             import_func_names = config["kwargs"]["data_import_func_names"]
@@ -68,21 +68,6 @@ class FuturesDataProcessor(BaseProcessor):
                 method(args) 
             
         
-    def get_local_data_info(self,code,period):    
-        """取得本地数据里最后一天作为开始日期""" 
-        
-        sql = "select id,start_date,end_date,data_path from local_data_source where code=%s and period_type=%s"
-        rows = self.db_accessor.do_query(sql,(code,period))
-        if len(rows)==0:
-            return None
-        data_info = {"id":rows[0][0],"start_date":rows[0][1],"end_date":rows[0][2],"data_path":rows[0][3]}
-        return data_info
- 
-    def update_last_local_data_date(self,code,period,end_date):    
-        """更新本地数据里的结束日期字段""" 
-        
-        sql = "update local_data_source set end_date=%s where code=%s and period_type=%s"
-        self.db_accessor.do_inserto_withparams(sql,(end_date,code,period))
     
                
     
