@@ -351,7 +351,7 @@ class AkFuturesExtractor(FutureExtractor):
         result_rows = self.dbaccessor.do_query(date_sql) 
         max_date = result_rows[0][0]          
         # 如果日期范围内包含了记录中的日期，则修改起始日期
-        if max_date>end_date:
+        if max_date>=end_date:
             print("exceed end date,max date:{}".format(max_date))
             return        
         if max_date>begin_date:

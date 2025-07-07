@@ -150,6 +150,7 @@ class TFTDataset(DatasetH):
         data["label"] = data["label"].astype("float64")
         # 使用前几天的移动平均值作为目标数值
         data["label_ori"] = data["label"]
+        data.reset_index(drop = True, inplace = True)
         data["price_norm"] = data[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5)) 
         # Mock
         data["diff_range"] = data["price_norm"] 

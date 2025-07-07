@@ -33,7 +33,8 @@ DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
 DRAW_SEQ_DETAIL = [0]
 
-warnings.filterwarnings("ignore", category=pd.core.common.SettingWithCopyWarning)
+from pandas.errors import SettingWithCopyWarning
+warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 class FuturesIndustryDRollModule(MlpModule):
     """整合行业板块的总体模型"""              
