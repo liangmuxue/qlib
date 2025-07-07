@@ -35,6 +35,30 @@ def __futures_hist_separate_char_and_numbers_em(symbol: str = "焦煤2506") -> t
     numbers = re.findall(pattern=r"\d+", string=symbol)
     return char[0], numbers[0]
 
+
+def __fetch_exchange_symbol_raw_em() -> list:
+    """
+    东方财富网-期货行情-交易所品种对照表原始数据
+    https://quote.eastmoney.com/qihuo/al2505.html
+    :return: 交易所品种对照表原始数据
+    :rtype: pandas.DataFrame
+    """
+    url = "https://futsse-static.eastmoney.com/redis"
+    params = {"msgid": "gnweb"}
+    r = requests.get(url, params=params)
+    data_json = r.json()
+    all_exchange_symbol_list = []
+    for item in data_json:
+        params = {"msgid": str(item["mktid"])}
+        r = requests.get(url, params=params)
+        inner_data_json = r.json()
+        for num in range(1, len(inner_data_json) + 1):
+            params = {"msgid": str(item["mktid"]) + f"_{num}"}
+            r = requests.get(url, params=params)
+            inner_data_json = r.json()
+            all_exchange_symbol_list.extend(inner_data_json)
+    return all_exchange_symbol_list
+
 def __get_exchange_symbol_map() -> Tuple[Dict, Dict, Dict, Dict]:
     """
     东方财富网-期货行情-交易所品种映射
@@ -767,12 +791,15 @@ def futures_hist_em(
     for key in c_contract_to_e_contract.keys():
         value = c_contract_to_e_contract[key]
         # 查找所有数据其中最后一位为m的编码（表示为主连），并和指定编码匹配
-        if not value.endswith("m"):
-            continue
-        code = value[:-1]
-        if code==symbol.lower():
-            sec_id = f"{c_contract_mkt[key]}.{c_contract_to_e_contract[key]}"
-            break
+        if len(symbol)<4 and value.endswith("m"):
+            code = value[:-1]
+            if code==symbol.lower():
+                sec_id = f"{c_contract_mkt[key]}.{c_contract_to_e_contract[key]}"
+                break
+        elif re.match(pattern=".*\d$", string=value):
+            if value==symbol.lower():
+                sec_id = f"{c_contract_mkt[key]}.{c_contract_to_e_contract[key]}"
+                break            
     if sec_id is None:
         print("Not Found symbol:{}".format(symbol))
         return None
@@ -792,6 +819,8 @@ def futures_hist_em(
     r = requests.get(url, timeout=15, params=params)
     data_json = r.json()
     temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
+    if temp_df is None or temp_df.shape[0]==0:
+        return None
     temp_df.columns = [
         "时间",
         "开盘",

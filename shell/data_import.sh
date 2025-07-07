@@ -1,0 +1,2 @@
+export PYTHONPATH="${PYTHONPATH}:/home/qdata/project/qlib:/home/qdata/project/qlib/custom:/home/qdata/project/qlib/projects/backtrader:/home/qdata/project/qlib/projects/darts:/home/qdata/project/qlib/projects/FinRL:/home/qdata/projects/qlib/project/rqalpha"
+/home/bavon/miniconda3/envs/py39/bin/python /home/qdata/project/qlib/custom/data_extract/akshare_futures_extractor.py

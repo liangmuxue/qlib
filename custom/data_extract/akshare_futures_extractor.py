@@ -2,6 +2,7 @@ from data_extract.his_data_extractor import HisDataExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 
+import re
 import time
 import datetime
 import math
@@ -351,7 +352,7 @@ class AkFuturesExtractor(FutureExtractor):
         result_rows = self.dbaccessor.do_query(date_sql) 
         max_date = result_rows[0][0]          
         # 如果日期范围内包含了记录中的日期，则修改起始日期
-        if max_date>end_date:
+        if max_date>=end_date:
             print("exceed end date,max date:{}".format(max_date))
             return        
         if max_date>begin_date:
@@ -375,6 +376,57 @@ class AkFuturesExtractor(FutureExtractor):
                 get_futures_daily_df['open'] = get_futures_daily_df['open'].astype(float)
             get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
 
+    def import_day_range_contract_data_em(self,data_range=None):
+        """导入指定日期范围的合约数据,Easy Money Mode"""
+        
+        begin_date,end_date = data_range
+        begin_date = datetime.datetime.strptime(str(begin_date), '%Y%m%d').date()
+        end_date = datetime.datetime.strptime(str(end_date), '%Y%m%d').date()
+
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        pd.set_option('display.unicode.ambiguous_as_wide', True)
+        pd.set_option('display.unicode.east_asian_width', True)
+        dtype = {
+            'code': sqlalchemy.String,
+            "date": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
+        }  
+        tar_cols = list(dtype.keys())                
+        date_sql = "select max(date) from dominant_real_data"
+        result_rows = self.dbaccessor.do_query(date_sql) 
+        max_date = result_rows[0][0]          
+        # 如果日期范围内包含了记录中的日期，则修改起始日期
+        if max_date>=end_date:
+            print("exceed end date,max date:{}".format(max_date))
+            return        
+        if max_date>begin_date:
+            begin_date = max_date
+        
+
+        symbole_list =  ak.futures_hist_table_em()['合约代码']
+
+        for symbol in symbole_list:
+            if not re.match(".*\d$",symbol):
+                continue
+            futures_hist_em_df = futures_hist_em(symbol=symbol,start_date=str(begin_date),end_date=str(end_date))
+            if futures_hist_em_df is None:
+                continue
+            futures_hist_em_df = futures_hist_em_df.rename(
+                columns={"时间": "date","开盘": "open","最高": "high","最低": "low","收盘": "close",
+                         "成交量": "volume","持仓量": "hold"})
+            futures_hist_em_df['code'] = symbol
+            futures_hist_em_df['settle'] = futures_hist_em_df['close']
+            futures_hist_em_df.drop(columns=['涨跌','涨跌幅','成交额'])
+            futures_hist_em_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
+            print("{} import ok".format(symbol))            
+            
     def import_day_range_continues_data(self,data_range=None):
         """导入指定日期范围的主连数据"""
         
@@ -495,6 +547,9 @@ if __name__ == "__main__":
     # 合约情况
     # contract_df = ak.match_main_contract(symbol="shfe") 
     # print(contract_df)
+    # hist_em = ak.futures_hist_table_em() 
+    # print(hist_em)
+    
     # 实时行情
     # futures_zh_spot_df = ak.futures_zh_spot(symbol='FU2501', market="shfe", adjust='0')
     # print(futures_zh_spot_df)
@@ -568,7 +623,8 @@ if __name__ == "__main__":
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     
-    extractor.import_day_range_contract_data(data_range=(20250503,20250515))
+    # extractor.import_day_range_contract_data(data_range=(20250515,20250515))
+    extractor.import_day_range_contract_data_em(data_range=(20250116,20250706))
     # extractor.import_day_range_continues_data(data_range=(20250603,20250628))
     # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
             
