@@ -9,7 +9,7 @@ from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
 from trader.utils.date_util import tradedays,get_tradedays_dur,get_tradedays
 
 import pandas as pd
-from pandas.core.common import SettingWithCopyWarning
+from pandas.errors import SettingWithCopyWarning
 import numpy as np
 import pickle
 import itertools

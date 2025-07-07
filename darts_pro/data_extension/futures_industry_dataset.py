@@ -219,7 +219,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         fur_indus = self.get_fur_industry()
         fur_indus_df = pd.DataFrame(fur_indus,columns=["code","name"])
         # 插入整体指标数据
-        fur_indus_df = fur_indus_df.append(pd.DataFrame(np.array([['ZS_all','综合']]),columns=["code","name"]),ignore_index=True)
+        fur_indus_df = pd.concat([fur_indus_df,pd.DataFrame(np.array([['ZS_all','综合']]),columns=["code","name"])],ignore_index=True)
         # 生成继承映射关系对象
         sw_ins_mappings = FuturesMappingUtil.build_accord_mapping(target_series, fur_indus_df, instrument_df, dataset=dataset)
         return sw_ins_mappings

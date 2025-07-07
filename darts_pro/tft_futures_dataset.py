@@ -9,7 +9,6 @@ from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
 from trader.utils.date_util import tradedays,get_tradedays_dur,get_tradedays
 
 import pandas as pd
-from pandas.core.common import SettingWithCopyWarning
 import numpy as np
 import pickle
 import itertools
@@ -136,10 +135,10 @@ class TFTFuturesDataset(TFTSeriesDataset):
         
         group_cols = ['datetime','industry']
         # 添加行并根据行业取平均值
-        df_mean = df.groupby(group_cols).mean().reset_index()
+        df_mean = df.groupby(group_cols).mean(numeric_only=True).reset_index()
         df_mean['industry'] = df_mean['industry'].astype(str)
         # 针对整体数值取平均值
-        df_total_mean = df.groupby('datetime').mean().reset_index()
+        df_total_mean = df.groupby('datetime').mean(numeric_only=True).reset_index()
         indus_sql = "select  id from futures_industry where code='all'"   
         indus_id = self.dbaccessor.do_query(indus_sql)[0][0]
         df_total_mean['industry'] = str(indus_id)
