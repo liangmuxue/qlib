@@ -34,7 +34,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         """数据预处理"""
  
         # 补充行业数据
-        indus_sql = "select code,industry_id from trading_variety union (select upper(concat('zs_',code)), id from futures_industry)"   
+        indus_sql = "select code,industry_id from trading_variety union (select upper(concat('zs_',code)), id from futures_industry where delete_flag=0)"   
         indus_data = self.dbaccessor.do_query(indus_sql)
         indus_info_arr = []
         for item in indus_data:
@@ -139,7 +139,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df_mean['industry'] = df_mean['industry'].astype(str)
         # 针对整体数值取平均值
         df_total_mean = df.groupby('datetime').mean(numeric_only=True).reset_index()
-        indus_sql = "select  id from futures_industry where code='all'"   
+        indus_sql = "select id from futures_industry where code='all'"   
         indus_id = self.dbaccessor.do_query(indus_sql)[0][0]
         df_total_mean['industry'] = str(indus_id)
         df_mean = pd.concat([df_mean,df_total_mean],axis=0)

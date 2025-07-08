@@ -26,8 +26,8 @@ from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [202200811]
-STAT_DATE = [20220801,20220830]
+TRACK_DATE = [20230811]
+STAT_DATE = [20230601,20220831]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -759,7 +759,6 @@ class FuturesIndustryDRollModule(MlpModule):
             # 根据配置，决定针对行业数据进行处理还是针对整体指数数据进行处理
             for j,indus_index in enumerate(industry_index_proxy):
                 target_info = target_info_list[indus_index]
-                rank_code = target_info["item_rank_code"]
                 indus_code = target_info["instrument"]
                 date = target_info["future_start_datetime"]  
                 # 因为预测的是最后一个未来日期和前面的差值，因此按照最后一个时间序号作为序列编号

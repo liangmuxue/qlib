@@ -82,7 +82,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanData_rsvCcidiff8Mse_Step1_202301"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
