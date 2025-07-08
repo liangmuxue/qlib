@@ -100,6 +100,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
     def OnRspOrderInsert(self, pInputOrder: "CThostFtdcInputOrderField", pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             print(f"OnRspOrderInsert failed: {pRspInfo.ErrorMsg}")
+            print("OnRspOrderInsert failed obj:{}".format(pRspInfo))
 
         if pInputOrder is not None:
             print(f"OnRspOrderInsert:"
@@ -795,11 +796,11 @@ if __name__ == "__main__":
 
     semaphore = threading.Semaphore(0)
     # SimNow
-    sys.argv = ["","tcp://180.168.146.187:10130","10010","","","simnow_client_test","0000000000000000"]
-    # HuaXin
-    sys.argv = ["","tcp://210.14.72.12:4600","10010","00031959","47756343","00043153","0000000000000000"]
-    # OpenCtp
-    sys.argv = ["","tcp://121.37.80.177:20002","10010","12912","123456","simnow_client_test","0000000000000000"]    
+    # sys.argv = ["","tcp://180.168.146.187:10130","10010","","","simnow_client_test","0000000000000000"]
+    # # HuaXin
+    # sys.argv = ["","tcp://210.14.72.12:4600","10010","00031959","47756343","00043153","0000000000000000"]
+    # # OpenCtp
+    # sys.argv = ["","tcp://121.37.80.177:20002","10010","12912","123456","simnow_client_test","0000000000000000"]    
     host = sys.argv[1]
     broker = sys.argv[2]
     user = sys.argv[3]
@@ -818,91 +819,103 @@ if __name__ == "__main__":
     tdImpl.ConfirmSettlementInfo()
 
     time.sleep(1)
-    tdImpl.QryInstrument("SHFE", "au", "")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryExchange()
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryProduct("","")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryPosition("")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryPositionDetail("")
-    semaphore.acquire()
-
-    tdImpl.QryOrder("")
-    time.sleep(1)
-
-    time.sleep(1)
-    tdImpl.QryTrade("")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryPrice("", "")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryAccount()
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryCommissionRate("")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryMarginRate("", "")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryOrderCommRate("")
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryInvestor()
-    semaphore.acquire()
-
-    time.sleep(1)
-    tdImpl.QryTradingCode()
-    semaphore.acquire()
+    # tdImpl.QryInstrument("SHFE", "au", "")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryExchange()
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryProduct("","")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryPosition("")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryPositionDetail("")
+    # semaphore.acquire()
+    #
+    # tdImpl.QryOrder("")
+    # time.sleep(1)
+    #
+    # time.sleep(1)
+    # tdImpl.QryTrade("")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryPrice("", "")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryAccount()
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryCommissionRate("")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryMarginRate("", "")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryOrderCommRate("")
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryInvestor()
+    # semaphore.acquire()
+    #
+    # time.sleep(1)
+    # tdImpl.QryTradingCode()
+    # semaphore.acquire()
 
     # insert order
-    print("New order ...")
-    ExchangeID = input("ExchangeID:")
-    InstrumentID = input("InstrumentID:")
-    Direction = input("Direction:0,买入;1,卖出")
-    Offset = input("Offset:0,开仓;1,平仓;2,强平;3,平今;4,平昨;5,强减")
-    PriceType = input("PriceType:1,任意价;2,限价(Default:2)")
-    if PriceType == "":
-        PriceType = "2"
-    Price = input("Price:")
-    Volume = input("Volume:")
-    TimeCondition = input("TimeCondition:1,IOC立即完成否则撤销;3,GFD当日有效(Default:3)")
-    if TimeCondition == "":
-        TimeCondition = "3"
-    VolumeCondition = input("VolumeCondition:1,任何数量;2,最小数量;3,全部数量(Default:1)")
-    if VolumeCondition == "":
-        VolumeCondition = "1"
-    MinVolume = input("MinVolume: (Default:1)")
-    if MinVolume == "":
-        MinVolume = "1"
+    print("New order create")
+    # ExchangeID = input("ExchangeID:")
+    # InstrumentID = input("InstrumentID:")
+    # Direction = input("Direction:0,买入;1,卖出")
+    # Offset = input("Offset:0,开仓;1,平仓;2,强平;3,平今;4,平昨;5,强减")
+    # PriceType = input("PriceType:1,任意价;2,限价(Default:2)")
+    # if PriceType == "":
+    #     PriceType = "2"
+    # Price = input("Price:")
+    # Volume = input("Volume:")
+    # TimeCondition = input("TimeCondition:1,IOC立即完成否则撤销;3,GFD当日有效(Default:3)")
+    # if TimeCondition == "":
+    #     TimeCondition = "3"
+    # VolumeCondition = input("VolumeCondition:1,任何数量;2,最小数量;3,全部数量(Default:1)")
+    # if VolumeCondition == "":
+    #     VolumeCondition = "1"
+    # MinVolume = input("MinVolume: (Default:1)")
+    # if MinVolume == "":
+    #     MinVolume = "1"
+    ExchangeID = "SHFE"  
+    InstrumentID = "cu2606"
+    Direction = "0"
+    Offset = "0"
+    PriceType = "2"
+    Price = 80000
+    Volume = 100
+    TimeCondition = "3"
+    VolumeCondition = "1"
+    MinVolume = "1"
+    # InstrumentName = "zn2606"
     tdImpl.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
                        VolumeCondition, MinVolume)
-
+    print("OrderInsert .")
+    # semaphore.acquire()
     # cancel order
-    print("Cancel order ...")
-    ExchangeID = input("ExchangeID:")
-    InstrumentID = input("InstrumentID:")
-    OrderSysID = input("OrderSysID:")
-    FrontID = input("FrontID:")
-    SessionID = input("SessionID:")
-    OrderRef = input("OrderRef:")
-    tdImpl.OrderCancel(ExchangeID, InstrumentID, OrderSysID, FrontID, SessionID, OrderRef)
-
+    # print("Cancel order ...")
+    # ExchangeID = input("ExchangeID:")
+    # InstrumentID = input("InstrumentID:")
+    # OrderSysID = input("OrderSysID:")
+    # FrontID = input("FrontID:")
+    # SessionID = input("SessionID:")
+    # OrderRef = input("OrderRef:")
+    # tdImpl.OrderCancel(ExchangeID, InstrumentID, OrderSysID, FrontID, SessionID, OrderRef)
+    #
     input("################# 按任意键退出 \n")
