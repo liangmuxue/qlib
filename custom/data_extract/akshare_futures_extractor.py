@@ -21,7 +21,8 @@ import requests
 from trader.utils.date_util import get_next_working_day,get_next_month,is_working_day
 from cus_utils.log_util import AppLogger
 from data_extract.his_data_extractor import FutureExtractor,get_period_name
-from data_extract.akshare.futures_daily_bar import get_futures_daily,futures_hist_em,futures_zh_minute_sina
+from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_minute_sina
+from data_extract.akshare.futures_daily import get_futures_daily
 
 class AkFuturesExtractor(FutureExtractor):
     """akshare期货数据源"""
@@ -561,7 +562,7 @@ if __name__ == "__main__":
     # print(futures_hist_em_df)    
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="RB0", period="1")
     # print(futures_zh_minute_sina_df)
-    # get_futures_daily_df = get_futures_daily(start_date="20250501", end_date="20250516", market="DCE")
+    # get_futures_daily_df = ak.get_futures_daily(start_date="20250501", end_date="20250516", market="SHFE")
     # print(get_futures_daily_df)    
     # futures_zh_daily_em_df = ak.futures_hist_em(symbol="BR2201")
     # print(futures_zh_daily_em_df)
@@ -623,8 +624,8 @@ if __name__ == "__main__":
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     
-    # extractor.import_day_range_contract_data(data_range=(20250515,20250515))
-    extractor.import_day_range_contract_data_em(data_range=(20250116,20250706))
+    extractor.import_day_range_contract_data(data_range=(20250630,20250630))
+    # extractor.import_day_range_contract_data_em(data_range=(20250116,20250706))
     # extractor.import_day_range_continues_data(data_range=(20250603,20250628))
     # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
             
