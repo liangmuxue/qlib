@@ -251,52 +251,8 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             semaphore.release()
 
     def OnRtnOrder(self, pOrder):
-        print(f"OnRtnOrder:"
-              f"UserID={pOrder.UserID} "
-              f"BrokerID={pOrder.BrokerID} "
-              f"InvestorID={pOrder.InvestorID} "
-              f"ExchangeID={pOrder.ExchangeID} "
-              f"InstrumentID={pOrder.InstrumentID} "
-              f"Direction={pOrder.Direction} "
-              f"CombOffsetFlag={pOrder.CombOffsetFlag} "
-              f"CombHedgeFlag={pOrder.CombHedgeFlag} "
-              f"OrderPriceType={pOrder.OrderPriceType} "
-              f"LimitPrice={pOrder.LimitPrice} "
-              f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
-              f"FrontID={pOrder.FrontID} "
-              f"SessionID={pOrder.SessionID} "
-              f"OrderRef={pOrder.OrderRef} "
-              f"TimeCondition={pOrder.TimeCondition} "
-              f"GTDDate={pOrder.GTDDate} "
-              f"VolumeCondition={pOrder.VolumeCondition} "
-              f"MinVolume={pOrder.MinVolume} "
-              f"RequestID={pOrder.RequestID} "
-              f"InvestUnitID={pOrder.InvestUnitID} "
-              f"CurrencyID={pOrder.CurrencyID} "
-              f"AccountID={pOrder.AccountID} "
-              f"ClientID={pOrder.ClientID} "
-              f"IPAddress={pOrder.IPAddress} "
-              f"MacAddress={pOrder.MacAddress} "
-              f"OrderSysID={pOrder.OrderSysID} "
-              f"OrderStatus={pOrder.OrderStatus} "
-              f"StatusMsg={pOrder.StatusMsg} "
-              f"VolumeTotal={pOrder.VolumeTotal} "
-              f"VolumeTraded={pOrder.VolumeTraded} "
-              f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
-              f"TradingDay={pOrder.TradingDay} "
-              f"InsertDate={pOrder.InsertDate} "
-              f"InsertTime={pOrder.InsertTime} "
-              f"UpdateTime={pOrder.UpdateTime} "
-              f"CancelTime={pOrder.CancelTime} "
-              f"UserProductInfo={pOrder.UserProductInfo} "
-              f"ActiveUserID={pOrder.ActiveUserID} "
-              f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
-              f"TraderID={pOrder.TraderID} "
-              f"ClientID={pOrder.ClientID} "
-              f"ParticipantID={pOrder.ParticipantID} "
-              f"OrderLocalID={pOrder.OrderLocalID} "
-              )
-
+        self.listenner.on_order_rtn(pOrder)
+        
     def OnRtnTrade(self, pTrade):
         print(f"OnRtnTrade:"
               f"BrokerID={pTrade.BrokerID} "
@@ -704,6 +660,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         self.OrderRef = self.OrderRef + 1
         req.ForceCloseReason = tdapi.THOST_FTDC_FCC_NotForceClose
         req.ContingentCondition = tdapi.THOST_FTDC_CC_Immediately
+        req.OrderLocalID = OrderRef
         self.api.ReqOrderInsert(req, 0)
 
     def OrderCancel(self, ExchangeID, InstrumentID, OrderSysID, FrontID, SessionID, OrderRef):
@@ -804,6 +761,7 @@ class QidianFuturesTrade(BaseTrade):
         # 放入待处理队列
         order = copy.copy(order_in)
         order.ref_id = OrderRef
+        order.res_result = {}
         self.order_queue.append(order)
                 
         self.api.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
@@ -813,6 +771,59 @@ class QidianFuturesTrade(BaseTrade):
                 
     ######################## 回调事件调用 #################################  
     
+    def on_order_rtn(self,pOrder):
+        
+        order = self.find_cache_order(pOrder.OrderLocalID)
+        if order is None:
+            logger.warning("order not in cache:{}".format(pOrder.OrderLocalID))
+            return
+        
+        print(f"OnRtnOrder:"
+                      f"UserID={pOrder.UserID} "
+                      f"BrokerID={pOrder.BrokerID} "
+                      f"InvestorID={pOrder.InvestorID} "
+                      f"ExchangeID={pOrder.ExchangeID} "
+                      f"InstrumentID={pOrder.InstrumentID} "
+                      f"Direction={pOrder.Direction} "
+                      f"CombOffsetFlag={pOrder.CombOffsetFlag} "
+                      f"CombHedgeFlag={pOrder.CombHedgeFlag} "
+                      f"OrderPriceType={pOrder.OrderPriceType} "
+                      f"LimitPrice={pOrder.LimitPrice} "
+                      f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
+                      f"FrontID={pOrder.FrontID} "
+                      f"SessionID={pOrder.SessionID} "
+                      f"OrderRef={pOrder.OrderRef} "
+                      f"TimeCondition={pOrder.TimeCondition} "
+                      f"GTDDate={pOrder.GTDDate} "
+                      f"VolumeCondition={pOrder.VolumeCondition} "
+                      f"MinVolume={pOrder.MinVolume} "
+                      f"RequestID={pOrder.RequestID} "
+                      f"InvestUnitID={pOrder.InvestUnitID} "
+                      f"CurrencyID={pOrder.CurrencyID} "
+                      f"AccountID={pOrder.AccountID} "
+                      f"ClientID={pOrder.ClientID} "
+                      f"IPAddress={pOrder.IPAddress} "
+                      f"MacAddress={pOrder.MacAddress} "
+                      f"OrderSysID={pOrder.OrderSysID} "
+                      f"OrderStatus={pOrder.OrderStatus} "
+                      f"StatusMsg={pOrder.StatusMsg} "
+                      f"VolumeTotal={pOrder.VolumeTotal} "
+                      f"VolumeTraded={pOrder.VolumeTraded} "
+                      f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
+                      f"TradingDay={pOrder.TradingDay} "
+                      f"InsertDate={pOrder.InsertDate} "
+                      f"InsertTime={pOrder.InsertTime} "
+                      f"UpdateTime={pOrder.UpdateTime} "
+                      f"CancelTime={pOrder.CancelTime} "
+                      f"UserProductInfo={pOrder.UserProductInfo} "
+                      f"ActiveUserID={pOrder.ActiveUserID} "
+                      f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
+                      f"TraderID={pOrder.TraderID} "
+                      f"ClientID={pOrder.ClientID} "
+                      f"ParticipantID={pOrder.ParticipantID} "
+                      f"OrderLocalID={pOrder.OrderLocalID} "
+                      )        
+        
     def on_order_confirm(self,pInputOrder):
         """成单事件"""
         

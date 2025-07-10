@@ -40,95 +40,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
     def before_trading(self,context):
         """交易前准备"""
         
-        self.logger_info("before_trading.now:{}".format(context.now))
-        
-        env = Environment.get_instance()
-        # 初始化代理的当日环境
-        env.broker.trade_proxy.init_env()
-        # 时间窗定义
-        self.time_line = 0
-        pred_date = int(context.now.strftime('%Y%m%d'))
-        self.trade_day = pred_date
-        # 设置上一交易日，用于后续挂牌确认
-        self.prev_day = get_previous_trading_date(self.trade_day)
-        # 初始化当日合约对照表
-        self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.now)        
-        # 根据当前日期，进行预测计算
-        context.ml_context.prepare_data(pred_date)        
-        # 根据预测计算，筛选可以买入的股票
-        candidate_list = self.get_candidate_list(pred_date,context=context)
-        # candidate_list = [""000702"]
-        # candidate_list = []
-        buy_list = {}
-        sell_list = {}
-        # 从文件中加载的未成单的订单记录，维护到上下文
-        buy_orders = self.trade_entity.get_buy_list_active(str(self.trade_day))
-        for index,row in buy_orders.iterrows():   
-            order = self.create_order(row["order_book_id"], row["quantity"], SIDE.BUY,row["price"],position_effect=row["position_effect"])
-            buy_list[row["order_book_id"]] = order
-        sell_orders = self.trade_entity.get_sell_list_active(str(self.trade_day))
-        for index,row in sell_orders.iterrows():  
-            order = self.create_order(row["order_book_id"], row["quantity"], SIDE.SELL,row["price"],position_effect=row["position_effect"])
-            order.set_frozen_cash(0)
-            order._status = row["status"]            
-            sell_list[row["order_book_id"]] = order
-        
-        candidate_order_list = {}                  
-        for item in candidate_list:
-            trend = item[0]
-            instrument = item[1]
-            # 剔除没有价格数据的品种
-            if not self.has_current_data(pred_date,instrument,mode="instrument"):
-                logger.warning("no data for buy:{},ignore".format(instrument))
-                continue
-            # 代码转化为标准格式
-            order_book_id = self.data_source.transfer_furtures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
-            # 如果已持仓当前品种，则忽略
-            if self.get_postion_by_order_book_id(order_book_id) is not None:
-                continue
-            # 以昨日收盘价格作为当前卖盘价格,注意使用未复权的数据
-            h_bar = history_bars(order_book_id,1,"1d",fields="close",adjust_type="none")
-            if h_bar is None:
-                logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
-                continue
-            price = h_bar[0]
-            # # fake
-            # if order_book_id.startswith("000410"):
-            #     price = 7.17
-            
-            # 如果已经在待开仓列表中了，则不处理
-            if trend==1 and order_book_id in buy_list:
-                continue
-            if trend==0 and order_book_id in sell_list:
-                continue            
-            # 根据多空标志决定买卖方向
-            if trend==1:
-                side = SIDE.BUY
-            else:
-                side = SIDE.SELL
-            # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）,仓位类型为开仓
-            order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.OPEN)
-            if side==SIDE.BUY:
-                buy_list[order_book_id] = order
-            else:
-                sell_list[order_book_id] = order
-            # 加入到候选开仓订单
-            candidate_order_list[order_book_id] = order
-        # 需要开仓的订单信息，保存到上下文
-        self.candidate_list = candidate_order_list         
-        # 根据买单数量配置，设置买单列表
-        position_max_number = self.strategy.position_max_number
-        # 从买入候选列表中，根据配置取得待买入列表
-        self.buy_list = get_topN_dict(buy_list,position_max_number)
-        # 卖单保存到上下文    
-        self.sell_list = sell_list
-        # 新增开仓列表
-        self.new_open_list = {}
-        # 撤单列表
-        self.cancel_list = []
-        self.open_try_cnt = 0
-        # 在每日开盘前计算单个品种购买的额度
-        self.single_value = self.day_compute_quantity()
+        super().before_trading(context)
         
     def after_trading(self,context):
         logger.info("after_trading in")
@@ -149,12 +61,8 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         # 首先进行撮合，然后进行策略
         env = Environment.get_instance()
-        env.broker.trade_proxy.handler_bar(context.now)
         self.time_line = 2
         
-        # 如果之前有新增候选买入，在此添加
-        for index,(k,v) in enumerate(self.new_open_list.items()):
-            self.buy_list[k] = v            
         # 如果非实时模式，则需要在相应前等待几秒，以保证先处理外部通知事件
         if self.handle_bar_wait:
             time.sleep(3)
