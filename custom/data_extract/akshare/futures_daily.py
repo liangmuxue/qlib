@@ -667,9 +667,13 @@ def get_futures_daily(
 
     df_list = list()
     while start_date <= end_date:
-        df = f(date=str(start_date).replace("-", ""))
-        if not df.empty:
-            df_list.append(df)
+        try:
+            df = f(date=str(start_date).replace("-", ""))
+            if not df.empty:
+                df_list.append(df)            
+        except Exception as e:
+            print("request err,{}".format(e))
+
         start_date += datetime.timedelta(days=1)
 
     if len(df_list) == 0:
