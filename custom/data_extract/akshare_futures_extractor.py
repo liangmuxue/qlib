@@ -365,7 +365,7 @@ class AkFuturesExtractor(FutureExtractor):
         for row in result_rows:
             market_code = row[0]
             # 先不使用金融期货数据
-            if market_code in ['CFFEX']:
+            if market_code in ['CFFEX','INE']:
                 continue
             get_futures_daily_df = get_futures_daily(start_date=begin_date, end_date=end_date, market=market_code)
             if get_futures_daily_df.shape[0]==0:
