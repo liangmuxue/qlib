@@ -94,65 +94,18 @@ class FurSimulationStrategy(FurBacktestStrategy):
         trade = event.trade
         order = event.order
         account = event.account
+        account.get_positions()
         self.logger_debug("on_trade_handler in,order:{}".format(order))
         # 保存成单交易对象
         self.trade_entity.add_trade(trade,multiplier=order.kwargs['multiplier'])
-        # 更新卖单状态
-        if order.side == SIDE.SELL:
-            sell_order = self.get_sell_order(order.order_book_id, context=context)
-            # 这里需要修改状态为已成交
-            sell_order._status = ORDER_STATUS.FILLED      
-            # 卖出一个，就可以再买一个。从候选列表中挑选新的股票，放入待买入列表中
-            self.pick_to_open_list(context)                 
-        # 更新买单状态
-        if order.side == SIDE.BUY:
-            buy_order = self.get_buy_order(order.order_book_id, context=context)
-            # 这里需要修改状态为已成交
-            buy_order._status = ORDER_STATUS.FILLED          
+        # 修改当日仓位列表中的状态为已成交
+        self.update_order_status(order,ORDER_STATUS.FILLED,side=order.side, context=self.context)     
+        # 维护仓位数据
+        self.apply_trade_pos(trade)
+        # 平仓一个，就可以再开仓一个。从候选列表中挑选新的品种，放入待开仓列表中
+        if order.position_effect==POSITION_EFFECT.CLOSE:
+            self.get_next_candidate()          
     
     def on_order_handler(self,context, event):
-        order = event.order
-        self.logger_info("order handler,order:{}".format(order))
-        # 已接单事件
-        if order.status==ORDER_STATUS.ACTIVE:
-            self.logger_info("order active:{},trade_date:{}".format(order.order_book_id,self.trade_day))
-            # 订单已接受，设置第二订单号          
-            if order.side==SIDE.BUY:
-                self.buy_list[order.order_book_id].set_secondary_order_id(order.secondary_order_id) 
-            else:
-                self.sell_list[order.order_book_id].set_secondary_order_id(order.secondary_order_id) 
-            # 更新跟踪变量状态
-            self.update_order_status(order,ORDER_STATUS.ACTIVE,side=order.side, context=self.context)   
-            # 更新存储状态               
-            self.trade_entity.add_or_update_order(order,str(self.trade_day))  
-            return        
-        # 如果订单被拒绝，则忽略,仍然保持新单状态，后续会继续下单
-        if order.status==ORDER_STATUS.REJECTED:
-            self.logger_info("order reject:{},trade_date:{}".format(order.order_book_id,self.trade_day))
-            self.trade_entity.add_or_update_order(order,str(self.trade_day))  
-            return
-        # 已撤单事件
-        if order.status==ORDER_STATUS.CANCELLED:
-            self.logger_info("order CANCELLED:{},trade_date:{}".format(order.order_book_id,self.trade_day))
-            # 这里需要修改状态为已撤单
-            self.update_order_status(order,ORDER_STATUS.CANCELLED,side=order.side, context=self.context)      
-            self.trade_entity.add_or_update_order(order,str(self.trade_day))     
-            if order.side==SIDE.BUY and self.buy_list[order.order_book_id].kwargs["need_resub"]:
-                self.logger_info("need resub order:{}".format(order))
-                # 如果具备重新报单标志，则以最新价格重新生成订单
-                cur_snapshot = self.get_current_snapshot(order.order_book_id)
-                price_now = cur_snapshot.last
-                # 创建新订单对象并重置原数据
-                order_resub = self.create_order(order.order_book_id, order.quantity, SIDE.BUY, price_now)
-                self.buy_list[order.order_book_id] = order_resub
-                self.logger_debug("resub buylist set end:{}".format(order.order_book_id))
-            if order.side==SIDE.SELL and self.sell_list[order.order_book_id].kwargs["need_resub"]:
-                self.logger_info("need resub order:{}".format(order))
-                # 如果具备重新报单标志，则以最新价格重新生成订单
-                price_now = self.get_last_price(order.order_book_id)
-                # 创建新订单对象并重置原数据
-                order_resub = self.create_order(order.order_book_id, order.quantity, SIDE.SELL, price_now)
-                order_resub.kwargs["sell_reason"] = order.kwargs["sell_reason"]
-                self.sell_list[order.order_book_id] = order_resub
-                self.logger_debug("resub sell_list set end:{}".format(order.order_book_id))     
+        super().on_order_handler(context, event) 
                     

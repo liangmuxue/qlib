@@ -54,7 +54,7 @@ class PredResultProcessor(BaseProcessor):
         record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 设置模型路径
         # train_sub_path = self.wf_task.get_matched_model_file_name(working_day,task_type=CommonDictEnum.WORK_TYPE__TRAIN.value)
-        train_sub_path = "202205_202210"
+        train_sub_path = model_template["kwargs"]["optargs"]["data_path"]
         model_template["kwargs"]["optargs"]["work_dir"] = os.path.join(self.wf_task.get_model_path(),train_sub_path) 
         # 设置中间结果路径
         model_template["kwargs"]["optargs"]["inter_rs_filepath"] = os.path.join(self.wf_task.get_dumpdata_path(),"step1_rs.pkl") 

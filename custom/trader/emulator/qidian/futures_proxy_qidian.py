@@ -3,17 +3,19 @@ from rqalpha.portfolio import Portfolio
 
 import copy
 import threading
+import pandas as pd
 
 from cus_utils.process import IFakeSyncCall
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-import trader.emulator.ctpapi.thosttraderapi as tdapi 
+import CTPAPI.build.thosttraderapi as tdapi 
 
 from rqalpha.const import SIDE,ORDER_STATUS as RQ_ORDER_STATUS
 from rqalpha.apis import Environment
 from rqalpha.core.events import EVENT, Event
 from trader.rqalpha.model.trade import Trade
+from trader.emulator.constance import OrderStatusType
 
 emaphore = threading.Semaphore(0)
 
@@ -254,28 +256,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         self.listenner.on_order_rtn(pOrder)
         
     def OnRtnTrade(self, pTrade):
-        print(f"OnRtnTrade:"
-              f"BrokerID={pTrade.BrokerID} "
-              f"InvestorID={pTrade.InvestorID} "
-              f"ExchangeID={pTrade.ExchangeID} "
-              f"InstrumentID={pTrade.InstrumentID} "
-              f"Direction={pTrade.Direction} "
-              f"OffsetFlag={pTrade.OffsetFlag} "
-              f"HedgeFlag={pTrade.HedgeFlag} "
-              f"Price={pTrade.Price}  "
-              f"Volume={pTrade.Volume} "
-              f"OrderSysID={pTrade.OrderSysID} "
-              f"OrderRef={pTrade.OrderRef} "
-              f'TradeID={pTrade.TradeID} '
-              f'TradeDate={pTrade.TradeDate} '
-              f'TradeTime={pTrade.TradeTime} '
-              f'ClientID={pTrade.ClientID} '
-              f'TradingDay={pTrade.TradingDay} '
-              f'OrderLocalID={pTrade.OrderLocalID} '
-              f'BrokerOrderSeq={pTrade.BrokerOrderSeq} '
-              f'InvestUnitID={pTrade.InvestUnitID} '
-              f'ParticipantID={pTrade.ParticipantID} '
-              )
+        self.listenner.on_trade_rtn(pTrade)
 
 
     def OnRspQryOrder(self, pOrder: tdapi.CThostFtdcOrderField, pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",
@@ -678,7 +659,25 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         req.OrderRef = OrderRef
         req.ActionFlag = tdapi.THOST_FTDC_AF_Delete
         self.api.ReqOrderAction(req, 0)
-        
+
+class TradeOrderRes():
+    """订单交易结果类"""
+    
+    def __init__(
+        self
+    ):
+        self.TRADE_COLUMNS = ['price','volume','time']
+        self.status = OrderStatusType.NotBegin.value   
+        self.trade_data = pd.DataFrame(columns=self.TRADE_COLUMNS)
+    
+    def append_trade_data(self,pTrade):
+        new_data = [pTrade.Price,pTrade.Volume,pTrade.TradeTime]
+        new_data = pd.DataFrame(new_data,columns=self.TRADE_COLUMNS)
+        self.trade_data = pd.concat([self.trade_data,new_data])
+
+    def sum_trade_volume(self):  
+        return self.trade_data['volume'].sum()
+    
 class QidianFuturesTrade(BaseTrade):
     """奇点的仿真交易类"""
     
@@ -761,7 +760,8 @@ class QidianFuturesTrade(BaseTrade):
         # 放入待处理队列
         order = copy.copy(order_in)
         order.ref_id = OrderRef
-        order.res_result = {}
+        # 初始化结果空对象
+        order.res_result = TradeOrderRes()
         self.order_queue.append(order)
                 
         self.api.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
@@ -773,91 +773,55 @@ class QidianFuturesTrade(BaseTrade):
     
     def on_order_rtn(self,pOrder):
         
+        # 返回数据中包含本地上下文标识，用于本地存储的串接
         order = self.find_cache_order(pOrder.OrderLocalID)
         if order is None:
             logger.warning("order not in cache:{}".format(pOrder.OrderLocalID))
             return
+        # 更新订单状态
+        if pOrder.OrderStatus==OrderStatusType.PartTradedQueueing.value and order.res_result.status==OrderStatusType.NotBegin.value:
+            order.status = OrderStatusType.PartTradedQueueing.value
+        elif pOrder.OrderStatus==OrderStatusType.AllTraded.value and order.res_result.status==OrderStatusType.PartTradedQueueing.value:
+            order.status = OrderStatusType.AllTraded.value  
+            # 收到订单结束标志时，则判断交易记录是否完整，如完整，则进行订单确认消息发送环节
+            self.trade_data_check_and_confirm(order)
+            
+        if pOrder.OrderStatus not in[OrderStatusType.PartTradedQueueing.value,OrderStatusType.AllTraded.value]:
+            logger.warning("unknown status:{}".format(pOrder.OrderStatus))  
+            return
         
-        print(f"OnRtnOrder:"
-                      f"UserID={pOrder.UserID} "
-                      f"BrokerID={pOrder.BrokerID} "
-                      f"InvestorID={pOrder.InvestorID} "
-                      f"ExchangeID={pOrder.ExchangeID} "
-                      f"InstrumentID={pOrder.InstrumentID} "
-                      f"Direction={pOrder.Direction} "
-                      f"CombOffsetFlag={pOrder.CombOffsetFlag} "
-                      f"CombHedgeFlag={pOrder.CombHedgeFlag} "
-                      f"OrderPriceType={pOrder.OrderPriceType} "
-                      f"LimitPrice={pOrder.LimitPrice} "
-                      f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
-                      f"FrontID={pOrder.FrontID} "
-                      f"SessionID={pOrder.SessionID} "
-                      f"OrderRef={pOrder.OrderRef} "
-                      f"TimeCondition={pOrder.TimeCondition} "
-                      f"GTDDate={pOrder.GTDDate} "
-                      f"VolumeCondition={pOrder.VolumeCondition} "
-                      f"MinVolume={pOrder.MinVolume} "
-                      f"RequestID={pOrder.RequestID} "
-                      f"InvestUnitID={pOrder.InvestUnitID} "
-                      f"CurrencyID={pOrder.CurrencyID} "
-                      f"AccountID={pOrder.AccountID} "
-                      f"ClientID={pOrder.ClientID} "
-                      f"IPAddress={pOrder.IPAddress} "
-                      f"MacAddress={pOrder.MacAddress} "
-                      f"OrderSysID={pOrder.OrderSysID} "
-                      f"OrderStatus={pOrder.OrderStatus} "
-                      f"StatusMsg={pOrder.StatusMsg} "
-                      f"VolumeTotal={pOrder.VolumeTotal} "
-                      f"VolumeTraded={pOrder.VolumeTraded} "
-                      f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
-                      f"TradingDay={pOrder.TradingDay} "
-                      f"InsertDate={pOrder.InsertDate} "
-                      f"InsertTime={pOrder.InsertTime} "
-                      f"UpdateTime={pOrder.UpdateTime} "
-                      f"CancelTime={pOrder.CancelTime} "
-                      f"UserProductInfo={pOrder.UserProductInfo} "
-                      f"ActiveUserID={pOrder.ActiveUserID} "
-                      f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
-                      f"TraderID={pOrder.TraderID} "
-                      f"ClientID={pOrder.ClientID} "
-                      f"ParticipantID={pOrder.ParticipantID} "
-                      f"OrderLocalID={pOrder.OrderLocalID} "
-                      )        
+    def on_trade_rtn(self,pTrade):
         
-    def on_order_confirm(self,pInputOrder):
+        # 找到对应的订单并判断状态
+        order = self.find_cache_order(pTrade.OrderLocalID)
+        if order is None:
+            logger.warning("trade order not in cache:{}".format(pTrade.OrderLocalID))
+            return
+        # 添加交易记录
+        order.res_result.append_trade_data(pTrade)
+        
+        # 如果订单当前状态已经是全部成交了，则判断交易记录是否完整，如完整，则进行订单确认消息发送环节
+        if order.res_result.status==OrderStatusType.AllTraded.value:
+            order.status = OrderStatusType.AllTraded.value   
+            self.trade_data_check_and_confirm(order)
+    
+    def trade_data_check_and_confirm(self,order):
+        """判断交易记录是否完整，如完整，则进行订单确认消息发送环节"""
+        
+        volume_order = order.volume
+        trade_volume_sum = order.res_result.sum_trade_volume()
+        # 如交易汇总成交量等于订单的成交量，则确认
+        if volume_order==trade_volume_sum:
+            self.on_order_confirm(order)
+                  
+    def on_order_confirm(self,order):
         """成单事件"""
         
-        logger.info(f"OnRspOrderInsert:"
-                          f"UserID={pInputOrder.UserID} "
-                          f"BrokerID={pInputOrder.BrokerID} "
-                          f"InvestorID={pInputOrder.InvestorID} "
-                          f"ExchangeID={pInputOrder.ExchangeID} "
-                          f"InstrumentID={pInputOrder.InstrumentID} "
-                          f"Direction={pInputOrder.Direction} "
-                          f"CombOffsetFlag={pInputOrder.CombOffsetFlag} "
-                          f"CombHedgeFlag={pInputOrder.CombHedgeFlag} "
-                          f"OrderPriceType={pInputOrder.OrderPriceType} "
-                          f"LimitPrice={pInputOrder.LimitPrice} "
-                          f"VolumeTotalOriginal={pInputOrder.VolumeTotalOriginal} "
-                          f"OrderRef={pInputOrder.OrderRef} "
-                          f"TimeCondition={pInputOrder.TimeCondition} "
-                          f"GTDDate={pInputOrder.GTDDate} "
-                          f"VolumeCondition={pInputOrder.VolumeCondition} "
-                          f"MinVolume={pInputOrder.MinVolume} "
-                          f"RequestID={pInputOrder.RequestID} "
-                          f"InvestUnitID={pInputOrder.InvestUnitID} "
-                          f"CurrencyID={pInputOrder.CurrencyID} "
-                          f"AccountID={pInputOrder.AccountID} "
-                          f"ClientID={pInputOrder.ClientID} "
-                          f"IPAddress={pInputOrder.IPAddress} "
-                          f"MacAddress={pInputOrder.MacAddress} "
-                          )    
+        logger.info("on_order_confirm:{}".format(order))
         
         # 衔接RQ的后续处理，记录成单信息    
         env = Environment.get_instance()
         cur_price = pInputOrder.LimitPrice
-        # 通过引用订单编号找到上下文对应的订单
-        order = self.find_cache_order(pInputOrder.OrderRef)
         try:     
             trade = Trade.__from_create__(
                 order_id=order.order_id,

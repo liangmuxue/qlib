@@ -28,7 +28,6 @@ import matplotlib.pyplot as plt
 # matplotlib.use('Agg')
 from datetime import datetime
 
-from finrl.plot import backtest_stats, backtest_plot, get_daily_return, get_baseline
 from .tft_recorder import TftRecorder
 
 from darts_pro.data_extension.series_data_utils import get_pred_center_value

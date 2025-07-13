@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_rsvCcidiff8Mse_Step1_202306"
+               model_name: "Futures_cleanData_rsvCcidiff8Mse_Step1_202308"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
@@ -104,8 +104,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2023-01-31]
-                valid: [2023-07-01, 2023-09-30]
+                train: [2006-01-01, 2023-07-31]
+                valid: [2023-07-01, 2023-11-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
