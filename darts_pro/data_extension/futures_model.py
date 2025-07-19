@@ -283,7 +283,7 @@ class FuturesIndustryModel(FuturesModel):
                 scale_mode=self.scale_mode,
                 mode=mode
             )
-            # 透传行业分类和股票映射关系，后续使用
+            # 透传行业分类和品种映射关系，后续使用
             self.valid_sw_ins_mappings = ds.sw_ins_mappings     
         return ds      
     

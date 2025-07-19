@@ -10,16 +10,8 @@ from qlib.utils import init_instance_by_config
 from qlib.config import REG_CN
 from qlib.workflow import R
 from qlib.model.trainer import fill_placeholder
-import qlib
 
-import ruamel.yaml as yaml
-
-from darts_pro.data_extension.custom_nor_model import TFTCluSerModel
 from .ml_context import MlIntergrate
-from workflow.main_fitter import MainFitter
-from cus_utils.common_compute import normalization,compute_series_slope,compute_price_range,slope_classify_compute,comp_max_and_rate
-from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,CLASS_SIMPLE_VALUE_MAX
-from trader.busi_compute import slope_status
 from trader.data_viewer import DataViewer
 from persistence.wf_task_store import WfTaskStore
 from cus_utils.db_accessor import DbAccessor
@@ -111,4 +103,23 @@ class MlWorkflowIntergrate(MlIntergrate):
         sql = "insert into backtest_result(task_id,total_gain,total_transactions,avg_duration) values(%s,%s,%s,%s)"
         self.dbaccess.do_inserto_withparams(sql,(self.task_id,total_gain,total_transactions,avg_duration))
         
+class FurWorkflowIntergrate(MlWorkflowIntergrate):
+    """继承MlWorkflowIntergrate,获取相关上下文数据和环境,用于期货工作流模式"""
     
+    def __init__(
+        self,
+        task_config,
+        **kwargs,
+    ):
+            
+        # 配置文件内容
+        self.base_cfg = task_config.base
+        # 初始化
+        self.pred_data_path = self.base_cfg.pred_data_path
+        self.pred_data_file = self.base_cfg.pred_data_file
+        
+        self.kwargs = kwargs
+        self.pred_df = None
+        self.task_id = kwargs["task_id"]
+        self.task_store = WfTaskStore()
+        self.dbaccess = DbAccessor({})  

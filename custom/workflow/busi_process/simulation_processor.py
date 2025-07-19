@@ -19,32 +19,31 @@ class SimulationProcessor(BaseProcessor):
         """根据原配置模板，生成实际配置文件"""
         
         real_template = copy.deepcopy(template)
-        backtest_template = real_template["task"]["backtest"]
         model_template = real_template["task"]["model"]
-        dataset_template = real_template["task"]["dataset"]
+        backtest_template = model_template["kwargs"]["simulation"]
         
         # 设置预测数据路径
-        model_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
+        backtest_template["standard"]["base"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
         # 计算开始结束日期
         start_date,end_date = self.get_first_and_last_day(working_day)    
         # 回测开始和结束日期为本月第一天和最后一天
-        backtest_template["rqalpha"]["base"]["start_date"] = start_date
-        backtest_template["rqalpha"]["base"]["end_date"] = end_date
+        backtest_template["standard"]["base"]["start_date"] = start_date
+        backtest_template["standard"]["base"]["end_date"] = end_date
         # 给回测进程植入任务号
-        backtest_template["rqalpha"]["extra"]["task_id"] = self.wf_task.task_entity["id"]
+        backtest_template["standard"]["extra"]["task_id"] = self.wf_task.task_entity["id"]
         # config_path为当前文件路径
         config_file_path = self.wf_task.get_task_config_file()   
-        backtest_template["rqalpha"]["extra"]["context_vars"]["strategy_class"]["config_path"] = config_file_path
+        backtest_template["strategy_class"]["config_path"] = config_file_path
         # 相关文件路径
         parent_path = self.wf_task.get_trader_data_path()
         cur_period_path = parent_path # + "/" + str(working_day)[4:6]
-        backtest_template["rqalpha"]["extra"]["report_save_path"] = cur_period_path
-        backtest_template["rqalpha"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
-        backtest_template["rqalpha"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path
+        backtest_template["standard"]["extra"]["report_save_path"] = cur_period_path
+        backtest_template["standard"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
+        backtest_template["standard"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path
         # 映射数据文件路径
-        backtest_template["rqalpha"]["extra"]["stock_data_path"] = self.wf_task.get_stock_data_path()
+        backtest_template["standard"]["extra"]["stock_data_path"] = self.wf_task.get_stock_data_path()
         # 映射预测数据文件路径
-        backtest_template["rqalpha"]["extra"]["dump_path"] = self.wf_task.get_dumpdata_part_path()      
+        backtest_template["standard"]["extra"]["dump_path"] = self.wf_task.get_dumpdata_part_path()      
         return real_template
     
     def get_first_and_last_day(self,working_day):
@@ -75,15 +74,6 @@ class SimulationProcessor(BaseProcessor):
                            
     def sub_run(self,working_day=None,results=None,resume=True):
         """回测入口，整合glib的工作流配置方式，与rqalpha结合"""
-
-        # rqalpha配置属于整个工作流配置文件的一部分
-        rq_config = self.config["task"]["backtest"]["rqalpha"]
-        # 统一一个运行策略文件，后面通过不同的实现类来进行策略区分
-        strategy_file_path = self.config["task"]["backtest"]["run_file"]
-        # 透传总体任务配置
-        global_var.set_value("task_config", self.config)
-        # 改写run file，用于使用自定义strategy,解决execution context问题
-        from trader.rqalpha import run_file
-        run_file(strategy_file_path, rq_config)   
+        pass
         
         

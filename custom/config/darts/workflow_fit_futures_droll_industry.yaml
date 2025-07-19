@@ -66,7 +66,7 @@ task:
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
-               total_iters: 3e4
+               total_iters: 6e4
                # base_lr: 0.5e-4
                # max_lr: 1.5e-3
                # cycle_momentum: False
@@ -80,9 +80,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_rsvCcidiff8Mse_Step1_202308"
+               model_name: "Futures_cleanData_rsvCcidiff8Mse_Step1_202310"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
@@ -104,8 +104,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2023-07-31]
-                valid: [2023-07-01, 2023-09-30]
+                train: [2006-01-01, 2023-09-30]
+                valid: [2023-09-01, 2023-11-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

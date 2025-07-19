@@ -8,7 +8,7 @@ import time
 import os
 import threading
 # from openctp_ctp import tdapi # pip install mode
-import projects.openctp_ctp_python.CTPAPI.build.thosttraderapi as tdapi # manual mode
+import CTPAPI.build.thosttraderapi as tdapi # manual mode
 
 
 class TdImpl(tdapi.CThostFtdcTraderSpi):
@@ -39,6 +39,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         print("OnFrontConnected")
 
         req = tdapi.CThostFtdcReqAuthenticateField()
+        print("req create,self.broker:{}".format(self.broker))
         req.BrokerID = self.broker
         req.UserID = self.user
         req.AppID = self.appid
@@ -67,6 +68,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         req.UserID = self.user
         req.Password = self.password
         req.UserProductInfo = "demo"
+        print("ReqUserLogin,req.BrokerID:{},req.UserID:{},req.Password:{}".format(req.BrokerID,req.UserID,req.Password))
         self.api.ReqUserLogin(req, 0)
 
     def OnRspUserLogin(
@@ -812,13 +814,13 @@ if __name__ == "__main__":
     tdImpl.Run()
 
     # wait for login ok.
-    semaphore.acquire()
-
-    tdImpl.QrySettlementInfo("")
-
-    tdImpl.ConfirmSettlementInfo()
-
-    time.sleep(1)
+    # semaphore.acquire()
+    #
+    # tdImpl.QrySettlementInfo("")
+    #
+    # tdImpl.ConfirmSettlementInfo()
+    #
+    time.sleep(3)
     # tdImpl.QryInstrument("SHFE", "au", "")
     # semaphore.acquire()
     #
@@ -894,7 +896,7 @@ if __name__ == "__main__":
     # if MinVolume == "":
     #     MinVolume = "1"
     ExchangeID = "SHFE"  
-    InstrumentID = "cu2606"
+    InstrumentID = "hc2510"
     Direction = "0"
     Offset = "0"
     PriceType = "2"
@@ -918,4 +920,4 @@ if __name__ == "__main__":
     # OrderRef = input("OrderRef:")
     # tdImpl.OrderCancel(ExchangeID, InstrumentID, OrderSysID, FrontID, SessionID, OrderRef)
     #
-    input("################# 按任意键退出 \n")
+    # input("################# 按任意键退出 \n")

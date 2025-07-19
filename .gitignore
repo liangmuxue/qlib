@@ -7,6 +7,10 @@ __pycache__/
 *.so
 **/*.pickle
 **/*.pkl
+**/*.con
+**/*.h
+**/*.cxx
+**/*.cmake
 **/darts_logs
 *.settings
 *.ipynb

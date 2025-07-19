@@ -536,7 +536,58 @@ class AkFuturesExtractor(FutureExtractor):
             print("code:{} ok".format(code))
     
     
-                        
+    def build_qlib_instrument(self):
+        """qlib品种名单列表生成"""
+        
+        qlib_dir = "/home/qdata/qlib_data/futures_data/instruments"
+        clean_data_file = "clean_data.txt"
+        total_file = "all.txt"
+        # 上一步骤已经生成了all.txt的日期对照，在这里把日期对照关系同步到具体文件
+        total_path = os.path.join(qlib_dir,total_file)
+        clean_data_path = os.path.join(qlib_dir,clean_data_file)
+        columns = ['code','begin','end']
+        all = pd.read_table(total_path,sep='\t',header=None)   
+        all.columns = columns
+        all.set_index('code')
+        clean_data = pd.read_table(clean_data_path,sep='\t',header=None)   
+        clean_data.columns = columns
+        clean_data.set_index('code')
+        clean_data.update(all)
+        clean_data.to_csv(clean_data_path, sep='\t', index=False,header=None)
+    
+    def get_realtime_data(self,symbol,market):
+        """新浪实时行情"""
+        
+        futures_zh_spot_df = ak.futures_zh_spot(symbol=symbol, market='CF', adjust='0')
+        futures_zh_spot_df['close'] = futures_zh_spot_df['last_close']
+        return futures_zh_spot_df
+    
+    def get_day_contract(self):
+        """取得当前可交易合约"""
+
+        dce_text = ak.match_main_contract(symbol="dce")
+        czce_text = ak.match_main_contract(symbol="czce")
+        shfe_text = ak.match_main_contract(symbol="shfe")
+        gfex_text = ak.match_main_contract(symbol="gfex")
+        
+        all_str = ",".join([dce_text, czce_text, shfe_text, gfex_text])  
+        all_contract_arr = all_str.split(",")
+        return all_contract_arr
+
+    def get_day_contract_info(self):
+        """取得当前可交易合约信息"""
+
+        dce_text = ak.match_main_contract(symbol="dce")
+        czce_text = ak.match_main_contract(symbol="czce")
+        shfe_text = ak.match_main_contract(symbol="shfe")
+        gfex_text = ak.match_main_contract(symbol="gfex")
+        time.sleep(3)
+        futures_zh_spot_df = ak.futures_zh_spot(
+            symbol=",".join([dce_text, czce_text, shfe_text, gfex_text]),
+            market="CF",
+            adjust='0')
+        return futures_zh_spot_df         
+               
 if __name__ == "__main__":    
     
     extractor = AkFuturesExtractor(savepath="/home/qdata/futures_data")   
@@ -552,8 +603,11 @@ if __name__ == "__main__":
     # print(hist_em)
     
     # 实时行情
-    # futures_zh_spot_df = ak.futures_zh_spot(symbol='FU2501', market="shfe", adjust='0')
-    # print(futures_zh_spot_df)
+    futures_zh_spot_df = ak.futures_zh_spot(symbol='AU2505', market="CF", adjust='0')
+    print(futures_zh_spot_df)
+    # extractor.get_day_contract_info()
+    # futures_zh_realtime_df = ak.futures_zh_realtime(symbol="白糖")
+    # print(futures_zh_realtime_df)    
     # 分时数据
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2501", period="1")
     # print(futures_zh_minute_sina_df)
@@ -623,8 +677,11 @@ if __name__ == "__main__":
     # 导出到qlib
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
+    # qlib品种名单列表生成
+    # extractor.build_qlib_instrument()
     
-    extractor.import_day_range_contract_data(data_range=(20250630,20250630))
+    ############ 历史合约数据导入 ###################
+    # extractor.import_day_range_contract_data(data_range=(20250630,20250630))
     # extractor.import_day_range_contract_data_em(data_range=(20250116,20250706))
     # extractor.import_day_range_continues_data(data_range=(20250603,20250628))
     # extractor.import_day_range_1min_data(data_range=(20250626,20250628))

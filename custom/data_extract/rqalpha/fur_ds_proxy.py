@@ -22,6 +22,8 @@ import six
 import numpy as np
 import pandas as pd
 
+from trader.utils.date_util import get_tradedays_dur
+
 from rqalpha.data.data_proxy import DataProxy
 from rqalpha.const import INSTRUMENT_TYPE, TRADING_CALENDAR_TYPE
 from rqalpha.utils import risk_free_helper, TimeRange, merge_trading_period
@@ -40,12 +42,12 @@ class FurDataProxy(DataProxy):
         # type: (AbstractDataSource, AbstractPriceBoard) -> None
         self._data_source = data_source
         self._price_board = price_board
-        try:
-            trading_calendars = data_source.get_trading_calendars()
-        except NotImplementedError:
-            # forward compatible
-            trading_calendars = {TRADING_CALENDAR_TYPE.EXCHANGE: data_source.get_trading_calendar()}
-        TradingDatesMixin.__init__(self, trading_calendars)
+        # try:
+        #     trading_calendars = data_source.get_trading_calendars()
+        # except NotImplementedError:
+        #     # forward compatible
+        #     trading_calendars = {TRADING_CALENDAR_TYPE.EXCHANGE: data_source.get_trading_calendar()}
+        # TradingDatesMixin.__init__(self, trading_calendars)
 
     def __getattr__(self, item):
         return getattr(self._data_source, item)
@@ -131,6 +133,10 @@ class FurDataProxy(DataProxy):
             return np.nan
         return bar[0]
 
+    def get_previous_trading_date(self,dt):
+        prev_day = get_tradedays_dur(dt, -1)
+        return prev_day
+    
     @lru_cache(10240)
     def _get_settlement(self, instrument, dt):
         bar = self._data_source.history_bars(instrument, 1, '1d', 'settlement', dt, skip_suspended=False)

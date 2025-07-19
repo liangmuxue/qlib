@@ -59,7 +59,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         outer_info = pd.DataFrame(np.array(outer_info_arr),columns=["datetime_number","instrument","ot_close"]).astype(
             {"datetime_number":int,"instrument":str,"ot_close":float})          
         data_filter = DataFilter()
-        # 清除序列长度不够的股票
+        # 清除序列长度不够的品种
         group_column = self.get_group_column()
         time_column = self.col_def["time_column"]       
         df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)  

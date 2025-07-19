@@ -9,7 +9,7 @@ from trader.rqalpha.strategy_class.backtest_base import BaseStrategy,SellReason
 from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
 from trader.rqalpha.futures_trade_entity import FuturesTradeEntity
 from trader.emulator.sim_strategy import SimStrategy
-from trader.utils.date_util import tradedays,get_tradedays_dur
+from trader.utils.date_util import tradedays,get_tradedays_dur,is_working_day
 
 from data_extract.rqalpha.fur_ds_proxy import FurDataProxy
 from data_extract.his_data_extractor import PeriodType
@@ -68,15 +68,15 @@ class FurBacktestStrategy(SimStrategy):
         self.context.s_arr = sub_contract_names
         for name in sub_contract_names:
             subscribe(name)
-         
+        # 初始化代理的当日环境
+        env = Environment.get_instance()
+        env.broker.trade_proxy.init_env()
+                 
     def before_trading(self,context):
         """交易前准备"""
         
         self.logger_info("before_trading.now:{}".format(context.now))
         
-        env = Environment.get_instance()
-        # 初始化代理的当日环境
-        env.broker.trade_proxy.init_env()
         # 时间窗定义
         self.time_line = 0
         pred_date = int(context.now.strftime('%Y%m%d'))
@@ -84,7 +84,7 @@ class FurBacktestStrategy(SimStrategy):
         if pred_date==20220511:
             print("ggg")        
         # 设置上一交易日，用于后续挂牌确认
-        self.prev_day = get_previous_trading_date(self.trade_day)
+        self.prev_day = self.get_previous_trading_date(self.trade_day)
         # 初始化当日合约对照表
         self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.now)        
         # 根据当前日期，进行预测计算
@@ -106,7 +106,7 @@ class FurBacktestStrategy(SimStrategy):
             # 代码转化为标准格式
             order_book_id = self.data_source.transfer_furtures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
             # 以昨日收盘价格作为当前卖盘价格,注意使用未复权的数据
-            h_bar = history_bars(order_book_id,1,"1d",fields="close",adjust_type="none")
+            h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="close")
             if h_bar is None:
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
@@ -123,7 +123,7 @@ class FurBacktestStrategy(SimStrategy):
             # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）,仓位类型为开仓
             order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.OPEN)
             # 对于开仓候选品种，如果已持仓当前品种，则进行锁仓
-            if self.get_postion_by_order_book_id(order_book_id) is not None:
+            if self.get_position(order_book_id) is not None:
                 self.lock_list[order_book_id] = order        
                 continue               
             # 加入到候选开仓订单
@@ -152,9 +152,10 @@ class FurBacktestStrategy(SimStrategy):
                 pos_number += 1
         
         # 生成热加载数据，提升查询性能
-        self.data_source.build_hot_loading_data(pred_date,self.close_list,reset=True) 
-        self.data_source.build_hot_loading_data(pred_date,self.open_list)        
-        self.data_source.build_hot_loading_data(pred_date,self.get_positions())    
+        if self.strategy.building_hot_data:
+            self.data_source.build_hot_loading_data(pred_date,self.close_list,reset=True) 
+            self.data_source.build_hot_loading_data(pred_date,self.open_list)        
+            self.data_source.build_hot_loading_data(pred_date,self.get_positions())    
 
         
     def after_trading(self,context):
@@ -526,7 +527,8 @@ class FurBacktestStrategy(SimStrategy):
         total_value = self.get_total_value()
         # 保证金不能超出限制
         bond_limit = total_value * bond_rate
-        current_bond = np.array([pos.margin for pos in self.get_positions()]).sum()
+        positions = self.get_positions()
+        current_bond = np.array([pos.margin for pos in positions]).sum()
         remain_bond = bond_limit - current_bond
         if remain_bond<0:
             return 0
@@ -599,6 +601,9 @@ class FurBacktestStrategy(SimStrategy):
     def is_trade_opening(self,dt):
         """检查当前是否已开盘"""
         
+        # 非工作日
+        if not is_working_day(dt.date()):
+            return False
         # 出于数据获取考虑，9点01才算开盘
         open_timing = datetime.datetime(dt.year,dt.month,dt.day,9,0,0)
         if dt>open_timing:
@@ -625,6 +630,9 @@ class FurBacktestStrategy(SimStrategy):
         if order_book_id in self.open_list:
             return self.open_list[order_book_id]
         return None    
+    
+    def get_previous_trading_date(self,trade_date):
+        return get_tradedays_dur(str(trade_date),-1)
     
     def get_last_or_prevday_bar(self,order_book_id):
         """根据当前时间点，取得昨天或上一交易时间段的数据"""
@@ -664,7 +672,7 @@ class FurBacktestStrategy(SimStrategy):
     def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None):
         """代理api的订单创建方法"""
         
-        order_book_id = assure_order_book_id(id_or_ins)
+        order_book_id = id_or_ins
         multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
         # 添加交易所编码
         exchange_code = self.data_source.get_exchange_from_instrument(order_book_id)

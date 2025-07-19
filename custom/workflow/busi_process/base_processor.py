@@ -60,27 +60,32 @@ class BaseProcessor(object):
         rec = R.get_recorder()
         # model & dataset initiation
         model = init_instance_by_config(task_config["model"])
-        dataset = init_instance_by_config(task_config["dataset"])
-        # 执行实际运行入口，具体运行内容取决于yaml配置文件中的任务type字段
-        model.fit(dataset)
-        # fill placehorder
-        placehorder_value = {"<MODEL>": model, "<DATASET>": dataset}
-        task_config = fill_placeholder(task_config, placehorder_value)
-        # generate records: prediction, backtest, and analysis
-        records = task_config.get("record", [])
-        if isinstance(records, dict):  # prevent only one dict
-            records = [records]
-        rtn_list = []
-        for record in records:
-            r = init_instance_by_config(
-                record,
-                recorder=rec,
-                default_module="qlib.workflow.record_ext",
-                try_kwargs={"model": model, "dataset": dataset},
-            )
-            rtn = r.generate()
-            rtn_list.append(rtn)
-        return rtn_list,model
+        if "dataset" not in task_config:
+            # 如要用于非训练任务，独立的实时任务包括模拟盘以及实盘
+            model.run()
+            return None,None
+        else:
+            dataset = init_instance_by_config(task_config["dataset"])
+            # 执行实际运行入口，具体运行内容取决于yaml配置文件中的任务type字段
+            model.fit(dataset)
+            # fill placehorder
+            placehorder_value = {"<MODEL>": model, "<DATASET>": dataset}
+            task_config = fill_placeholder(task_config, placehorder_value)
+            # generate records: prediction, backtest, and analysis
+            records = task_config.get("record", [])
+            if isinstance(records, dict):  # prevent only one dict
+                records = [records]
+            rtn_list = []
+            for record in records:
+                r = init_instance_by_config(
+                    record,
+                    recorder=rec,
+                    default_module="qlib.workflow.record_ext",
+                    try_kwargs={"model": model, "dataset": dataset},
+                )
+                rtn = r.generate()
+                rtn_list.append(rtn)
+                return rtn_list,model
 
     def before_run(self,working_day=None):
         """子任务运行的前处理，子类实现"""
@@ -120,10 +125,11 @@ class BaseProcessor(object):
                     self.before_run(working_day=working_day)  
                     # 执行任务    
                     results,model = self._exe_task(config.get("task"))
-                    # 透传整体模型变量，后续统一使用
-                    global_var.set_value("model",model)
-                    # 执行个性化内容             
-                    self.sub_run(working_day=working_day,results=results,resume=resume)
+                    if results is not None:
+                        # 透传整体模型变量，后续统一使用
+                        global_var.set_value("model",model)
+                        # 执行个性化内容             
+                        self.sub_run(working_day=working_day,results=results,resume=resume)
             except Exception as e:
                 # 修改为错误状态
                 wf_task.task_fail_handler(self)

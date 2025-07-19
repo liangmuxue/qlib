@@ -15,6 +15,16 @@ def get_next_working_day(day):
             return next_day
         cur_day = next_day
 
+def get_prev_working_day(day):
+    """取得指定日期的上一工作日"""
+    
+    cur_day = day
+    while(True):
+        prev_day = cur_day - timedelta(days=1)
+        if is_working_day(prev_day):
+            return prev_day
+        cur_day = prev_day
+        
 def get_previous_day(day):
     """取得指定日期的上一日"""
     

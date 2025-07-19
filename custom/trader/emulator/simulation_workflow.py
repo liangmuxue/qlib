@@ -1,0 +1,182 @@
+from rqalpha.environment import Environment
+from trader.emulator.portfolio import Portfolio
+from rqalpha.core.events import EVENT
+
+import os
+import threading
+import time
+from datetime import datetime
+
+from rqalpha.data.bar_dict_price_board import BarDictPriceBoard
+
+from data_extract.rqalpha.fur_ds_proxy import FurDataProxy
+from cus_utils.data_aug import DictToObject
+from qlib.utils import init_instance_by_config
+from trader.utils.date_util import tradedays
+from trader.emulator.qidian.futures_proxy_qidian import QidianFuturesTrade
+from trader.emulator.futures_real_ds import FuturesRealDataSource
+
+from cus_utils.log_util import AppLogger
+logger = AppLogger()
+
+
+class Executor(threading.Thread):
+    """模拟盘执行器"""
+    
+    def __init__(self, trade_date,env=None):
+        threading.Thread.__init__(self)
+        
+        self.trade_date = trade_date
+        self.env = env
+        # 预定义事件集合
+        self.event_Coll = {EVENT.BEFORE_TRADING:0,EVENT.OPEN_AUCTION:0,EVENT.BAR:0,EVENT.AFTER_TRADING:0}
+
+    def create_event(self,now_time):
+        """交易过程过程中的事件生成"""
+        
+        # 交易准备事件
+        if self.event_Coll[EVENT.BEFORE_TRADING]==0:
+            self.event_Coll[EVENT.BEFORE_TRADING] = 1
+            return EVENT.BEFORE_TRADING
+        # 8点半进行开盘竞价
+        auction_time = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,8,30,0) 
+        if now_time>auction_time and self.event_Coll[EVENT.OPEN_AUCTION]==0:
+            self.event_Coll[EVENT.OPEN_AUCTION] = 1
+            return EVENT.OPEN_AUCTION
+        # 9点进入正式交易时段，生成BAR事件
+        bar_time = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,9,0,0) 
+        if now_time>bar_time:
+            self.event_Coll[EVENT.BAR] += 1
+            return EVENT.BAR        
+        
+        return None
+               
+    def run(self):
+        """模拟盘运行，循环并进行事件推送"""
+        
+        # 按照间隔时间一直循环，并进行相关事件调用
+        while True:
+            now_time = datetime.now()
+            # 更新运行环境的时间
+            self.env.update_time(now_time)            
+            event = self.create_event(now_time)
+            if event is not None:
+                self.env.publish_event(event)
+            # 间隔几秒再重复
+            time.sleep(3)
+
+class SimulationContext():
+    """策略上下文"""
+    
+    def __init__(self,config=None):
+        self.config = config       
+        self.now = None
+        
+    def set_nowtime(self,time):
+        self.now = time
+        
+    def get_trade_proxy(self):
+        return self.trade_proxy
+       
+    def set_trade_proxy(self,trade_proxy):
+        self.trade_proxy = trade_proxy   
+                
+           
+class SimulationWorkflow():
+    
+    def __init__(self,**kwargs):
+        """仿真入口(工作流模式)，这里只负责与相关的回测类进行对接"""
+        
+        logger.info("init in")
+        self.sim_config = kwargs['simulation']
+        # 使用qlib模式，动态类定义，以及传参
+        self.strategy_class = init_instance_by_config(self.sim_config['strategy_class'])
+        # 生成实际的策略类
+        config = self.sim_config['standard']
+        config = DictToObject(config) 
+        self.context = SimulationContext(config)
+        self.strategy_class.__build_with_context__(self.context,workflow_mode=True)
+        # 整体数据以及上下文环境，复用RQALPHA的设计模式
+        env = Environment(config)
+        self.env = env
+        # 设置数据源
+        ds = FuturesRealDataSource(stock_data_path=env.config.extra.stock_data_path,
+                            sim_path=env.config.extra.stock_data_path)
+        env.set_data_source(ds)  
+        # 设置中间数据代理
+        price_board = BarDictPriceBoard()
+        data_proxy = FurDataProxy(ds,price_board)
+        env.set_data_proxy(data_proxy)   
+        # 设置账户对象    
+        persis_path = env.config.extra.persis_path
+        account_path = Portfolio.get_persis_account_path(persis_path)
+        # 从存储中加载
+        start_date = env.config.base.start_date
+        if os.path.exists(account_path):
+            portfolio = Portfolio.load_from_storage(persis_path, start_date, data_proxy)
+        else:
+            starting_cash = env.config.base.accounts.future 
+            financing_rate = env.config.mod.sys_account.financing_rate
+            portfolio = Portfolio(starting_cash,[],financing_rate,trade_date=start_date,data_proxy=data_proxy,persis_path=persis_path)
+        env.set_portfolio(portfolio)       
+        # 设置交易代理
+        proxy_config = config.mod.ext_emulation_mod.emu_args
+        trade_proxy = QidianFuturesTrade(context=self,account_alias=proxy_config)      
+        self.context.set_trade_proxy(trade_proxy)  
+        # 执行器
+        self.executor = Executor(datetime.now().date(),env=self)
+        # 信号控制
+        self.semaphore = threading.Semaphore(0)
+              
+    def run(self):
+        """执行入口"""
+        
+        # 初始化交易代理环境
+        self.context.get_trade_proxy().init_env()
+        # 初始化行情数据环境
+        # TODO
+        # 开启执行器
+        self.run_status = 1 
+        self.executor.start()
+        # 锁定当前主线程，直到结束事件生成
+        self.semaphore.acquire()
+    
+    def update_time(self,time):
+        
+        self.context.set_nowtime(time)
+        self.env.update_time(time, time)  
+    
+    def publish_event(self,event):
+            if event == EVENT.BAR:
+                self.handle_bar(bar_dict=None)
+            elif event == EVENT.OPEN_AUCTION:
+                self.open_auction(bar_dict=None)
+            elif event == EVENT.BEFORE_TRADING:
+                self.before_trading()
+ 
+    def before_trading(self):
+        """交易前准备"""
+        
+        context= self.context
+        if context.config.ignore_mode:
+            return     
+        self.strategy_class.init_env()
+        self.strategy_class.before_trading(context)
+    
+    def handle_bar(self,bar_dict=None):
+        """主要的算法逻辑入口"""
+        
+        context= self.context
+        if context.config.ignore_mode:
+            return      
+        self.strategy_class.handle_bar(context,bar_dict=bar_dict)
+        
+    def open_auction(self, bar_dict=None):
+        """集合竞价入口"""
+        
+        context= self.context
+        if context.config.ignore_mode:
+            return      
+        self.strategy_class.open_auction(context,bar_dict=bar_dict)
+
+    

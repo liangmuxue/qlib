@@ -9,9 +9,7 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 from rqalpha.data.base_data_source import BaseDataSource
 from rqalpha.model.tick import TickObject
-from rqalpha.apis import instruments,get_previous_trading_date
-from rqalpha.const import TRADING_CALENDAR_TYPE
-from trader.utils.date_util import get_tradedays_dur,date_string_transfer
+from trader.utils.date_util import get_tradedays_dur,date_string_transfer,get_prev_working_day
 from cus_utils.db_accessor import DbAccessor
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 from data_extract.juejin_futures_extractor import JuejinFuturesExtractor
@@ -84,6 +82,8 @@ class FuturesDataSource(BaseDataSource):
                 contract_data = self.get_contract_data_by_day(symbol, date)     
                 if contract_data is not None:
                     results.append([item['code'],symbol,contract_data['volume'].values[0]])
+        if len(results)==0:
+            return None
         results = pd.DataFrame(np.array(results),columns=self.day_contract_columns)
         results['date'] = date.date()
         return results
@@ -128,7 +128,7 @@ class FuturesDataSource(BaseDataSource):
             
         return main_name       
         
-    def get_k_data(self, instrument, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
+    def get_k_data(self, order_book_id, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
         """从已下载的文件中，加载K线数据"""
         
         self.time_inject(begin=True)
@@ -136,27 +136,27 @@ class FuturesDataSource(BaseDataSource):
         if frequency=="1m":
             period = PeriodType.MIN1.value
             # item_data = self.extractor.load_item_df(instrument,period=period)   
-            item_data = self.extractor.load_item_by_time(instrument,start_dt,period=period)   
+            item_data = self.extractor.load_item_by_time(order_book_id,start_dt,period=period)   
+            if item_data.shape[0]==0:
+                return None                
             item_data["last"] = item_data["close"]      
-            self.time_inject(code_name="load_item_df")              
         # 日线数据使用akshare的数据源
         if frequency=="1d":
             start_dt = dt_obj(start_dt.year, start_dt.month, start_dt.day).date() 
             end_dt = dt_obj(end_dt.year, end_dt.month, end_dt.day).date()
-            item_data = self.load_item_day_data(instrument.order_book_id,start_dt)
+            item_data = self.load_item_day_data(order_book_id,start_dt)
+            if item_data is None or item_data.shape[0]==0:
+                return None                
             # 使用结算价作为当日最终价格
             item_data["last"] = item_data["settle"]    
             # 字段和rq统一
             item_data['symbol'] = item_data['code']        
             item_data = item_data.rename(columns={"date":"datetime"})
-        self.time_inject(code_name="dt query,{}".format(frequency))     
-        if item_data.shape[0]==0:
-            return None    
 
         # 取得前一个交易时段收盘
         item_data["prev_close"]= np.NaN
         if need_prev:
-            item_data["prev_close"] = self._get_prev_close(instrument, start_dt,frequency=frequency)
+            item_data["prev_close"] = self._get_prev_close(order_book_id, start_dt,frequency=frequency)
         # item_data = item_data.iloc[0].to_dict()
         return item_data
 
@@ -175,15 +175,11 @@ class FuturesDataSource(BaseDataSource):
         else:
             return bar_data.iloc[0].to_dict()
 
-    def history_bars(self, instrument, bar_count, frequency, fields, dt, skip_suspended=True,include_now=False, adjust_type=None, adjust_orig=None):
+    def history_bars(self, order_book_id, bar_count, frequency, fields=None, dt=None):
         """历史数据查询"""
         
-        cal_df_index = self.get_trading_calendars()[TRADING_CALENDAR_TYPE.EXCHANGE]
-        start_dt_loc = cal_df_index.get_loc(dt.replace(hour=0, minute=0, second=0, microsecond=0)) - bar_count + 1
-        start_dt = cal_df_index[start_dt_loc]
-
-        bar_data = self.get_k_data(instrument.order_book_id, start_dt, dt,frequency=frequency)
-
+        start_dt = get_tradedays_dur(dt,-bar_count)
+        bar_data = self.get_k_data(order_book_id, start_dt, dt,frequency=frequency)
         if bar_data is None or bar_data.empty:
             return None
         else:
@@ -226,7 +222,7 @@ class FuturesDataSource(BaseDataSource):
         tick_obj = TickObject(instrument, d)
         return tick_obj
 
-    def _get_prev_close(self, instrument, dt,frequency=None):
+    def _get_prev_close(self, order_book_id, dt,frequency=None):
         """取得上一交易时段的收盘价"""
         
         # 根据当前时间点，取得上一时间点
@@ -235,9 +231,10 @@ class FuturesDataSource(BaseDataSource):
             prev_datetime = dt - datetime.timedelta(minutes=1)  
         if frequency=="1d":
             # 日期级别，使用api方法取得上一交易日
-            prev_datetime = get_previous_trading_date(dt)
+            prev_datetime = get_prev_working_day(dt)
+            prev_datetime = dt_obj.combine(prev_datetime, dt_obj.min.time())
             
-        bar = self.get_bar(instrument,prev_datetime,frequency=frequency,need_prev=False)
+        bar = self.get_bar(order_book_id,prev_datetime,frequency=frequency,need_prev=False)
         if bar is None or len(bar) < 1:
             return np.nan
         return bar["close"]

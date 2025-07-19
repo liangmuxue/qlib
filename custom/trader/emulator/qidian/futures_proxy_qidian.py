@@ -4,6 +4,7 @@ from rqalpha.portfolio import Portfolio
 import copy
 import threading
 import pandas as pd
+import time
 
 from cus_utils.process import IFakeSyncCall
 from cus_utils.log_util import AppLogger
@@ -16,17 +17,16 @@ from rqalpha.apis import Environment
 from rqalpha.core.events import EVENT, Event
 from trader.rqalpha.model.trade import Trade
 from trader.emulator.constance import OrderStatusType
-
-emaphore = threading.Semaphore(0)
+from rqalpha.const import POSITION_DIRECTION
 
 class TdImpl(tdapi.CThostFtdcTraderSpi):
     def __init__(self, host, broker, user, password, appid, authcode,listenner=None):
         super().__init__()
 
-        self.broker = broker
+        self.broker = str(broker)
         self.user = user
-        self.password = password
-        self.appid = appid
+        self.password = str(password)
+        self.appid = str(appid)
         self.authcode = authcode
 
         self.TradingDay = ""
@@ -87,6 +87,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         req.UserID = self.user
         req.Password = self.password
         req.UserProductInfo = "demo"
+        print("ReqUserLogin,req.BrokerID:{},req.UserID:{},req.Password:{}".format(req.BrokerID,req.UserID,req.Password))
         self.api.ReqUserLogin(req, 0)
 
     def OnRspUserLogin(
@@ -111,7 +112,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
     def OnRspOrderInsert(self, pInputOrder, pRspInfo, nRequestID, bIsLast):
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             logger.warning(f"OnRspOrderInsert failed: {pRspInfo.ErrorMsg}")
-            self.listenner.on_order_failed(pInputOrder)
+            self.listenner.on_order_failed(pInputOrder,reason_id=pRspInfo.ErrorID)
             return 
 
         if pInputOrder is not None:
@@ -142,38 +143,39 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
 
     def OnErrRtnOrderInsert(self, pInputOrder: "CThostFtdcInputOrderField", pRspInfo: "CThostFtdcRspInfoField") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
-            print(f"OnErrRtnOrderInsert failed: {pRspInfo.ErrorMsg}")
+            print("OnErrRtnOrderInsert failed:ErrorMsg:{},ErrorID:{}".format(pRspInfo.ErrorMsg,pRspInfo.ErrorID))
+            return             
 
-        if pInputOrder is not None:
-            print(f"OnErrRtnOrderInsert:"
-                  f"UserID={pInputOrder.UserID} "
-                  f"BrokerID={pInputOrder.BrokerID} "
-                  f"InvestorID={pInputOrder.InvestorID} "
-                  f"ExchangeID={pInputOrder.ExchangeID} "
-                  f"InstrumentID={pInputOrder.InstrumentID} "
-                  f"Direction={pInputOrder.Direction} "
-                  f"CombOffsetFlag={pInputOrder.CombOffsetFlag} "
-                  f"CombHedgeFlag={pInputOrder.CombHedgeFlag} "
-                  f"OrderPriceType={pInputOrder.OrderPriceType} "
-                  f"LimitPrice={pInputOrder.LimitPrice} "
-                  f"VolumeTotalOriginal={pInputOrder.VolumeTotalOriginal} "
-                  f"OrderRef={pInputOrder.OrderRef} "
-                  f"TimeCondition={pInputOrder.TimeCondition} "
-                  f"GTDDate={pInputOrder.GTDDate} "
-                  f"VolumeCondition={pInputOrder.VolumeCondition} "
-                  f"MinVolume={pInputOrder.MinVolume} "
-                  f"RequestID={pInputOrder.RequestID} "
-                  f"InvestUnitID={pInputOrder.InvestUnitID} "
-                  f"CurrencyID={pInputOrder.CurrencyID} "
-                  f"AccountID={pInputOrder.AccountID} "
-                  f"ClientID={pInputOrder.ClientID} "
-                  f"IPAddress={pInputOrder.IPAddress} "
-                  f"MacAddress={pInputOrder.MacAddress} "
-                  )
+        # if pInputOrder is not None:
+        #     print(f"OnErrRtnOrderInsert:"
+        #           f"UserID={pInputOrder.UserID} "
+        #           f"BrokerID={pInputOrder.BrokerID} "
+        #           f"InvestorID={pInputOrder.InvestorID} "
+        #           f"ExchangeID={pInputOrder.ExchangeID} "
+        #           f"InstrumentID={pInputOrder.InstrumentID} "
+        #           f"Direction={pInputOrder.Direction} "
+        #           f"CombOffsetFlag={pInputOrder.CombOffsetFlag} "
+        #           f"CombHedgeFlag={pInputOrder.CombHedgeFlag} "
+        #           f"OrderPriceType={pInputOrder.OrderPriceType} "
+        #           f"LimitPrice={pInputOrder.LimitPrice} "
+        #           f"VolumeTotalOriginal={pInputOrder.VolumeTotalOriginal} "
+        #           f"OrderRef={pInputOrder.OrderRef} "
+        #           f"TimeCondition={pInputOrder.TimeCondition} "
+        #           f"GTDDate={pInputOrder.GTDDate} "
+        #           f"VolumeCondition={pInputOrder.VolumeCondition} "
+        #           f"MinVolume={pInputOrder.MinVolume} "
+        #           f"RequestID={pInputOrder.RequestID} "
+        #           f"InvestUnitID={pInputOrder.InvestUnitID} "
+        #           f"CurrencyID={pInputOrder.CurrencyID} "
+        #           f"AccountID={pInputOrder.AccountID} "
+        #           f"ClientID={pInputOrder.ClientID} "
+        #           f"IPAddress={pInputOrder.IPAddress} "
+        #           f"MacAddress={pInputOrder.MacAddress} "
+        #           )
 
     def OnErrRtnOrderAction(self, pOrderAction: "CThostFtdcOrderActionField", pRspInfo: "CThostFtdcRspInfoField") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
-            print(f"OnErrRtnOrderAction failed: {pRspInfo.ErrorMsg}")
+            print("OnErrRtnOrderAction failed:ErrorMsg:{},ErrorID:{}".format(pRspInfo.ErrorMsg,pRspInfo.ErrorID))
 
         if pOrderAction is not None:
             print(f"OnErrRtnOrderAction:"
@@ -219,7 +221,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
                 f"MaxLimitOrderVolume={pInstrument.MaxLimitOrderVolume} "
             )
         if bIsLast == True:
-           semaphore.release()
+            semaphore.release()
 
     def OnRspQryExchange(self, pExchange: "CThostFtdcExchangeField", pRspInfo: "CThostFtdcRspInfoField",
                          nRequestID: "int", bIsLast: "bool") -> "void":
@@ -506,6 +508,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             semaphore.release()
 
     def OnRtnInstrumentStatus(self, pInstrumentStatus: "CThostFtdcInstrumentStatusField") -> "void":
+        pass
         print(f"OnRtnInstrumentStatus:"
               f"ExchangeID={pInstrumentStatus.ExchangeID} "
               f"InstrumentID={pInstrumentStatus.InstrumentID} "
@@ -622,13 +625,14 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         req.UserID = self.user
         req.InvestorID = self.user
         req.ExchangeID = ExchangeID
-        req.InstrumentID = InstrumentID
-        req.Direction = Direction
-        req.CombOffsetFlag = Offset
+        req.InstrumentID = InstrumentID.lower()
+        direction = "0" if Direction==POSITION_DIRECTION.LONG else "1"
+        req.Direction = direction
+        req.CombOffsetFlag = str(Offset)
         req.CombHedgeFlag = tdapi.THOST_FTDC_HF_Speculation
         req.OrderPriceType = PriceType
         # 唯一编号，用于串接上下文
-        req.OrderRef = OrderRef
+        req.OrderRef = str(OrderRef)
         if Price != "":
             req.LimitPrice = float(Price)
         if Volume != "":
@@ -688,17 +692,16 @@ class QidianFuturesTrade(BaseTrade):
     ):   
         super().__init__(context)  
         
-        self.host = account_alias["host"]
-        self.broker = account_alias["broker"]
-        self.user = account_alias["user"]
-        self.password = account_alias["password"]
-        self.appid = account_alias["appid"]
-        self.authcode = account_alias["authcode"]
+        self.host = account_alias.host
+        self.broker = str(account_alias.broker)
+        self.user = account_alias.user
+        self.password = str(account_alias.password)
+        self.appid = str(account_alias.appid)
+        self.authcode = str(account_alias.authcode)
         
         self.order_ref_id = 0
         self.order_queue = []
-        # 初始化环境以及登录
-        self.init_env()
+        self.portfolio = None
         
     def init_env(self):
         
@@ -712,6 +715,10 @@ class QidianFuturesTrade(BaseTrade):
         tdImpl = TdImpl(host, broker, user, password, appid, authcode,listenner=self)
         self.api = tdImpl
         tdImpl.Run()
+        time.sleep(3)
+        
+        # semaphore = threading.Semaphore(0)
+        # semaphore.acquire()
     
     def build_order_ref_id(self):
         
@@ -719,7 +726,17 @@ class QidianFuturesTrade(BaseTrade):
         return self.order_ref_id
     
     ########################交易数据获取#################################  
-        
+    
+    def get_positions(self):  
+        portfolio = self.get_portfolio()
+        return portfolio.get_positions()
+    
+    def get_portfolio(self):
+        return self.context.env.get_portfolio()
+                
+    def set_portfolio(self,portfolio):
+        self.portfolio = portfolio
+               
     def find_cache_order(self,order_ref_id):
         """查找已生成订单"""
         
@@ -728,7 +745,7 @@ class QidianFuturesTrade(BaseTrade):
             if order.ref_id==order_ref_id:
                 return order
         return None
-    
+
     ########################交易请求#################################  
     
     def submit_order(self,order_in):
@@ -740,7 +757,7 @@ class QidianFuturesTrade(BaseTrade):
         
         ExchangeID = order_in.exchange_id
         InstrumentID = order_in.order_book_id
-        Direction = order_in.long_short
+        Direction = order_in.position_direction
         if order_in.side=='BUY':
             Offset = 0
         else:
@@ -850,8 +867,33 @@ class QidianFuturesTrade(BaseTrade):
         # 发送成单事件          
         env.event_bus.publish_event(Event(EVENT.TRADE, account=account, trade=trade, order=order))  
                   
-    def on_order_failed(self,order):
+    def on_order_failed(self,pInputOrder,reason_id=None):
         """订单失败事件"""        
         
-        logger.warning("on_order_failed in:{}".format(order))
+        logger.warning("on_order_failed in,reason_id:{}".format(reason_id))
+        print(f"failed order:"
+              f"UserID={pInputOrder.UserID} "
+              f"BrokerID={pInputOrder.BrokerID} "
+              f"InvestorID={pInputOrder.InvestorID} "
+              f"ExchangeID={pInputOrder.ExchangeID} "
+              f"InstrumentID={pInputOrder.InstrumentID} "
+              f"Direction={pInputOrder.Direction} "
+              f"CombOffsetFlag={pInputOrder.CombOffsetFlag} "
+              f"CombHedgeFlag={pInputOrder.CombHedgeFlag} "
+              f"OrderPriceType={pInputOrder.OrderPriceType} "
+              f"LimitPrice={pInputOrder.LimitPrice} "
+              f"VolumeTotalOriginal={pInputOrder.VolumeTotalOriginal} "
+              f"OrderRef={pInputOrder.OrderRef} "
+              f"TimeCondition={pInputOrder.TimeCondition} "
+              f"GTDDate={pInputOrder.GTDDate} "
+              f"VolumeCondition={pInputOrder.VolumeCondition} "
+              f"MinVolume={pInputOrder.MinVolume} "
+              f"RequestID={pInputOrder.RequestID} "
+              f"InvestUnitID={pInputOrder.InvestUnitID} "
+              f"CurrencyID={pInputOrder.CurrencyID} "
+              f"AccountID={pInputOrder.AccountID} "
+              f"ClientID={pInputOrder.ClientID} "
+              f"IPAddress={pInputOrder.IPAddress} "
+              f"MacAddress={pInputOrder.MacAddress} "
+              )        
     

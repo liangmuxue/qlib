@@ -843,11 +843,12 @@ class FuturesProcessModel(TftDataframeModel):
         model.mode = "predict"
         model.model.mode = "predict"
         model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
-        model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
-        model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings   
         model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)              
+                max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)   
+        # 先fit再赋值，则以当前数据集生成的mapping为准
+        model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
+        model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings                     
         model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
                                                     batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))        
         # 再用第二阶段模型生成实际品种结果
@@ -859,12 +860,13 @@ class FuturesProcessModel(TftDataframeModel):
         model.mode = "predict"
         model.model.mode = "predict"
         model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
-        model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
-        model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings   
         # 进行推理及预测，先fit再predict
         model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)               
+                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)    
+        # 先fit再赋值，则以当前数据集生成的mapping为准           
+        model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
+        model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings          
         pred_result = model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
                                             batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))
         

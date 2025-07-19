@@ -155,12 +155,12 @@ class JuejinFuturesExtractor(FutureExtractor):
             item_df = None
         return item_df
 
-    def load_item_by_time(self,instrument,datetime,period=PeriodType.MIN5.value):
+    def load_item_by_time(self,order_book_id,datetime,period=PeriodType.MIN5.value):
         """加载单个品种指定时间的数据"""
         
         if period==PeriodType.MIN1.value:
             sim_data = self.sim_data
-            item_df = sim_data[(sim_data['symbol']==instrument.order_book_id)&(sim_data['datetime']==datetime)]
+            item_df = sim_data[(sim_data['symbol']==order_book_id)&(sim_data['datetime']==datetime)]
         else:
             item_df = None
         return item_df
