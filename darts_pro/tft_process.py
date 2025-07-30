@@ -99,10 +99,7 @@ class TftDatafAnalysis():
         global_var.set_value("load_ass_data",False)
         global_var.set_value("save_ass_data",False)    
                     
-        self.pred_data_path = self.kwargs["pred_data_path"]
         self.batch_file_path = self.kwargs["batch_file_path"]
-        self.load_dataset_file = self.kwargs["load_dataset_file"]
-        self.save_dataset_file = self.kwargs["save_dataset_file"]      
         if not os.path.exists(self.batch_file_path):
             os.mkdir(self.batch_file_path)
             

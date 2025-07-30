@@ -1,5 +1,5 @@
 qlib_init:
-    provider_uri: '/home/qdata/qlib_data/futures_data'
+    provider_uri: &provider_uri '/home/qdata/qlib_data/futures_data'
     region: cn
 market: &market clean_data
 benchmark: &benchmark SH000300
@@ -77,6 +77,8 @@ task:
                lr: 1e-3
                weight_decay: 1e-4
             optargs:
+               provider_uri: *provider_uri
+               market: *market
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'

@@ -906,9 +906,12 @@ class FuturesIndustryDRollModule(MlpModule):
             # 对于预测数据，生成对应涨跌幅类别
             for i,imp_idx in enumerate(import_index):
                 ts = target_info[imp_idx]
+                open_array = ts["open_array"][self.input_chunk_length-1:]
                 price_array = ts["price_array"][self.input_chunk_length-1:]
                 diff_range = (price_array[-1] - price_array[0])/price_array[0]
                 p_taraget_class = compute_price_class(price_array,mode="first_last")
+                diff_range = (open_array[-1] - price_array[0])/price_array[0]
+                p_taraget_class = get_simple_class(diff_range) 
                 # 根据多空判断取得实际对应的类别
                 if overroll_trend==0:
                     diff_range = -diff_range

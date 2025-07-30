@@ -150,6 +150,33 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 ass_data_path = os.path.join(global_var.get_value("ass_data_path"),"ass_data_{}.pkl".format(mode))
                 with open(ass_data_path, "wb") as fout:
                     pickle.dump(self.ass_data, fout) 
+        self.check_instrument_data()
+        
+    def check_instrument_data(self,dump_file=False):
+        """校验训练及验证的品种的一致性"""
+        
+        dataset = global_var.get_value("dataset")   
+        provider_file = dataset.provider_file
+        # 检查配置文件中的品种，和实际生成的品种比较，看是否有不一致的情况
+        instrument_list = self.df_data['instrument'].unique().tolist()
+        data = pd.read_csv(provider_file,sep='\t')
+        data.columns = ['instrument','begin_date','end_date']
+        new_data = []
+        # 逐项检查是否匹配
+        not_match_ins = []
+        for index,row in data.iterrows():
+            instrument = row['instrument']
+            if instrument in instrument_list:
+                new_data.append(row.values.tolist())
+            else:
+                not_match_ins.append(instrument)
+        new_data = pd.DataFrame(np.array(new_data),columns=data.columns)
+        if dump_file:
+            new_data.to_csv(provider_file,index=False,sep='\t',header=None)
+        if len(not_match_ins)>0:
+            message = "not all match:{}".format(not_match_ins)
+            raise ValueError(message)
+            
     
     def build_date_mappings(self,df_data,dataset=None,instrument_number=None):
         """生成日期映射关系"""

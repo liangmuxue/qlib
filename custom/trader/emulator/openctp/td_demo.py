@@ -798,7 +798,7 @@ if __name__ == "__main__":
 
     semaphore = threading.Semaphore(0)
     # SimNow
-    # sys.argv = ["","tcp://180.168.146.187:10130","10010","","","simnow_client_test","0000000000000000"]
+    # sys.argv = ["","tcp://182.254.243.31:40001","9999","235798","","simnow_client_test","0000000000000000"]
     # # HuaXin
     # sys.argv = ["","tcp://210.14.72.12:4600","10010","00031959","47756343","00043153","0000000000000000"]
     # # OpenCtp
@@ -814,15 +814,14 @@ if __name__ == "__main__":
     tdImpl.Run()
 
     # wait for login ok.
-    # semaphore.acquire()
+    semaphore.acquire()
+    
+    tdImpl.QrySettlementInfo("")
+    tdImpl.ConfirmSettlementInfo()
     #
-    # tdImpl.QrySettlementInfo("")
-    #
-    # tdImpl.ConfirmSettlementInfo()
-    #
-    time.sleep(3)
+    # time.sleep(3)
     # tdImpl.QryInstrument("SHFE", "au", "")
-    # semaphore.acquire()
+    semaphore.acquire()
     #
     # time.sleep(1)
     # tdImpl.QryExchange()
@@ -851,8 +850,8 @@ if __name__ == "__main__":
     # tdImpl.QryPrice("", "")
     # semaphore.acquire()
     #
-    # time.sleep(1)
-    # tdImpl.QryAccount()
+    time.sleep(1)
+    tdImpl.QryAccount()
     # semaphore.acquire()
     #
     # time.sleep(1)
@@ -900,15 +899,15 @@ if __name__ == "__main__":
     Direction = "0"
     Offset = "0"
     PriceType = "2"
-    Price = 80000
-    Volume = 100
+    Price = 3393
+    Volume = 3
     TimeCondition = "3"
     VolumeCondition = "1"
     MinVolume = "1"
     # InstrumentName = "zn2606"
-    tdImpl.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
-                       VolumeCondition, MinVolume)
-    print("OrderInsert .")
+    # tdImpl.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
+    #                    VolumeCondition, MinVolume)
+    # print("OrderInsert .")
     # semaphore.acquire()
     # cancel order
     # print("Cancel order ...")
@@ -920,4 +919,8 @@ if __name__ == "__main__":
     # OrderRef = input("OrderRef:")
     # tdImpl.OrderCancel(ExchangeID, InstrumentID, OrderSysID, FrontID, SessionID, OrderRef)
     #
-    # input("################# 按任意键退出 \n")
+    time.sleep(3)
+    print("begin qry pos")
+    # tdImpl.QryPosition("")
+    tdImpl.QryOrder("")
+    input("################# 按任意键退出 \n")

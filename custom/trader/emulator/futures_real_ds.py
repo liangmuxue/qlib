@@ -72,6 +72,16 @@ class FuturesRealDataSource(FuturesDataSource):
             return None
         return realtime_data['close'].values[0]    
 
+    def get_last_bar(self,order_book_id,dt=None):
+        """取得指定标的最近报价信息"""
+
+        instrument_code = order_book_id[:-4]
+        exchange_code = self.get_exchange_from_instrument(instrument_code)
+        realtime_data = self.extractor_ak.get_realtime_data(order_book_id, exchange_code)
+        if realtime_data is None:
+            return None
+        return realtime_data.iloc[0].to_dict()
+    
     def get_main_contract_name(self,instrument,date):
         """根据品种编码，确定当前对应的主力合约"""
         

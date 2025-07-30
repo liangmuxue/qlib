@@ -603,7 +603,7 @@ if __name__ == "__main__":
     # print(hist_em)
     
     # 实时行情
-    futures_zh_spot_df = ak.futures_zh_spot(symbol='AU2505', market="CF", adjust='0')
+    futures_zh_spot_df = ak.futures_zh_spot(symbol='RB2510', market="CF", adjust='0')
     print(futures_zh_spot_df)
     # extractor.get_day_contract_info()
     # futures_zh_realtime_df = ak.futures_zh_realtime(symbol="白糖")

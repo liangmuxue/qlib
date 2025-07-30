@@ -74,7 +74,12 @@ class FuturesTradeEntity(TradeEntity):
             self.exp_trade_data(self.save_path)   
             # 日志记录
             self.add_log(row_data)
-            
+    
+    def get_trade_by_date(self,date):
+        trade_data_df = self.trade_data_df
+        target_df = trade_data_df[trade_data_df["trade_date"]==pd.to_datetime(date)]
+        return target_df
+                  
     def get_trade_date_by_instrument(self,order_book_id,position_effect,before_date):  
         """查询某个品种的最近已成交交易日期
             Params:

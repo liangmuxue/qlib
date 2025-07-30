@@ -46,9 +46,9 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.data_source = env.data_source
         # 初始化交易代理对象
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
-        # 根据标志，决定是否清空目录下的历史交易记录
-        if emu_args.clear_data:
-            self.trade_entity.clear_his_data()
+        if emu_args.sync_data:
+            # 和本地存储进行同步更新
+            self.context.get_trade_proxy().sync_local_store(self.context.now.date(),self.trade_entity)
         # 加载当日可以交易的合约品种
         self.data_source.load_all_contract()
         # sub_contract_names = self.data_source.get_all_contract_names(env.trading_dt)
@@ -142,7 +142,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         env = Environment.get_instance()
         # 如果还没有开盘，取上一交易日数据，否则取上一交易时间段数据
         if self.is_trade_opening(env.trading_dt):
-            bar = self.data_source.get_last_price(order_book_id)
+            bar = self.data_source.get_last_bar(order_book_id)
         else:
             prev_day = get_tradedays_dur(env.trading_dt, -1)
             bar = self.data_source.get_bar(order_book_id,prev_day,"1d")            

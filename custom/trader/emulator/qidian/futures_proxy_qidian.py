@@ -24,7 +24,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         super().__init__()
 
         self.broker = str(broker)
-        self.user = user
+        self.user = str(user)
         self.password = str(password)
         self.appid = str(appid)
         self.authcode = authcode
@@ -108,7 +108,9 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         self.FrontID = pRspUserLogin.FrontID
         self.SessionID = pRspUserLogin.SessionID
         self.OrderRef = 1
-
+        # 开始前需要进行结算确认操作
+        self.ConfirmSettlementInfo()
+        
     def OnRspOrderInsert(self, pInputOrder, pRspInfo, nRequestID, bIsLast):
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             logger.warning(f"OnRspOrderInsert failed: {pRspInfo.ErrorMsg}")
@@ -715,10 +717,9 @@ class QidianFuturesTrade(BaseTrade):
         tdImpl = TdImpl(host, broker, user, password, appid, authcode,listenner=self)
         self.api = tdImpl
         tdImpl.Run()
-        time.sleep(3)
-        
-        # semaphore = threading.Semaphore(0)
-        # semaphore.acquire()
+        time.sleep(1)
+        # self.semaphore = threading.Semaphore(0)
+        # self.semaphore.acquire()
     
     def build_order_ref_id(self):
         
@@ -746,6 +747,16 @@ class QidianFuturesTrade(BaseTrade):
                 return order
         return None
 
+    def sync_local_store(self,date,trade_entity):
+        """和本地存储进行同步更新"""
+        
+        trade_data = trade_entity.get_trade_by_date(date)
+        # 使用模拟后台的数据，更新本地存储对应的数据
+        for index,row in trade_data.iterrows():
+            order_book_id = row['order_book_id']
+            
+        
+    
     ########################交易请求#################################  
     
     def submit_order(self,order_in):

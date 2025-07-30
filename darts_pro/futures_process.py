@@ -62,6 +62,7 @@ class FuturesProcessModel(TftDataframeModel):
         dataset: TFTFuturesDataset,
     ):
         self.dataset = dataset
+        dataset.provider_file = os.path.join(self.optargs["provider_uri"],"instruments",self.optargs["market"]+".txt")
         global_var.set_value("dataset", dataset)
         viz_data = TensorViz(env="viz_data")
         viz_result = TensorViz(env="viz_result")

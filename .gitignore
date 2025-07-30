@@ -8,9 +8,6 @@ __pycache__/
 **/*.pickle
 **/*.pkl
 **/*.con
-**/*.h
-**/*.cxx
-**/*.cmake
 **/darts_logs
 *.settings
 *.ipynb
