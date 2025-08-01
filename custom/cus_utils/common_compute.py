@@ -128,6 +128,10 @@ def enhance_data(ori_data,mode="smote",bins=None):
     amplitude = np.squeeze(amplitude,axis=1)     
     return amplitude,y_res
 
+def scale_value(value, src_range_min, src_range_max, dst_range_min, dst_range_max):
+    """数值从源范围缩放到目标范围"""
+    return (value - src_range_min) * (dst_range_max - dst_range_min) / (src_range_max - src_range_min) + dst_range_min
+
 def normalization(data,res=1e-5,mode="numpy",avoid_zero=True,axis=0):
     if mode=="numpy":
         if len(data.shape)==1:

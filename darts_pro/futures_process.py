@@ -368,6 +368,7 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.batch_size = self.batch_size     
             self.model.model.batch_size = self.batch_size   
             self.model.model.monitor = monitor
+            self.model.model.train_step_mode = self.optargs["step_mode"]    
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=2) 
             self.model.monitor = monitor        

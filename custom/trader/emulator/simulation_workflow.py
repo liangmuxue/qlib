@@ -1,5 +1,4 @@
 from rqalpha.environment import Environment
-from trader.emulator.portfolio import Portfolio
 from rqalpha.core.events import EVENT
 
 import os
@@ -13,7 +12,7 @@ from data_extract.rqalpha.fur_ds_proxy import FurDataProxy
 from cus_utils.data_aug import DictToObject
 from qlib.utils import init_instance_by_config
 from trader.utils.date_util import tradedays
-from trader.emulator.qidian.futures_proxy_qidian import QidianFuturesTrade
+from trader.emulator.qidian.futures_proxy_ctp import CtpFuturesTrade
 from trader.emulator.futures_real_ds import FuturesRealDataSource
 
 from cus_utils.log_util import AppLogger
@@ -107,21 +106,11 @@ class SimulationWorkflow():
         price_board = BarDictPriceBoard()
         data_proxy = FurDataProxy(ds,price_board)
         env.set_data_proxy(data_proxy)   
-        # 设置账户对象    
-        persis_path = env.config.extra.persis_path
-        account_path = Portfolio.get_persis_account_path(persis_path)
-        # 从存储中加载
-        start_date = env.config.base.start_date
-        if os.path.exists(account_path):
-            portfolio = Portfolio.load_from_storage(persis_path, start_date, data_proxy)
-        else:
-            starting_cash = env.config.base.accounts.future 
-            financing_rate = env.config.mod.sys_account.financing_rate
-            portfolio = Portfolio(starting_cash,[],financing_rate,trade_date=start_date,data_proxy=data_proxy,persis_path=persis_path)
-        env.set_portfolio(portfolio)       
+        # 策略类初始化
+        self.strategy_class.init_env()
         # 设置交易代理
         proxy_config = config.mod.ext_emulation_mod.emu_args
-        trade_proxy = QidianFuturesTrade(context=self,account_alias=proxy_config)      
+        trade_proxy = CtpFuturesTrade(context=self,account_alias=proxy_config)      
         self.context.set_trade_proxy(trade_proxy)  
         # 执行器
         self.executor = Executor(datetime.now().date(),env=self)
@@ -160,7 +149,6 @@ class SimulationWorkflow():
         context= self.context
         if context.config.ignore_mode:
             return     
-        self.strategy_class.init_env()
         self.strategy_class.before_trading(context)
     
     def handle_bar(self,bar_dict=None):

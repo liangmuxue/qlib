@@ -20,8 +20,7 @@ from darts_pro.act_model.fur_industry_ts import FurIndustryMixer,FurStrategy
 from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 
-from cus_utils.common_compute import compute_price_class,batch_cov_comp,normalization,\
-    normalization_axis
+from cus_utils.common_compute import compute_price_class,scale_value
 from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
@@ -140,7 +139,7 @@ class FuturesIndustryDRollModule(MlpModule):
             industry_index = FuturesMappingUtil.get_industry_data_index_without_main(self.train_sw_ins_mappings)
             index_num = combine_nodes_num.shape[0]
             # 加入短期指标
-            if self.target_mode[seq] in [0]:
+            if self.target_mode[seq] in [0,5]:
                 pred_len = self.output_chunk_length
                 cut_len = pred_len
             elif self.target_mode[seq] in [1,2]:
@@ -447,7 +446,7 @@ class FuturesIndustryDRollModule(MlpModule):
             # indus_bitop_diff = rate_total['indus_bitop_diff'].sum()
             indus_top_diff = rate_total['indus_top_diff'].sum()
             trend_corr_cnt = rate_total['trend_correct'].sum()
-            if self.train_step_mode!=1:
+            if self.train_step_mode==2:
                 total_cnt = rate_total['total_cnt'].sum()
                 yield_rate = rate_total['yield_rate'].sum()
                 self.log("yield_rate", yield_rate, prog_bar=True) 
@@ -456,17 +455,19 @@ class FuturesIndustryDRollModule(MlpModule):
                     name = "cls{}_cnt".format(i)
                     cnt = rate_total[name].sum()
                     self.log("score_{} rate".format(i), round(cnt/total_cnt,3), prog_bar=True) 
-            for i in range(len(CLASS_SIMPLE_VALUES.keys())):
-                cnt = np.sum(rate_total['indus_top_class']==i)
-                if cnt>0:
-                    self.log("indus_top_{} rate".format(i), cnt/rate_total.shape[0], prog_bar=True)                 
-                # self.log("score_{} min rate".format(i), combine_rate_min[i], prog_bar=True) 
-            # self.log("indus_bitop_diff", round(indus_bitop_diff,3), prog_bar=True)  
-            self.log("indus_top_diff", round(indus_top_diff,3), prog_bar=True)  
-            self.log("trend corr rate", round(trend_corr_cnt/rate_total.shape[0],3), prog_bar=True)  
+            if self.train_step_mode>0:
+                for i in range(len(CLASS_SIMPLE_VALUES.keys())):
+                    cnt = np.sum(rate_total['indus_top_class']==i)
+                    if cnt>0:
+                        self.log("indus_top_{} rate".format(i), cnt/rate_total.shape[0], prog_bar=True)                 
+                    # self.log("score_{} min rate".format(i), combine_rate_min[i], prog_bar=True) 
+                # self.log("indus_bitop_diff", round(indus_bitop_diff,3), prog_bar=True)  
+                self.log("indus_top_diff", round(indus_top_diff,3), prog_bar=True)  
+                self.log("trend corr rate", round(trend_corr_cnt/rate_total.shape[0],3), prog_bar=True)  
+            else:
+                self.log("trend corr rate", round(trend_corr_cnt/rate_total.shape[0],3), prog_bar=True)  
             # self.log("total cnt", total_cnt, prog_bar=True)  
             # self.log("total_imp_cnt", total_imp_cnt, prog_bar=True)  
-            # self.log("f1_scores", round(f1_scores,3), prog_bar=True)  
      
         # 如果是测试模式，则在此进行可视化
         if self.mode is not None and self.mode.startswith("pred_") :
@@ -765,7 +766,7 @@ class FuturesIndustryDRollModule(MlpModule):
                 time_index = target_info["future_end"] - 1 
                 # 预测数据放入记录，与最后一个日期序号对应
                 if len(ce_index)>1:
-                    pred_data = ce_index[1][j,-1]
+                    pred_data = ce_index[0][j]
                 else:
                     pred_data = ce_index[0][j]
                 glo_match_data.append([indus_index,date,indus_code,time_index,pred_data])
@@ -841,8 +842,12 @@ class FuturesIndustryDRollModule(MlpModule):
                 continue
   
             # Compute Acc Resultes
-            import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr = self.collect_result(import_index,overroll_trend=trend_value,
-                                                indus_top_index=indus_top_index,target_info=target_info_list,indus_result_list=result_list)
+            import_price_result = None
+            if self.train_step_mode==0:
+                trend_correct_results = self.collect_result_compindex(overroll_trend=trend_value,target_info=target_info_list,result_list=result_list)
+            else:
+                import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr = self.collect_result(import_index,overroll_trend=trend_value,
+                                                    indus_top_index=indus_top_index,target_info=target_info_list,indus_result_list=result_list)                
             # 把结果数据整合到预测记录中
             if indus_result_total_list is None:
                 indus_result_total_list = result_list
@@ -879,12 +884,19 @@ class FuturesIndustryDRollModule(MlpModule):
                 rate_item.append(indus_top_class) 
                 rate_item.append(indus_top_diff)                                    
             else:
-                rate_columns = ["date"] + ["trend_value","trend_correct","indus_top_class","indus_top_diff"]                   
-                # 添加多空判断预测信息 
-                rate_item.append(trend_value) 
-                rate_item.append(main_trend_correct) 
-                rate_item.append(indus_top_class) 
-                rate_item.append(indus_top_diff)     
+                if self.train_step_mode!=0:
+                    rate_columns = ["date"] + ["trend_value","trend_correct","indus_top_class","indus_top_diff"]                   
+                    # 添加多空判断预测信息 
+                    rate_item.append(trend_value) 
+                    rate_item.append(main_trend_correct) 
+                    rate_item.append(indus_top_class) 
+                    rate_item.append(indus_top_diff)     
+                else:
+                    rate_columns = ["date"] + ["trend_value","trend_correct","indus_top_class","indus_top_diff"]                   
+                    rate_item.append(trend_correct_results['trend_value'].values[0]) 
+                    rate_item.append(trend_correct_results['main_trend_correct'].values[0]) 
+                    rate_item.append(0) 
+                    rate_item.append(0)                         
             rate_total.append(rate_item)
             
         if predict_mode:
@@ -898,7 +910,7 @@ class FuturesIndustryDRollModule(MlpModule):
         return rate_total,indus_result_total_list,total_imp_cnt,import_price_result_list
        
     def collect_result(self,import_index,overroll_trend=0,indus_top_index=None,target_info=None,indus_result_list=None): 
-        """收集预测对应的实际数据"""
+        """判断预测准确度，并生成结果数据"""
     
         import_price_result = None
         if self.train_step_mode!=1:
@@ -960,15 +972,10 @@ class FuturesIndustryDRollModule(MlpModule):
             indus_top_diff -= diff_range 
         else:
             indus_top_diff += diff_range 
-        # 计算整体趋势准确率
-        main_trend_correct = 0
-        raise_num = np.sum(total_diff_range>=0)
-        if overroll_trend==1 and raise_num>=3:
-            main_trend_correct = 1
-        elif overroll_trend==0 and raise_num<3:
-            main_trend_correct = 1
-        else:
-            main_trend_correct = 0        
+        # 计算整体趋势准确率,使用平均值计算总体是否上涨
+        main_trend_target = total_diff_range.mean()>0
+        main_trend_correct = (overroll_trend==main_trend_target)
+        main_trend_correct = main_trend_correct+0
     
         return import_price_result,indus_top_class,indus_top_diff,main_trend_correct,indus_bitop_diff,indus_top_corr
     
@@ -1000,7 +1007,32 @@ class FuturesIndustryDRollModule(MlpModule):
         import_price_result["yield_rate"] = import_price_result["yield_rate"].astype(np.float)   
     
         return import_price_result
-    
+
+    def collect_result_compindex(self,overroll_trend=0,target_info=None,result_list=None):
+        
+        trend_results = []
+        for index,row in result_list.iterrows():
+            indus_index = int(row["indus_index"])
+            trend_flag = int(row["trend_flag"])
+            diff_range = target_info[indus_index]["diff_range"][-1] 
+            trend_corr = 0
+            if (diff_range<0 and trend_flag==0) or (diff_range>=0 and trend_flag==1):
+                trend_corr = 1         
+            results = row.values.tolist() + [trend_corr,diff_range] 
+            trend_results.append(results)    
+        trend_results = np.array(trend_results)
+        trend_results = pd.DataFrame(trend_results,columns=result_list.columns.tolist() + ['trend_corr','diff_range'])
+        # 计算整体趋势准确率
+        indus_num = trend_results.shape[0]
+        trend_correct_num = np.sum(trend_results['trend_corr']>0)  
+        main_trend_target = trend_correct_num>(indus_num//2)
+        # 使用平均值计算总体是否上涨
+        main_trend_target = trend_results['diff_range'].mean()>0
+        main_trend_correct = (overroll_trend==main_trend_target)
+        trend_results['trend_value'] = overroll_trend+0
+        trend_results['main_trend_correct'] = (main_trend_correct+0)
+        
+        return trend_results        
             
     def build_import_index(self,date=None,output_data=None,target=None,price_target=None,target_info=None,combine_instrument=None,instrument_index=None,index_round_targets=None):  
         """生成涨幅达标的预测数据下标"""
@@ -1009,9 +1041,10 @@ class FuturesIndustryDRollModule(MlpModule):
         
         # 不同阶段，使用不同的策略
         if self.train_step_mode==0:
-            indus_top_index,trend_value,result_list = self.strategy_top_indus(cls_values,ce_values,
+            trend_value,result_list = self.strategy_compindex(cls_values,ce_values,
                                         target=target,target_info=target_info,index_round_targets=index_round_targets,
                                    combine_instrument=combine_instrument)
+            return None,trend_value, None,result_list,None
         elif self.train_step_mode==1:
             indus_top_index,trend_value,result_list = self.strategy_top_indus(cls_values,ce_values,
                                         target=target,target_info=target_info,index_round_targets=index_round_targets,
@@ -1035,7 +1068,55 @@ class FuturesIndustryDRollModule(MlpModule):
         ins_result_list = pd.DataFrame(ins_result_list,columns=['top_index','top_flag'])
         ins_result_list['date'] = date            
         return import_index_real,trend_value,indus_top_index,result_list,ins_result_list
+    
+    
+    def strategy_compindex(self,cls,ce_values,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
+        """衡量整体指标"""
         
+        date = int(target_info[0]['future_start_datetime'])
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
+        main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        indus_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+        industry_index = [i for i in range(indus_index.shape[0])]
+        industry_index_real = indus_index[industry_index]
+        industry_index.remove(main_index)
+               
+        # 整体指数预测数据转化为价格参考指数，并设置阈值进行涨跌判断
+        price_inf_threhold = 0
+        trend_indus = ce_values[0]
+        
+        # 根据趋势预测数据在历史数据中的相对位置，并参照历史实际数据走势，判断涨跌趋势。并综合多个行业判断整体涨跌趋势。
+        trend_flag_indus = []
+        result_list = []
+        price_round_data_indus = []
+        trend_can_num = 1
+        for i,idx in enumerate(industry_index):
+            target_info_item = target_info[industry_index_real[idx]]
+            price_round_data = target_info_item["diff_range"][-self.cut_len-self.output_chunk_length:-self.output_chunk_length]
+            # 根据预测数值，在[0,1]范围区间进行估算
+            trend_indus_item = trend_indus[i]
+            # 预测数值转换为目标范围数值
+            target_value = scale_value(trend_indus_item,0,1,price_round_data.min(),price_round_data.max())
+            trend_flag = target_value>0
+            trend_flag_indus.append(trend_flag)
+            result_list.append([date,industry_index_real[idx],trend_flag,target_value,trend_indus_item])
+        price_round_data_indus = np.array(price_round_data_indus)
+        trend_real = (np.sum(price_round_data_indus>0)>(len(industry_index)//2))+0
+        
+        # 构建结果集
+        result_list = np.array(result_list)
+        result_list = pd.DataFrame(result_list,columns=self.result_columns)
+        result_list['date'] = result_list['date'].astype(int) 
+        result_list['trend_flag'] = result_list['trend_flag'].astype(int) 
+        
+        # 超出一半上涨，则认为整体上涨
+        # trend_value = (np.sum(trend_flag_indus)>(len(industry_index)//2))+0
+        # 根据平均数是否是否大于0判断是否整体上涨
+        trend_value = (result_list['price_inf'].mean()>0)
+                        
+        return trend_value,result_list    
+            
+       
     def strategy_top_indus(self,cls,ce_values,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
         """行业排名方式筛选候选者"""
 
@@ -1049,8 +1130,8 @@ class FuturesIndustryDRollModule(MlpModule):
                
         # 整体指数预测数据转化为价格参考指数，并设置阈值进行涨跌判断
         price_inf_threhold = 0
-        ce_indus = ce_values[0]
-        trend_indus = ce_values[1]
+        ce_indus = ce_values[1]
+        trend_indus = ce_values[0]
         
         # 根据趋势预测数据在历史数据中的相对位置，并参照历史实际数据走势，判断涨跌趋势。并综合多个行业判断整体涨跌趋势。
         trend_flag_indus = []
@@ -1058,17 +1139,15 @@ class FuturesIndustryDRollModule(MlpModule):
         price_round_data_indus = []
         trend_can_num = 1
         for i,idx in enumerate(industry_index):
-            index_round_targets_item = index_round_targets[idx][-self.cut_len-self.output_chunk_length:-self.output_chunk_length,1]
             target_info_item = target_info[industry_index_real[idx]]
             price_round_data = target_info_item["diff_range"][-self.cut_len-self.output_chunk_length:-self.output_chunk_length]
-            # 取得最接近的匹配索引，然后查找到对应的价格涨跌幅进行判断
-            match_index = np.argsort(trend_indus[i])[:trend_can_num]
-            # match_index = np.abs(index_round_targets_item-pred_data[-1]).argmin()
-            price_indus_inf = np.mean(price_round_data[match_index])
-            # trend_flag = np.sum(price_round_data[match_index]>price_inf_threhold)>(trend_can_num/2)
-            trend_flag = np.sum(price_round_data[match_index])>0
+            # 根据预测数值，在[0,1]范围区间进行估算
+            trend_indus_item = trend_indus[i]
+            # 预测数值转换为目标范围数值
+            target_value = scale_value(trend_indus_item,0,1,price_round_data.min(),price_round_data.max())
+            trend_flag = target_value>0
             trend_flag_indus.append(trend_flag)
-            result_list.append([date,industry_index_real[idx],trend_flag,price_indus_inf,price_indus_inf])
+            result_list.append([date,industry_index_real[idx],trend_flag,target_value,trend_indus_item])
         price_round_data_indus = np.array(price_round_data_indus)
         trend_real = (np.sum(price_round_data_indus>0)>(len(industry_index)//2))+0
         
@@ -1082,12 +1161,11 @@ class FuturesIndustryDRollModule(MlpModule):
         trend_flag_indus = np.array(trend_flag_indus)
         price_indus_inf_list = result_list['price_inf'].values
         
-        # max_index = np.abs(price_indus_inf_list).argmax()
-        # trend_value = (price_indus_inf_list[max_index]>0)
-        # trend_value = (price_indus_inf_list.sum()>0)
         # 超出一半上涨，则认为整体上涨
-        trend_value = (np.sum(trend_flag_indus)>(len(industry_index)//2))+0
-        # trend_value = (np.sum(cls_ins>0.5)>(len(industry_index)//2))+0
+        # trend_value = (np.sum(trend_flag_indus)>(len(industry_index)//2))+0
+        # 根据平均数是否是否大于0判断是否整体上涨
+        trend_value = (result_list['price_inf'].mean()>0)
+        
         # Make All Trend Correct
         # trend_value = trend_real
         

@@ -6,6 +6,7 @@ import numpy as np
 
 from rqalpha.environment import Environment
 
+from trader.emulator.portfolio import Portfolio
 from trader.rqalpha.ml_wf_context import FurWorkflowIntergrate
 from trader.emulator.futures_backtest_strategy import FurBacktestStrategy,POS_COLUMNS
 from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
@@ -51,9 +52,18 @@ class FurSimulationStrategy(FurBacktestStrategy):
             self.context.get_trade_proxy().sync_local_store(self.context.now.date(),self.trade_entity)
         # 加载当日可以交易的合约品种
         self.data_source.load_all_contract()
-        # sub_contract_names = self.data_source.get_all_contract_names(env.trading_dt)
-        # for name in sub_contract_names:
-        #     self.contract_today.append(name)
+        # 投资组合信息加载，包括账户、持仓、交易等
+        persis_path = env.config.extra.persis_path
+        account_path = Portfolio.get_persis_account_path(persis_path)        
+        start_date = env.config.base.start_date
+        if os.path.exists(account_path):
+            # 从存储中加载
+            portfolio = Portfolio.load_from_storage(persis_path, start_date, data_proxy)
+        else:
+            starting_cash = env.config.base.accounts.future 
+            financing_rate = env.config.mod.sys_account.financing_rate
+            portfolio = Portfolio(starting_cash,[],financing_rate,trade_date=start_date,data_proxy=data_proxy,persis_path=persis_path)
+        env.set_portfolio(portfolio)         
                      
     def before_trading(self,context):
         """交易前准备"""

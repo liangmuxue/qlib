@@ -922,5 +922,5 @@ if __name__ == "__main__":
     time.sleep(3)
     print("begin qry pos")
     # tdImpl.QryPosition("")
-    tdImpl.QryOrder("")
+    tdImpl.QryOrder("ss2509")
     input("################# 按任意键退出 \n")

@@ -107,7 +107,16 @@ class Portfolio(object):
             pos_list_total += pos_list
             
         return cls(starting_cash,pos_list_total,self.financing_rate,data_proxy=data_proxy,trade_date=trade_date,persis_path=persis_path)
-                              
+
+    @classmethod
+    def load_from_ctp(cls,ctp_data,trade_date=None,data_proxy=None):
+        """从CTP服务端数据对接"""
+        
+        
+        
+        
+        
+                                      
     def save_to_storage(self):
         """保存到存储"""
         

@@ -541,7 +541,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 行业板块数据归一化
         past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
         future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
-        long_diff_seq_targets = long_diff_targets[:,-self.cut_len:,:]
+        # long_diff_seq_targets = long_diff_targets[:,-self.cut_len:,:]
+        # 衡量目标值与前面各段已知结果比较的相对位置
+        long_diff_seq_targets = np.concatenate([past_round_targets[:,-self.cut_len:,:],future_round_targets[:,-1:,:]],axis=1)
         
         for i in range(self.ins_in_indus_index.shape[0]):
             # 取得对应的行业序列数据，作为目标数据
@@ -552,21 +554,21 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             future_index_round_targets[i] = indus_future_round
             
         for i in range(self.past_target_shape[-1]):
-            if self.scale_mode[i] in [0,1]:
+            if self.scale_mode[i] in [0,1,5]:
                 # 分行业归一化
                 scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
                 future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
                 long_diff_seq_targets[:,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
                 
-        # 单独归一化未来行业板块整体预测数值
+        # 统合归一化所有行业板块的整体预测数值
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0]:
                 future_index_round_targets[self.indus_rel_index,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[self.indus_rel_index,:,i])
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
         index_round_targets = np.concatenate([past_index_round_targets,future_index_round_targets],axis=1)
 
-        # 整体目标值批次内,分行业归一化
+        # 所有品种目标值,批次内分行业归一化
         past_data_scale = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
         for inner_idx,ins_indus_index in enumerate(self.ins_in_indus_index):
             # 忽略无效数值

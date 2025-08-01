@@ -38,7 +38,10 @@ class FuturesTradeEntity(TradeEntity):
         # 初始化交易日志数据
         self.trade_log_df = pd.DataFrame(columns=TRADE_LOG_COLUMNS)
         self.log_save_path = log_save_path
-        
+    
+    def set_trade_data(self,trade_data):
+        self.trade_data_df = trade_data
+      
     def add_trade(self,trade,multiplier=1,default_status=ORDER_STATUS.FILLED):
         """添加交易信息，需要先具备订单信息"""
         

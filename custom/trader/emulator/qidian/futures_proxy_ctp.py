@@ -2,9 +2,10 @@ from trader.emulator.base_trade_proxy import BaseTrade
 from rqalpha.portfolio import Portfolio
 
 import copy
-import threading
+import numpy as np
 import pandas as pd
 import time
+
 
 from cus_utils.process import IFakeSyncCall
 from cus_utils.log_util import AppLogger
@@ -12,12 +13,13 @@ logger = AppLogger()
 
 import CTPAPI.build.thosttraderapi as tdapi 
 
-from rqalpha.const import SIDE,ORDER_STATUS as RQ_ORDER_STATUS
+from rqalpha.const import POSITION_DIRECTION,ORDER_STATUS as RQ_ORDER_STATUS
 from rqalpha.apis import Environment
+from rqalpha.const import ORDER_STATUS
 from rqalpha.core.events import EVENT, Event
 from trader.rqalpha.model.trade import Trade
-from trader.emulator.constance import OrderStatusType
-from rqalpha.const import POSITION_DIRECTION
+from trader.utils.constance import OrderStatusType,CtpQueryType,CtpSyncFlag
+from trader.utils.ctp_sync_proxy import CtpSyncProxy
 
 class TdImpl(tdapi.CThostFtdcTraderSpi):
     def __init__(self, host, broker, user, password, appid, authcode,listenner=None):
@@ -225,18 +227,36 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         if bIsLast == True:
             semaphore.release()
 
-    def OnRspQryExchange(self, pExchange: "CThostFtdcExchangeField", pRspInfo: "CThostFtdcRspInfoField",
-                         nRequestID: "int", bIsLast: "bool") -> "void":
+    def OnRspQryInvestorPosition(self, pInvestorPosition: tdapi.CThostFtdcInvestorPositionField,
+                                 pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
-            print(f"OnRspQryExchange failed: {pRspInfo.ErrorMsg}")
+            print(f"OnRspQryInvestorPosition failed: {pRspInfo.ErrorMsg}")
             return
-        print(f"OnRspQryExchange:"
-              f"ExchangeID={pExchange.ExchangeID} "
-              f"ExchangeName={pExchange.ExchangeName} "
-              )
-        if bIsLast == True:
-            semaphore.release()
 
+        if pInvestorPosition is not None:
+            print(f"OnRspInvestorPosition:{pInvestorPosition.InstrumentID} "
+                  f"ExchangeID={pInvestorPosition.ExchangeID} "
+                  f"InstrumentID={pInvestorPosition.InstrumentID} "
+                  f"HedgeFlag={pInvestorPosition.HedgeFlag} "
+                  f"PositionDate={pInvestorPosition.PositionDate} "
+                  f"PosiDirection={pInvestorPosition.PosiDirection} "
+                  f"Position={pInvestorPosition.Position} "
+                  f"YdPosition={pInvestorPosition.YdPosition} "
+                  f"TodayPosition={pInvestorPosition.TodayPosition} "
+                  f"UseMargin={pInvestorPosition.UseMargin} "
+                  f"PreMargin={pInvestorPosition.PreMargin} "
+                  f"FrozenMargin={pInvestorPosition.FrozenMargin} "
+                  f"Commission={pInvestorPosition.Commission} "
+                  f"FrozenCommission={pInvestorPosition.FrozenCommission} "
+                  f"CloseProfit={pInvestorPosition.CloseProfit} "
+                  f"LongFrozen={pInvestorPosition.LongFrozen} "
+                  f"ShortFrozen={pInvestorPosition.ShortFrozen} "
+                  f"PositionCost={pInvestorPosition.PositionCost} "
+                  f"OpenCost={pInvestorPosition.OpenCost} "
+                  f"SettlementPrice={pInvestorPosition.SettlementPrice} "
+                  )
+            self.listenner.process_qry_result(CtpQueryType.QryPosition,pInvestorPosition)
+            
     def OnRspQryProduct(self, pProduct: "CThostFtdcProductField", pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",
                         bIsLast: "bool") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
@@ -316,8 +336,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
                   f"OrderLocalID={pOrder.OrderLocalID} "
                   )
 
-        if bIsLast == True:
-            semaphore.release()
+        self.listenner.process_qry_result(CtpQueryType.QryOrder,pOrder)
 
     def OnRspQryTrade(self, pTrade: tdapi.CThostFtdcTradeField, pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",
                       bIsLast: "bool") -> "void":
@@ -372,8 +391,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
                   f"CurrencyID={pTradingAccount.CurrencyID} "
                   )
 
-        if bIsLast == True:
-            semaphore.release()
+        self.listenner.process_qry_result(CtpQueryType.QryAccount,pTradingAccount)
 
     def OnRspQryInvestor(self, pInvestor: "CThostFtdcInvestorField", pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
@@ -684,8 +702,8 @@ class TradeOrderRes():
     def sum_trade_volume(self):  
         return self.trade_data['volume'].sum()
     
-class QidianFuturesTrade(BaseTrade):
-    """奇点的仿真交易类"""
+class CtpFuturesTrade(BaseTrade):
+    """CTP的仿真交易类"""
     
     def __init__(
         self,
@@ -713,7 +731,8 @@ class QidianFuturesTrade(BaseTrade):
         password = self.password
         appid = self.appid
         authcode = self.authcode
-        
+        # 同步和异步的转换代理
+        self.sync_proxy = CtpSyncProxy(self)
         tdImpl = TdImpl(host, broker, user, password, appid, authcode,listenner=self)
         self.api = tdImpl
         tdImpl.Run()
@@ -751,12 +770,47 @@ class QidianFuturesTrade(BaseTrade):
         """和本地存储进行同步更新"""
         
         trade_data = trade_entity.get_trade_by_date(date)
+        trade_ext_columns = trade_data.columns.tolist() + ["sync_flag"]
         # 使用模拟后台的数据，更新本地存储对应的数据
+        qry_results = []
+        if trade_data.shape[0]==0:
+            return
         for index,row in trade_data.iterrows():
             order_book_id = row['order_book_id']
-            
+            # 使用异步转同步的模式进行调用
+            qry_order = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder,order_book_id)
+            if qry_order is None:
+                logger.warning("qry_order None:{}".format(order_book_id))
+                qry_results.append(row.values.tolist() + [CtpSyncFlag.NOT_EXISTS])
+                continue
+            if qry_order.OrderStatus==OrderStatusType.AllTraded:
+                row['status'] = ORDER_STATUS.FILLED
+            if qry_order.OrderStatus==OrderStatusType.UnClosed:
+                row['status'] = ORDER_STATUS.REJECTED                
+            qry_results.append(row.values.tolist() + [CtpSyncFlag.ACCORD])
         
-    
+        qry_results = pd.DataFrame(np.array(qry_results),columns=trade_ext_columns)  
+        trade_entity.set_trade_data(qry_results)
+        
+    def sync_account_store(self):
+        """账户信息和本地存储进行同步更新"""
+        
+        qry_account = self.sync_proxy.qry_sync_func(CtpQueryType.QryAccount)
+        # TODO
+        print(f"OnRspQryTradingAccount: "
+              f"PreBalance={pTradingAccount.PreBalance} "
+              f"PreMargin={pTradingAccount.PreMargin} "
+              f"FrozenMargin={pTradingAccount.FrozenMargin} "
+              f"CurrMargin={pTradingAccount.CurrMargin} "
+              f"Commission={pTradingAccount.Commission} "
+              f"FrozenCommission={pTradingAccount.FrozenCommission} "
+              f"Available={pTradingAccount.Available} "
+              f"Balance={pTradingAccount.Balance} "
+              f"CloseProfit={pTradingAccount.CloseProfit} "
+              f"CurrencyID={pTradingAccount.CurrencyID} "
+              )        
+        
+        
     ########################交易请求#################################  
     
     def submit_order(self,order_in):
@@ -798,7 +852,9 @@ class QidianFuturesTrade(BaseTrade):
 
                 
     ######################## 回调事件调用 #################################  
-    
+    def process_qry_result(self,qry_bunder,results):
+        self.sync_proxy.process_qry_result(qry_bunder, results)
+        
     def on_order_rtn(self,pOrder):
         
         # 返回数据中包含本地上下文标识，用于本地存储的串接

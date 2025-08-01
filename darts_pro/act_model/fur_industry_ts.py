@@ -91,7 +91,11 @@ class FurIndustryMixer(nn.Module):
         classify_out_combine = torch.cat(classify_out_combine,dim=1)
         if self.target_mode==0:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
+            # 关联比较模式，叠加整合网络
             index_data_combine = self.combine_layer(index_data_combine)  
+        elif self.target_mode==5:
+            # 独立衡量模式
+            index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]            
         elif self.target_mode==1:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)
             index_data_combine = self.seq_layer(index_data_combine)
@@ -99,8 +103,6 @@ class FurIndustryMixer(nn.Module):
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
             
         return classify_out_combine,cls_out_combine,index_data_combine
-
-
 
 class FurIndustryDRollMixer(nn.Module):
     """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络.
