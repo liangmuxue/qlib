@@ -164,7 +164,7 @@ class FuturesDataSource(BaseDataSource):
         if frequency != '1m' and frequency != '1d':
             return super(FuturesDataSource, self).get_bar(order_book_id, dt, frequency)
         
-        if not self.is_trade_opening(dt) and frequency == '1m':
+        if frequency == '1m' and not self.is_trade_opening(dt):
             # 如果不在交易时间，则不出数
             return None
         else:

@@ -111,6 +111,23 @@ def compare_dataset_consistence():
         compare_rs = np.where(diff>eps)
         if np.sum(compare_rs)>1:
             print("{} difference:{}".format(names[i],compare_rs))
+
+def swig_object_to_dict(obj):
+    """Swig Object to Dict"""
+    
+    if not hasattr(obj, '__swig_getmethods__'):
+        return None
+
+    result = {}
+    for name, method in obj.__swig_getmethods__.items():
+        try:
+            if callable(method):
+                result[name] = method(obj)
+            else:
+                result[name] = method
+        except Exception:
+            pass
+    return result
         
 if __name__ == "__main__":
     file_path = "custom/data/aug/test_100.npy"

@@ -51,7 +51,11 @@ class FurDataProxy(DataProxy):
 
     def __getattr__(self, item):
         return getattr(self._data_source, item)
-
+    
+    @property
+    def data_source(self):
+        return self._data_source    
+    
     def get_trading_minutes_for(self, order_book_id, dt):
         instrument = self.instruments(order_book_id)
         minutes = self._data_source.get_trading_minutes_for(instrument, dt)

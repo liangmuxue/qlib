@@ -166,5 +166,16 @@ class FuturesTradeEntity(TradeEntity):
                                       (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]       
         else:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
-        return target_df          
+        return target_df         
+    
+    def move_order_by_date(self,date): 
+        """移除指定日期的数据"""
+        
+        data = self.get_trade_by_date(date)
+        target_df = self.trade_data_df[~self.trade_data_df["trade_date"]==pd.to_datetime(date)]
+        self.trade_data_df = target_df
+        
+        return data
+        
+        
                 

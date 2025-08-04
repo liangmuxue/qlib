@@ -609,16 +609,16 @@ class FuturesIndustryDRollModule(MlpModule):
                             # viz_detail.viz_matrix_var(view_data,win=win,title=target_title,names=names)     
                                                     
                             # 显示时间段比对图   
-                            indus_output_value = ce_output[j][index,k,:]
-                            diff_index_round_target = long_diff_index_targets_total[index,indus_rel_index[k],:,j]
-                            price_target = ts_arr[indus_index_item]["diff_range"][-self.output_chunk_length-self.cut_len:-self.output_chunk_length]
-                            price_target =  MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(np.expand_dims(price_target,-1)).squeeze(-1)
-                            win = "round_target_mul{}_{}_{}".format(j,k,viz_total_size)    
-                            target_title = "seq_target_{}_{},date:{}".format(indus_name,j,date)
-                            viz_detail = viz_result_detail["all"]
-                            view_data = np.stack([indus_output_value,diff_index_round_target,price_target]).transpose(1,0)
-                            date_list = ["S{}".format(i) for i in range(self.cut_len)]
-                            viz_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=date_list,legends=["pred","target","price"])      
+                            # indus_output_value = ce_output[j][index,k,:]
+                            # diff_index_round_target = long_diff_index_targets_total[index,indus_rel_index[k],:,j]
+                            # price_target = ts_arr[indus_index_item]["diff_range"][-self.output_chunk_length-self.cut_len:-self.output_chunk_length]
+                            # price_target =  MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(np.expand_dims(price_target,-1)).squeeze(-1)
+                            # win = "round_target_mul{}_{}_{}".format(j,k,viz_total_size)    
+                            # target_title = "seq_target_{}_{},date:{}".format(indus_name,j,date)
+                            # viz_detail = viz_result_detail["all"]
+                            # view_data = np.stack([indus_output_value,diff_index_round_target,price_target]).transpose(1,0)
+                            # date_list = ["S{}".format(i) for i in range(self.cut_len)]
+                            # viz_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=date_list,legends=["pred","target","price"])      
                                         
                     # 显示板块比对图
                     indust_output_value = ce_output[j][index]

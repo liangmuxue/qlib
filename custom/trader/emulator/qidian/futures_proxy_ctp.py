@@ -20,6 +20,7 @@ from rqalpha.core.events import EVENT, Event
 from trader.rqalpha.model.trade import Trade
 from trader.utils.constance import OrderStatusType,CtpQueryType,CtpSyncFlag
 from trader.utils.ctp_sync_proxy import CtpSyncProxy
+from trader.emulator.portfolio import SimPosition
 
 class TdImpl(tdapi.CThostFtdcTraderSpi):
     def __init__(self, host, broker, user, password, appid, authcode,listenner=None):
@@ -52,7 +53,10 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
 
     def Run(self):
         self.api.Init()
-
+    
+    def set_bundler(self,bundle_id):
+        self.bundle_id = bundle_id
+    
     def OnFrontConnected(self):
         logger.info("OnFrontConnected")
 
@@ -233,29 +237,14 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             print(f"OnRspQryInvestorPosition failed: {pRspInfo.ErrorMsg}")
             return
 
-        if pInvestorPosition is not None:
-            print(f"OnRspInvestorPosition:{pInvestorPosition.InstrumentID} "
-                  f"ExchangeID={pInvestorPosition.ExchangeID} "
-                  f"InstrumentID={pInvestorPosition.InstrumentID} "
-                  f"HedgeFlag={pInvestorPosition.HedgeFlag} "
-                  f"PositionDate={pInvestorPosition.PositionDate} "
-                  f"PosiDirection={pInvestorPosition.PosiDirection} "
-                  f"Position={pInvestorPosition.Position} "
-                  f"YdPosition={pInvestorPosition.YdPosition} "
-                  f"TodayPosition={pInvestorPosition.TodayPosition} "
-                  f"UseMargin={pInvestorPosition.UseMargin} "
-                  f"PreMargin={pInvestorPosition.PreMargin} "
-                  f"FrozenMargin={pInvestorPosition.FrozenMargin} "
-                  f"Commission={pInvestorPosition.Commission} "
-                  f"FrozenCommission={pInvestorPosition.FrozenCommission} "
-                  f"CloseProfit={pInvestorPosition.CloseProfit} "
-                  f"LongFrozen={pInvestorPosition.LongFrozen} "
-                  f"ShortFrozen={pInvestorPosition.ShortFrozen} "
-                  f"PositionCost={pInvestorPosition.PositionCost} "
-                  f"OpenCost={pInvestorPosition.OpenCost} "
-                  f"SettlementPrice={pInvestorPosition.SettlementPrice} "
-                  )
-            self.listenner.process_qry_result(CtpQueryType.QryPosition,pInvestorPosition)
+        # swig对象转实际业务对象
+        symbol = pInvestorPosition.InstrumentID
+        quantity = pInvestorPosition.Position
+        direction = POSITION_DIRECTION.LONG if pInvestorPosition.PosiDirection==1 else POSITION_DIRECTION.SHORT
+        price = pInvestorPosition.SettlementPrice        
+        position = SimPosition(symbol,direction,quantity,price)
+        
+        self.listenner.process_qry_result(CtpQueryType.QryPosition.value,position)
             
     def OnRspQryProduct(self, pProduct: "CThostFtdcProductField", pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",
                         bIsLast: "bool") -> "void":
@@ -289,54 +278,9 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             print(f"OnRspQryOrder failed: {pRspInfo.ErrorMsg}")
             return
 
-        if pOrder is not None:
-            print(f"OnRspQryOrder:"
-                  f"UserID={pOrder.UserID} "
-                  f"BrokerID={pOrder.BrokerID} "
-                  f"InvestorID={pOrder.InvestorID} "
-                  f"ExchangeID={pOrder.ExchangeID} "
-                  f"InstrumentID={pOrder.InstrumentID} "
-                  f"Direction={pOrder.Direction} "
-                  f"CombOffsetFlag={pOrder.CombOffsetFlag} "
-                  f"CombHedgeFlag={pOrder.CombHedgeFlag} "
-                  f"OrderPriceType={pOrder.OrderPriceType} "
-                  f"LimitPrice={pOrder.LimitPrice} "
-                  f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
-                  f"FrontID={pOrder.FrontID} "
-                  f"SessionID={pOrder.SessionID} "
-                  f"OrderRef={pOrder.OrderRef} "
-                  f"TimeCondition={pOrder.TimeCondition} "
-                  f"GTDDate={pOrder.GTDDate} "
-                  f"VolumeCondition={pOrder.VolumeCondition} "
-                  f"MinVolume={pOrder.MinVolume} "
-                  f"RequestID={pOrder.RequestID} "
-                  f"InvestUnitID={pOrder.InvestUnitID} "
-                  f"CurrencyID={pOrder.CurrencyID} "
-                  f"AccountID={pOrder.AccountID} "
-                  f"ClientID={pOrder.ClientID} "
-                  f"IPAddress={pOrder.IPAddress} "
-                  f"MacAddress={pOrder.MacAddress} "
-                  f"OrderSysID={pOrder.OrderSysID} "
-                  f"OrderStatus={pOrder.OrderStatus} "
-                  f"StatusMsg={pOrder.StatusMsg} "
-                  f"VolumeTotal={pOrder.VolumeTotal} "
-                  f"VolumeTraded={pOrder.VolumeTraded} "
-                  f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
-                  f"TradingDay={pOrder.TradingDay} "
-                  f"InsertDate={pOrder.InsertDate} "
-                  f"InsertTime={pOrder.InsertTime} "
-                  f"UpdateTime={pOrder.UpdateTime} "
-                  f"CancelTime={pOrder.CancelTime} "
-                  f"UserProductInfo={pOrder.UserProductInfo} "
-                  f"ActiveUserID={pOrder.ActiveUserID} "
-                  f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
-                  f"TraderID={pOrder.TraderID} "
-                  f"ClientID={pOrder.ClientID} "
-                  f"ParticipantID={pOrder.ParticipantID} "
-                  f"OrderLocalID={pOrder.OrderLocalID} "
-                  )
-
-        self.listenner.process_qry_result(CtpQueryType.QryOrder,pOrder)
+        if pOrder is None:
+            print("pOrder None")
+        self.listenner.process_qry_result(CtpQueryType.QryOrder.value,pOrder)
 
     def OnRspQryTrade(self, pTrade: tdapi.CThostFtdcTradeField, pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",
                       bIsLast: "bool") -> "void":
@@ -373,25 +317,12 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
 
     def OnRspQryTradingAccount(self, pTradingAccount: tdapi.CThostFtdcTradingAccountField,
                                pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
+        print("OnRspQryTradingAccount in:{}".format(pTradingAccount))
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             print(f"OnRspQryTradingAccount failed: {pRspInfo.ErrorMsg}")
             return
 
-        if pTradingAccount is not None:
-            print(f"OnRspQryTradingAccount: "
-                  f"PreBalance={pTradingAccount.PreBalance} "
-                  f"PreMargin={pTradingAccount.PreMargin} "
-                  f"FrozenMargin={pTradingAccount.FrozenMargin} "
-                  f"CurrMargin={pTradingAccount.CurrMargin} "
-                  f"Commission={pTradingAccount.Commission} "
-                  f"FrozenCommission={pTradingAccount.FrozenCommission} "
-                  f"Available={pTradingAccount.Available} "
-                  f"Balance={pTradingAccount.Balance} "
-                  f"CloseProfit={pTradingAccount.CloseProfit} "
-                  f"CurrencyID={pTradingAccount.CurrencyID} "
-                  )
-
-        self.listenner.process_qry_result(CtpQueryType.QryAccount,pTradingAccount)
+        self.listenner.process_qry_result(CtpQueryType.QryAccount.value,pTradingAccount)
 
     def OnRspQryInvestor(self, pInvestor: "CThostFtdcInvestorField", pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
@@ -792,11 +723,10 @@ class CtpFuturesTrade(BaseTrade):
         qry_results = pd.DataFrame(np.array(qry_results),columns=trade_ext_columns)  
         trade_entity.set_trade_data(qry_results)
         
-    def sync_account_store(self):
-        """账户信息和本地存储进行同步更新"""
+    def query_account_info(self):
+        """请求账户信息"""
         
-        qry_account = self.sync_proxy.qry_sync_func(CtpQueryType.QryAccount)
-        # TODO
+        pTradingAccount = self.sync_proxy.qry_sync_func(CtpQueryType.QryAccount.value)
         print(f"OnRspQryTradingAccount: "
               f"PreBalance={pTradingAccount.PreBalance} "
               f"PreMargin={pTradingAccount.PreMargin} "
@@ -808,9 +738,87 @@ class CtpFuturesTrade(BaseTrade):
               f"Balance={pTradingAccount.Balance} "
               f"CloseProfit={pTradingAccount.CloseProfit} "
               f"CurrencyID={pTradingAccount.CurrencyID} "
-              )        
+              )     
+        return pTradingAccount   
+
+    def query_position_info(self,pos_code):
+        """请求持仓信息"""
         
+        pInvestorPositions = self.sync_proxy.qry_sync_func(CtpQueryType.QryPosition.value,pos_code,wait_time=3,multiple=True)
+        # print(f"OnRspInvestorPosition:{pInvestorPosition.InstrumentID} "
+        #       f"ExchangeID={pInvestorPosition.ExchangeID} "
+        #       f"InstrumentID={pInvestorPosition.InstrumentID} "
+        #       f"HedgeFlag={pInvestorPosition.HedgeFlag} "
+        #       f"PositionDate={pInvestorPosition.PositionDate} "
+        #       f"PosiDirection={pInvestorPosition.PosiDirection} "
+        #       f"Position={pInvestorPosition.Position} "
+        #       f"YdPosition={pInvestorPosition.YdPosition} "
+        #       f"TodayPosition={pInvestorPosition.TodayPosition} "
+        #       f"UseMargin={pInvestorPosition.UseMargin} "
+        #       f"PreMargin={pInvestorPosition.PreMargin} "
+        #       f"FrozenMargin={pInvestorPosition.FrozenMargin} "
+        #       f"Commission={pInvestorPosition.Commission} "
+        #       f"FrozenCommission={pInvestorPosition.FrozenCommission} "
+        #       f"CloseProfit={pInvestorPosition.CloseProfit} "
+        #       f"LongFrozen={pInvestorPosition.LongFrozen} "
+        #       f"ShortFrozen={pInvestorPosition.ShortFrozen} "
+        #       f"PositionCost={pInvestorPosition.PositionCost} "
+        #       f"OpenCost={pInvestorPosition.OpenCost} "
+        #       f"SettlementPrice={pInvestorPosition.SettlementPrice} "
+        #       )
+        return pInvestorPositions   
+
+    def query_order_info(self,order_code):
+        """请求订单信息"""
         
+        pOrder = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder.value,order_code,wait_time=5)
+        # print(f"OnRspQryOrder:"
+        #        f"UserID={pOrder.UserID} "
+        #        f"BrokerID={pOrder.BrokerID} "
+        #        f"InvestorID={pOrder.InvestorID} "
+        #        f"ExchangeID={pOrder.ExchangeID} "
+        #        f"InstrumentID={pOrder.InstrumentID} "
+        #        f"Direction={pOrder.Direction} "
+        #        f"CombOffsetFlag={pOrder.CombOffsetFlag} "
+        #        f"CombHedgeFlag={pOrder.CombHedgeFlag} "
+        #        f"OrderPriceType={pOrder.OrderPriceType} "
+        #        f"LimitPrice={pOrder.LimitPrice} "
+        #        f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
+        #        f"FrontID={pOrder.FrontID} "
+        #        f"SessionID={pOrder.SessionID} "
+        #        f"OrderRef={pOrder.OrderRef} "
+        #        f"TimeCondition={pOrder.TimeCondition} "
+        #        f"GTDDate={pOrder.GTDDate} "
+        #        f"VolumeCondition={pOrder.VolumeCondition} "
+        #        f"MinVolume={pOrder.MinVolume} "
+        #        f"RequestID={pOrder.RequestID} "
+        #        f"InvestUnitID={pOrder.InvestUnitID} "
+        #        f"CurrencyID={pOrder.CurrencyID} "
+        #        f"AccountID={pOrder.AccountID} "
+        #        f"ClientID={pOrder.ClientID} "
+        #        f"IPAddress={pOrder.IPAddress} "
+        #        f"MacAddress={pOrder.MacAddress} "
+        #        f"OrderSysID={pOrder.OrderSysID} "
+        #        f"OrderStatus={pOrder.OrderStatus} "
+        #        f"StatusMsg={pOrder.StatusMsg} "
+        #        f"VolumeTotal={pOrder.VolumeTotal} "
+        #        f"VolumeTraded={pOrder.VolumeTraded} "
+        #        f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
+        #        f"TradingDay={pOrder.TradingDay} "
+        #        f"InsertDate={pOrder.InsertDate} "
+        #        f"InsertTime={pOrder.InsertTime} "
+        #        f"UpdateTime={pOrder.UpdateTime} "
+        #        f"CancelTime={pOrder.CancelTime} "
+        #        f"UserProductInfo={pOrder.UserProductInfo} "
+        #        f"ActiveUserID={pOrder.ActiveUserID} "
+        #        f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
+        #        f"TraderID={pOrder.TraderID} "
+        #        f"ClientID={pOrder.ClientID} "
+        #        f"ParticipantID={pOrder.ParticipantID} "
+        #        f"OrderLocalID={pOrder.OrderLocalID} "
+        #        )
+        return pOrder 
+            
     ########################交易请求#################################  
     
     def submit_order(self,order_in):

@@ -1,5 +1,9 @@
 import asyncio
 import time
+import copy
+
+from cus_utils.log_util import AppLogger
+logger = AppLogger()
 
 class CtpSyncProxy(object):
     """CTP交易流程中异步和同步的处理"""
@@ -11,35 +15,46 @@ class CtpSyncProxy(object):
     def process_qry_result(self,qry_bunder,results):
         """接收处理异步结果,qry_bunder为字符串，表示异步结果对应的调用者"""
         
+        # logger.debug("process_qry_result in,qry_bunder:{}".format(qry_bunder))
         if qry_bunder in self.results_content:
-            # 如果结果集里有同类数据，则需要检查问题
-            raise Exception("same content:{}".format(qry_bunder))
-        
-        # 放入结果集合中，以提供给异步数据处理程序使用
-        self.results_content = results
-        
-    async def async_func(self,func_name,args=None):
-        """异步转同步，无限循环体内检查数据是否到达，到达后转同步"""
-        
-        if args is None:
-            self.caller.__getattribute__(func_name)
+            # 有可能分多条返回，在这里累加
+            ori_data = self.results_content[qry_bunder]
+            ori_data.append(results)
+            self.results_content[qry_bunder] = ori_data
         else:
-            self.caller.__getattribute__(func_name)(args)
+            # 放入结果集合中，以提供给异步数据处理程序使用
+            if results is None:
+                self.results_content[qry_bunder] = None
+            else:
+                self.results_content[qry_bunder] = [results]
+        
+    async def async_func(self,func_name,args=None,wait_time=3,multiple=False):
+        """异步转同步，循环体内检查数据是否到达，到达后转同步"""
+        
+        method = getattr(self.caller.api, func_name)
+        if args is None:
+            method()
+        else:
+            method(args)
         counter = 0
-        while True:
-            # 这里调用方法名需要和绑定的回调类别名一致
-            if func_name in self.results_content:
-                # 获取数据的同时，删除结果集对应内容
-                results = self.results_content.pop(func_name)
-                return results
+        # 根据指定时间，等待后延时获取结果
+        while counter<=wait_time:
             time.sleep(1)
             counter += 1
-            # 如果长时间没有结果，则返回空
-            if counter>10:
-                return None
+        results = self.results_content.pop(func_name)
+        # 如果当前业务函数只返回一条结果，则脱掉外层数组包装，返回对象
+        if not multiple and results is not None:
+            results = results[0]
+        return results
 
-    def qry_sync_func(self,func_name,args):
-        """接受业务调用，并进行异步同步转换"""
+    def qry_sync_func(self,func_name,args=None,wait_time=3,multiple=False):
+        """接受业务调用，并进行异步同步转换
+            @params:
+               func_name 字符串类型 方法名  
+               args 方法的参数
+               wait_time 回调时需要等待的秒数
+               multiple 回调是否包含多条结果
+        """
         
-        result = asyncio.run(self.async_func(func_name,args))
+        result = asyncio.run(self.async_func(func_name,args=args,wait_time=wait_time,multiple=multiple))
         return result

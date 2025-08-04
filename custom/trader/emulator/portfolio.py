@@ -17,19 +17,130 @@ from trader.emulator.futures_backtest_strategy import POS_COLUMNS
 ACCOUNT_COLUMNS = ['id','cash','type','financing_rate']
 POSITION_COLUMNS = ['account_id'] + POS_COLUMNS
 
-class SimPosition(Position):
-    
+class SimPosition(object):
+    __repr_properties__ = (
+        "order_book_id", "direction", "quantity", "market_value", "trading_pnl", "position_pnl", "last_price"
+    )
+
     def __init__(self, order_book_id, direction, init_quantity=0, init_price=None):
-        super().__init__(order_book_id, direction, init_quantity=init_quantity, init_price=init_price)
-    
+        self._env = Environment.get_instance()
+
+        self._order_book_id = order_book_id
+        self._direction = direction
+
+        self._quantity = init_quantity
+        self._old_quantity = init_quantity
+        self._logical_old_quantity = 0
+
+        self._avg_price: float = init_price or 0
+        self._trade_cost: float = 0
+        self._transaction_cost: float = 0
+        self._prev_close: Optional[float] = init_price
+        self._last_price: Optional[float] = init_price
+
+        self._direction_factor = 1 if direction == POSITION_DIRECTION.LONG else -1    
+
+    @property
+    def order_book_id(self):
+        # type: () -> str
+        return self._order_book_id
+
+    @property
+    def direction(self):
+        # type: () -> POSITION_DIRECTION
+        return self._direction
+
+    @property
+    def quantity(self):
+        # type: () -> int
+        return self._quantity
+
+    @property
+    def transaction_cost(self):
+        # type: () -> float
+        return self._transaction_cost
+
+    @property
+    def avg_price(self):
+        # type: () -> float
+        return self._avg_price
+
+    @property
+    def trading_pnl(self):
+        # type: () -> float
+        trade_quantity = self._quantity - self._logical_old_quantity
+        return (trade_quantity * self.last_price - self._trade_cost) * self._direction_factor
+
+    @property
+    def position_pnl(self):
+        # type: () -> float
+        return self._logical_old_quantity * (self.last_price - self.prev_close) * self._direction_factor
+
+    @property
+    def pnl(self):
+        # type: () -> float
+        """
+        返回该持仓的累积盈亏
+        """
+        return (self.last_price - self.avg_price) * self._quantity * self._direction_factor
+
+    @property
+    def market_value(self):
+        # type: () -> float
+        return self.last_price * self._quantity if self._quantity else 0
+
+    @property
+    def equity(self):
+        # type: () -> float
+        return self.last_price * self._quantity if self._quantity else 0
+        
 class SimAccount(Account):
     def __init__(
             self, account_type: str, total_cash: float, init_positions: Dict[str, Tuple[int, Optional[float]]],
             financing_rate: float,id=None
     ):
-        super().__init__(account_type,total_cash,init_positions,financing_rate)  
+        self._type = account_type
+        self._total_cash = total_cash  # 包含保证金的总资金
+        self._env = Environment.get_instance()
+
+        self._positions = {}
+        self._backward_trade_set = set()
+        self._frozen_cash = 0
+        self._pending_deposit_withdraw: List[Tuple[date, float]] = []
+
+        self._cash_liabilities = 0      # 现金负债
+
+        self.register_event()
+
+        self._management_fee_calculator_func = lambda account, rate: account.total_value * rate
+        self._management_fee_rate = 0.0
+        self._management_fees = 0.0
+
+        # 融资利率/年
+        self._financing_rate = financing_rate
+
+        for order_book_id in init_positions.keys():
+            self._positions[order_book_id] = init_positions[order_book_id]
         self.id = id
         
+    def get_or_create_pos(
+            self,
+            order_book_id: str,
+            direction: Union[POSITION_DIRECTION, str],
+            init_quantity: float = 0,
+            init_price : Optional[float] = None
+    ) -> SimPosition:
+        if order_book_id not in self._positions:
+            pos = SimPosition(order_book_id, direction, init_quantity, init_price)
+            if not init_price:
+                last_price = self._env.get_last_price(order_book_id)
+                pos.update_last_price(last_price)            
+            self._positions[order_book_id] = pos
+            positions = pos
+        else:
+            positions = self._positions[order_book_id]
+        return positions
+            
     def apply_trade(self, trade, order=None):
         # type: (Trade, Optional[Order]) -> None
         if trade.exec_id in self._backward_trade_set:
@@ -67,15 +178,16 @@ class Portfolio(object):
         account_args[DEFAULT_ACCOUNT_TYPE.FUTURE] = {
             "account_type": DEFAULT_ACCOUNT_TYPE.FUTURE.name, "total_cash": starting_cash, "init_positions": {}, "financing_rate": financing_rate
         }        
-        last_trading_date = data_proxy.get_previous_trading_date(trade_date)
-        for order_book_id, quantity in init_positions:
+        for pos in init_positions:
+            order_book_id = pos.order_book_id
             account_type = self.get_account_type(order_book_id)
             if account_type in account_args:
-                price = data_proxy.get_bar(order_book_id, last_trading_date).close
-                account_args[account_type]["init_positions"][order_book_id] = quantity, price
+                account_args[account_type]["init_positions"][order_book_id] = pos
+        
+        self._accounts = {}      
         self._accounts = {account_type: SimAccount(**args) for account_type, args in account_args.items()}
         self._static_unit_net_value = 1
-        self._units = sum(account.total_value for account in six.itervalues(self._accounts))
+        # self._units = sum(account.total_value for account in six.itervalues(self._accounts))
         self.data_proxy = data_proxy
         self.persis_filepath = persis_path
 
@@ -111,10 +223,6 @@ class Portfolio(object):
     @classmethod
     def load_from_ctp(cls,ctp_data,trade_date=None,data_proxy=None):
         """从CTP服务端数据对接"""
-        
-        
-        
-        
         
                                       
     def save_to_storage(self):
@@ -186,8 +294,14 @@ class Portfolio(object):
         return sum(account.total_value for account in six.itervalues(self._accounts))    
     
     def get_positions(self):
-        return list(chain(*(a.get_positions() for a in six.itervalues(self._accounts))))    
-    
+        
+        positions = []
+        for key in self._accounts.keys():
+            value = self._accounts[key]
+            for pos_key in value.positions.keys():
+                pos = value._positions[pos_key]
+                positions.append(pos)
+        return positions
     
     
     

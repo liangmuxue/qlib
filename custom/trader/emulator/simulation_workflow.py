@@ -106,12 +106,12 @@ class SimulationWorkflow():
         price_board = BarDictPriceBoard()
         data_proxy = FurDataProxy(ds,price_board)
         env.set_data_proxy(data_proxy)   
-        # 策略类初始化
-        self.strategy_class.init_env()
         # 设置交易代理
         proxy_config = config.mod.ext_emulation_mod.emu_args
         trade_proxy = CtpFuturesTrade(context=self,account_alias=proxy_config)      
-        self.context.set_trade_proxy(trade_proxy)  
+        self.context.set_trade_proxy(trade_proxy)        
+        # 策略类初始化
+        self.strategy_class.init_env()
         # 执行器
         self.executor = Executor(datetime.now().date(),env=self)
         # 信号控制
@@ -120,8 +120,6 @@ class SimulationWorkflow():
     def run(self):
         """执行入口"""
         
-        # 初始化交易代理环境
-        self.context.get_trade_proxy().init_env()
         # 初始化行情数据环境
         # TODO
         # 开启执行器
