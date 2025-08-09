@@ -107,6 +107,12 @@ def test_time_compute():
     # tt()
     cls = Cls()
     cls.inner_func()
+
+def test_c_head():
+    import CppHeaderParser
+    cppHeader = CppHeaderParser.CppHeader("custom/trader/emulator/openctp/ThostFtdcUserApiDataType.h")
+    for define in cppHeader.deines:
+        print(define)
      
 if __name__ == "__main__":
     # test_days_dur()
@@ -114,6 +120,7 @@ if __name__ == "__main__":
     # test_import()
     # test_date()
     # test_math()
-    test_time_compute()
+    # test_time_compute()
+    test_c_head()
     # debug_data()
     

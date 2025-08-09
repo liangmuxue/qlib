@@ -2,12 +2,13 @@ from data_extract.rqalpha.futures_ds import FuturesDataSource
 
 import datetime
 import time
-from datetime import date
-from datetime import datetime as dt_obj
+from datetime import date,timedelta
 import numpy as np
 import pandas as pd
 import pickle
 import os
+
+from rqalpha.environment import Environment
 
 from trader.utils.date_util import get_tradedays_dur
 from cus_utils.db_accessor import DbAccessor
@@ -33,7 +34,8 @@ class FuturesRealDataSource(FuturesDataSource):
         self.extractor_ak = AkFuturesExtractor(savepath=stock_data_path)
         # 是否实时模式
         self.frequency_sim = frequency_sim 
-        
+        # 缓存最近价格信息
+        self.last_bar_cache = {}
     
     # def load_all_contract_conv(self):  
     #
@@ -62,25 +64,44 @@ class FuturesRealDataSource(FuturesDataSource):
             with open(contract_data_file, "wb") as fout:
                 pickle.dump(all_contracts, fout)              
     
-    def get_last_price(self,order_book_id,dt=None):
+    def get_last_price(self,order_book_id,dt):
         """取得指定标的最近报价信息"""
 
-        instrument_code = order_book_id[:-4]
-        exchange_code = self.get_exchange_from_instrument(instrument_code)
-        realtime_data = self.extractor_ak.get_realtime_data(order_book_id, exchange_code)
-        if realtime_data is None:
+        bar = self.get_last_bar(order_book_id, dt)
+        if bar is None:
             return None
-        return realtime_data['close'].values[0]    
+        return bar['close']
 
-    def get_last_bar(self,order_book_id,dt=None):
+    def has_real_data(self,order_book_id):
+        """检查当日是否有指定品种的交易数据"""
+        
+    def get_last_bar(self,order_book_id,dt):
         """取得指定标的最近报价信息"""
 
+        if order_book_id in self.last_bar_cache:
+            # 从缓存获取最近请求的实时数据，如果在时限内，则直接使用
+            (last_bar,last_dt) = self.last_bar_cache[order_book_id]
+            dur_time = (dt - last_dt).seconds
+            if dur_time<60:
+                return last_bar
+            
         instrument_code = order_book_id[:-4]
         exchange_code = self.get_exchange_from_instrument(instrument_code)
-        realtime_data = self.extractor_ak.get_realtime_data(order_book_id, exchange_code)
+        try:
+            realtime_data = self.extractor_ak.get_realtime_data(order_book_id, exchange_code)
+        except Exception as e:
+            realtime_data = None
         if realtime_data is None:
-            return None
-        return realtime_data.iloc[0].to_dict()
+            last_dt = dt + timedelta(minutes=-1)
+            # 如果拿不到实时数据，则取得前一分钟数据
+            realtime_data = self.extractor_ak.get_last_minutes_data(order_book_id)
+            if realtime_data is None:
+                return None    
+        data = realtime_data.to_dict()   
+        # 放入缓存，后续可以复用
+        self.last_bar_cache[order_book_id] = (data,dt) 
+        
+        return realtime_data.to_dict()
     
     def get_main_contract_name(self,instrument,date):
         """根据品种编码，确定当前对应的主力合约"""

@@ -633,6 +633,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             print(f'OnRspQrySettlementInfo failed: {pRspInfo.ErrorMsg}')
             exit(-1)
         if pSettlementInfo is not None:
+            pass
             # print(f"OnRspQrySettlementInfo:TradingDay={pSettlementInfo.TradingDay},InvestorID={pSettlementInfo.InvestorID},CurrencyID={pSettlementInfo.CurrencyID},Content={pSettlementInfo.Content}")
             print(pSettlementInfo.Content.decode('gbk'))
         if bIsLast == True:

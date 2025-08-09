@@ -18,21 +18,28 @@ from trader.emulator.futures_real_ds import FuturesRealDataSource
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-
 class Executor(threading.Thread):
     """模拟盘执行器"""
     
-    def __init__(self, trade_date,env=None):
+    def __init__(self, trade_date,env=None,wait_time=3):
         threading.Thread.__init__(self)
         
         self.trade_date = trade_date
         self.env = env
+        self.wait_time = wait_time
         # 预定义事件集合
         self.event_Coll = {EVENT.BEFORE_TRADING:0,EVENT.OPEN_AUCTION:0,EVENT.BAR:0,EVENT.AFTER_TRADING:0}
+        # 业务响应事件，以应对异步问题
+        self.busi_event_queue = []
+        
 
-    def create_event(self,now_time):
+    def pop_event(self,now_time):
         """交易过程过程中的事件生成"""
         
+        # 优先响应业务事件
+        if len(self.busi_event_queue)>0:
+            event = self.busi_event_queue.pop()
+            return event
         # 交易准备事件
         if self.event_Coll[EVENT.BEFORE_TRADING]==0:
             self.event_Coll[EVENT.BEFORE_TRADING] = 1
@@ -58,11 +65,36 @@ class Executor(threading.Thread):
             now_time = datetime.now()
             # 更新运行环境的时间
             self.env.update_time(now_time)            
-            event = self.create_event(now_time)
+            event = self.pop_event(now_time)
             if event is not None:
                 self.env.publish_event(event)
             # 间隔几秒再重复
-            time.sleep(3)
+            time.sleep(self.wait_time)
+            
+class AsisExecutor(Executor):
+    """辅助执行器"""
+
+    def __init__(self, trade_date,env=None,wait_time=3):
+        
+        super().__init__(trade_date,env=env,wait_time=wait_time)
+        self.event_Coll = {EVENT.BEFORE_TRADING:0,EVENT.POST_BAR:0}  
+        self.env.set_asis_execute(False)
+
+    def pop_event(self,now_time):
+        """交易过程过程中的事件生成"""
+        
+        
+        # 优先响应业务事件
+        if len(self.busi_event_queue)>0:
+            event = self.busi_event_queue.pop()
+            return event
+        # 交易准备事件
+        if self.event_Coll[EVENT.BEFORE_TRADING]==0:
+            self.event_Coll[EVENT.BEFORE_TRADING] = 1
+            return EVENT.BEFORE_TRADING
+        # 执行辅助事件,借用POST_BAR事件
+        self.event_Coll[EVENT.POST_BAR] += 1
+        return EVENT.POST_BAR        
 
 class SimulationContext():
     """策略上下文"""
@@ -113,7 +145,11 @@ class SimulationWorkflow():
         # 策略类初始化
         self.strategy_class.init_env()
         # 执行器
-        self.executor = Executor(datetime.now().date(),env=self)
+        self.executor = AsisExecutor(datetime.now().date(),env=self)
+        # 注册相关回调事件
+        env.event_bus.add_listener(EVENT.ORDER_CREATION_PASS, self.strategy_class.on_order_handler)     
+        env.event_bus.add_listener(EVENT.ORDER_CREATION_REJECT, self.strategy_class.on_order_handler)  
+        env.event_bus.add_listener(EVENT.TRADE, self.strategy_class.on_trade_handler)     
         # 信号控制
         self.semaphore = threading.Semaphore(0)
               
@@ -134,12 +170,20 @@ class SimulationWorkflow():
         self.env.update_time(time, time)  
     
     def publish_event(self,event):
-            if event == EVENT.BAR:
-                self.handle_bar(bar_dict=None)
-            elif event == EVENT.OPEN_AUCTION:
-                self.open_auction(bar_dict=None)
-            elif event == EVENT.BEFORE_TRADING:
-                self.before_trading()
+        """事件统一发布"""
+        
+        env = Environment.get_instance()
+        if event == EVENT.BAR:
+            self.handle_bar(bar_dict=None)
+        elif event == EVENT.POST_BAR:
+            self.asis_func()            
+        elif event == EVENT.OPEN_AUCTION:
+            self.open_auction(bar_dict=None)
+        elif event == EVENT.BEFORE_TRADING:
+            self.before_trading()
+        else:
+            # 其他的属于业务事件，异步响应模式
+            env.event_bus.publish_event(event) 
  
     def before_trading(self):
         """交易前准备"""
@@ -165,4 +209,32 @@ class SimulationWorkflow():
             return      
         self.strategy_class.open_auction(context,bar_dict=bar_dict)
 
+    def add_busi_event(self,event):
+        self.executor.busi_event_queue.append(event)
+
+    ######################### 辅助功能实现 ####################################
+    def set_asis_execute(self,flag):
+        self.asis_execute = flag
+    
+    def asis_func(self):
+        """辅助功能调用"""
+        
+        if not self.asis_execute:
+            # 开仓指定品种
+            # self.strategy_class.open_trade_order("hc2510")
+            self.strategy_class.clear_position()
+            # 清空所有持仓
+            # self.strategy_class.query_position()     
+            # self.strategy_class.query_trade()    
+            # self.strategy_class.query_account()   
+            self.asis_execute = True
+        else:
+            # return
+            # 检查持仓以及订单交易情况
+            self.strategy_class.query_position()
+            # self.strategy_class.query_trade()
+        
+        
+        
+        
     

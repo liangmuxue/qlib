@@ -172,7 +172,7 @@ class FuturesTradeEntity(TradeEntity):
         """移除指定日期的数据"""
         
         data = self.get_trade_by_date(date)
-        target_df = self.trade_data_df[~self.trade_data_df["trade_date"]==pd.to_datetime(date)]
+        target_df = self.trade_data_df[self.trade_data_df["trade_date"]!=pd.to_datetime(date)]
         self.trade_data_df = target_df
         
         return data

@@ -8,7 +8,8 @@ from rqalpha.environment import Environment
 
 from CTPAPI.build.thosttraderapi import THOST_FTDC_OST_AllTraded,THOST_FTDC_OST_Canceled
 
-from trader.emulator.portfolio import Portfolio
+from trader.utils.constance import OrderStatusType
+from trader.emulator.portfolio import Portfolio,SimOrder
 from trader.rqalpha.ml_wf_context import FurWorkflowIntergrate
 from trader.emulator.futures_backtest_strategy import FurBacktestStrategy,POS_COLUMNS
 from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
@@ -28,6 +29,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         # 设置策略模拟仓位，用于策略逻辑判断
         self.sim_position = pd.DataFrame(columns=POS_COLUMNS)   
         self.contract_today = {}
+        self.prev_side = SIDE.BUY
 
     def __build_with_context__(self,context,workflow_mode=False):
         self.context = context
@@ -71,7 +73,6 @@ class FurSimulationStrategy(FurBacktestStrategy):
             por_info = self.query_ctp_por_data()
             # 同步到投资组合对象
             portfolio = self.sync_portfolio(cur_date,por_info)        
-            env.set_portfolio(portfolio)
             # 保存投资组合数据到本地存储
             # TODO
             # 同步当日订单
@@ -233,6 +234,8 @@ class FurSimulationStrategy(FurBacktestStrategy):
         """ctp数据同步到投资组合"""
         
         (account,positions,orders) = por_info
+        if positions is None:
+            positions = []
         env = Environment.get_instance()
         
         persis_path = env.config.extra.persis_path
@@ -241,7 +244,34 @@ class FurSimulationStrategy(FurBacktestStrategy):
             
         portfolio = Portfolio(starting_cash,positions,financing_rate,trade_date=date,data_proxy=env.data_proxy,persis_path=persis_path)
         return portfolio
-    
+ 
+    def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None):
+        """代理api的订单创建方法"""
+        
+        order_book_id = id_or_ins
+        multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
+        # 添加交易所编码
+        exchange_code = self.data_source.get_exchange_from_instrument(order_book_id[:-4])
+        
+        order = SimOrder.__from_create__(
+            order_book_id=order_book_id,
+            quantity=amount,
+            side=side,
+            style=None,
+            position_effect=position_effect,
+            # 自定义属性
+            price=price,
+            multiplier=multiplier,
+            try_cnt=0, 
+            close_reason=close_reason,  
+            need_resub=False, 
+            exchange_id=exchange_code      
+        )   
+        order.set_frozen_cash(0)    
+        order.set_frozen_price(price)
+              
+        return order
+        
     def sync_orders(self,date,por_info):
         """ctp订单数据同步"""
         
@@ -251,14 +281,19 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         persis_orders = []
         for order in orders:
+            # 忽略无效订单
+            if order.VolumeTotal==0 or order.LimitPrice==0:
+                continue
             side = SIDE.BUY if order.Direction==0 else SIDE.SELL
             effect = POSITION_EFFECT.OPEN if order.CombOffsetFlag==0 else POSITION_EFFECT.CLOSE
-            order_p = self.create_order(order.InstrumentID, order.VolumeTraded, side, order.LimitPrice,position_effect=effect)
+            order_p = self.create_order(order.InstrumentID, order.VolumeTotal, side, order.LimitPrice,position_effect=effect)
             # 根据远端状态设置本地状态
-            if order.OrderStatus==THOST_FTDC_OST_AllTraded:
-                order_p.status = ORDER_STATUS.FILLED
+            if order.OrderStatus==OrderStatusType.AllTraded.value:
+                order_p.set_status(ORDER_STATUS.FILLED)
+            elif order.OrderStatus==OrderStatusType.Canceled.value:
+                order_p.set_status(ORDER_STATUS.REJECTED)
             else:
-                order_p.status = ORDER_STATUS.ACTIVE
+                order_p.active()
             persis_orders.append(order_p)
         
         return persis_orders
@@ -271,23 +306,26 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         for order in orders:
             # 遍历从远程取得的订单信息，逐个进行业务添加
-            self.trade_entity.add_or_update_order(order,str(date))          
+            self.trade_entity.add_or_update_order(order,date.strftime("%Y%m%d"))          
     
-    def query_ctp_por_data(self):
+    def query_ctp_por_data(self,has_order=True):
         """请求CTP远端系统数据"""
         
         ctp_trade_proxy = self.context.get_trade_proxy()
         # 请求远端CTP数据
         account = ctp_trade_proxy.query_account_info()
         positions = ctp_trade_proxy.query_position_info("")
-        orders = ctp_trade_proxy.query_order_info("")
-        
+        if has_order:
+            orders = ctp_trade_proxy.query_order_info("")
+        else:
+            orders = None
         return (account,positions,orders)
     
     def get_last_price(self,order_book_id):
         """取得指定标的最近报价信息"""
 
-        return self.data_source.get_last_price(order_book_id)
+        env = Environment.get_instance()
+        return self.data_source.get_last_price(order_book_id,env.trading_dt)
     
     def get_last_or_prevday_bar(self,order_book_id):
         """根据当前时间点，取得昨天或上一交易时间段的数据"""
@@ -308,7 +346,16 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         env = Environment.get_instance()
         return env.portfolio
-    
+
+
+    def get_position(self,order_book_id):
+        """取得指定品种的持仓信息，使用当前策略维护的仓位数据"""
+        
+        for pos in self.get_positions():
+            if pos.order_book_id==order_book_id:
+                return pos
+        return None
+       
     def get_positions(self):
         """取得持仓信息"""
     
@@ -318,14 +365,18 @@ class FurSimulationStrategy(FurBacktestStrategy):
     def get_ava_positions(self):
         """取得当日可以买卖的持仓信息"""
         
-        env = Environment.get_instance()
-        cur_date = self.trade_day
-        positions = []
-        for pos in self.get_positions():
-            # 如果当日无数据，则忽略
-            if self.has_current_data(cur_date,pos.order_book_id,mode="symbol"):
-                positions.append(pos)
-        return positions 
+        # 直接使用所有品种
+        positions = self.get_positions()
+        return positions
+        
+        # env = Environment.get_instance()
+        # cur_date = self.trade_day
+        # positions = []
+        # for pos in self.get_positions():
+        #     # 如果当日无数据，则忽略
+        #     if self.has_current_data(cur_date,pos.order_book_id,mode="symbol"):
+        #         positions.append(pos)
+        # return positions 
            
     def has_current_data(self,date,code,mode="instrument"):
         """当日是否开盘交易,使用懒加载缓存模式"""
@@ -341,7 +392,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
             return self.contract_today[symbol]==1
         
         # 取得实时价格，如果有则说明当日有交易
-        price = self.data_source.get_last_price(symbol)
+        price = self.data_source.get_last_price(symbol,date)
         flag = 1
         if price is None:
             flag = 0
@@ -352,9 +403,134 @@ class FurSimulationStrategy(FurBacktestStrategy):
                     
     ############################事件注册部分######################################
     
-    def on_trade_handler(self,context, event):
+    def on_trade_handler(self,event):
+        
+        context = self.context
         super().on_trade_handler(context, event)         
     
-    def on_order_handler(self,context, event):
+    def on_order_handler(self,event):
+        
+        context = self.context
         super().on_order_handler(context, event)    
+                    
+    def apply_trade_pos(self,trade):
+        """维护仓位数据"""
+        
+        # 直接通过请求远程信息来实现仓位数据同步
+        self.refresh_portfolio()
+       
+    def refresh_portfolio(self):
+        
+        env = Environment.get_instance()
+        context = self.context
+        cur_date = context.now.date()
+        time.sleep(15)
+        por_info = self.query_ctp_por_data(has_order=False)
+        portfolio = self.sync_portfolio(cur_date,por_info)   
+        env.set_portfolio(portfolio)
+                             
+    ######################### 辅助功能实现 ####################################
+        
+    def clear_position(self):
+        """清空所有持仓"""
+        
+        # 遍历仓位，并执行平仓单
+        for pos in self.get_positions():
+            order_book_id = pos.order_book_id
+            side = SIDE.BUY if pos.direction==POSITION_DIRECTION.SHORT else SIDE.SELL
+            # 取值需要低于当前行情，以保证成交
+            price = self.get_last_price(order_book_id)
+            if side==SIDE.SELL:
+                close_price = int(price - price * 0.03)
+            else:
+                close_price = int(price + price * 0.03)
+            quantity = pos.quantity
+            if quantity==0:
+                continue
+            # 根据持仓标志，决定发送平仓还是平今指令
+            if pos.today_pos:
+                position_effect = POSITION_EFFECT.CLOSE_TODAY
+            else:
+                position_effect = POSITION_EFFECT.CLOSE
+            order = self.create_order(order_book_id, quantity, side,close_price,position_effect=position_effect)
+            self.context.get_trade_proxy().submit_order(order)
+            
+    def query_position(self):
+        
+        positions = self.get_positions()
+        logger.info("positions number:{}".format(len(positions)))
+        for pos in positions:
+            logger.info("pos:{}".format(pos))
+  
+    def query_account(self):
+        
+        ctp_trade_proxy = self.context.get_trade_proxy()
+        account = ctp_trade_proxy.query_account_info()
+        print("account:{}".format(account))
+          
+    def query_trade(self):
+        
+        ctp_trade_proxy = self.context.get_trade_proxy()
+        orders = ctp_trade_proxy.query_order_info("")
+        logger.info("orders number:{}".format(len(orders)))
+        for pOrder in orders:
+            print(f"OnRspQryOrder:"
+              f"UserID={pOrder.UserID} "
+              f"BrokerID={pOrder.BrokerID} "
+              f"InvestorID={pOrder.InvestorID} "
+              f"ExchangeID={pOrder.ExchangeID} "
+              f"InstrumentID={pOrder.InstrumentID} "
+              f"Direction={pOrder.Direction} "
+              f"CombOffsetFlag={pOrder.CombOffsetFlag} "
+              f"CombHedgeFlag={pOrder.CombHedgeFlag} "
+              f"OrderPriceType={pOrder.OrderPriceType} "
+              f"LimitPrice={pOrder.LimitPrice} "
+              f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
+              f"FrontID={pOrder.FrontID} "
+              f"SessionID={pOrder.SessionID} "
+              f"OrderRef={pOrder.OrderRef} "
+              f"TimeCondition={pOrder.TimeCondition} "
+              f"GTDDate={pOrder.GTDDate} "
+              f"VolumeCondition={pOrder.VolumeCondition} "
+              f"MinVolume={pOrder.MinVolume} "
+              f"RequestID={pOrder.RequestID} "
+              f"InvestUnitID={pOrder.InvestUnitID} "
+              f"CurrencyID={pOrder.CurrencyID} "
+              f"AccountID={pOrder.AccountID} "
+              f"ClientID={pOrder.ClientID} "
+              f"IPAddress={pOrder.IPAddress} "
+              f"MacAddress={pOrder.MacAddress} "
+              f"OrderSysID={pOrder.OrderSysID} "
+              f"OrderStatus={pOrder.OrderStatus} "
+              f"StatusMsg={pOrder.StatusMsg} "
+              f"VolumeTotal={pOrder.VolumeTotal} "
+              f"VolumeTraded={pOrder.VolumeTraded} "
+              f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
+              f"TradingDay={pOrder.TradingDay} "
+              f"InsertDate={pOrder.InsertDate} "
+              f"InsertTime={pOrder.InsertTime} "
+              f"UpdateTime={pOrder.UpdateTime} "
+              f"CancelTime={pOrder.CancelTime} "
+              f"UserProductInfo={pOrder.UserProductInfo} "
+              f"ActiveUserID={pOrder.ActiveUserID} "
+              f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
+              f"TraderID={pOrder.TraderID} "
+              f"ClientID={pOrder.ClientID} "
+              f"ParticipantID={pOrder.ParticipantID} "
+              f"OrderLocalID={pOrder.OrderLocalID} "
+              )       
+            # logger.info("order:{}".format(order))      
+                        
+    def open_trade_order(self,order_book_id,side=SIDE.BUY,quantity=10):
+        """开仓指定的品种"""
+
+        price = self.get_last_price(order_book_id)
+        if side==SIDE.SELL:
+            open_price = int(price - price * 0.03)
+        else:
+            open_price = int(price + price * 0.03)
+        quantity = quantity        
+        order = self.create_order(order_book_id, quantity, side,open_price,position_effect=POSITION_EFFECT.OPEN)
+        self.context.get_trade_proxy().submit_order(order)  
+  
                     

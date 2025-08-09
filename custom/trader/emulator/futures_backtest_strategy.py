@@ -595,8 +595,10 @@ class FurBacktestStrategy(SimStrategy):
         
         if order.order_book_id in self.open_list:
             self.open_list[order.order_book_id]._status = status
-        else:
+        elif order.order_book_id in self.close_list:
             self.close_list[order.order_book_id]._status = status
+        else:
+            logger.warning("no order in close or open list:{}".format(order.order_book_id))
                 
     def is_trade_opening(self,dt):
         """检查当前是否已开盘"""
@@ -675,7 +677,7 @@ class FurBacktestStrategy(SimStrategy):
         order_book_id = id_or_ins
         multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
         # 添加交易所编码
-        exchange_code = self.data_source.get_exchange_from_instrument(order_book_id)
+        exchange_code = self.data_source.get_exchange_from_instrument(order_book_id[:-4])
         
         style = cal_style(price, None)
         order = Order.__from_create__(

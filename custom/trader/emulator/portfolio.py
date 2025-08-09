@@ -10,6 +10,7 @@ from itertools import chain
 
 from rqalpha.portfolio.account import Account
 from rqalpha.portfolio.position import Position
+from rqalpha.model import Order
 from rqalpha.environment import Environment
 from rqalpha.const import POSITION_DIRECTION, POSITION_EFFECT, DEFAULT_ACCOUNT_TYPE
 from trader.emulator.futures_backtest_strategy import POS_COLUMNS
@@ -17,16 +18,26 @@ from trader.emulator.futures_backtest_strategy import POS_COLUMNS
 ACCOUNT_COLUMNS = ['id','cash','type','financing_rate']
 POSITION_COLUMNS = ['account_id'] + POS_COLUMNS
 
+class SimOrder(Order):
+    
+    def set_status(self,status):
+        self._status = status
+        
+    def set_frozen_price(self,price):
+        self._frozen_price = price
+        
+    
 class SimPosition(object):
     __repr_properties__ = (
-        "order_book_id", "direction", "quantity", "market_value", "trading_pnl", "position_pnl", "last_price"
+        "order_book_id", "direction", "quantity", "today_pos", "trading_pnl", "position_pnl", "last_price"
     )
 
-    def __init__(self, order_book_id, direction, init_quantity=0, init_price=None):
+    def __init__(self, order_book_id, direction, init_quantity=0, init_price=None,today_pos=False):
         self._env = Environment.get_instance()
 
         self._order_book_id = order_book_id
         self._direction = direction
+        self._today_pos = today_pos
 
         self._quantity = init_quantity
         self._old_quantity = init_quantity
@@ -45,6 +56,11 @@ class SimPosition(object):
         # type: () -> str
         return self._order_book_id
 
+    @property
+    def today_pos(self):
+        # type: () -> str
+        return self._today_pos
+    
     @property
     def direction(self):
         # type: () -> POSITION_DIRECTION
@@ -93,7 +109,11 @@ class SimPosition(object):
     def equity(self):
         # type: () -> float
         return self.last_price * self._quantity if self._quantity else 0
-        
+    
+    def __repr__(self):
+        fmt_str = "{}({})".format("SimPosition", ", ".join((str(p) + "={}") for p in self.__repr_properties__))
+        return fmt_str.format(*(getattr(self, p, None) for p in self.__repr_properties__))
+            
 class SimAccount(Account):
     def __init__(
             self, account_type: str, total_cash: float, init_positions: Dict[str, Tuple[int, Optional[float]]],
@@ -142,26 +162,8 @@ class SimAccount(Account):
         return positions
             
     def apply_trade(self, trade, order=None):
-        # type: (Trade, Optional[Order]) -> None
-        if trade.exec_id in self._backward_trade_set:
-            return
-        order_book_id = trade.order_book_id
-        if order and trade.position_effect != POSITION_EFFECT.MATCH:
-            if trade.last_quantity != order.quantity:
-                self._frozen_cash -= trade.last_quantity / order.quantity * order.init_frozen_cash
-            else:
-                self._frozen_cash -= order.init_frozen_cash
-        if trade.position_effect == POSITION_EFFECT.MATCH:
-            delta_cash = self._get_or_create_pos(
-                order_book_id, POSITION_DIRECTION.LONG
-            ).apply_trade(trade) + self._get_or_create_pos(
-                order_book_id, POSITION_DIRECTION.SHORT
-            ).apply_trade(trade)
-            self._total_cash += delta_cash
-        else:
-            delta_cash = self._get_or_create_pos(order_book_id, trade.position_direction).apply_trade(trade)
-            self._total_cash += delta_cash
-        self._backward_trade_set.add(trade.exec_id)
+        # Do Nothing
+        return
         
 class Portfolio(object):
     

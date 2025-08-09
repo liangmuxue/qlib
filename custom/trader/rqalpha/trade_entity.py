@@ -68,7 +68,7 @@ class TradeEntity():
         else:
             sell_reason = 0
         row_data = [trade_date,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,sell_reason,secondary_order_id]
-        logger.debug("row_data is:{}".format(row_data))
+        # logger.debug("row_data is:{}".format(row_data))
         row_data_np = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
         if self.trade_data_df.shape[0]==0:
@@ -81,9 +81,9 @@ class TradeEntity():
                 # 有可能是之前撤单后新发起的订单，这类订单需要更新
                 self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
                     (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)] = pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)
-                logger.debug("update trade,data:{}".format(row_data_np))
+                # logger.debug("update trade,data:{}".format(row_data_np))
             else:
-                logger.debug("concat trade,data:{}".format(row_data_np))
+                # logger.debug("concat trade,data:{}".format(row_data_np))
                 self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)], axis=0)
         # 映射系统订单
         self.sys_orders[order.order_book_id] = order
@@ -254,7 +254,7 @@ class TradeEntity():
 
     def add_log(self,row_data):
         now_time = datetime.datetime.now()
-        logger.debug("add log,row_data:{},now_time:{}".format(row_data,now_time))
+        # logger.debug("add log,row_data:{},now_time:{}".format(row_data,now_time))
         log_row_data = row_data + [now_time]
         log_row_data = np.expand_dims(np.array(log_row_data),axis=0)
         self.trade_log_df = pd.concat([self.trade_log_df,pd.DataFrame(log_row_data,columns=TRADE_LOG_COLUMNS)], axis=0)

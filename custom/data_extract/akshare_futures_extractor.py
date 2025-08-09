@@ -523,7 +523,7 @@ class AkFuturesExtractor(FutureExtractor):
                 if status_code==-1:
                     print("try again later")
                     time.sleep(60)
-                    futures_zh_minute_sina_df,status_code = futures_zh_minute_sina(symbol=contract_name, period="1")
+                    status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=contract_name, period="1")
                 if status_code==0:
                     print("contract {} has no data".format(contract_name))
                     continue                    
@@ -535,6 +535,19 @@ class AkFuturesExtractor(FutureExtractor):
                 time.sleep(5)
             print("code:{} ok".format(code))
     
+    def get_last_minutes_data(self,symbol):
+        """取得指定品种最近一分钟数据"""
+        
+        status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=symbol, period="1")
+        # 如果频繁调用限制，则等一会儿再试
+        if status_code==-1:
+            print("try again later")
+            time.sleep(10)
+        status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=symbol, period="1")
+        if status_code==0 or status_code==-1:
+            print("contract {} has no data".format(symbol))
+            return None
+        return futures_zh_minute_sina_df.iloc[-1]         
     
     def build_qlib_instrument(self):
         """qlib品种名单列表生成"""
@@ -560,7 +573,7 @@ class AkFuturesExtractor(FutureExtractor):
         
         futures_zh_spot_df = ak.futures_zh_spot(symbol=symbol, market='CF', adjust='0')
         futures_zh_spot_df['close'] = futures_zh_spot_df['last_close']
-        return futures_zh_spot_df
+        return futures_zh_spot_df.iloc[0]
     
     def get_day_contract(self):
         """取得当前可交易合约"""
@@ -603,14 +616,14 @@ if __name__ == "__main__":
     # print(hist_em)
     
     # 实时行情
-    futures_zh_spot_df = ak.futures_zh_spot(symbol='RB2510', market="CF", adjust='0')
-    print(futures_zh_spot_df)
+    # futures_zh_spot_df = ak.futures_zh_spot(symbol='RB2510', market="CF", adjust='0')
+    # print(futures_zh_spot_df)
     # extractor.get_day_contract_info()
     # futures_zh_realtime_df = ak.futures_zh_realtime(symbol="白糖")
     # print(futures_zh_realtime_df)    
     # 分时数据
-    # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2501", period="1")
-    # print(futures_zh_minute_sina_df)
+    futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2509", period="1")
+    print(futures_zh_minute_sina_df)
     # 历史行情
     # futures_hist_em_df = futures_hist_em(symbol="CU", period="daily")
     # print(futures_hist_em_df)    
