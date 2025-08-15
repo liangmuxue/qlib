@@ -5,8 +5,7 @@ import pandas as pd
 import numpy as np
 
 from rqalpha.environment import Environment
-
-from CTPAPI.build.thosttraderapi import THOST_FTDC_OST_AllTraded,THOST_FTDC_OST_Canceled
+from rqalpha.apis import cal_style
 
 from trader.utils.constance import OrderStatusType
 from trader.emulator.portfolio import Portfolio,SimOrder
@@ -66,25 +65,25 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.data_source.load_all_contract()
         # 投资组合信息加载，包括账户、持仓、交易等
         persis_path = env.config.extra.persis_path
-        
+
+        # 根据开仓数量配置，设置开仓列表
+        position_max_number = self.strategy.position_max_number
+        self.open_list = {} 
+        self.close_list = {}  
+                
         # 同步数据，从CTP远端系统中同步账户、持仓、交易等信息到本地
+        por_info = self.query_ctp_por_data()
+        # 同步到投资组合对象
+        portfolio = self.sync_portfolio(cur_date,por_info)     
+        env.set_portfolio(portfolio)   
+        # 保存投资组合数据到本地存储
+        # TODO
+        # 同步当日订单
         if emu_args.sync_data:
-            # 请求远端数据
-            por_info = self.query_ctp_por_data()
-            # 同步到投资组合对象
-            portfolio = self.sync_portfolio(cur_date,por_info)        
-            # 保存投资组合数据到本地存储
-            # TODO
-            # 同步当日订单
             orders = self.sync_orders(cur_date,por_info)   
             if orders is not None:
                 # 同步到到交易存储类
                 self.transfer_order(orders,date=cur_date)
-        else:
-            starting_cash = env.config.base.accounts.future 
-            financing_rate = env.config.mod.sys_account.financing_rate
-            portfolio = Portfolio(starting_cash,[],financing_rate,trade_date=cur_date,data_proxy=env.get_data_proxy(),persis_path=persis_path)
-        env.set_portfolio(portfolio)
                 
         pred_date = self.trade_day
         # 设置上一交易日，用于后续挂牌确认
@@ -98,21 +97,17 @@ class FurSimulationStrategy(FurBacktestStrategy):
         # candidate_list = ["000702"]
         self.lock_list = {}        
         candidate_order_list = {}  
-        # 根据开仓数量配置，设置开仓列表
-        position_max_number = self.strategy.position_max_number
-        self.open_list = {} 
-        self.close_list = {}     
         # 撤单列表
         self.cancel_list = []        
         # 综合候选品种以及当前已持仓品种，生成维护开仓和平仓列表
         positions = self.get_positions()
         pos_number = len(positions)
         # 由于当前可能已经进入交易时间了，因此首先查找当日订单，并维护相关数据
-        exists_orders = self.trade_entity.get_order_list(context.now.date())
+        exists_orders = self.trade_entity.get_order_list(context.now.date().strftime("%Y%m%d"))
         exists_order_ids = []
         for index,row in exists_orders.iterrows():
             pos_number += 1
-            exists_order_ids.append(row['order_book_id'].values[0])
+            exists_order_ids.append(row['order_book_id'])
         # 处理候选列表
         for item in candidate_list:
             trend = item[0]
@@ -177,6 +172,8 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         self.logger_info("handle_bar.now:{}".format(context.now))
         
+        self.query_position()
+        
         # 首先进行撮合，然后进行策略
         env = Environment.get_instance()
         
@@ -218,14 +215,13 @@ class FurSimulationStrategy(FurBacktestStrategy):
             self.context.get_trade_proxy().submit_order(order_in)
             return order_in
     
-    def cancel_order(self,order):
-        """撤单，直接调用broker的方法"""
+    def cancel_order(self,order,ctp_order=None):
+        """撤单"""
         
         self.logger_info("cancel_order in ,order:{}".format(order.order_book_id))
-        # 这里需要修改状态为待取消
+        # 修改状态为待取消
         self.update_order_status(order,ORDER_STATUS.PENDING_CANCEL,side=order.side, context=self.context,price=order.price)     
         self.trade_entity.add_or_update_order(order,str(self.trade_day))
-        # 调用代理的撤单方法    
         self.context.get_trade_proxy().cancel_order(order)
                 
     ###############################数据逻辑处理部分########################################  
@@ -240,9 +236,11 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         persis_path = env.config.extra.persis_path
         financing_rate = env.config.mod.sys_account.financing_rate
-        starting_cash = account.Available
+        frozen = account['frozen']
+        margin = account['margin']
+        balance = account['balance']
             
-        portfolio = Portfolio(starting_cash,positions,financing_rate,trade_date=date,data_proxy=env.data_proxy,persis_path=persis_path)
+        portfolio = Portfolio(balance,frozen,margin,positions,financing_rate,trade_date=date,data_proxy=env.data_proxy,persis_path=persis_path)
         return portfolio
  
     def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None):
@@ -252,12 +250,13 @@ class FurSimulationStrategy(FurBacktestStrategy):
         multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
         # 添加交易所编码
         exchange_code = self.data_source.get_exchange_from_instrument(order_book_id[:-4])
+        style = cal_style(price, None)
         
         order = SimOrder.__from_create__(
             order_book_id=order_book_id,
             quantity=amount,
             side=side,
-            style=None,
+            style=style,
             position_effect=position_effect,
             # 自定义属性
             price=price,
@@ -271,7 +270,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         order.set_frozen_price(price)
               
         return order
-        
+       
     def sync_orders(self,date,por_info):
         """ctp订单数据同步"""
         
@@ -281,20 +280,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         persis_orders = []
         for order in orders:
-            # 忽略无效订单
-            if order.VolumeTotal==0 or order.LimitPrice==0:
-                continue
-            side = SIDE.BUY if order.Direction==0 else SIDE.SELL
-            effect = POSITION_EFFECT.OPEN if order.CombOffsetFlag==0 else POSITION_EFFECT.CLOSE
-            order_p = self.create_order(order.InstrumentID, order.VolumeTotal, side, order.LimitPrice,position_effect=effect)
-            # 根据远端状态设置本地状态
-            if order.OrderStatus==OrderStatusType.AllTraded.value:
-                order_p.set_status(ORDER_STATUS.FILLED)
-            elif order.OrderStatus==OrderStatusType.Canceled.value:
-                order_p.set_status(ORDER_STATUS.REJECTED)
-            else:
-                order_p.active()
-            persis_orders.append(order_p)
+            persis_orders.append(order)
         
         return persis_orders
     
@@ -306,7 +292,17 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         for order in orders:
             # 遍历从远程取得的订单信息，逐个进行业务添加
-            self.trade_entity.add_or_update_order(order,date.strftime("%Y%m%d"))          
+            self.trade_entity.add_or_update_order(order,date.strftime("%Y%m%d"))      
+            # 还需要添加到平仓列表
+            if order.position_effect==POSITION_EFFECT.CLOSE and order.status!=ORDER_STATUS.CANCELLED:
+                trade_day = order.trading_datetime.strftime("%Y%m%d")
+                # 确认是否有持仓
+                if self.get_position(order.order_book_id) is None:
+                    continue
+                # 忽略当天的平仓
+                if trade_day==date.strftime("%Y%m%d"):
+                    continue
+                self.append_to_close_list(order)
     
     def query_ctp_por_data(self,has_order=True):
         """请求CTP远端系统数据"""
@@ -333,7 +329,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         env = Environment.get_instance()
         # 如果还没有开盘，取上一交易日数据，否则取上一交易时间段数据
         if self.is_trade_opening(env.trading_dt):
-            bar = self.data_source.get_last_bar(order_book_id)
+            bar = self.data_source.get_last_bar(order_book_id,env.trading_dt)
         else:
             prev_day = get_tradedays_dur(env.trading_dt, -1)
             bar = self.data_source.get_bar(order_book_id,prev_day,"1d")            
@@ -392,7 +388,8 @@ class FurSimulationStrategy(FurBacktestStrategy):
             return self.contract_today[symbol]==1
         
         # 取得实时价格，如果有则说明当日有交易
-        price = self.data_source.get_last_price(symbol,date)
+        dt = self.context.now
+        price = self.data_source.get_last_price(symbol,dt)
         flag = 1
         if price is None:
             flag = 0
@@ -400,7 +397,13 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.contract_today[symbol] = flag
         
         return self.contract_today[symbol]==1
-                    
+
+    def get_availabel(self):
+        """获取可用资金"""
+        
+        portfolio = self.get_portfolio()  
+        return portfolio.cash
+                        
     ############################事件注册部分######################################
     
     def on_trade_handler(self,event):
@@ -468,58 +471,13 @@ class FurSimulationStrategy(FurBacktestStrategy):
         account = ctp_trade_proxy.query_account_info()
         print("account:{}".format(account))
           
-    def query_trade(self):
+    def query_trade(self,order_code=""):
         
         ctp_trade_proxy = self.context.get_trade_proxy()
-        orders = ctp_trade_proxy.query_order_info("")
+        orders = ctp_trade_proxy.query_order_info(order_code)
         logger.info("orders number:{}".format(len(orders)))
-        for pOrder in orders:
-            print(f"OnRspQryOrder:"
-              f"UserID={pOrder.UserID} "
-              f"BrokerID={pOrder.BrokerID} "
-              f"InvestorID={pOrder.InvestorID} "
-              f"ExchangeID={pOrder.ExchangeID} "
-              f"InstrumentID={pOrder.InstrumentID} "
-              f"Direction={pOrder.Direction} "
-              f"CombOffsetFlag={pOrder.CombOffsetFlag} "
-              f"CombHedgeFlag={pOrder.CombHedgeFlag} "
-              f"OrderPriceType={pOrder.OrderPriceType} "
-              f"LimitPrice={pOrder.LimitPrice} "
-              f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
-              f"FrontID={pOrder.FrontID} "
-              f"SessionID={pOrder.SessionID} "
-              f"OrderRef={pOrder.OrderRef} "
-              f"TimeCondition={pOrder.TimeCondition} "
-              f"GTDDate={pOrder.GTDDate} "
-              f"VolumeCondition={pOrder.VolumeCondition} "
-              f"MinVolume={pOrder.MinVolume} "
-              f"RequestID={pOrder.RequestID} "
-              f"InvestUnitID={pOrder.InvestUnitID} "
-              f"CurrencyID={pOrder.CurrencyID} "
-              f"AccountID={pOrder.AccountID} "
-              f"ClientID={pOrder.ClientID} "
-              f"IPAddress={pOrder.IPAddress} "
-              f"MacAddress={pOrder.MacAddress} "
-              f"OrderSysID={pOrder.OrderSysID} "
-              f"OrderStatus={pOrder.OrderStatus} "
-              f"StatusMsg={pOrder.StatusMsg} "
-              f"VolumeTotal={pOrder.VolumeTotal} "
-              f"VolumeTraded={pOrder.VolumeTraded} "
-              f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
-              f"TradingDay={pOrder.TradingDay} "
-              f"InsertDate={pOrder.InsertDate} "
-              f"InsertTime={pOrder.InsertTime} "
-              f"UpdateTime={pOrder.UpdateTime} "
-              f"CancelTime={pOrder.CancelTime} "
-              f"UserProductInfo={pOrder.UserProductInfo} "
-              f"ActiveUserID={pOrder.ActiveUserID} "
-              f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
-              f"TraderID={pOrder.TraderID} "
-              f"ClientID={pOrder.ClientID} "
-              f"ParticipantID={pOrder.ParticipantID} "
-              f"OrderLocalID={pOrder.OrderLocalID} "
-              )       
-            # logger.info("order:{}".format(order))      
+        for order in orders:
+            logger.info("order:{}".format(order))      
                         
     def open_trade_order(self,order_book_id,side=SIDE.BUY,quantity=10):
         """开仓指定的品种"""
@@ -533,4 +491,16 @@ class FurSimulationStrategy(FurBacktestStrategy):
         order = self.create_order(order_book_id, quantity, side,open_price,position_effect=POSITION_EFFECT.OPEN)
         self.context.get_trade_proxy().submit_order(order)  
   
-                    
+    def clear_order(self):
+        """清空所有未执行订单"""     
+        
+        cur_date = self.context.now.date()
+        ctp_trade_proxy = self.context.get_trade_proxy()
+        ctp_orders = ctp_trade_proxy.query_order_info("")
+        orders = self.sync_orders(cur_date,(None,None,ctp_orders))   
+        for order in orders:
+            # 针对未完成的进行撤单
+            if order.status==ORDER_STATUS.ACTIVE:
+                self.cancel_order(order)
+        
+        

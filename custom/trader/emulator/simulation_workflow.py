@@ -83,7 +83,6 @@ class AsisExecutor(Executor):
     def pop_event(self,now_time):
         """交易过程过程中的事件生成"""
         
-        
         # 优先响应业务事件
         if len(self.busi_event_queue)>0:
             event = self.busi_event_queue.pop()
@@ -146,6 +145,7 @@ class SimulationWorkflow():
         self.strategy_class.init_env()
         # 执行器
         self.executor = AsisExecutor(datetime.now().date(),env=self)
+        # self.executor = Executor(datetime.now().date(),env=self)
         # 注册相关回调事件
         env.event_bus.add_listener(EVENT.ORDER_CREATION_PASS, self.strategy_class.on_order_handler)     
         env.event_bus.add_listener(EVENT.ORDER_CREATION_REJECT, self.strategy_class.on_order_handler)  
@@ -221,15 +221,16 @@ class SimulationWorkflow():
         
         if not self.asis_execute:
             # 开仓指定品种
-            # self.strategy_class.open_trade_order("hc2510")
-            self.strategy_class.clear_position()
+            # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
-            # self.strategy_class.query_position()     
+            # self.strategy_class.clear_position()
+            # self.strategy_class.clear_order()
+            self.strategy_class.query_position()     
             # self.strategy_class.query_trade()    
             # self.strategy_class.query_account()   
             self.asis_execute = True
         else:
-            # return
+            return
             # 检查持仓以及订单交易情况
             self.strategy_class.query_position()
             # self.strategy_class.query_trade()

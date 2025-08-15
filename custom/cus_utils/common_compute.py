@@ -554,14 +554,18 @@ def softmax(x):
 def slope_angle(lines):
     """取得斜率角度正弦值"""
     
+def round_to_tick(value, tick_size):
+    """实现最小变动单位"""
     
+    return round(value / tick_size) * tick_size
 
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)
     target = torch.randn(2, 2)
     # mae_comp(input,target)
-    find_nearest(input.numpy(),target.numpy())
+    # find_nearest(input.numpy(),target.numpy())
+    print(round_to_tick(3128,5))
     
        
     

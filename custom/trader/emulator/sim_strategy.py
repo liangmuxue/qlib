@@ -479,13 +479,12 @@ class SimStrategy(BaseStrategy):
         
         portfolio = self.get_portfolio()  
         return portfolio.total_value
-        
+
     def get_cash(self):
         """获取当前现金"""
         
         portfolio = self.get_portfolio()
-        # 现金减去冻结部分
-        return portfolio.cash + portfolio.frozen_cash
+        return portfolio.cash
 
     def get_market_value(self):
         """获取当前市值"""

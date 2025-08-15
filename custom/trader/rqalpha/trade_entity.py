@@ -11,7 +11,7 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 # 交易信息表字段，分别为交易日期，股票代码，成交价格，成交量,总价格，成交状态，订单编号,卖出原因
-TRADE_COLUMNS = ["trade_date","order_book_id","side","position_effect","price","quantity","multiplier","total_price","status","order_id","sell_reason","secondary_order_id"]
+TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","position_effect","price","quantity","multiplier","total_price","status","order_id","sell_reason","secondary_order_id"]
 TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
 
 class TradeEntity():
@@ -42,7 +42,7 @@ class TradeEntity():
         self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
         self.exp_trade_data(self.save_path)
            
-    def add_or_update_order(self,order,trade_day):
+    def add_or_update_order(self,order,trade_day,only_add=False):
         """添加(或更新)订单信息"""
         
         # logger.debug("add_or_update_order in,order:{}".format(order))
@@ -53,7 +53,7 @@ class TradeEntity():
         # 订单价格为冻结价格
         price = order.frozen_price
         quantity = order.quantity
-        # 交易状态为进行中
+        # 交易状态
         status = order.status
         order_id = order.order_id
         # 透传合约乘数
@@ -67,7 +67,8 @@ class TradeEntity():
             sell_reason = order.sell_reason
         else:
             sell_reason = 0
-        row_data = [trade_date,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,sell_reason,secondary_order_id]
+        update_datetime = datetime.datetime.now()
+        row_data = [trade_date,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,sell_reason,secondary_order_id]
         # logger.debug("row_data is:{}".format(row_data))
         row_data_np = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
@@ -76,13 +77,24 @@ class TradeEntity():
             logger.debug("after add,self.trade_data_df:{}".format(self.trade_data_df))
         else:
             item_df = self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
-                                         (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)]
+                                             (self.trade_data_df["side"]==order.side)&
+                                         (self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_day)]
             if item_df.shape[0]>0:
+                # 如果设置了只添加标志，则保持原有记录
+                if only_add:
+                    return                
                 # 有可能是之前撤单后新发起的订单，这类订单需要更新
+                prev_datetime = item_df['trade_datetime']
+                # 保留之前的发起订单的时间
+                row_data_np[0,0] = prev_datetime
                 self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
-                    (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)] = pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)
+                    (self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_day)&
+                    (self.trade_data_df["position_effect"]==position_effect)] = pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)
                 # logger.debug("update trade,data:{}".format(row_data_np))
             else:
+                if row_data_np.shape[0]==0:
+                    logger.warning("row_data_np empty")
+                    return
                 # logger.debug("concat trade,data:{}".format(row_data_np))
                 self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)], axis=0)
         # 映射系统订单
@@ -146,6 +158,8 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         # logger.debug("trade_data_df in get order:{}".format(trade_data_df))
         target_df = trade_data_df[(trade_data_df["order_id"]==order_id)]
+        if target_df.shape[0]==0:
+            return None
         return target_df.iloc[0]
          
     def get_trade_by_instrument(self,order_book_id,trade_side,before_date):  
@@ -158,7 +172,7 @@ class TradeEntity():
         
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["order_book_id"]==order_book_id)
-                                  &(trade_data_df["side"]==trade_side)&(trade_data_df["trade_date"]<=before_date)]
+                                  &(trade_data_df["side"]==trade_side)&(trade_data_df["trade_datetime"]<=before_date)]
         return target_df
         
     def get_trade_date_by_instrument(self,order_book_id,trade_side,before_date):  
@@ -172,18 +186,18 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["order_book_id"]==order_book_id)
                                   &(trade_data_df["side"]==trade_side)&
-                                  (trade_data_df["trade_date"]<=pd.to_datetime(before_date))]
+                                  (trade_data_df["trade_datetime"]<=pd.to_datetime(before_date))]
         if target_df.shape[0]==0:
             return None
         # 取得最后一个交易
-        return target_df["trade_date"].dt.to_pydatetime().tolist()[-1].strftime('%Y%m%d') 
+        return target_df["trade_datetime"].dt.to_pydatetime().tolist()[-1].strftime('%Y%m%d') 
     
     def get_order_list(self,trade_date=None):   
         """取得指定日期的订单"""
         
         if self.trade_data_df.shape[0]==0:
             return self.trade_data_df
-        target_df = self.trade_data_df[(self.trade_data_df["trade_date"].dt.strftime('%Y%m%d') ==trade_date)]
+        target_df = self.trade_data_df[(self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d') ==trade_date)]
         return target_df  
         
     def get_sell_list_active(self,trade_date):   
@@ -194,7 +208,7 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.SELL)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]      
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]      
         else:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.SELL)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]                  
         return target_df  
@@ -207,7 +221,7 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]       
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]       
         else:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]             
         return target_df  
@@ -220,7 +234,7 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]       
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]       
         else:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
         return target_df  
@@ -232,7 +246,7 @@ class TradeEntity():
             return self.trade_data_df
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["side"]==SIDE.BUY)&
-                                  (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)&
+                                  (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)&
                         ((trade_data_df["status"]==ORDER_STATUS.ACTIVE)|(trade_data_df["status"]==ORDER_STATUS.FILLED))]             
         return target_df    
     
@@ -245,7 +259,7 @@ class TradeEntity():
         
         if not os.path.exists(file_path):
             return None
-        trade_data = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)  
+        trade_data = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)  
         self.sys_orders = {}    
         # 追加到系统订单信息中
         for index,row in trade_data.iterrows():   

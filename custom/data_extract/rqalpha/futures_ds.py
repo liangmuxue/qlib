@@ -298,12 +298,12 @@ class FuturesDataSource(BaseDataSource):
         
         if contract_code is not None:
             item_code = contract_code[:-4]
-            item_sql = "select name,code,multiplier,limit_rate,magin_radio from trading_variety where code='{}' ".format(item_code)
+            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range from trading_variety where code='{}' ".format(item_code)
         else:
-            item_sql = "select name,code,multiplier,limit_rate,magin_radio from trading_variety where isnull(magin_radio)=0"
+            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(item_sql)  
         result_arr = np.array(result_rows)         
-        return pd.DataFrame(result_arr,columns=["name","code","multiplier","limit_rate","magin_radio"])
+        return pd.DataFrame(result_arr,columns=["name","code","multiplier","limit_rate","magin_radio","price_range"])
         
     def get_all_contract_names(self,date):
         """取得所有合约名称（用于订阅）"""

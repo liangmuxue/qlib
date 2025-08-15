@@ -5,23 +5,24 @@ import copy
 import numpy as np
 import pandas as pd
 import time
-
+from datetime import datetime
 
 from cus_utils.process import IFakeSyncCall
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
+from cus_utils.common_compute import round_to_tick
+
 import CTPAPI.build.thosttraderapi as tdapi 
 import CTPAPI.build.thostmduserapi as tuapi 
 
-from rqalpha.const import POSITION_DIRECTION,POSITION_EFFECT,ORDER_STATUS as RQ_ORDER_STATUS
+from rqalpha.const import POSITION_DIRECTION,POSITION_EFFECT,ORDER_STATUS,SIDE
 from rqalpha.apis import Environment
-from rqalpha.const import ORDER_STATUS,SIDE
 from rqalpha.core.events import EVENT, Event
 from trader.rqalpha.model.trade import Trade
 from trader.utils.constance import OrderStatusType,CtpQueryType,CtpSyncFlag,OrderOffsetType
 from trader.utils.ctp_sync_proxy import CtpSyncProxy
-from trader.emulator.portfolio import SimPosition
+from trader.emulator.portfolio import SimPosition,SimAccount
 
 class TdImpl(tdapi.CThostFtdcTraderSpi):
     def __init__(self, host, broker, user, password, appid, authcode,listenner=None):
@@ -170,7 +171,8 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
                   f"IPAddress={pInputOrderAction.IPAddress} "
                   f"MacAddress={pInputOrderAction.MacAddress} "
                   )
-
+        self.listenner.on_order_cancel(pInputOrderAction,reason_id=pRspInfo.ErrorID)
+        
     def OnErrRtnOrderInsert(self, pInputOrder: "CThostFtdcInputOrderField", pRspInfo: "CThostFtdcRspInfoField") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             print("OnErrRtnOrderInsert failed:ErrorMsg:{},ErrorID:{}".format(pRspInfo.ErrorMsg,pRspInfo.ErrorID))
@@ -254,26 +256,33 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             semaphore.release()
 
     def OnRspQryInvestorPosition(self, pInvestorPosition: tdapi.CThostFtdcInvestorPositionField,
-                                 pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
+                                 pRspInfo, nRequestID, bIsLast):
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             print(f"OnRspQryInvestorPosition failed: {pRspInfo.ErrorMsg}")
             return
-
+        if pInvestorPosition is None:
+            return
         # swig对象转实际业务对象
-        symbol = pInvestorPosition.InstrumentID
+        symbol = pInvestorPosition.InstrumentID.upper()
         quantity = pInvestorPosition.Position
         if quantity==0:
             logger.warning("quantity 0:{}".format(symbol)) 
             return
         direction = POSITION_DIRECTION.LONG if pInvestorPosition.PosiDirection==tuapi.THOST_FTDC_PD_Long else POSITION_DIRECTION.SHORT
         price = pInvestorPosition.SettlementPrice      
-        
         # 标识是否全部为当日持仓
         today_pos = False
         if pInvestorPosition.Position==pInvestorPosition.TodayPosition:
             today_pos = True
-        
-        position = SimPosition(symbol,direction,quantity,price,today_pos=today_pos)
+        # 保证金占用
+        margin = pInvestorPosition.UseMargin
+        position_cost = pInvestorPosition.PositionCost
+        # 由于要计算市值，因此加入品种乘数
+        data_source = self.listenner.context.env.data_source
+        multiplier = data_source.get_contract_info(symbol)["multiplier"].astype(float).values[0]
+        # 实时取得最近价格
+        last_price = data_source.get_last_price(symbol,self.listenner.context.env.trading_dt)
+        position = SimPosition(symbol,direction,quantity,last_price,today_pos=today_pos,margin=margin,multiplier=multiplier,position_cost=position_cost)
         
         self.listenner.process_qry_result(CtpQueryType.QryPosition.value,position)
             
@@ -373,12 +382,82 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
     def OnRspQryOrder(self, pOrder: tdapi.CThostFtdcOrderField, pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",
                       bIsLast: "bool") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
-            print(f"OnRspQryOrder failed: {pRspInfo.ErrorMsg}")
+            logger.warning(f"OnRspQryOrder failed: {pRspInfo.ErrorMsg}")
             return
-
         if pOrder is None:
-            print("pOrder None")
-        self.listenner.process_qry_result(CtpQueryType.QryOrder.value,pOrder)
+            logger.warning("pOrder None")
+            return
+        # print(f"OnRspQryOrder:"
+        #       f"UserID={pOrder.UserID} "
+        #       f"BrokerID={pOrder.BrokerID} "
+        #       f"InvestorID={pOrder.InvestorID} "
+        #       f"ExchangeID={pOrder.ExchangeID} "
+        #       f"InstrumentID={pOrder.InstrumentID} "
+        #       f"Direction={pOrder.Direction} "
+        #       f"CombOffsetFlag={pOrder.CombOffsetFlag} "
+        #       f"CombHedgeFlag={pOrder.CombHedgeFlag} "
+        #       f"OrderPriceType={pOrder.OrderPriceType} "
+        #       f"LimitPrice={pOrder.LimitPrice} "
+        #       f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
+        #       f"FrontID={pOrder.FrontID} "
+        #       f"SessionID={pOrder.SessionID} "
+        #       f"OrderRef={pOrder.OrderRef} "
+        #       f"TimeCondition={pOrder.TimeCondition} "
+        #       f"GTDDate={pOrder.GTDDate} "
+        #       f"VolumeCondition={pOrder.VolumeCondition} "
+        #       f"MinVolume={pOrder.MinVolume} "
+        #       f"RequestID={pOrder.RequestID} "
+        #       f"InvestUnitID={pOrder.InvestUnitID} "
+        #       f"CurrencyID={pOrder.CurrencyID} "
+        #       f"AccountID={pOrder.AccountID} "
+        #       f"ClientID={pOrder.ClientID} "
+        #       f"IPAddress={pOrder.IPAddress} "
+        #       f"MacAddress={pOrder.MacAddress} "
+        #       f"OrderSysID={pOrder.OrderSysID} "
+        #       f"OrderStatus={pOrder.OrderStatus} "
+        #       f"StatusMsg={pOrder.StatusMsg} "
+        #       f"VolumeTotal={pOrder.VolumeTotal} "
+        #       f"VolumeTraded={pOrder.VolumeTraded} "
+        #       f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
+        #       f"TradingDay={pOrder.TradingDay} "
+        #       f"InsertDate={pOrder.InsertDate} "
+        #       f"InsertTime={pOrder.InsertTime} "
+        #       f"UpdateTime={pOrder.UpdateTime} "
+        #       f"CancelTime={pOrder.CancelTime} "
+        #       f"UserProductInfo={pOrder.UserProductInfo} "
+        #       f"ActiveUserID={pOrder.ActiveUserID} "
+        #       f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
+        #       f"TraderID={pOrder.TraderID} "
+        #       f"ClientID={pOrder.ClientID} "
+        #       f"ParticipantID={pOrder.ParticipantID} "
+        #       f"OrderLocalID={pOrder.OrderLocalID} "
+        #       )        
+        #
+
+        p_status = str(pOrder.OrderStatus)
+        # 从原订单转换为业务订单，避免C++数值传递问题
+        side = SIDE.BUY if pOrder.Direction==0 else SIDE.SELL
+        effect = POSITION_EFFECT.OPEN if pOrder.CombOffsetFlag==0 else POSITION_EFFECT.CLOSE      
+        strategy_class = self.listenner.context.strategy_class  
+        order = strategy_class.create_order(pOrder.InstrumentID.upper(), pOrder.VolumeTotal, side, pOrder.LimitPrice,position_effect=effect)
+        # CTP订单特有属性赋值
+        order.kwargs['OrderSysID'] = pOrder.OrderSysID
+        order.kwargs['FrontID'] = pOrder.FrontID
+        order.kwargs['SessionID'] = str(pOrder.SessionID)
+        order.kwargs['secondary_order_id'] = pOrder.OrderRef
+        # 状态判断赋值
+        if p_status==OrderStatusType.UnClosed.value:
+            status = ORDER_STATUS.ACTIVE
+        elif p_status==OrderStatusType.AllTraded.value:
+            status = ORDER_STATUS.FILLED    
+            order.set_filled_quantity(pOrder.VolumeTraded)
+        elif p_status==OrderStatusType.Canceled.value:
+            status = ORDER_STATUS.CANCELLED                 
+        order.set_status(status)
+        trading_dt = pOrder.InsertDate + " " + pOrder.InsertTime
+        trading_dt = datetime.strptime(trading_dt, "%Y%m%d %H:%M:%S")
+        order.set_trading_dt(trading_dt)
+        self.listenner.process_qry_result(CtpQueryType.QryOrder.value,order)
 
     def OnRspQryTrade(self, pTrade: tdapi.CThostFtdcTradeField, pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",
                       bIsLast: "bool") -> "void":
@@ -419,8 +498,12 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             print(f"OnRspQryTradingAccount failed: {pRspInfo.ErrorMsg}")
             return
-
-        self.listenner.process_qry_result(CtpQueryType.QryAccount.value,pTradingAccount)
+        # 需要转化为python对象，以避免后续流程中的c++对象属性丢失
+        frozen = pTradingAccount.FrozenMargin
+        margin = pTradingAccount.CurrMargin
+        balance = pTradingAccount.Balance        
+        account = {"frozen":frozen,"margin":margin,"balance":balance}
+        self.listenner.process_qry_result(CtpQueryType.QryAccount.value,account)
 
     def OnRspQryInvestor(self, pInvestor: "CThostFtdcInvestorField", pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
@@ -795,49 +878,11 @@ class CtpFuturesTrade(BaseTrade):
                 return order
         return None
 
-    def sync_local_store(self,date,trade_entity):
-        """和本地存储进行同步更新"""
-        
-        trade_data = trade_entity.get_trade_by_date(date)
-        trade_ext_columns = trade_data.columns.tolist() + ["sync_flag"]
-        # 使用模拟后台的数据，更新本地存储对应的数据
-        qry_results = []
-        if trade_data.shape[0]==0:
-            return
-        for index,row in trade_data.iterrows():
-            order_book_id = row['order_book_id']
-            # 使用异步转同步的模式进行调用
-            qry_order = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder,order_book_id)
-            if qry_order is None:
-                logger.warning("qry_order None:{}".format(order_book_id))
-                qry_results.append(row.values.tolist() + [CtpSyncFlag.NOT_EXISTS])
-                continue
-            if qry_order.OrderStatus==OrderStatusType.AllTraded:
-                row['status'] = ORDER_STATUS.FILLED
-            if qry_order.OrderStatus==OrderStatusType.UnClosed:
-                row['status'] = ORDER_STATUS.REJECTED                
-            qry_results.append(row.values.tolist() + [CtpSyncFlag.ACCORD])
-        
-        qry_results = pd.DataFrame(np.array(qry_results),columns=trade_ext_columns)  
-        trade_entity.set_trade_data(qry_results)
-        
     def query_account_info(self):
         """请求账户信息"""
         
-        pTradingAccount = self.sync_proxy.qry_sync_func(CtpQueryType.QryAccount.value,wait_time=8)
-        print(f"OnRspQryTradingAccount: "
-              f"PreBalance={pTradingAccount.PreBalance} "
-              f"PreMargin={pTradingAccount.PreMargin} "
-              f"FrozenMargin={pTradingAccount.FrozenMargin} "
-              f"CurrMargin={pTradingAccount.CurrMargin} "
-              f"Commission={pTradingAccount.Commission} "
-              f"FrozenCommission={pTradingAccount.FrozenCommission} "
-              f"Available={pTradingAccount.Available} "
-              f"Balance={pTradingAccount.Balance} "
-              f"CloseProfit={pTradingAccount.CloseProfit} "
-              f"CurrencyID={pTradingAccount.CurrencyID} "
-              )     
-        return pTradingAccount   
+        account = self.sync_proxy.qry_sync_func(CtpQueryType.QryAccount.value,wait_time=8)
+        return account   
 
     def query_position_info(self,pos_code):
         """请求持仓信息"""
@@ -872,54 +917,13 @@ class CtpFuturesTrade(BaseTrade):
         """请求订单信息"""
         
         orders = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder.value,order_code,wait_time=5,multiple=True)
-        # print(f"OnRspQryOrder:"
-        #        f"UserID={pOrder.UserID} "
-        #        f"BrokerID={pOrder.BrokerID} "
-        #        f"InvestorID={pOrder.InvestorID} "
-        #        f"ExchangeID={pOrder.ExchangeID} "
-        #        f"InstrumentID={pOrder.InstrumentID} "
-        #        f"Direction={pOrder.Direction} "
-        #        f"CombOffsetFlag={pOrder.CombOffsetFlag} "
-        #        f"CombHedgeFlag={pOrder.CombHedgeFlag} "
-        #        f"OrderPriceType={pOrder.OrderPriceType} "
-        #        f"LimitPrice={pOrder.LimitPrice} "
-        #        f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
-        #        f"FrontID={pOrder.FrontID} "
-        #        f"SessionID={pOrder.SessionID} "
-        #        f"OrderRef={pOrder.OrderRef} "
-        #        f"TimeCondition={pOrder.TimeCondition} "
-        #        f"GTDDate={pOrder.GTDDate} "
-        #        f"VolumeCondition={pOrder.VolumeCondition} "
-        #        f"MinVolume={pOrder.MinVolume} "
-        #        f"RequestID={pOrder.RequestID} "
-        #        f"InvestUnitID={pOrder.InvestUnitID} "
-        #        f"CurrencyID={pOrder.CurrencyID} "
-        #        f"AccountID={pOrder.AccountID} "
-        #        f"ClientID={pOrder.ClientID} "
-        #        f"IPAddress={pOrder.IPAddress} "
-        #        f"MacAddress={pOrder.MacAddress} "
-        #        f"OrderSysID={pOrder.OrderSysID} "
-        #        f"OrderStatus={pOrder.OrderStatus} "
-        #        f"StatusMsg={pOrder.StatusMsg} "
-        #        f"VolumeTotal={pOrder.VolumeTotal} "
-        #        f"VolumeTraded={pOrder.VolumeTraded} "
-        #        f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
-        #        f"TradingDay={pOrder.TradingDay} "
-        #        f"InsertDate={pOrder.InsertDate} "
-        #        f"InsertTime={pOrder.InsertTime} "
-        #        f"UpdateTime={pOrder.UpdateTime} "
-        #        f"CancelTime={pOrder.CancelTime} "
-        #        f"UserProductInfo={pOrder.UserProductInfo} "
-        #        f"ActiveUserID={pOrder.ActiveUserID} "
-        #        f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
-        #        f"TraderID={pOrder.TraderID} "
-        #        f"ClientID={pOrder.ClientID} "
-        #        f"ParticipantID={pOrder.ParticipantID} "
-        #        f"OrderLocalID={pOrder.OrderLocalID} "
-        #        )
         
         if orders is None:
             return []
+        else:
+            # 订单按时间排序
+            orders.sort(key=lambda x: x.trading_datetime)
+                    
         return orders 
             
     ########################交易请求#################################  
@@ -944,13 +948,18 @@ class CtpFuturesTrade(BaseTrade):
         # 默认交易类型为限价
         PriceType = "2"
         Price = order_in.kwargs['price']
+        # 实现最小价格变动范围要求
+        data_source = self.context.env.data_source
+        price_range = data_source.get_contract_info(InstrumentID)["price_range"].astype(float).values[0]
+        PriceRound = round_to_tick(Price,price_range)
+        
         Volume = order_in.quantity
         # 挂单当日有效
         TimeCondition = "3"
         # 可以任意数量成单
         VolumeCondition = "1"
         MinVolume = "1"
-
+        
         # 生成用于串接上下文的唯一编号
         OrderRef = self.build_order_ref_id()
         # 放入待处理队列
@@ -960,12 +969,31 @@ class CtpFuturesTrade(BaseTrade):
         order.res_result = TradeOrderRes()
         self.order_queue.append(order)
                 
-        self.api.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
+        self.api.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, PriceRound, Volume, TimeCondition,
                        VolumeCondition, MinVolume,OrderRef=OrderRef)   
         
-
+    def cancel_order(self,order,ctp_order=None):
+        """撤单"""
+        
+        if ctp_order is not None:
+            ExchangeID = ctp_order.ExchangeID
+            InstrumentID = ctp_order.InstrumentID
+            OrderSysID = ctp_order.OrderSysID
+            FrontID = ctp_order.FrontID
+            SessionID = ctp_order.SessionID
+            OrderRef = ctp_order.OrderRef
+        else:
+            ExchangeID = order.exchange_id
+            InstrumentID = order.order_book_id
+            OrderSysID = order.kwargs['OrderSysID']
+            FrontID = order.kwargs['FrontID']
+            SessionID = order.kwargs['SessionID']
+            OrderRef = order.kwargs['secondary_order_id']            
+                
+        self.api.OrderCancel(ExchangeID, InstrumentID, OrderSysID, FrontID, SessionID, OrderRef)
                 
     ######################## 回调事件调用 #################################  
+    
     def process_qry_result(self,qry_bunder,results):
         self.sync_proxy.process_qry_result(qry_bunder, results)
         
@@ -973,6 +1001,7 @@ class CtpFuturesTrade(BaseTrade):
 
         # 找到对应的订单并判断状态
         order = self.find_cache_order(pOrder.OrderRef)
+        pOrder.InstrumentID = pOrder.InstrumentID.upper()
         if order is None:
             logger.warning("order not in cache:{}".format(pOrder.OrderLocalID))
             return
@@ -1070,9 +1099,20 @@ class CtpFuturesTrade(BaseTrade):
         if order is None:
             logger.warning("order not in cache:{}".format(pOrder.OrderRef))
             return   
-        logger.warning("on_order_failed in,order_book_id:{},reason_id:{}".format(order.InstrumentID,reason_id))
+        logger.info("on_order_failed in,order_book_id:{},reason_id:{}".format(order.order_book_id,reason_id))
         order.set_status(ORDER_STATUS.REJECTED)  
         # 发送订单失败事件       
         env = Environment.get_instance()   
-        env.event_bus.publish_event(Event(EVENT.ORDER_CREATION_REJECT, order=order))              
+        account = env.get_account(order.order_book_id)  
+        env.event_bus.publish_event(Event(EVENT.ORDER_CREATION_REJECT, order=order,account=account))              
     
+    def on_order_cancel(self,pOrder,reason_id=None):
+        """撤单回报"""
+        
+        # 如果没有错误，则发起撤销事件
+        if reason_id==0:
+            self.context.add_busi_event(Event(EVENT.ORDER_CANCELLATION_PASS, order=pOrder)) 
+              
+        
+        
+        

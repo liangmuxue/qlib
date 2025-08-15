@@ -12,7 +12,7 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 # 交易信息表字段，分别为交易日期，品种代码，买卖类型，多空类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
-TRADE_COLUMNS = ["trade_date","order_book_id","side","long_short","price","quantity","total_price","status","order_id","close_reason","secondary_order_id"]
+TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","long_short","price","quantity","total_price","status","order_id","close_reason","secondary_order_id"]
 TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
 
 class FuturesTradeEntity(TradeEntity):
@@ -69,7 +69,9 @@ class FuturesTradeEntity(TradeEntity):
             close_reason = order['close_reason'] 
         else:
             close_reason = None
-        row_data = [trade_date,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,close_reason,secondary_order_id]
+        trade_datetime = order['trade_datetime']
+        update_datetime = datetime.datetime.now()
+        row_data = [trade_datetime,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,close_reason,secondary_order_id]
         # 使用订单号查询并更新记录
         self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
         # 变更后保存数据
@@ -78,11 +80,20 @@ class FuturesTradeEntity(TradeEntity):
             # 日志记录
             self.add_log(row_data)
     
+    def update_status(self,order):
+        """修改订单状态"""
+        
+        # 通过订单编号定位记录并修改
+        df = self.trade_data_df
+        df.loc[df['order_id']==order.order_id,'status'] = order.status
+        # 同时更新时间
+        df.loc[df['order_id']==order.order_id,'update_datetime'] = datetime.datetime.now()
+    
     def get_trade_by_date(self,date):
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[trade_data_df["trade_date"]==pd.to_datetime(date)]
         return target_df
-                  
+               
     def get_trade_date_by_instrument(self,order_book_id,position_effect,before_date):  
         """查询某个品种的最近已成交交易日期
             Params:
@@ -141,7 +152,20 @@ class FuturesTradeEntity(TradeEntity):
         else:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]                  
         return target_df  
-    
+
+    def get_open_order_active(self,trade_date,order_book_id):   
+        """取得指定未成交开仓订单"""
+
+        if self.trade_data_df.shape[0]==0:
+            return self.trade_data_df
+        trade_data_df = self.trade_data_df
+        target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
+                                      (trade_data_df["order_book_id"]==order_book_id)&
+                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]  
+        if target_df.shape[0]==0:
+            return None    
+        return target_df.iloc[0]
+       
     def get_close_list_active(self,trade_date):   
         """取得所有未成交平仓订单"""
 

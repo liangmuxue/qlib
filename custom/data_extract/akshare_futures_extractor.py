@@ -51,16 +51,17 @@ class AkFuturesExtractor(FutureExtractor):
         for result in result_rows:
             exchange_map[result[1]] = result[0]
         
-        insert_sql = "insert into trading_variety(exchange_id,code,name,magin_radio,limit_rate,multiplier) values(%s,%s,%s,%s,%s,%s)"
-        # update_sql = "update trading_variety set multiplier={} where code='{}'"
+        insert_sql = "insert into trading_variety(exchange_id,code,name,magin_radio,limit_rate,multiplier,price_range) values(%s,%s,%s,%s,%s,%s,%s)"
+        # update_sql = "update trading_variety set multiplier={},limit_rate={}, price_range={} where code='{}'"
         futures_rule_df = ak.futures_rule()        
         for idx,row in futures_rule_df.iterrows():
             exchange_id = exchange_map[row['交易所']]
-            magin_radio = row['交易保证金比例'] if not math.isnan(row['交易保证金比例']) else None
-            limit_rate = row['涨跌停板幅度'] if not math.isnan(row['交易保证金比例']) else None
-            multiplier = row['合约乘数'] if not math.isnan(row['合约乘数']) else None
-            self.dbaccessor.do_inserto_withparams(insert_sql, (exchange_id,row['代码'],row['品种'],magin_radio,limit_rate,multiplier))     
-            # update_sql_real = update_sql.format(multiplier,row['代码'])   
+            magin_radio = row['交易保证金比例'] if not math.isnan(row['交易保证金比例']) else 0
+            limit_rate = row['涨跌停板幅度'] if not math.isnan(row['涨跌停板幅度']) else 0
+            multiplier = row['合约乘数'] if not math.isnan(row['合约乘数']) else 0
+            price_range = row['最小变动价位'] if not math.isnan(row['最小变动价位']) else 0
+            self.dbaccessor.do_inserto_withparams(insert_sql, (exchange_id,row['代码'],row['品种'],magin_radio,limit_rate,multiplier,price_range))     
+            # update_sql_real = update_sql.format(multiplier,limit_rate,price_range,row['代码']) 
             # self.dbaccessor.do_inserto(update_sql_real)  
 
     def extract_item_data(self,code,start_date=None,end_date=None,period=PeriodType.DAY.value):  
@@ -622,8 +623,8 @@ if __name__ == "__main__":
     # futures_zh_realtime_df = ak.futures_zh_realtime(symbol="白糖")
     # print(futures_zh_realtime_df)    
     # 分时数据
-    futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2509", period="1")
-    print(futures_zh_minute_sina_df)
+    # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2509", period="1")
+    # print(futures_zh_minute_sina_df)
     # 历史行情
     # futures_hist_em_df = futures_hist_em(symbol="CU", period="daily")
     # print(futures_hist_em_df)    
@@ -674,7 +675,7 @@ if __name__ == "__main__":
 
     
     # 导入期货交易品种
-    # extractor.import_trading_variety()    
+    extractor.import_trading_variety()    
     # 导入交易时间表
     # extractor.import_variety_trade_schedule()    
     # 导入主力连续历史数据

@@ -424,19 +424,25 @@ class FurBacktestStrategy(SimStrategy):
                 # 撤单
                 self.cancel_order(close_order)
             # 止损卖出未成交，以当前价格重新挂单 
-            if close_order.kwargs["close_reason"]==SellReason.STOP_FALL.value:
+            elif close_order.kwargs["close_reason"]==SellReason.STOP_FALL.value:
                 # 更新挂单列表，后续统一处理
                 close_order.kwargs["price"] = price_now    
                 self.reset_order_list(close_item)              
                 # 撤单
                 self.cancel_order(close_order)
             # 超期未成交，以当前价格重新挂单 
-            if close_order.kwargs["close_reason"]==SellReason.EXPIRE_DAY.value:
+            elif close_order.kwargs["close_reason"]==SellReason.EXPIRE_DAY.value:
                 # 更新挂单列表，后续统一处理
                 close_order.kwargs["price"] = price_now    
                 self.reset_order_list(close_item)              
                 # 撤单
                 self.cancel_order(close_order)
+            # 其他情况，以当前价格重新挂单 
+            else:
+                close_order.kwargs["price"] = price_now
+                self.reset_order_list(close_item)              
+                # 撤单
+                self.cancel_order(close_order)                
     
     @get_time
     def verify_order_opening(self,context):
@@ -451,7 +457,6 @@ class FurBacktestStrategy(SimStrategy):
         # 已下单未成交的处理
         for index,open_item in open_list_active.iterrows():
             self.logger_info("check active,open_item.order_book_id:{}".format(open_item.order_book_id))
-            sys_order = self.trade_entity.get_sys_order(open_item.order_book_id)
             open_order = self.get_today_opened_order(open_item.order_book_id,context=context)
             price_now = self.get_last_price(open_item.order_book_id)
             if price_now is None:
@@ -524,9 +529,9 @@ class FurBacktestStrategy(SimStrategy):
         position_max_number = self.strategy.position_max_number  
         bond_rate = self.strategy.bond_rate    
         # 总资产 
-        total_value = self.get_total_value()
+        total_cash = self.get_cash()
         # 保证金不能超出限制
-        bond_limit = total_value * bond_rate
+        bond_limit = total_cash * bond_rate
         positions = self.get_positions()
         current_bond = np.array([pos.margin for pos in positions]).sum()
         remain_bond = bond_limit - current_bond
@@ -701,11 +706,18 @@ class FurBacktestStrategy(SimStrategy):
     def get_today_opened_order(self,order_book_id,context=None):
         """取得当日开仓列表"""
         
+        order_rtn = None
         if order_book_id in self.open_list:
             order = self.open_list[order_book_id]
             if order.position_effect==POSITION_EFFECT.OPEN:
-                return order
-        return None   
+                order_rtn = order
+        # 如果不在当日开仓列表中，再从存储中取，并懒加载
+        if order_rtn is None:
+            order = self.trade_entity.get_open_order_active(context.now.date().strftime("%Y%m%d"),order_book_id)
+            if order is not None:
+                order_rtn = self.create_order(order_book_id, order['quantity'], order['side'], order['price'], order['position_effect'])
+                self.open_list[order_book_id] = order_rtn
+        return order_rtn   
 
     def get_today_closed_order(self,order_book_id,context=None):
         """取得当日平仓列表"""
@@ -811,7 +823,7 @@ class FurBacktestStrategy(SimStrategy):
         order = event.order
         account = event.account
         account.get_positions()
-        self.logger_debug("on_trade_handler in,order:{}".format(order))
+        self.logger_debug("on_trade_handler in,order:{},trade:{}".format(order,trade))
         # 保存成单交易对象
         self.trade_entity.add_trade(trade,multiplier=order.kwargs['multiplier'])
         # 修改当日仓位列表中的状态为已成交
@@ -871,7 +883,9 @@ class FurBacktestStrategy(SimStrategy):
         # 如果订单被拒绝，则忽略,仍然保持新单状态，后续会继续下单
         if order.status==ORDER_STATUS.REJECTED:
             self.logger_info("order reject:{},trade_date:{}".format(order.order_book_id,self.trade_day))
-            self.trade_entity.add_or_update_order(order,str(self.trade_day))  
+            # self.trade_entity.add_or_update_order(order,str(self.trade_day))  
+            # 直接修改状态
+            self.trade_entity.update_status(order)
             return
         # 已撤单事件
         if order.status==ORDER_STATUS.CANCELLED:

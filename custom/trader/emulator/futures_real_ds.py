@@ -77,13 +77,13 @@ class FuturesRealDataSource(FuturesDataSource):
         
     def get_last_bar(self,order_book_id,dt):
         """取得指定标的最近报价信息"""
-
-        if order_book_id in self.last_bar_cache:
-            # 从缓存获取最近请求的实时数据，如果在时限内，则直接使用
-            (last_bar,last_dt) = self.last_bar_cache[order_book_id]
-            dur_time = (dt - last_dt).seconds
-            if dur_time<60:
-                return last_bar
+        
+        # if order_book_id in self.last_bar_cache:
+        #     # 从缓存获取最近请求的实时数据，如果在时限内，则直接使用
+        #     (last_bar,last_dt) = self.last_bar_cache[order_book_id]
+        #     dur_time = (dt - last_dt).seconds
+        #     if dur_time<60:
+        #         return last_bar
             
         instrument_code = order_book_id[:-4]
         exchange_code = self.get_exchange_from_instrument(instrument_code)
@@ -97,11 +97,14 @@ class FuturesRealDataSource(FuturesDataSource):
             realtime_data = self.extractor_ak.get_last_minutes_data(order_book_id)
             if realtime_data is None:
                 return None    
+            
         data = realtime_data.to_dict()   
+        if 'close' not in data or int(data['close'])==0:
+            data['close'] = data['current_price']
         # 放入缓存，后续可以复用
         self.last_bar_cache[order_book_id] = (data,dt) 
         
-        return realtime_data.to_dict()
+        return data
     
     def get_main_contract_name(self,instrument,date):
         """根据品种编码，确定当前对应的主力合约"""
