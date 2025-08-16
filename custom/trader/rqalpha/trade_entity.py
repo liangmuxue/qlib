@@ -45,7 +45,7 @@ class TradeEntity():
     def add_or_update_order(self,order,trade_day,only_add=False):
         """添加(或更新)订单信息"""
         
-        # logger.debug("add_or_update_order in,order:{}".format(order))
+        logger.debug("add_or_update_order in,order:{}".format(order))
         trade_date = order.datetime
         order_book_id = order.order_book_id
         side = order.side
@@ -84,12 +84,14 @@ class TradeEntity():
                 if only_add:
                     return                
                 # 有可能是之前撤单后新发起的订单，这类订单需要更新
-                prev_datetime = item_df['trade_datetime']
+                prev_datetime = item_df['trade_datetime'].values[0]
                 # 保留之前的发起订单的时间
                 row_data_np[0,0] = prev_datetime
-                self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
+                # 先删除再增加
+                self.trade_data_df = self.trade_data_df[~((self.trade_data_df["order_book_id"]==order.order_book_id)&
                     (self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_day)&
-                    (self.trade_data_df["position_effect"]==position_effect)] = pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)
+                    (self.trade_data_df["position_effect"]==position_effect))]
+                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)], axis=0)
                 # logger.debug("update trade,data:{}".format(row_data_np))
             else:
                 if row_data_np.shape[0]==0:
@@ -114,6 +116,7 @@ class TradeEntity():
     def update_order_status(self,order,status=ORDER_STATUS.ACTIVE,price=0):
         """更新订单状态"""
         
+        print("update_order_status in")
         self.trade_data_df.loc[self.trade_data_df["order_id"]==order.order_id,"status"] = status
         if price!=0:
             self.trade_data_df.loc[self.trade_data_df["order_id"]==order.order_id,"price"] = price

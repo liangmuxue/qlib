@@ -16,6 +16,8 @@
 分项指标  'CCI5' SCALE_MODE:0(按照行业内计算) or 2(整个计算), TARGET_MODE:2(按照行业内计算) or 3(整个计算)
 
 
-
-Futures_industryAdj_rsvTimediff8DetailIndus_Step2_202203
+TODO:
+1 部分成功订单的处理
+2 多位一体：每个品种在验证、回测、实盘阶段进行记录和比照
+          字段：预测前收盘，第一天开盘收盘最高最低，第二天开盘收盘最高最低，回测开仓和平仓价格，模拟盘开仓和平仓价格
 

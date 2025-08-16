@@ -866,7 +866,7 @@ class FurBacktestStrategy(SimStrategy):
                
     def on_order_handler(self,context, event):
         order = event.order
-        self.logger_info("order handler,order:{}".format(order))
+        self.logger_info("order handler,event_type::{},order:{}".format(event.event_type,event.order))
         # 已接单事件
         if order.status==ORDER_STATUS.ACTIVE:
             self.logger_info("order active:{},trade_date:{}".format(order.order_book_id,self.trade_day))

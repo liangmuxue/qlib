@@ -13,7 +13,7 @@ from trader.rqalpha.ml_wf_context import FurWorkflowIntergrate
 from trader.emulator.futures_backtest_strategy import FurBacktestStrategy,POS_COLUMNS
 from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
 from trader.utils.date_util import tradedays,get_tradedays_dur
-from rqalpha.const import ORDER_STATUS,SIDE,POSITION_EFFECT,POSITION_DIRECTION
+from rqalpha.const import ORDER_STATUS,SIDE,POSITION_EFFECT,POSITION_DIRECTION,DEFAULT_ACCOUNT_TYPE
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -74,7 +74,8 @@ class FurSimulationStrategy(FurBacktestStrategy):
         # 同步数据，从CTP远端系统中同步账户、持仓、交易等信息到本地
         por_info = self.query_ctp_por_data()
         # 同步到投资组合对象
-        portfolio = self.sync_portfolio(cur_date,por_info)     
+        portfolio = self.sync_portfolio(cur_date,por_info)    
+        # logger.info("account is:{}".format(portfolio.accounts[DEFAULT_ACCOUNT_TYPE.FUTURE.name])) 
         env.set_portfolio(portfolio)   
         # 保存投资组合数据到本地存储
         # TODO
@@ -222,6 +223,9 @@ class FurSimulationStrategy(FurBacktestStrategy):
         # 修改状态为待取消
         self.update_order_status(order,ORDER_STATUS.PENDING_CANCEL,side=order.side, context=self.context,price=order.price)     
         self.trade_entity.add_or_update_order(order,str(self.trade_day))
+        if "OrderSysID" not in order.kwargs:
+            ctp_trade_proxy = self.context.get_trade_proxy()
+            order = ctp_trade_proxy.query_order_info(order.order_id)[0]      
         self.context.get_trade_proxy().cancel_order(order)
                 
     ###############################数据逻辑处理部分########################################  
@@ -284,13 +288,16 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         return persis_orders
     
-    def transfer_order(self,orders,date=None):
+    def transfer_order(self,orders,date=None,ignore_before=True):
         """"把远程订单信息同步到本地交易存储类"""
         
         # 首先移除当日全部订单数据
         moved_data = self.trade_entity.move_order_by_date(date)
         
         for order in orders:
+            # 忽略之前的订单数据，只关注当天的
+            if ignore_before and order.trading_datetime.strftime("%Y%m%d")==date.strftime("%Y%m%d"):
+                continue
             # 遍历从远程取得的订单信息，逐个进行业务添加
             self.trade_entity.add_or_update_order(order,date.strftime("%Y%m%d"))      
             # 还需要添加到平仓列表

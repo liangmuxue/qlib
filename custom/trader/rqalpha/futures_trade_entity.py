@@ -83,15 +83,17 @@ class FuturesTradeEntity(TradeEntity):
     def update_status(self,order):
         """修改订单状态"""
         
+        print("update_order_status in,order:{}".format(order))
         # 通过订单编号定位记录并修改
         df = self.trade_data_df
         df.loc[df['order_id']==order.order_id,'status'] = order.status
         # 同时更新时间
         df.loc[df['order_id']==order.order_id,'update_datetime'] = datetime.datetime.now()
+        self.exp_trade_data(self.save_path)  
     
     def get_trade_by_date(self,date):
         trade_data_df = self.trade_data_df
-        target_df = trade_data_df[trade_data_df["trade_date"]==pd.to_datetime(date)]
+        target_df = trade_data_df[trade_data_df["trade_datetime"]==pd.to_datetime(date)]
         return target_df
                
     def get_trade_date_by_instrument(self,order_book_id,position_effect,before_date):  
@@ -105,11 +107,11 @@ class FuturesTradeEntity(TradeEntity):
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["order_book_id"]==order_book_id)
                                   &(trade_data_df["position_effect"]==position_effect)&
-                                  (trade_data_df["trade_date"]<=pd.to_datetime(before_date))]
+                                  (trade_data_df["trade_datetime"]<=pd.to_datetime(before_date))]
         if target_df.shape[0]==0:
             return None
         # 取得最后一个交易
-        return target_df["trade_date"].dt.to_pydatetime().tolist()[-1].strftime('%Y%m%d') 
+        return target_df["trade_datetime"].dt.to_pydatetime().tolist()[-1].strftime('%Y%m%d') 
 
     def get_trade_in_pos(self,order_book_id):   
         """取得指定的已持仓交易订单"""
@@ -127,7 +129,7 @@ class FuturesTradeEntity(TradeEntity):
             return self.trade_data_df
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]                  
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]                  
         return target_df  
     
     def get_open_list_filled(self,trade_date):   
@@ -137,7 +139,7 @@ class FuturesTradeEntity(TradeEntity):
             return self.trade_data_df
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.FILLED)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]                  
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]                  
         return target_df  
     
     def get_open_list_active(self,trade_date):   
@@ -148,7 +150,7 @@ class FuturesTradeEntity(TradeEntity):
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]      
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]      
         else:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]                  
         return target_df  
@@ -161,7 +163,7 @@ class FuturesTradeEntity(TradeEntity):
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
                                       (trade_data_df["order_book_id"]==order_book_id)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]  
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]  
         if target_df.shape[0]==0:
             return None    
         return target_df.iloc[0]
@@ -174,7 +176,7 @@ class FuturesTradeEntity(TradeEntity):
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]      
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]      
         else:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]                  
         return target_df  
@@ -187,7 +189,7 @@ class FuturesTradeEntity(TradeEntity):
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)&
-                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]       
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]       
         else:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
         return target_df         
@@ -196,7 +198,7 @@ class FuturesTradeEntity(TradeEntity):
         """移除指定日期的数据"""
         
         data = self.get_trade_by_date(date)
-        target_df = self.trade_data_df[self.trade_data_df["trade_date"]!=pd.to_datetime(date)]
+        target_df = self.trade_data_df[self.trade_data_df["trade_datetime"]!=pd.to_datetime(date)]
         self.trade_data_df = target_df
         
         return data

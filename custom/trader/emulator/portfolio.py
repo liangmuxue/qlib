@@ -34,10 +34,10 @@ class SimOrder(Order):
                 
 class SimPosition(object):
     __repr_properties__ = (
-        "order_book_id", "direction", "quantity","multiplier", "today_pos", "margin", "pnl", "position_cost", "avg_price","last_price"
+        "order_book_id", "direction", "quantity","multiplier", "today_pos", "margin", "frozen_margin", "use_margin", "pnl", "position_cost", "avg_price","last_price"
     )
 
-    def __init__(self, order_book_id, direction, init_quantity=0, init_price=None,margin=0,position_cost=0,multiplier=0,today_pos=False):
+    def __init__(self, order_book_id, direction, init_quantity=0, init_price=None,use_margin=0,frozen_margin=0,position_cost=0,multiplier=0,today_pos=False):
         self._env = Environment.get_instance()
 
         self._order_book_id = order_book_id
@@ -50,7 +50,8 @@ class SimPosition(object):
 
         self._multiplier = multiplier
         self._trade_cost: float = 0
-        self._margin = margin
+        self._use_margin = use_margin
+        self._frozen_margin = frozen_margin
         self._position_cost = position_cost
         self._last_price: Optional[float] = init_price
 
@@ -92,9 +93,19 @@ class SimPosition(object):
         return self._multiplier
 
     @property
+    def use_margin(self):
+        """持仓保证金"""
+        return self._use_margin
+    
+    @property
+    def frozen_margin(self):
+        """未成交订单冻结保证金"""
+        return self._frozen_margin
+        
+    @property
     def margin(self):
         """保证金"""
-        return self._margin
+        return self._frozen_margin + self._use_margin
 
     @property
     def position_cost(self):
@@ -127,6 +138,11 @@ class SimPosition(object):
         return fmt_str.format(*(getattr(self, p, None) for p in self.__repr_properties__))
             
 class SimAccount():
+    
+    __repr_properties__ = (
+        "total_cash", "frozen_cash", "margin"
+    )
+        
     def __init__(
             self, account_type: str, total_cash: float, frozen: float, margin: float, init_positions: Dict[str, Tuple[int, Optional[float]]],
             financing_rate: float,id=None
@@ -210,7 +226,11 @@ class SimAccount():
     def apply_trade(self, trade, order=None):
         # Do Nothing
         return
-        
+
+    def __repr__(self):
+        fmt_str = "{}({})".format("SimPosition", ", ".join((str(p) + "={}") for p in self.__repr_properties__))
+        return fmt_str.format(*(getattr(self, p, None) for p in self.__repr_properties__))
+            
 class Portfolio(object):
     
     def __init__(

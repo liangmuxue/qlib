@@ -176,7 +176,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
     def OnErrRtnOrderInsert(self, pInputOrder: "CThostFtdcInputOrderField", pRspInfo: "CThostFtdcRspInfoField") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             print("OnErrRtnOrderInsert failed:ErrorMsg:{},ErrorID:{}".format(pRspInfo.ErrorMsg,pRspInfo.ErrorID))
-            return             
+            self.listenner.on_order_failed(pInputOrder,reason_id=pRspInfo.ErrorID)
 
         # if pInputOrder is not None:
         #     print(f"OnErrRtnOrderInsert:"
@@ -274,15 +274,18 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         today_pos = False
         if pInvestorPosition.Position==pInvestorPosition.TodayPosition:
             today_pos = True
-        # 保证金占用
-        margin = pInvestorPosition.UseMargin
+        # 持仓保证金占用
+        use_margin = pInvestorPosition.UseMargin
+        # 未成交订单保证金占用
+        frozen_margin = pInvestorPosition.FrozenMargin
+        # 持仓成本
         position_cost = pInvestorPosition.PositionCost
         # 由于要计算市值，因此加入品种乘数
         data_source = self.listenner.context.env.data_source
         multiplier = data_source.get_contract_info(symbol)["multiplier"].astype(float).values[0]
         # 实时取得最近价格
         last_price = data_source.get_last_price(symbol,self.listenner.context.env.trading_dt)
-        position = SimPosition(symbol,direction,quantity,last_price,today_pos=today_pos,margin=margin,multiplier=multiplier,position_cost=position_cost)
+        position = SimPosition(symbol,direction,quantity,last_price,today_pos=today_pos,use_margin=use_margin,frozen_margin=frozen_margin,multiplier=multiplier,position_cost=position_cost)
         
         self.listenner.process_qry_result(CtpQueryType.QryPosition.value,position)
             
@@ -1005,23 +1008,20 @@ class CtpFuturesTrade(BaseTrade):
         if order is None:
             logger.warning("order not in cache:{}".format(pOrder.OrderLocalID))
             return
-               
-        # 报错后发起相关错误流程
+        
         if pOrder.OrderStatus==OrderStatusType.Canceled.value:
+            # 报错后发起相关错误流程
             self.on_order_failed(pOrder,pOrder.StatusMsg)
-            return
-        # 更新订单状态
-        if pOrder.OrderStatus==OrderStatusType.HasCommit.value:
-            self.on_order_accept(pOrder)        
-        elif pOrder.OrderStatus==OrderStatusType.PartTradedQueueing.value and order.res_result.status==OrderStatusType.NotBegin.value:
-            order.status = OrderStatusType.PartTradedQueueing.value
-        elif pOrder.OrderStatus==OrderStatusType.AllTraded.value and order.res_result.status==OrderStatusType.PartTradedQueueing.value:
-            order.status = OrderStatusType.AllTraded.value  
-            # 收到订单结束标志时，则判断交易记录是否完整，如完整，则进行订单确认消息发送环节
-            # self.trade_data_check_and_confirm(order)
+        elif pOrder.OrderStatus==OrderStatusType.HasCommit.value:
+            # 报单已提交
+            self.on_order_accept(pOrder)   
+        elif pOrder.OrderStatus==OrderStatusType.PartTradedQueueing.value:
+            pass
+        elif pOrder.OrderStatus==OrderStatusType.AllTraded.value:
+            # 全部报单已提交
+            self.on_order_accept(pOrder)
         elif pOrder.OrderStatus not in[OrderStatusType.PartTradedQueueing.value,OrderStatusType.AllTraded.value]:
             logger.warning("unknown status:{}".format(pOrder.OrderStatus))  
-            return
         
     def on_trade_rtn(self,pTrade):
         
@@ -1081,30 +1081,33 @@ class CtpFuturesTrade(BaseTrade):
         """订单已提交事件"""        
 
         # 返回数据中包含本地上下文标识，用于本地存储的串接
-        order = self.find_cache_order(pOrder.OrderRef)
-        if order is None:
+        order_queue = self.find_cache_order(pOrder.OrderRef)
+        if order_queue is None:
             logger.warning("order not in cache:{}".format(pOrder.OrderRef))
-            return        
-        logger.info("on_order_accept in,order_book_id:{}".format(order.order_book_id))
+            return      
+        order = copy.copy(order_queue) 
         order.set_status(ORDER_STATUS.ACTIVE) 
+        logger.info("on_order_accept in,order:{}".format(order))
         # 发送订单失败事件       
         env = Environment.get_instance()   
-        env.event_bus.publish_event(Event(EVENT.ORDER_CREATION_PASS, order=order)) 
+        account = env.get_account(order.order_book_id)  
+        self.context.add_busi_event(Event(EVENT.ORDER_CREATION_PASS, account=account,order=order)) 
                          
     def on_order_failed(self,pOrder,reason_id=None):
         """订单失败事件"""        
         
         # 返回数据中包含本地上下文标识，用于本地存储的串接
-        order = self.find_cache_order(pOrder.OrderRef)
-        if order is None:
+        order_queue = self.find_cache_order(pOrder.OrderRef)
+        if order_queue is None:
             logger.warning("order not in cache:{}".format(pOrder.OrderRef))
             return   
+        order = copy.copy(order_queue) 
         logger.info("on_order_failed in,order_book_id:{},reason_id:{}".format(order.order_book_id,reason_id))
         order.set_status(ORDER_STATUS.REJECTED)  
         # 发送订单失败事件       
         env = Environment.get_instance()   
         account = env.get_account(order.order_book_id)  
-        env.event_bus.publish_event(Event(EVENT.ORDER_CREATION_REJECT, order=order,account=account))              
+        self.context.add_busi_event(Event(EVENT.ORDER_CREATION_REJECT, account=account,order=order))         
     
     def on_order_cancel(self,pOrder,reason_id=None):
         """撤单回报"""
@@ -1113,6 +1116,4 @@ class CtpFuturesTrade(BaseTrade):
         if reason_id==0:
             self.context.add_busi_event(Event(EVENT.ORDER_CANCELLATION_PASS, order=pOrder)) 
               
-        
-        
         

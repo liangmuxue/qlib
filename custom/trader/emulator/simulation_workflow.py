@@ -3,6 +3,7 @@ from rqalpha.core.events import EVENT
 
 import os
 import threading
+import queue
 import time
 from datetime import datetime
 
@@ -30,15 +31,15 @@ class Executor(threading.Thread):
         # 预定义事件集合
         self.event_Coll = {EVENT.BEFORE_TRADING:0,EVENT.OPEN_AUCTION:0,EVENT.BAR:0,EVENT.AFTER_TRADING:0}
         # 业务响应事件，以应对异步问题
-        self.busi_event_queue = []
+        self.busi_event_queue = queue.Queue(maxsize=6)
         
 
     def pop_event(self,now_time):
         """交易过程过程中的事件生成"""
         
         # 优先响应业务事件
-        if len(self.busi_event_queue)>0:
-            event = self.busi_event_queue.pop()
+        if self.busi_event_queue.qsize()>0:
+            event = self.busi_event_queue.get()
             return event
         # 交易准备事件
         if self.event_Coll[EVENT.BEFORE_TRADING]==0:
@@ -84,8 +85,9 @@ class AsisExecutor(Executor):
         """交易过程过程中的事件生成"""
         
         # 优先响应业务事件
-        if len(self.busi_event_queue)>0:
-            event = self.busi_event_queue.pop()
+        if self.busi_event_queue.qsize()>0:
+            event = self.busi_event_queue.get()
+            logger.info("busi event pop,type:{},order_book_id:{}".format(event.event_type,event.order.order_book_id))
             return event
         # 交易准备事件
         if self.event_Coll[EVENT.BEFORE_TRADING]==0:
@@ -210,7 +212,7 @@ class SimulationWorkflow():
         self.strategy_class.open_auction(context,bar_dict=bar_dict)
 
     def add_busi_event(self,event):
-        self.executor.busi_event_queue.append(event)
+        self.executor.busi_event_queue.put(event)
 
     ######################### 辅助功能实现 ####################################
     def set_asis_execute(self,flag):
@@ -221,11 +223,11 @@ class SimulationWorkflow():
         
         if not self.asis_execute:
             # 开仓指定品种
-            # self.strategy_class.open_trade_order("HC2510")
+            # self.strategy_class.open_trade_order("SS2509")
             # 清空所有持仓
-            # self.strategy_class.clear_position()
+            self.strategy_class.clear_position()
             # self.strategy_class.clear_order()
-            self.strategy_class.query_position()     
+            # self.strategy_class.query_position()     
             # self.strategy_class.query_trade()    
             # self.strategy_class.query_account()   
             self.asis_execute = True

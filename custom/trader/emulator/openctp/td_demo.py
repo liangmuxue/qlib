@@ -364,7 +364,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
                   f"OpenCost={pInvestorPosition.OpenCost} "
                   f"SettlementPrice={pInvestorPosition.SettlementPrice} "
                   )
-            print("python_dict:{}".format(swig_object_to_dict(pInvestorPosition)))
+            # print("python_dict:{}".format(swig_object_to_dict(pInvestorPosition)))
 
         if bIsLast == True:
             semaphore.release()
@@ -853,7 +853,6 @@ if __name__ == "__main__":
     # semaphore.acquire()
     #
     time.sleep(1)
-    # tdImpl.QryAccount()
     # semaphore.acquire()
     #
     # time.sleep(1)
@@ -922,7 +921,7 @@ if __name__ == "__main__":
     # tdImpl.OrderCancel(ExchangeID, InstrumentID, OrderSysID, FrontID, SessionID, OrderRef)
     #
     time.sleep(3)
-    # print("begin qry pos")
+    # tdImpl.QryAccount()
     tdImpl.QryPosition("")
     # tdImpl.QryOrder("")
     input("################# 按任意键退出 \n")
