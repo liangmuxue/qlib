@@ -33,7 +33,7 @@ class FuturesDataSource(BaseDataSource):
         super(FuturesDataSource, self).__init__(path,{})
         
         self.dbaccessor = DbAccessor({})
-        self.busi_columns = ["code","datetime","open","high","low","close","volume","hold","settle"]
+        self.busi_columns = ["code","datetime","open","close","high","low","volume","hold","settle"]
         self.day_contract_columns = ["symbol","contract","volume"]
         
         self.extractor = JuejinFuturesExtractor(savepath=stock_data_path,sim_path=sim_path)

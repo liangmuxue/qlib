@@ -31,7 +31,7 @@ class Executor(threading.Thread):
         # 预定义事件集合
         self.event_Coll = {EVENT.BEFORE_TRADING:0,EVENT.OPEN_AUCTION:0,EVENT.BAR:0,EVENT.AFTER_TRADING:0}
         # 业务响应事件，以应对异步问题
-        self.busi_event_queue = queue.Queue(maxsize=6)
+        self.busi_event_queue = queue.Queue(maxsize=60)
         
 
     def pop_event(self,now_time):
@@ -39,7 +39,7 @@ class Executor(threading.Thread):
         
         # 优先响应业务事件
         if self.busi_event_queue.qsize()>0:
-            event = self.busi_event_queue.get()
+            event = self.busi_event_queue.get(timeout=2)
             return event
         # 交易准备事件
         if self.event_Coll[EVENT.BEFORE_TRADING]==0:
@@ -86,8 +86,8 @@ class AsisExecutor(Executor):
         
         # 优先响应业务事件
         if self.busi_event_queue.qsize()>0:
-            event = self.busi_event_queue.get()
-            logger.info("busi event pop,type:{},order_book_id:{}".format(event.event_type,event.order.order_book_id))
+            event = self.busi_event_queue.get(timeout=2)
+            logger.info("busi event pop,type:{}".format(event.event_type))
             return event
         # 交易准备事件
         if self.event_Coll[EVENT.BEFORE_TRADING]==0:
@@ -127,7 +127,7 @@ class SimulationWorkflow():
         config = self.sim_config['standard']
         config = DictToObject(config) 
         self.context = SimulationContext(config)
-        self.strategy_class.__build_with_context__(self.context,workflow_mode=True)
+        self.strategy_class.__build_with_context__(self,workflow_mode=True)
         # 整体数据以及上下文环境，复用RQALPHA的设计模式
         env = Environment(config)
         self.env = env
@@ -149,6 +149,7 @@ class SimulationWorkflow():
         self.executor = AsisExecutor(datetime.now().date(),env=self)
         # self.executor = Executor(datetime.now().date(),env=self)
         # 注册相关回调事件
+        env.event_bus.add_listener(EVENT.DO_RESTORE, self.strategy_class.refresh_portfolio)   
         env.event_bus.add_listener(EVENT.ORDER_CREATION_PASS, self.strategy_class.on_order_handler)     
         env.event_bus.add_listener(EVENT.ORDER_CREATION_REJECT, self.strategy_class.on_order_handler)  
         env.event_bus.add_listener(EVENT.TRADE, self.strategy_class.on_trade_handler)     
@@ -223,12 +224,14 @@ class SimulationWorkflow():
         
         if not self.asis_execute:
             # 开仓指定品种
-            # self.strategy_class.open_trade_order("SS2509")
+            # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
-            self.strategy_class.clear_position()
+            # self.strategy_class.clear_position()
             # self.strategy_class.clear_order()
-            # self.strategy_class.query_position()     
-            # self.strategy_class.query_trade()    
+            self.strategy_class.query_position()     
+            # self.strategy_class.query_trade()   
+            # orders = self.strategy_class.query_order_info("")
+            # print("orders len:{}".format(len(orders)))
             # self.strategy_class.query_account()   
             self.asis_execute = True
         else:

@@ -220,7 +220,7 @@ class FurBacktestStrategy(SimStrategy):
         # 轮询候选列表进行买入操作
         for order in self.get_need_open_list():
             # 只对待开仓状态进行挂单
-            self.logger_debug("open order loop,order_book_id:{},status:{}".format(order.order_book_id,order.status))
+            logger.info("open order loop,order_book_id:{},status:{}".format(order.order_book_id,order.status))
             if order.status!=ORDER_STATUS.PENDING_NEW:
                 continue
             # 以昨日收盘价格挂单买入
@@ -491,8 +491,17 @@ class FurBacktestStrategy(SimStrategy):
         # 已拒绝订单，重新按照现在价格下单
         open_list_reject = self.trade_entity.get_open_list_reject(str(self.trade_day))
         for index,open_item in open_list_reject.iterrows():
+            price_now = self.get_last_price(open_item.order_book_id)
+            # 修改状态    
+            self.update_order_status(open_item,ORDER_STATUS.PENDING_NEW,side=open_item.side, context=context)      
+            # 更新报价     
+            self.open_list[open_item.order_book_id].kwargs["price"] = price_now       
+            
+        # 已拒绝平仓订单，重新按照现在价格下单                 
+        close_list_reject = self.trade_entity.get_close_list_reject(str(self.trade_day))
+        for index,close_item in close_list_reject.iterrows():
             try:
-                cur_snapshot = self.get_current_snapshot(open_item.order_book_id)
+                cur_snapshot = self.get_current_snapshot(close_item.order_book_id)
                 price_now = cur_snapshot.last
             except Exception as e:
                 logger.error("cur_snapshot err:{}".format(e))
@@ -500,8 +509,8 @@ class FurBacktestStrategy(SimStrategy):
             # 修改状态    
             self.update_order_status(open_item,ORDER_STATUS.PENDING_NEW,side=open_item.side, context=context)      
             # 更新报价     
-            self.open_list[open_item.order_book_id].kwargs["price"] = price_now                         
-                                
+            self.close_list[open_item.order_book_id].kwargs["price"] = price_now  
+                                            
     ###############################数据逻辑处理部分########################################  
 
     def get_position(self,order_book_id):
@@ -867,6 +876,14 @@ class FurBacktestStrategy(SimStrategy):
     def on_order_handler(self,context, event):
         order = event.order
         self.logger_info("order handler,event_type::{},order:{}".format(event.event_type,event.order))
+        # 未接单事件
+        if order.status==ORDER_STATUS.PENDING_NEW:
+            self.logger_info("order PENDING_NEW:{},trade_date:{}".format(order.order_book_id,self.trade_day))            
+            # 更新跟踪变量状态
+            self.update_order_status(order,ORDER_STATUS.PENDING_NEW,side=order.side, context=self.context)   
+            # 更新存储状态               
+            self.trade_entity.update_status(order)
+            return            
         # 已接单事件
         if order.status==ORDER_STATUS.ACTIVE:
             self.logger_info("order active:{},trade_date:{}".format(order.order_book_id,self.trade_day))
@@ -883,9 +900,10 @@ class FurBacktestStrategy(SimStrategy):
         # 如果订单被拒绝，则忽略,仍然保持新单状态，后续会继续下单
         if order.status==ORDER_STATUS.REJECTED:
             self.logger_info("order reject:{},trade_date:{}".format(order.order_book_id,self.trade_day))
-            # self.trade_entity.add_or_update_order(order,str(self.trade_day))  
             # 直接修改状态
             self.trade_entity.update_status(order)
+            # 更新跟踪变量状态
+            self.update_order_status(order,ORDER_STATUS.REJECTED,side=order.side, context=self.context)               
             return
         # 已撤单事件
         if order.status==ORDER_STATUS.CANCELLED:

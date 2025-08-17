@@ -922,6 +922,6 @@ if __name__ == "__main__":
     #
     time.sleep(3)
     # tdImpl.QryAccount()
-    tdImpl.QryPosition("")
-    # tdImpl.QryOrder("")
+    # tdImpl.QryPosition("")
+    tdImpl.QryOrder("hc2510")
     input("################# 按任意键退出 \n")

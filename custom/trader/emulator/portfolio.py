@@ -207,6 +207,11 @@ class SimAccount():
         return self._frozen_cash
 
     @property
+    def total_cash(self) -> float:
+        """总资金"""
+        return self._total_cash
+        
+    @property
     def cash(self) -> float:
         """可用资金"""
         
@@ -228,7 +233,7 @@ class SimAccount():
         return
 
     def __repr__(self):
-        fmt_str = "{}({})".format("SimPosition", ", ".join((str(p) + "={}") for p in self.__repr_properties__))
+        fmt_str = "{}({})".format("SimAccount", ", ".join((str(p) + "={}") for p in self.__repr_properties__))
         return fmt_str.format(*(getattr(self, p, None) for p in self.__repr_properties__))
             
 class Portfolio(object):
@@ -244,10 +249,9 @@ class Portfolio(object):
             data_proxy=None,
             persis_path=None     
     ):    
-        starting_cash = balance - frozen - margin
         account_args = {}
         account_args[DEFAULT_ACCOUNT_TYPE.FUTURE] = {
-            "account_type": DEFAULT_ACCOUNT_TYPE.FUTURE.name, "total_cash": starting_cash, "frozen":frozen, "margin":margin,
+            "account_type": DEFAULT_ACCOUNT_TYPE.FUTURE.name, "total_cash": balance, "frozen":frozen, "margin":margin,
             "init_positions": {}, "financing_rate": financing_rate
         }        
         for pos in init_positions:
@@ -263,8 +267,7 @@ class Portfolio(object):
         self.data_proxy = data_proxy
         self.persis_filepath = persis_path
                                       
-    @classmethod
-    def get_account_type(cls, order_book_id):
+    def get_account_type(self, order_book_id):
         return DEFAULT_ACCOUNT_TYPE.FUTURE
     
     @classmethod
@@ -274,7 +277,7 @@ class Portfolio(object):
     def get_persis_position_path(cls,persis_path):
         return os.path.join(persis_path,"position")
                 
-    def get_account(self, order_book_id):
+    def get_account(self, order_book_id=None):
         return self._accounts[self.get_account_type(order_book_id)]
     
     @property

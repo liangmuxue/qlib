@@ -10,6 +10,7 @@ from rqalpha.apis import cal_style
 from trader.utils.constance import OrderStatusType
 from trader.emulator.portfolio import Portfolio,SimOrder
 from trader.rqalpha.ml_wf_context import FurWorkflowIntergrate
+from rqalpha.core.events import EVENT, Event
 from trader.emulator.futures_backtest_strategy import FurBacktestStrategy,POS_COLUMNS
 from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
 from trader.utils.date_util import tradedays,get_tradedays_dur
@@ -30,8 +31,12 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.contract_today = {}
         self.prev_side = SIDE.BUY
 
-    def __build_with_context__(self,context,workflow_mode=False):
+    def __build_with_context__(self,work_context,workflow_mode=False):
+        
+        self.workflow = work_context
+        context = work_context.context
         self.context = context
+        
         provider_uri = context.config.provider_uri
         # 加载qlib上下文  
         task_config = context.config
@@ -75,7 +80,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         por_info = self.query_ctp_por_data()
         # 同步到投资组合对象
         portfolio = self.sync_portfolio(cur_date,por_info)    
-        # logger.info("account is:{}".format(portfolio.accounts[DEFAULT_ACCOUNT_TYPE.FUTURE.name])) 
+        logger.info("account info:{}".format(portfolio.get_account()))
         env.set_portfolio(portfolio)   
         # 保存投资组合数据到本地存储
         # TODO
@@ -123,7 +128,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
             if order_book_id in exists_order_ids:
                 continue            
             # 以昨日收盘价格作为当前卖盘价格
-            h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="close")
+            h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="settle")
             if h_bar is None:
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
@@ -222,10 +227,16 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.logger_info("cancel_order in ,order:{}".format(order.order_book_id))
         # 修改状态为待取消
         self.update_order_status(order,ORDER_STATUS.PENDING_CANCEL,side=order.side, context=self.context,price=order.price)     
-        self.trade_entity.add_or_update_order(order,str(self.trade_day))
         if "OrderSysID" not in order.kwargs:
-            ctp_trade_proxy = self.context.get_trade_proxy()
-            order = ctp_trade_proxy.query_order_info(order.order_id)[0]      
+            # 需要取得ctp订单的特有信息,只关注当天的
+            orders = self.query_order_info(order.order_book_id)
+            if len(orders)==0:
+                logger.warning("no order in cancel:{}".format(order.order_book_id))
+                return
+            order = orders[0]
+            if order.status!=ORDER_STATUS.ACTIVE:
+                logger.warning("no active order in cancel:{}".format(order.order_book_id))
+                return 
         self.context.get_trade_proxy().cancel_order(order)
                 
     ###############################数据逻辑处理部分########################################  
@@ -317,6 +328,9 @@ class FurSimulationStrategy(FurBacktestStrategy):
         ctp_trade_proxy = self.context.get_trade_proxy()
         # 请求远端CTP数据
         account = ctp_trade_proxy.query_account_info()
+        if account is None:
+            logger.warning("account None,again")
+            account = ctp_trade_proxy.query_account_info()
         positions = ctp_trade_proxy.query_position_info("")
         if has_order:
             orders = ctp_trade_proxy.query_order_info("")
@@ -424,19 +438,20 @@ class FurSimulationStrategy(FurBacktestStrategy):
         super().on_order_handler(context, event)    
                     
     def apply_trade_pos(self,trade):
-        """维护仓位数据"""
+        """维护仓位数据，使用事件通知模式，以避免查询异步失败问题"""
         
-        # 直接通过请求远程信息来实现仓位数据同步
-        self.refresh_portfolio()
+        logger.info("apply_trade_pos in")
+        self.workflow.add_busi_event(Event(EVENT.DO_RESTORE))    
        
-    def refresh_portfolio(self):
+    def refresh_portfolio(self,event):
+        """刷新仓位数据，使用事件通知模式，以避免查询异步失败问题"""
         
         env = Environment.get_instance()
         context = self.context
         cur_date = context.now.date()
-        time.sleep(15)
         por_info = self.query_ctp_por_data(has_order=False)
         portfolio = self.sync_portfolio(cur_date,por_info)   
+        logger.info("refresh_portfolio end,account:{}".format(portfolio.get_account()))
         env.set_portfolio(portfolio)
                              
     ######################### 辅助功能实现 ####################################
@@ -485,7 +500,17 @@ class FurSimulationStrategy(FurBacktestStrategy):
         logger.info("orders number:{}".format(len(orders)))
         for order in orders:
             logger.info("order:{}".format(order))      
-                        
+            
+    def query_order_info(self,order_code=""):
+        """取得指定日期的订单"""
+        
+        ctp_trade_proxy = self.context.get_trade_proxy()
+        cur_date = self.context.now.date()
+        orders = ctp_trade_proxy.get_day_orders(cur_date,order_code=order_code)
+        for order in orders:
+            logger.info("order:{}".format(order))   
+        return orders       
+                               
     def open_trade_order(self,order_book_id,side=SIDE.BUY,quantity=10):
         """开仓指定的品种"""
 

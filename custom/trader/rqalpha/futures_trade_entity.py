@@ -188,12 +188,25 @@ class FuturesTradeEntity(TradeEntity):
             return self.trade_data_df
         trade_data_df = self.trade_data_df
         if trade_date is not None:
-            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)&
+            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)&
                                       (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]       
         else:
-            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
+            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
         return target_df         
-    
+
+    def get_close_list_reject(self,trade_date):   
+        """取得所有被拒绝的平仓订单"""
+
+        if self.trade_data_df.shape[0]==0:
+            return self.trade_data_df
+        trade_data_df = self.trade_data_df
+        if trade_date is not None:
+            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)&
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]       
+        else:
+            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
+        return target_df   
+        
     def move_order_by_date(self,date): 
         """移除指定日期的数据"""
         

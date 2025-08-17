@@ -457,6 +457,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         elif p_status==OrderStatusType.Canceled.value:
             status = ORDER_STATUS.CANCELLED                 
         order.set_status(status)
+        # 拼接订单提交日期和时间
         trading_dt = pOrder.InsertDate + " " + pOrder.InsertTime
         trading_dt = datetime.strptime(trading_dt, "%Y%m%d %H:%M:%S")
         order.set_trading_dt(trading_dt)
@@ -497,7 +498,6 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
 
     def OnRspQryTradingAccount(self, pTradingAccount: tdapi.CThostFtdcTradingAccountField,
                                pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
-        print("OnRspQryTradingAccount in:{}".format(pTradingAccount))
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             print(f"OnRspQryTradingAccount failed: {pRspInfo.ErrorMsg}")
             return
@@ -682,7 +682,6 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         self.api.ReqQryInvestor(req, 0)
 
     def QryAccount(self):
-        logger.debug("QryAccount in")
         req = tdapi.CThostFtdcQryTradingAccountField()
         req.BrokerID = self.broker
         req.InvestorID = self.user
@@ -919,7 +918,7 @@ class CtpFuturesTrade(BaseTrade):
     def query_order_info(self,order_code):
         """请求订单信息"""
         
-        orders = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder.value,order_code,wait_time=5,multiple=True)
+        orders = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder.value,order_code.lower(),wait_time=5,multiple=True)
         
         if orders is None:
             return []
@@ -928,7 +927,21 @@ class CtpFuturesTrade(BaseTrade):
             orders.sort(key=lambda x: x.trading_datetime)
                     
         return orders 
-            
+
+    def get_day_orders(self,date,order_code=""):
+        """取得指定日期的订单"""
+        
+        orders = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder.value,order_code.lower(),wait_time=5,multiple=True)
+        
+        if orders is None:
+            return []
+        order_rtn = []
+        for order in orders:
+            if order.trading_datetime.strftime("%Y%m%d")==date.strftime("%Y%m%d"):
+                order_rtn.append(order)
+                
+        return order_rtn 
+                
     ########################交易请求#################################  
     
     def submit_order(self,order_in):
@@ -1012,6 +1025,9 @@ class CtpFuturesTrade(BaseTrade):
         if pOrder.OrderStatus==OrderStatusType.Canceled.value:
             # 报错后发起相关错误流程
             self.on_order_failed(pOrder,pOrder.StatusMsg)
+        elif pOrder.OrderStatus==OrderStatusType.UnClosed.value:
+            # 报单未提交
+            self.on_order_not_accept(pOrder)              
         elif pOrder.OrderStatus==OrderStatusType.HasCommit.value:
             # 报单已提交
             self.on_order_accept(pOrder)   
@@ -1077,6 +1093,22 @@ class CtpFuturesTrade(BaseTrade):
         # 发送成单事件,使用异步事件栈模式，以规避c++异步回调的问题
         self.context.add_busi_event(Event(EVENT.TRADE, account=account, trade=trade, order=order)) 
 
+    def on_order_not_accept(self,pOrder):
+        """订单未提交事件"""        
+
+        # 返回数据中包含本地上下文标识，用于本地存储的串接
+        order_queue = self.find_cache_order(pOrder.OrderRef)
+        if order_queue is None:
+            logger.warning("order not in cache:{}".format(pOrder.OrderRef))
+            return      
+        order = copy.copy(order_queue) 
+        order.set_status(ORDER_STATUS.REJECTED) 
+        logger.info("on_order_not_accept in,order:{}".format(order))
+        # 订单未提交事件,使用ORDER_CREATION_REJECT--订单拒绝事件表示    
+        env = Environment.get_instance()   
+        account = env.get_account(order.order_book_id)  
+        self.context.add_busi_event(Event(EVENT.ORDER_CREATION_REJECT, account=account,order=order)) 
+        
     def on_order_accept(self,pOrder):
         """订单已提交事件"""        
 
@@ -1088,7 +1120,7 @@ class CtpFuturesTrade(BaseTrade):
         order = copy.copy(order_queue) 
         order.set_status(ORDER_STATUS.ACTIVE) 
         logger.info("on_order_accept in,order:{}".format(order))
-        # 发送订单失败事件       
+        # 发送订单通过事件       
         env = Environment.get_instance()   
         account = env.get_account(order.order_book_id)  
         self.context.add_busi_event(Event(EVENT.ORDER_CREATION_PASS, account=account,order=order)) 
