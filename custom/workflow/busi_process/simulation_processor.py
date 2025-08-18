@@ -36,7 +36,10 @@ class SimulationProcessor(BaseProcessor):
         backtest_template["strategy_class"]["config_path"] = config_file_path
         # 相关文件路径
         parent_path = self.wf_task.get_trader_data_path()
-        cur_period_path = parent_path # + "/" + str(working_day)[4:6]
+        emu_channel = backtest_template["standard"]["mod"]["ext_emulation_mod"]["emu_channel"]
+        cur_period_path = os.path.join(parent_path,emu_channel)
+        if not os.path.exists(cur_period_path):
+            os.mkdir(cur_period_path) 
         backtest_template["standard"]["extra"]["report_save_path"] = cur_period_path
         backtest_template["standard"]["mod"]["sys_analyser"]["report_save_path"] = cur_period_path
         backtest_template["standard"]["mod"]["ext_ds_mod"]["report_save_path"] = cur_period_path
