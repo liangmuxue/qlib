@@ -26,7 +26,7 @@ from cus_utils.tensor_viz import TensorViz
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20230811]
-STAT_DATE = [20250822,20240822]
+STAT_DATE = [20220822,20250822]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
@@ -80,6 +80,7 @@ class FuturesIndustryDRollModule(MlpModule):
                                     use_weighted_loss_func=use_weighted_loss_func,batch_file_path=batch_file_path,
                                     device=device,**kwargs)  
         self.result_file_path = "custom/data/results/step1_rs.pkl"
+        self.result_file_path_step2 = "custom/data/results/step2_rs.pkl"
         self.result_columns = ["date","indus_index","trend_flag","price_inf","ce_inf"]
         
         
@@ -481,8 +482,7 @@ class FuturesIndustryDRollModule(MlpModule):
                 if import_price_result is not None:
                     import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
                     # print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
-                    result_file_path = "custom/data/results/pred_coll.pkl"
-                    with open(result_file_path, "wb") as fout:
+                    with open(self.result_file_path_step2, "wb") as fout:
                         pickle.dump(import_price_result_item, fout)                  
                                         
             tar_viz = global_var.get_value("viz_data")
@@ -918,12 +918,7 @@ class FuturesIndustryDRollModule(MlpModule):
             # 对于预测数据，生成对应涨跌幅类别
             for i,imp_idx in enumerate(import_index):
                 ts = target_info[imp_idx]
-                open_array = ts["open_array"][self.input_chunk_length-1:]
-                price_array = ts["price_array"][self.input_chunk_length-1:]
-                diff_range = (price_array[-1] - price_array[0])/price_array[0]
-                p_taraget_class = compute_price_class(price_array,mode="first_last")
-                diff_range = (open_array[-1] - price_array[0])/price_array[0]
-                p_taraget_class = get_simple_class(diff_range) 
+                diff_range, p_taraget_class = self.compute_diff_range_class(ts)
                 # 根据多空判断取得实际对应的类别
                 if overroll_trend==0:
                     diff_range = -diff_range
@@ -945,9 +940,8 @@ class FuturesIndustryDRollModule(MlpModule):
         for index,row in indus_result_list.iterrows():
             indus_index = int(row["indus_index"])
             trend_flag = int(row["trend_flag"])
-            diff_range = target_info[indus_index]["diff_range"][-1] 
+            diff_range, p_taraget_class = self.compute_diff_range_class(target_info[indus_index])
             total_diff_range.append(diff_range)
-            p_taraget_class = get_simple_class(diff_range)
             if trend_flag==0:
                 p_taraget_class = np.array([3,2,1,0])[p_taraget_class]                
             trend_results.append(p_taraget_class)
@@ -1010,8 +1004,6 @@ class FuturesIndustryDRollModule(MlpModule):
         
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
-        if date==20240826:
-            print("ggg")
         # 不同阶段，使用不同的策略
         if self.train_step_mode==0:
             trend_value,result_list = self.strategy_compindex(cls_values,ce_values,
@@ -1043,6 +1035,16 @@ class FuturesIndustryDRollModule(MlpModule):
         ins_result_list['date'] = date            
         return import_index_real,trend_value,indus_top_index,result_list,ins_result_list
     
+    def compute_diff_range_class(self,target_info):
+        """根据实际涨跌数据计算类别"""
+        
+        open_array = target_info["open_array"][self.input_chunk_length-1:]
+        price_array = target_info["price_array"][self.input_chunk_length-1:]    
+        diff_range = (open_array[-1] - price_array[0])/price_array[0]*100
+        range_class = get_simple_class(diff_range)
+        
+        return diff_range,range_class
+
     def compute_total_trend(self,result_list):
         
         # 超出一半上涨，则认为整体上涨
@@ -1050,7 +1052,7 @@ class FuturesIndustryDRollModule(MlpModule):
         # 根据平均数是否是否大于0判断是否整体上涨 
         trend_value = result_list['price_inf'].mean()>0
         return trend_value
-    
+        
     def strategy_compindex(self,cls,ce_values,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
         """衡量整体指标"""
         

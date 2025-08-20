@@ -22,15 +22,11 @@ _STOCK_FIELD_NAMES = [
     'datetime', 'open', 'high', 'low', 'close', 'vol', 'amount'
 ]
 
-_FUTURE_DB_FIELD_NAMES = [
-    'datetime','code', 'open', 'close', 'high', 'low', 'volume', 'hold','settle'
-]
-
 class FuturesDataSource(BaseDataSource):
     """期货自定义数据源"""
     
     def __init__(self, path,stock_data_path=None,sim_path=None,frequency_sim=True):
-        super(FuturesDataSource, self).__init__(path,{})
+        # super(FuturesDataSource, self).__init__(path,{})
         
         self.dbaccessor = DbAccessor({})
         self.busi_columns = ["code","datetime","open","close","high","low","volume","hold","settle"]
@@ -42,9 +38,10 @@ class FuturesDataSource(BaseDataSource):
         self.frequency_sim = frequency_sim 
         # 从全局变量中取得主流程透传的主体模型,以及对应数据集对象
         model = global_var.get_value("model")
-        dataset = model.dataset
-        # dataset.build_series_data(no_series_data=True)
-        self.dataset = dataset
+        if model is not None:
+            dataset = model.dataset
+            # dataset.build_series_data(no_series_data=True)
+            self.dataset = dataset
 
     def time_inject(self,code_name=None,begin=False):
         if begin:
@@ -107,7 +104,7 @@ class FuturesDataSource(BaseDataSource):
         """取得指定品种和对应日期的分时交易记录"""
 
         return self.extractor.get_time_data_by_day(day,symbol)
-            
+
     def get_main_contract_name(self,instrument,date):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
@@ -426,64 +423,3 @@ class FuturesDataSource(BaseDataSource):
             return None
         return bar['close']
             
-class FuturesDataSourceSql(FuturesDataSource):
-    """期货自定义数据源,数据库模式"""
-    
-    def __init__(self, path,stock_data_path=None,sim_path=None,frequency_sim=True):
-        super(FuturesDataSourceSql, self).__init__(path,stock_data_path=stock_data_path,sim_path=sim_path,frequency_sim=frequency_sim)
-
-    def has_current_data(self,day,symbol):
-        """当日是否开盘交易"""
-
-        # 直接使用sql查询,检查当日是否有分时数据
-        item_sql = "select count(1) from dominant_continues_data_1min where code='{}' " \
-            "and Date(datetime)='{}'".format(symbol,day.strftime('%Y-%m-%d'))
-        cnt = self.dbaccessor.do_query(item_sql)[0][0]      
-        if cnt==0:
-            return False
-        return True
-
-    def get_time_data_by_day(self,day,symbol):
-        """取得指定品种和对应日期的分时交易记录"""
-
-        column_str = ','.join([str(i) for i in _FUTURE_DB_FIELD_NAMES])
-        item_sql = "select {} from dominant_real_data_1min where code='{}' " \
-            "and Date(datetime)='{}'".format(column_str,symbol,date_string_transfer(day))     
-        SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-        item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_DB_FIELD_NAMES)
-        return item_data
-            
-    def get_k_data(self, order_book_id, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
-        """从已下载的文件中，加载K线数据"""
-        
-        self.time_inject(begin=True)
-        # 可以加载不同的频次类型数据
-        if frequency=="1m":
-            column_str = ','.join([str(i) for i in _FUTURE_DB_FIELD_NAMES])
-            item_sql = "select {} from dominant_real_data_1min where code='{}' " \
-                "and datetime='{}'".format(column_str,order_book_id,start_dt.strftime('%Y-%m-%d %H:%M:%S'))     
-            SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-            item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_DB_FIELD_NAMES)
-            item_data["last"] = item_data["close"]    
-            self.time_inject(code_name="load_item_df")   
-                       
-        # 日线数据使用akshare的数据源
-        if frequency=="1d":
-            start_dt = dt_obj(start_dt.year, start_dt.month, start_dt.day).date() 
-            end_dt = dt_obj(end_dt.year, end_dt.month, end_dt.day).date()
-            item_data = self.load_item_day_data(order_book_id,start_dt)
-            # 使用结算价作为当日最终价格
-            item_data["last"] = item_data["settle"]    
-            # 字段和rq统一
-            item_data['symbol'] = item_data['code']        
-            item_data = item_data.rename(columns={"date":"datetime"})
-        self.time_inject(code_name="dt query,{}".format(frequency))     
-        if item_data.shape[0]==0:
-            return None    
-
-        # 取得前一个交易时段收盘
-        item_data["prev_close"]= np.NaN
-        if need_prev:
-            item_data["prev_close"] = self._get_prev_close(order_book_id, start_dt,frequency=frequency)
-        # item_data = item_data.iloc[0].to_dict()
-        return item_data

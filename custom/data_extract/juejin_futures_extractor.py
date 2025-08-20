@@ -357,18 +357,18 @@ if __name__ == "__main__":
     # 导入主力合约历史日行情数据
     # extractor.import_main_his_data_local()
     # 导入主力合约1分钟历史行情数据
-    extractor.import_main_1min_data_local()
+    # extractor.import_main_1min_data_local()
     # 根据主力合约数据，导入主力连续日行情数据
     # extractor.import_continues_data_local_by_main()
         
-    # begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()
-    # end = datetime.datetime.strptime("20220701", "%Y%m%d").date()
-    # simdata_date = [begin,end]
-    # ins_name = "CJ"
-    # contract_name = 'CJ2207'
-    # folder_name = extractor.folder_mapping[extractor.folder_mapping['instrument']==ins_name]['cate'].values[0]
-    # symbol_name = contract_name[:-4]
-    # extractor.load_sim_data(simdata_date,folder_name=folder_name,contract_name=contract_name)
+    begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()
+    end = datetime.datetime.strptime("20220701", "%Y%m%d").date()
+    simdata_date = [begin,end]
+    ins_name = "CJ"
+    contract_name = 'CJ2207'
+    folder_name = extractor.folder_mapping[extractor.folder_mapping['instrument']==ins_name]['cate'].values[0]
+    symbol_name = contract_name[:-4]
+    extractor.load_sim_data(simdata_date,folder_name=folder_name,contract_name=contract_name)
     # date = datetime.datetime.strptime("20220505 09:01:00", "%Y%m%d %H:%M:%S")
     # # data = extractor.get_time_data(contract_name,date)
     # data = extractor.get_time_data_by_symbol_and_day(ins_name,20220505,contract_name=contract_name)

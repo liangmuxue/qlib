@@ -788,18 +788,28 @@ def futures_hist_em(
         __get_exchange_symbol_map()
     )
     sec_id = None
-    for key in c_contract_to_e_contract.keys():
-        value = c_contract_to_e_contract[key]
-        # 查找所有数据其中最后一位为m的编码（表示为主连），并和指定编码匹配
-        if len(symbol)<4 and value.endswith("m"):
-            code = value[:-1]
-            if code==symbol.lower():
-                sec_id = f"{c_contract_mkt[key]}.{c_contract_to_e_contract[key]}"
-                break
-        elif re.match(pattern=".*\d$", string=value):
-            if value==symbol.lower():
-                sec_id = f"{c_contract_mkt[key]}.{c_contract_to_e_contract[key]}"
-                break            
+    # for key in c_contract_to_e_contract.keys():
+    #     value = c_contract_to_e_contract[key]
+    #     # 查找所有数据其中最后一位为m的编码（表示为主连），并和指定编码匹配
+    #     if len(symbol)<4 and value.endswith("m"):
+    #         code = value[:-1]
+    #         if code==symbol.lower():
+    #             sec_id = f"{c_contract_mkt[key]}.{c_contract_to_e_contract[key]}"
+    #             break
+    #     elif re.match(pattern=".*\d$", string=value):
+    #         if value==symbol.lower():
+    #             sec_id = f"{c_contract_mkt[key]}.{c_contract_to_e_contract[key]}"
+    #             break      
+    for key in e_symbol_mkt.keys():
+        # 查找所有数据主连编码，并和指定编码匹配
+        value = e_symbol_mkt[key]
+        if symbol.lower()==key.lower():
+            sec_id = str(value) + "." + key + "m"
+            sec_id = sec_id.lower()
+            break
+    if sec_id is None:
+        print("Not Found symbol:{}".format(symbol))
+        return None                  
     if sec_id is None:
         print("Not Found symbol:{}".format(symbol))
         return None

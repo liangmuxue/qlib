@@ -14,7 +14,7 @@ from cus_utils.data_aug import DictToObject
 from qlib.utils import init_instance_by_config
 from trader.utils.date_util import tradedays
 from trader.emulator.qidian.futures_proxy_ctp import CtpFuturesTrade
-from trader.emulator.futures_real_ds import FuturesRealDataSource
+from trader.emulator.futures_real_ds import FuturesDataSourceSql
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -132,7 +132,7 @@ class SimulationWorkflow():
         env = Environment(config)
         self.env = env
         # 设置数据源
-        ds = FuturesRealDataSource(stock_data_path=env.config.extra.stock_data_path,
+        ds = FuturesDataSourceSql(stock_data_path=env.config.extra.stock_data_path,
                             sim_path=env.config.extra.stock_data_path)
         env.set_data_source(ds)  
         # 设置中间数据代理
@@ -228,7 +228,7 @@ class SimulationWorkflow():
             # 清空所有持仓
             # self.strategy_class.clear_position()
             # self.strategy_class.clear_order()
-            # self.strategy_class.query_position()     
+            self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
             # orders = self.strategy_class.query_order_info("")
             # print("orders len:{}".format(len(orders)))

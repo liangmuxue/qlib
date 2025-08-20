@@ -500,16 +500,11 @@ class FurBacktestStrategy(SimStrategy):
         # 已拒绝平仓订单，重新按照现在价格下单                 
         close_list_reject = self.trade_entity.get_close_list_reject(str(self.trade_day))
         for index,close_item in close_list_reject.iterrows():
-            try:
-                cur_snapshot = self.get_current_snapshot(close_item.order_book_id)
-                price_now = cur_snapshot.last
-            except Exception as e:
-                logger.error("cur_snapshot err:{}".format(e))
-                continue
+            price_now = self.get_last_price(close_item.order_book_id)
             # 修改状态    
-            self.update_order_status(open_item,ORDER_STATUS.PENDING_NEW,side=open_item.side, context=context)      
+            self.update_order_status(close_item,ORDER_STATUS.PENDING_NEW,side=open_item.side, context=context)      
             # 更新报价     
-            self.close_list[open_item.order_book_id].kwargs["price"] = price_now  
+            self.close_list[close_item.order_book_id].kwargs["price"] = price_now  
                                             
     ###############################数据逻辑处理部分########################################  
 

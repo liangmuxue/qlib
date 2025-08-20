@@ -457,7 +457,7 @@ class AkFuturesExtractor(FutureExtractor):
             print("exceed end date,max date:{}".format(max_date))
             return        
         if max_date>begin_date:
-            begin_date = get_next_working_day(max_date)
+            begin_date = get_next_working_day(datetime.datetime.strptime(str(max_date), "%Y%m%d"))
         
         if begin_date==end_date and not is_working_day(str(end_date)):
             print("not working day:{}".format(end_date))
@@ -468,6 +468,8 @@ class AkFuturesExtractor(FutureExtractor):
         # 依次轮询各个品种，取得对应数据并插入数据库  
         for row in result_rows:
             var_code = row[0]
+            # if var_code!="AP":
+            #     continue
             futures_hist_em_df = futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date))
             if futures_hist_em_df is None:
                 continue
@@ -626,7 +628,7 @@ if __name__ == "__main__":
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2509", period="1")
     # print(futures_zh_minute_sina_df)
     # 历史行情
-    # futures_hist_em_df = futures_hist_em(symbol="CU", period="daily")
+    # futures_hist_em_df = futures_hist_em(symbol="AP", period="daily")
     # print(futures_hist_em_df)    
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="RB0", period="1")
     # print(futures_zh_minute_sina_df)
@@ -675,7 +677,7 @@ if __name__ == "__main__":
 
     
     # 导入期货交易品种
-    extractor.import_trading_variety()    
+    # extractor.import_trading_variety()    
     # 导入交易时间表
     # extractor.import_variety_trade_schedule()    
     # 导入主力连续历史数据
@@ -697,6 +699,6 @@ if __name__ == "__main__":
     ############ 历史合约数据导入 ###################
     # extractor.import_day_range_contract_data(data_range=(20250630,20250630))
     # extractor.import_day_range_contract_data_em(data_range=(20250116,20250706))
-    # extractor.import_day_range_continues_data(data_range=(20250603,20250628))
+    extractor.import_day_range_continues_data(data_range=(20250701,20250819))
     # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
             

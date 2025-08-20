@@ -60,7 +60,7 @@ def tradedays(start,end):
         
     counts = 0
     while True:
-        if start > end:
+        if start >= end:
             break
         if is_holiday(start) or start.weekday()==5 or start.weekday()==6:
             start += timedelta(days=1)
