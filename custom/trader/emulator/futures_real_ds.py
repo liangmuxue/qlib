@@ -53,7 +53,7 @@ class FuturesRealDataSource(FuturesDataSource):
             all_contracts = []
             contract_info = self.extractor_ak.get_day_contract()
             for symbol in contract_info:
-                main_code = symbol[:-4]
+                main_code = self.get_instrument_code_from_contract_code(symbol)
                 all_contracts.append([main_code,symbol])
             all_contracts = pd.DataFrame(np.array(all_contracts),columns=['code','main_contract_code'])
             
@@ -83,7 +83,7 @@ class FuturesRealDataSource(FuturesDataSource):
         #     if dur_time<60:
         #         return last_bar
             
-        instrument_code = order_book_id[:-4]
+        instrument_code = self.get_instrument_code_from_contract_code(order_book_id)
         exchange_code = self.get_exchange_from_instrument(instrument_code)
         try:
             realtime_data = self.extractor_ak.get_realtime_data(order_book_id, exchange_code)

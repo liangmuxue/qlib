@@ -12,7 +12,7 @@ from trader.emulator.portfolio import Portfolio,SimOrder
 from trader.rqalpha.ml_wf_context import FurWorkflowIntergrate
 from rqalpha.core.events import EVENT, Event
 from trader.emulator.futures_backtest_strategy import FurBacktestStrategy,POS_COLUMNS
-from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
+from trader.rqalpha.dict_mapping import transfer_futures_order_book_id,transfer_instrument
 from trader.utils.date_util import tradedays,get_tradedays_dur
 from rqalpha.const import ORDER_STATUS,SIDE,POSITION_EFFECT,POSITION_DIRECTION,DEFAULT_ACCOUNT_TYPE
 
@@ -123,7 +123,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
                 logger.warning("no data for buy:{},ignore".format(instrument))
                 continue
             # 代码转化为标准格式
-            order_book_id = self.data_source.transfer_furtures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
+            order_book_id = self.data_source.transfer_futures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
             # 如果已在订单中，则忽略
             if order_book_id in exists_order_ids:
                 continue            
@@ -264,7 +264,8 @@ class FurSimulationStrategy(FurBacktestStrategy):
         order_book_id = id_or_ins
         multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
         # 添加交易所编码
-        exchange_code = self.data_source.get_exchange_from_instrument(order_book_id[:-4])
+        instrument = self.data_source.get_instrument_code_from_contract_code(order_book_id)
+        exchange_code = self.data_source.get_exchange_from_instrument(instrument)
         style = cal_style(price, None)
         
         order = SimOrder.__from_create__(

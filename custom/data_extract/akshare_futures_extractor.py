@@ -379,7 +379,7 @@ class AkFuturesExtractor(FutureExtractor):
             get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
 
     def import_day_range_contract_data_em(self,data_range=None):
-        """导入指定日期范围的合约数据,Easy Money Mode"""
+        """导入指定日期范围的合约数据,东方财富渠道"""
         
         begin_date,end_date = data_range
         begin_date = datetime.datetime.strptime(str(begin_date), '%Y%m%d').date()
@@ -699,6 +699,6 @@ if __name__ == "__main__":
     ############ 历史合约数据导入 ###################
     # extractor.import_day_range_contract_data(data_range=(20250630,20250630))
     # extractor.import_day_range_contract_data_em(data_range=(20250116,20250706))
-    extractor.import_day_range_continues_data(data_range=(20250701,20250819))
-    # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
+    # extractor.import_day_range_continues_data(data_range=(20250701,20250819))
+    extractor.import_day_range_1min_data(data_range=(20250626,20250628))
             

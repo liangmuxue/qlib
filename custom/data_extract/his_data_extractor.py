@@ -18,7 +18,6 @@ from scripts.dump_bin import DumpDataAll
 
 from cus_utils.db_accessor import DbAccessor
 from cus_utils.log_util import AppLogger
-from trader.utils.date_util import get_previous_month,get_next_month
 
 logger = AppLogger()
 
@@ -531,17 +530,6 @@ class FutureExtractor(HisDataExtractor):
                                "volume":float,"hold":float}        
         self.sim_path = sim_path
 
-    def get_likely_main_contract_names(self,instrument,date):
-        """根据品种编码和指定日期，取得可能的主力合约名称"""
-        
-        #取得当前月，下个月，下下个月3个月份合约名称
-        cur_month = date.strftime('%y%m')
-        next_month = get_next_month(date,next=1)
-        next_month = next_month.strftime("%y%m")
-        next_two_month = get_next_month(date,next=2)
-        next_two_month = next_two_month.strftime("%y%m")
-        
-        return [instrument+cur_month,instrument+next_month,instrument+next_two_month]
             
 if __name__ == "__main__":    
     

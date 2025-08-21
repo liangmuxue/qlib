@@ -9,8 +9,9 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 from rqalpha.data.base_data_source import BaseDataSource
 from rqalpha.model.tick import TickObject
-from trader.utils.date_util import get_tradedays_dur,date_string_transfer,get_prev_working_day
+from trader.utils.date_util import get_tradedays_dur,date_string_transfer,get_prev_working_day,get_next_month
 from cus_utils.db_accessor import DbAccessor
+from cus_utils.string_util import find_first_digit_position
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 from data_extract.juejin_futures_extractor import JuejinFuturesExtractor
 from data_extract.akshare_extractor import AkExtractor
@@ -73,7 +74,7 @@ class FuturesDataSource(BaseDataSource):
         for i in range(contract_info.shape[0]):
             item = contract_info.iloc[i]
             # 根据日期，取得对应品种的主力合约以及次主力合约
-            contract_names = self.extractor.get_likely_main_contract_names(item['code'], date)
+            contract_names = self.get_likely_main_contract_names(item['code'], date)
             for symbol in contract_names:
                 # 查看合约当日的日线数据，如果有则记录
                 contract_data = self.get_contract_data_by_day(symbol, date)     
@@ -94,8 +95,8 @@ class FuturesDataSource(BaseDataSource):
             return False
         return True
     
-    def transfer_furtures_order_book_id(self,symbol,date):    
-        """品种简写编码转化为合约代码"""
+    def transfer_furures_order_book_id(self,symbol,date):    
+        """品种代码转化为合约代码"""
         
         main_contract_code = self.get_main_contract_name(symbol, date)
         return main_contract_code
@@ -105,6 +106,14 @@ class FuturesDataSource(BaseDataSource):
 
         return self.extractor.get_time_data_by_day(day,symbol)
 
+    def get_instrument_code_from_contract_code(self,contract_code):
+        """根据合约编码，取得品种代码"""
+        
+        # 取得第一个数字的位置，并截取前面的字符串作为品种代码
+        dig_pos = find_first_digit_position(contract_code)
+        instrument = contract_code[:dig_pos]
+        return instrument
+        
     def get_main_contract_name(self,instrument,date):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
@@ -124,7 +133,26 @@ class FuturesDataSource(BaseDataSource):
                 main_name = item_df['code'].values[0]
             
         return main_name       
+
+    def get_likely_main_contract_names(self,instrument,date,month_range=3):
+        """根据品种编码和指定日期，取得可能的主力合约名称"""
         
+        #取得当前月，下个月，下下个月,共3个月份合约名称
+        month_arr = []
+        exchange_code = self.data_source.get_exchange_from_instrument(instrument)
+        for i in range(month_range):
+            month_item = get_next_month(date,next=i)
+            # 郑商所和其他交易所编码方式不一样,为：代码+月份+年份最后一位
+            if exchange_code=="CZCE":     
+                month_item = month_item.strftime("%m")
+                month_item = instrument + month_item.strftime("%m") + month_item.strftime("%y")[1]  
+            else:
+                month_item = month_item.strftime("%y%m")
+                month_item = instrument + month_item
+            month_arr.append(month_item)
+            
+        return month_arr
+    
     def get_k_data(self, order_book_id, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
         """从已下载的文件中，加载K线数据"""
         
@@ -294,7 +322,7 @@ class FuturesDataSource(BaseDataSource):
         """取得合约相关信息"""
         
         if contract_code is not None:
-            item_code = contract_code[:-4]
+            item_code = self.get_instrument_code_from_contract_code(contract_code)
             item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range from trading_variety where code='{}' ".format(item_code)
         else:
             item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range from trading_variety where isnull(magin_radio)=0"
@@ -331,7 +359,7 @@ class FuturesDataSource(BaseDataSource):
             contract_symbol = instrument
         else:
             contract_symbol = instrument.order_book_id
-        code = contract_symbol[:-4]
+        code = self.get_instrument_code_from_contract_code(contract_symbol)
         # 从数据库取得对应品种的交易时间范围
         sql = "select code,ac_time_range,day_time_range,night_time_range from trading_variety where code='{}' ".format(code)
         result_rows = self.dbaccessor.do_query(sql)  

@@ -6,7 +6,7 @@ from rqalpha.apis import *
 from rqalpha.const import SIDE,ORDER_STATUS
 from rqalpha.data.bar_dict_price_board import BarDictPriceBoard
 from trader.rqalpha.strategy_class.backtest_base import BaseStrategy,SellReason
-from trader.rqalpha.dict_mapping import transfer_furtures_order_book_id,transfer_instrument
+from trader.rqalpha.dict_mapping import transfer_futures_order_book_id,transfer_instrument
 from trader.rqalpha.futures_trade_entity import FuturesTradeEntity
 from trader.emulator.sim_strategy import SimStrategy
 from trader.utils.date_util import tradedays,get_tradedays_dur,is_working_day
@@ -104,7 +104,7 @@ class FurBacktestStrategy(SimStrategy):
                 logger.warning("no data for buy:{},ignore".format(instrument))
                 continue
             # 代码转化为标准格式
-            order_book_id = self.data_source.transfer_furtures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
+            order_book_id = self.data_source.transfer_futures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
             # 以昨日收盘价格作为当前卖盘价格,注意使用未复权的数据
             h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="close")
             if h_bar is None:
