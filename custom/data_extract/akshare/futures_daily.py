@@ -528,7 +528,7 @@ def get_shfe_daily(date: str = "20220415") -> pd.DataFrame:
 def get_dce_daily(date: str = "20220308") -> pd.DataFrame:
     """
     大连商品交易所日交易数据
-    http://www.dce.com.cn/dalianshangpin/xqsj/tjsj26/rtj/rxq/index.html
+    http://www.dce.com.cn/dce/channel/list/168.html
     :param date: 交易日, e.g., 20200416
     :type date: str
     :return: 具体交易日的个品种行情数据
@@ -538,56 +538,39 @@ def get_dce_daily(date: str = "20220308") -> pd.DataFrame:
     if day.strftime("%Y%m%d") not in calendar:
         # warnings.warn("%s非交易日" % day.strftime("%Y%m%d"))
         return pd.DataFrame()
-    url = "http://www.dce.com.cn/publicweb/quotesdata/exportDayQuotesChData.html"
+    url = "http://www.dce.com.cn/dcereport/publicweb/dailystat/dayQuotes?VoGRv6Ir=09yk6ZalqWhDKcU20tqDi92k4ConNHqbT0yoUYdKiZo139alJWVnLF8Og0Tb8HVV.srdbD8hHePqjMARlaw16TnpkPq1Az8EE_iF00anxUljDBe3AAnOIUA"
     headers = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,"
-        "application/signed-exchange;v=b3;q=0.9",
+        "Accept": "application/json, text/plain, */*",
         "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
         "Content-Length": "86",
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
         "Host": "www.dce.com.cn",
         "Origin": "http://www.dce.com.cn",
         "Pragma": "no-cache",
-        "Referer": "http://www.dce.com.cn/publicweb/quotesdata/dayQuotesCh.html",
-        "Upgrade-Insecure-Requests": "1",
+        "Referer": "http://www.dce.com.cn/frontend/dcereport/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/84.0.4147.105 Safari/537.36",
     }
     params = {
-        "dayQuotes.variety": "all",
-        "dayQuotes.trade_type": "0",
-        "year": date[:4],
-        "month": str(int(date[4:6]) - 1),
-        "day": date[6:],
-        "exportFlag": "excel",
+        "varietyId": "all",
+        "tradeType": "1",
+        "tradeDate": date,
+        "contractId": "",
+        "optionSeries": "",
+        "statisticsType": 0,
     }
-    r = requests.post(url, data=params, headers=headers)
-    data_df = pd.read_excel(BytesIO(r.content), header=1)
-    data_df = data_df[~data_df["商品名称"].str.contains("小计")]
-    data_df = data_df[~data_df["商品名称"].str.contains("总计")]
-    data_df["variety"] = data_df[["商品名称"]].applymap(lambda x: cons.DCE_MAP[x])
-    data_df["symbol"] = data_df["合约名称"]
-    del data_df["商品名称"]
-    del data_df["合约名称"]
-    data_df.columns = [
-        "open",
-        "high",
-        "low",
-        "close",
-        "pre_settle",
-        "settle",
-        "_",
-        "_",
-        "volume",
-        "open_interest",
-        "_",
-        "turnover",
-        "variety",
-        "symbol",
-    ]
+    r = requests.post(url, json=params, headers=headers)
+    data_df = pd.DataFrame(r.json()['data'])
+    data_df = data_df[~data_df["variety"].str.contains("小计")]
+    data_df = data_df[~data_df["variety"].str.contains("总计")]
+    data_df["symbol"] = data_df["contractId"]
+    data_df["pre_settle"] = data_df["lastClear"]
+    data_df["settle"] = data_df["clearPrice"]
+    data_df["volume"] = data_df["volumn"]
+    data_df["open_interest"] = data_df["openInterestRate"]
     data_df["date"] = date
     data_df = data_df[
         [
@@ -605,7 +588,6 @@ def get_dce_daily(date: str = "20220308") -> pd.DataFrame:
             "variety",
         ]
     ]
-    data_df = data_df.applymap(lambda x: x.replace(",", ""))
     data_df = data_df.astype(
         {
             "open": "float",
@@ -673,7 +655,7 @@ def get_futures_daily(
             if not df.empty:
                 df_list.append(df)            
         except Exception as e:
-            print("request err,{}".format(e))
+            print("{} request err,date:{},err:{}".format(f,start_date,e))
 
         start_date += datetime.timedelta(days=1)
         time.sleep(1)
