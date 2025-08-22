@@ -103,7 +103,7 @@ class FuturesDataSource(BaseDataSource):
         for i in range(contract_info.shape[0]):
             item = contract_info.iloc[i]
             # 根据日期，取得对应品种的主力合约以及次主力合约
-            contract_names = self.get_likely_main_contract_names(item['code'], date)
+            contract_names = self.extractor_ak.get_likely_main_contract_names(item['code'], date)
             for symbol in contract_names:
                 # 查看合约当日的日线数据，如果有则记录
                 contract_data = self.get_contract_data_by_day(symbol, date)     
@@ -144,7 +144,7 @@ class FuturesDataSource(BaseDataSource):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
         #取得当前月，下个月，下下个月3个月份合约名称
-        contract_names = self.get_likely_main_contract_names(instrument, date)
+        contract_names = self.extractor_ak.get_likely_main_contract_names(instrument, date)
         # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
         contract_mapping = {}
         volume_main = 0
@@ -160,27 +160,6 @@ class FuturesDataSource(BaseDataSource):
             
         return main_name       
 
-    def get_likely_main_contract_names(self,instrument,date,month_range=3):
-        """根据品种编码和指定日期，取得可能的主力合约名称"""
-        
-        #取得当前月，下个月，下下个月,共3个月份合约名称
-        month_arr = []
-        exchange_code = self.get_exchange_from_instrument(instrument)
-        year = date.year
-        for i in range(month_range):
-            month_item = get_next_month(date,next=i)
-            # 郑商所和其他交易所编码方式不一样,为：代码+月份+年份最后一位
-            if exchange_code=="CZCE":     
-                if year<=2024:
-                    month_item = instrument + month_item.strftime("%y%m")
-                else:
-                    month_item = instrument + month_item.strftime("%y")[1]  + month_item.strftime("%m") 
-            else:
-                month_item = month_item.strftime("%y%m")
-                month_item = instrument + month_item
-            month_arr.append(month_item)
-            
-        return month_arr
     
     def get_k_data(self, order_book_id, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
         """从已下载的文件中，加载K线数据"""

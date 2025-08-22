@@ -538,7 +538,37 @@ class AkFuturesExtractor(FutureExtractor):
                 futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
                 time.sleep(5)
             print("code:{} ok".format(code))
-    
+
+    def get_likely_main_contract_names(self,instrument,date,month_range=3):
+        """根据品种编码和指定日期，取得可能的主力合约名称"""
+        
+        #取得当前月，下个月，下下个月,共3个月份合约名称
+        month_arr = []
+        exchange_code = self.get_exchange_from_instrument(instrument)
+        year = date.year
+        for i in range(month_range):
+            month_item = get_next_month(date,next=i)
+            # 郑商所和其他交易所编码方式不一样,为：代码+月份+年份最后一位
+            if exchange_code=="CZCE":     
+                if year<=2024:
+                    month_item = instrument + month_item.strftime("%y%m")
+                else:
+                    month_item = instrument + month_item.strftime("%y")[1]  + month_item.strftime("%m") 
+            else:
+                month_item = month_item.strftime("%y%m")
+                month_item = instrument + month_item
+            month_arr.append(month_item)
+            
+        return month_arr
+
+    def get_exchange_from_instrument(self,instrument_code):
+        
+        sql = "select e.code from trading_variety v,futures_exchange e where v.exchange_id=e.id and v.code='{}' ".format(instrument_code)
+        result_rows = self.dbaccessor.do_query(sql)  
+        if len(result_rows)==0:
+            return None        
+        return result_rows[0][0]
+           
     def get_last_minutes_data(self,symbol):
         """取得指定品种最近一分钟数据"""
         
