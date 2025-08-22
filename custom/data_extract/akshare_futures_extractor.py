@@ -377,6 +377,7 @@ class AkFuturesExtractor(FutureExtractor):
                 get_futures_daily_df = get_futures_daily_df[get_futures_daily_df['open'].str.len()>0]
                 get_futures_daily_df['open'] = get_futures_daily_df['open'].astype(float)
             get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
+            print("market {} ok".format(market_code))
 
     def import_day_range_contract_data_em(self,data_range=None):
         """导入指定日期范围的合约数据,东方财富渠道"""
@@ -645,6 +646,8 @@ if __name__ == "__main__":
     # 交易费用
     # futures_fees_info_df = ak.futures_fees_info()
     # print(futures_fees_info_df)   
+    futures_comm_info_df = ak.futures_comm_info(symbol="所有")
+    print(futures_comm_info_df)    
     # 连续合约
     # futures_main_sina_hist = ak.futures_main_sina(symbol="RB0", start_date="20130513", end_date="20220101")
     # print(futures_main_sina_hist.iloc[:10])    
@@ -698,7 +701,7 @@ if __name__ == "__main__":
     
     ############ 历史合约数据导入 ###################
     # extractor.import_day_range_contract_data(data_range=(20250630,20250630))
-    # extractor.import_day_range_contract_data_em(data_range=(20250116,20250706))
+    # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250701,20250819))
-    extractor.import_day_range_1min_data(data_range=(20250626,20250628))
+    # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
             

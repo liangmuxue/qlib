@@ -80,7 +80,7 @@ class SimulationEventSource(AbstractEventSource):
         if frequency == "1d":
             # 根据起始日期和结束日期，获取所有的交易日，然后再循环获取每一个交易日
             for day in trading_dates:
-                date = day.to_pydatetime()
+                date = day
                 dt_before_trading = date.replace(hour=0, minute=0)
 
                 dt_bar = self._get_day_bar_dt(date)
@@ -93,7 +93,7 @@ class SimulationEventSource(AbstractEventSource):
         elif frequency == '1m' and not frequency_sim:
             for day in trading_dates:
                 before_trading_flag = True
-                date = day.to_pydatetime()
+                date = day
                 last_dt = None
                 done = False
 

@@ -21,11 +21,13 @@ from typing import Union, List, Sequence, Optional
 import six
 import numpy as np
 import pandas as pd
+import json
+import copy
 
-from trader.utils.date_util import get_tradedays_dur
+from trader.utils.date_util import get_tradedays_dur,get_tradedays
 
 from rqalpha.data.data_proxy import DataProxy
-from rqalpha.const import INSTRUMENT_TYPE, TRADING_CALENDAR_TYPE
+from rqalpha.const import INSTRUMENT_TYPE, TRADING_CALENDAR_TYPE,COMMISSION_TYPE
 from rqalpha.utils import risk_free_helper, TimeRange, merge_trading_period
 from rqalpha.data.trading_dates_mixin import TradingDatesMixin
 from rqalpha.model.bar import BarObject, NANDict, PartialBarObject
@@ -42,12 +44,12 @@ class FurDataProxy(DataProxy):
         # type: (AbstractDataSource, AbstractPriceBoard) -> None
         self._data_source = data_source
         self._price_board = price_board
-        # try:
-        #     trading_calendars = data_source.get_trading_calendars()
-        # except NotImplementedError:
-        #     # forward compatible
-        #     trading_calendars = {TRADING_CALENDAR_TYPE.EXCHANGE: data_source.get_trading_calendar()}
-        # TradingDatesMixin.__init__(self, trading_calendars)
+        try:
+            trading_calendars = data_source.get_trading_calendars()
+        except NotImplementedError:
+            # forward compatible
+            trading_calendars = {TRADING_CALENDAR_TYPE.EXCHANGE: data_source.get_trading_calendar()}
+        TradingDatesMixin.__init__(self, trading_calendars)
 
     def __getattr__(self, item):
         return getattr(self._data_source, item)
@@ -55,7 +57,16 @@ class FurDataProxy(DataProxy):
     @property
     def data_source(self):
         return self._data_source    
-    
+
+    def get_trading_dates(self, start_date, end_date, trading_calendar_type=None):
+        """取得指定范围内的交易日"""
+        
+        date_list = get_tradedays(start_date,end_date,date_format=True)
+        date_list = pd.DataFrame(np.array(date_list),columns=["date"])
+        date_list['date'] = pd.to_datetime(date_list['date'])
+        
+        return date_list['date'].dt.to_pydatetime()
+        
     def get_trading_minutes_for(self, order_book_id, dt):
         instrument = self.instruments(order_book_id)
         minutes = self._data_source.get_trading_minutes_for(instrument, dt)
@@ -118,9 +129,8 @@ class FurDataProxy(DataProxy):
 
     @lru_cache(10240)
     def _get_prev_close(self, order_book_id, dt):
-        instrument = self.instruments(order_book_id)
         prev_trading_date = self.get_previous_trading_date(dt)
-        bar = self._data_source.history_bars(instrument, 1, '1d', 'close', prev_trading_date,skip_suspended=False, include_now=False, adjust_orig=dt)
+        bar = self._data_source.history_bars(order_book_id, 1, '1d', fields='settle', dt=prev_trading_date)
         if bar is None or len(bar) < 1:
             return np.nan
         return bar[0]
@@ -309,3 +319,37 @@ class FurDataProxy(DataProxy):
     def is_night_trading(self, sym_or_ids):
         # type: (StrOrIter) -> bool
         return any((instrument.trade_at_night for instrument in self.instruments(sym_or_ids)))
+
+
+class FutureInfoStore(object):
+    COMMISSION_TYPE_MAP = {
+        "by_volume": COMMISSION_TYPE.BY_VOLUME,
+        "by_money": COMMISSION_TYPE.BY_MONEY
+    }
+
+    def __init__(self, f, custom_future_info):
+        with open(f, "r") as json_file:
+            self._default_data = {
+                item.get("order_book_id") or item.get("underlying_symbol"): self._process_future_info_item(
+                    item
+                ) for item in json.load(json_file)
+            }
+        self._custom_data = custom_future_info
+        self._future_info = {}
+
+    @classmethod
+    def _process_future_info_item(cls, item):
+        item["commission_type"] = cls.COMMISSION_TYPE_MAP[item["commission_type"]]
+        return item
+
+    def get_future_info(self, instrument):
+        # type: (Instrument) -> Dict[str, float]
+        order_book_id = instrument.order_book_id
+        try:
+            return self._future_info[order_book_id]
+        except KeyError:
+            info = self._default_data.get(order_book_id) or self._default_data.get(instrument.underlying_symbol)
+            return self._future_info.setdefault(order_book_id, info)
+        
+        
+        

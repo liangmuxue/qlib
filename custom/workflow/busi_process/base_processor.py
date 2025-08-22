@@ -85,7 +85,7 @@ class BaseProcessor(object):
                 )
                 rtn = r.generate()
                 rtn_list.append(rtn)
-                return rtn_list,model
+            return rtn_list,model
 
     def before_run(self,working_day=None):
         """子任务运行的前处理，子类实现"""

@@ -1,4 +1,4 @@
-import six
+import os
 import datetime
 import time
 from datetime import date
@@ -6,17 +6,21 @@ from datetime import datetime as dt_obj
 import numpy as np
 import pandas as pd
 
-from dateutil.relativedelta import relativedelta
+from rqalpha.data.base_data_source.storages import (ExchangeTradingCalendarStore)
+from rqalpha.const import TRADING_CALENDAR_TYPE
 from rqalpha.data.base_data_source import BaseDataSource
 from rqalpha.model.tick import TickObject
-from trader.utils.date_util import get_tradedays_dur,date_string_transfer,get_prev_working_day,get_next_month
+from rqalpha.model.instrument import Instrument
+from trader.utils.date_util import get_tradedays_dur,get_tradedays,get_prev_working_day,get_next_month
 from cus_utils.db_accessor import DbAccessor
 from cus_utils.string_util import find_first_digit_position
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 from data_extract.juejin_futures_extractor import JuejinFuturesExtractor
 from data_extract.akshare_extractor import AkExtractor
 from trader.rqalpha.dict_mapping import judge_market,transfer_instrument
+from data_extract.rqalpha.fur_ds_proxy import FutureInfoStore
 import cus_utils.global_var as global_var
+from dateutil.relativedelta import relativedelta
 from data_extract.akshare_futures_extractor import AkFuturesExtractor
 
 _STOCK_FIELD_NAMES = [
@@ -28,7 +32,15 @@ class FuturesDataSource(BaseDataSource):
     
     def __init__(self, path,stock_data_path=None,sim_path=None,frequency_sim=True):
         # super(FuturesDataSource, self).__init__(path,{})
+
+        def _p(name):
+            return os.path.join(path, name)
         
+        self._calendar_providers = {
+            TRADING_CALENDAR_TYPE.EXCHANGE: ExchangeTradingCalendarStore(_p("trading_dates.npy"))
+        }
+        self._future_info_store = FutureInfoStore(_p("future_info.json"), None)              
+          
         self.dbaccessor = DbAccessor({})
         self.busi_columns = ["code","datetime","open","close","high","low","volume","hold","settle"]
         self.day_contract_columns = ["symbol","contract","volume"]
@@ -51,21 +63,38 @@ class FuturesDataSource(BaseDataSource):
             elapsed_time = time.time() - self.time_begin   
             self.time_begin = time.time()
             # print("{} Elapsed time: {} seconds".format(code_name,elapsed_time))  
-                    
+            
+    def get_trading_calendars(self):
+        return {TRADING_CALENDAR_TYPE.EXCHANGE: self.get_trading_calendar()}
+                        
     def load_sim_data(self,simdata_date):
         self.extractor.load_sim_data(simdata_date,dataset=self.dataset)
 
     def get_trading_calendar(self, trading_calendar_type=None):
         """取得交易日历"""
         
-        # type: (Optional[TRADING_CALENDAR_TYPE]) -> pd.DatetimeIndex
-        if trading_calendar_type is None:
-            return self.merged_trading_calendars
-        try:
-            return self.trading_calendars[trading_calendar_type]
-        except KeyError:
-            raise NotImplementedError("unsupported trading_calendar_type {}".format(trading_calendar_type))
-            
+        begin_date = "20240101"
+        end_date = "20251231"
+        trade_days = get_tradedays(begin_date,end_date)
+        
+        return trade_days
+
+    def get_instruments(self, id_or_syms=None, types=None):
+        # type: (Optional[Iterable[str]], Optional[Iterable[INSTRUMENT_TYPE]]) -> Iterable[Instrument]
+        if id_or_syms is None:
+            return []
+        instruments = []
+        for sym in id_or_syms:
+            contract_info = self.get_contract_info(sym)
+            if contract_info.shape[0]==0:
+                continue
+            params = {"order_book_id":contract_info.iloc[0]['code'],"symbol":contract_info.iloc[0]['name'],
+                      "type":"Future","trading_hours":contract_info.iloc[0]['trading_hours'],"de_listed_date":None}
+            ins = Instrument(params)
+            instruments.append(ins)
+        return instruments
+        
+        
     def build_trading_contract_mapping(self,date):  
         """生成对应日期的所有可交易合约的对照表"""
         
@@ -95,7 +124,7 @@ class FuturesDataSource(BaseDataSource):
             return False
         return True
     
-    def transfer_furures_order_book_id(self,symbol,date):    
+    def transfer_futures_order_book_id(self,symbol,date):    
         """品种代码转化为合约代码"""
         
         main_contract_code = self.get_main_contract_name(symbol, date)
@@ -109,16 +138,13 @@ class FuturesDataSource(BaseDataSource):
     def get_instrument_code_from_contract_code(self,contract_code):
         """根据合约编码，取得品种代码"""
         
-        # 取得第一个数字的位置，并截取前面的字符串作为品种代码
-        dig_pos = find_first_digit_position(contract_code)
-        instrument = contract_code[:dig_pos]
-        return instrument
+        return self.extractor.get_instrument_code_from_contract_code(contract_code)
         
     def get_main_contract_name(self,instrument,date):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
         #取得当前月，下个月，下下个月3个月份合约名称
-        contract_names = self.extractor.get_likely_main_contract_names(instrument, date)
+        contract_names = self.get_likely_main_contract_names(instrument, date)
         # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
         contract_mapping = {}
         volume_main = 0
@@ -139,13 +165,16 @@ class FuturesDataSource(BaseDataSource):
         
         #取得当前月，下个月，下下个月,共3个月份合约名称
         month_arr = []
-        exchange_code = self.data_source.get_exchange_from_instrument(instrument)
+        exchange_code = self.get_exchange_from_instrument(instrument)
+        year = date.year
         for i in range(month_range):
             month_item = get_next_month(date,next=i)
             # 郑商所和其他交易所编码方式不一样,为：代码+月份+年份最后一位
             if exchange_code=="CZCE":     
-                month_item = month_item.strftime("%m")
-                month_item = instrument + month_item.strftime("%m") + month_item.strftime("%y")[1]  
+                if year<=2024:
+                    month_item = instrument + month_item.strftime("%y%m")
+                else:
+                    month_item = instrument + month_item.strftime("%y")[1]  + month_item.strftime("%m") 
             else:
                 month_item = month_item.strftime("%y%m")
                 month_item = instrument + month_item
@@ -264,6 +293,11 @@ class FuturesDataSource(BaseDataSource):
             return np.nan
         return bar["close"]
 
+    def get_commission_info(self, instrument):
+        """计算交易手续费"""
+        return self._future_info_store.get_future_info(instrument)
+    
+    
     def get_open_auction_bar(self, instrument, dt):
         """重载原方法"""
         
@@ -323,14 +357,18 @@ class FuturesDataSource(BaseDataSource):
         
         if contract_code is not None:
             item_code = self.get_instrument_code_from_contract_code(contract_code)
-            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range from trading_variety where code='{}' ".format(item_code)
+            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range,COALESCE(day_time_range, '')  from trading_variety where code='{}' ".format(item_code)
         else:
-            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range from trading_variety where isnull(magin_radio)=0"
+            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range,COALESCE(day_time_range, '')  from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(item_sql)  
         result_arr = np.array(result_rows)         
-        return pd.DataFrame(result_arr,columns=["name","code","multiplier","limit_rate","magin_radio","price_range"])
+        if result_arr.shape[0]==0:
+            return result_arr
+        result_arr = pd.DataFrame(result_arr,columns=["name","code","multiplier","limit_rate","magin_radio","price_range","trading_hours"])
         
-    def get_all_contract_names(self,date):
+        return result_arr
+        
+    def get_all_contract_names(self,date=None):
         """取得所有合约名称（用于订阅）"""
         
         contract_info = self.get_contract_info()
@@ -386,7 +424,10 @@ class FuturesDataSource(BaseDataSource):
                 continue
             begin_end = item.split("-")
             start = trading_dt.strftime('%Y-%m-%d ') + begin_end[0].strip()
-            end = trading_dt.strftime('%Y-%m-%d ') + begin_end[1].strip()
+            try:
+                end = trading_dt.strftime('%Y-%m-%d ') + begin_end[1].strip()
+            except Exception:
+                print("eee")
             min_list = pd.date_range(start=start, end=end,freq='min')
             trading_minutes.update(set(min_list.to_pydatetime().tolist()))
             

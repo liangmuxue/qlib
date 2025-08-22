@@ -24,7 +24,7 @@ class DataStats(object):
         self.work_dir = work_dir
         
         stock_data_path = "/home/qdata/futures_data/juejin/main_1min"
-        self.ds = FuturesDataSourceSql(stock_data_path=stock_data_path,sim_path=stock_data_path,frequency_sim=False)        
+        self.ds = FuturesDataSourceSql("/home/liang/.rqalpha/bundle",stock_data_path=stock_data_path,sim_path=stock_data_path,frequency_sim=False)        
 
     def combine_real_result(self):
         """预测数据中整合实际结果"""

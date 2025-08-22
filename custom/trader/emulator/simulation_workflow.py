@@ -132,7 +132,7 @@ class SimulationWorkflow():
         env = Environment(config)
         self.env = env
         # 设置数据源
-        ds = FuturesDataSourceSql(stock_data_path=env.config.extra.stock_data_path,
+        ds = FuturesDataSourceSql(env.config.base.data_bundle_path,stock_data_path=env.config.extra.stock_data_path,
                             sim_path=env.config.extra.stock_data_path)
         env.set_data_source(ds)  
         # 设置中间数据代理

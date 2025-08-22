@@ -22,7 +22,9 @@ from gunicorn import instrument
 class FuturesRealDataSource(FuturesDataSource):
     """期货自定义实时数据源"""
     
-    def __init__(self,stock_data_path=None,sim_path=None,frequency_sim=True):
+    def __init__(self,path,stock_data_path=None,sim_path=None,frequency_sim=True):
+        
+        super(FuturesRealDataSource, self).__init__(path,stock_data_path=stock_data_path,sim_path=sim_path,frequency_sim=frequency_sim)
         
         self.dbaccessor = DbAccessor({})
         self.busi_columns = ["code","datetime","open","high","low","close","volume","hold","settle"]
@@ -34,11 +36,6 @@ class FuturesRealDataSource(FuturesDataSource):
         self.frequency_sim = frequency_sim 
         # 缓存最近价格信息
         self.last_bar_cache = {}
-    
-    # def load_all_contract_conv(self):  
-    #
-    #     ret = self.extractor_ak.get_day_contract()
-    #     self.all_contracts = pd.DataFrame(ret,columns='')
     
     def load_all_contract(self,cache_mode=True):
         """预加载所有合约"""
@@ -104,17 +101,22 @@ class FuturesRealDataSource(FuturesDataSource):
         
         return data
     
-    def get_main_contract_name(self,instrument,date):
+    def get_main_contract_name(self,instrument,date=None):
         """根据品种编码，确定当前对应的主力合约"""
+        
+        if date is not None:
+            return super().get_main_contract_name(instrument,date)
         
         item = self.all_contracts[self.all_contracts['code']==instrument]
         if item.shape[0]==0:
             return None
         return item['main_contract_code'].values[0]
             
-    def get_all_contract_names(self,date):
+    def get_all_contract_names(self,date=None):
         """取得所有合约名称（用于订阅）"""
         
+        if date is not None:
+            return super().get_all_contract_names(date)
         contract_names = self.extractor_ak.get_day_contract()
         return contract_names        
 
@@ -129,11 +131,11 @@ _FUTURE_CONTINUES_FIELD_NAMES = [
     'date','code', 'open', 'close', 'high', 'low', 'volume', 'hold','settle'
 ]
    
-class FuturesDataSourceSql(FuturesRealDataSource):
+class FuturesDataSourceSql(FuturesDataSource):
     """期货自定义数据源,数据库模式"""
     
-    def __init__(self,stock_data_path=None,sim_path=None,frequency_sim=True):
-        super(FuturesDataSourceSql, self).__init__(stock_data_path=stock_data_path,sim_path=sim_path,frequency_sim=frequency_sim)
+    def __init__(self,path,stock_data_path=None,sim_path=None,frequency_sim=True):
+        super(FuturesDataSourceSql, self).__init__(path,stock_data_path=stock_data_path,sim_path=sim_path,frequency_sim=frequency_sim)
 
     def has_current_data(self,day,symbol):
         """当日是否开盘交易"""

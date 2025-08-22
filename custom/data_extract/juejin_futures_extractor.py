@@ -12,6 +12,7 @@ import pandas as pd
 import datetime
 import time
 import sqlalchemy
+from cus_utils.string_util import find_first_digit_position
 
 class JuejinFuturesExtractor(FutureExtractor):
     """掘金期货数据源"""
@@ -23,7 +24,15 @@ class JuejinFuturesExtractor(FutureExtractor):
                                "volume":float,"hold":float}        
         self.sim_path = sim_path
         self.folder_mapping = self.build_main1m_folder_mapping()
-    
+
+    def get_instrument_code_from_contract_code(self,contract_code):
+        """根据合约编码，取得品种代码"""
+        
+        # 取得第一个数字的位置，并截取前面的字符串作为品种代码
+        dig_pos = find_first_digit_position(contract_code)
+        instrument = contract_code[:dig_pos]
+        return instrument
+        
     def load_sim_data(self,simdata_date,dataset=None,folder_name=None,contract_name=None):
         """从存储中加载对应的主力合约数据"""
         
@@ -32,13 +41,13 @@ class JuejinFuturesExtractor(FutureExtractor):
         begin = int(simdata_date[0].strftime('%y%m'))
         end = int(simdata_date[1].strftime('%y%m'))
         # 筛选主力合约数据，只获取数据集中具备的品种
-        if dataset is not None:
+        if dataset is not None and hasattr(dataset,"df_all"):
             instrument_arr = dataset.df_all['instrument'].unique()
         else:
             instrument_arr = None
             
         if contract_name is not None:
-            s_name = contract_name[:-4]
+            s_name = self.get_instrument_code_from_contract_code(contract_name)
             filepath = os.path.join(data_path,folder_name,s_name,"{}.{}.csv".format(contract_name,folder_name))
             item_df = pd.read_csv(filepath,dtype=self.col_data_types,parse_dates=['date'])  
             # 填入品种编码

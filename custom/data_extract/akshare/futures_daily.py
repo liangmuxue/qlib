@@ -5,6 +5,7 @@ Date: 2024/11/30 18:00
 Desc: 期货日线行情
 """
 
+import time
 import datetime
 import json
 import re
@@ -675,7 +676,8 @@ def get_futures_daily(
             print("request err,{}".format(e))
 
         start_date += datetime.timedelta(days=1)
-
+        time.sleep(1)
+        
     if len(df_list) == 0:
         return pd.DataFrame()
     elif len(df_list) > 0:

@@ -155,7 +155,7 @@ def get_next_month(date,next=1):
     month_later = date + relativedelta(months=next)
     return month_later
     
-def get_tradedays(start,end):
+def get_tradedays(start,end,date_format=False):
     '''
     计算指定日期之间的工作日
     start:开始日期
@@ -177,7 +177,10 @@ def get_tradedays(start,end):
         if is_holiday(start) or start.weekday()==5 or start.weekday()==6:
             start += timedelta(days=1)
             continue
-        cal_list.append(datetime.strftime(start,'%Y%m%d'))
+        if date_format:
+            cal_list.append(start)
+        else:
+            cal_list.append(start.strftime('%Y%m%d'))
         counts += 1
         start += timedelta(days=1)
     return cal_list

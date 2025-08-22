@@ -62,16 +62,39 @@ class FurBacktestStrategy(SimStrategy):
         # 根据标志，决定是否清空目录下的历史交易记录
         if emu_args["clear_data"]:
             self.trade_entity.clear_his_data()
-            
+
+        # 加载当日可以交易的合约品种
+        # self.data_source.load_all_contract()               
         # 订阅合约行情
         sub_contract_names = self.data_source.get_all_contract_names(self.context.now)
         self.context.s_arr = sub_contract_names
         for name in sub_contract_names:
-            subscribe(name)
+            self.subscribe_market_trading(name)
         # 初始化代理的当日环境
         env = Environment.get_instance()
         env.broker.trade_proxy.init_env()
-                 
+    
+    def subscribe_market_trading(self,id_or_symbols):
+        """订阅合约行情"""
+        
+        current_universe = Environment.get_instance().get_universe()
+        if isinstance(id_or_symbols, six.string_types):
+            instrument_arr = self.data_source.get_instruments([id_or_symbols])
+            if instrument_arr is None or len(instrument_arr)==0:
+                logger.warning("instruments Empty:{}".format(id_or_symbols))
+                return 
+            order_book_id = instrument_arr[0].order_book_id
+            current_universe.add(order_book_id)
+        elif isinstance(id_or_symbols, Instrument):
+            current_universe.add(id_or_symbols.order_book_id)
+        elif isinstance(id_or_symbols, Iterable):
+            for item in id_or_symbols:
+                current_universe.add(assure_order_book_id(item))
+        else:
+            raise RQInvalidArgument(_(u"unsupported order_book_id type"))
+        verify_that("id_or_symbols")._are_valid_instruments("subscribe", id_or_symbols)
+        Environment.get_instance().update_universe(current_universe)
+               
     def before_trading(self,context):
         """交易前准备"""
         
@@ -81,8 +104,6 @@ class FurBacktestStrategy(SimStrategy):
         self.time_line = 0
         pred_date = int(context.now.strftime('%Y%m%d'))
         self.trade_day = pred_date
-        if pred_date==20220511:
-            print("ggg")        
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = self.get_previous_trading_date(self.trade_day)
         # 初始化当日合约对照表
