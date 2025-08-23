@@ -104,9 +104,6 @@ class FuturesRealDataSource(FuturesDataSource):
     def get_main_contract_name(self,instrument,date=None):
         """根据品种编码，确定当前对应的主力合约"""
         
-        if date is not None:
-            return super().get_main_contract_name(instrument,date)
-        
         item = self.all_contracts[self.all_contracts['code']==instrument]
         if item.shape[0]==0:
             return None

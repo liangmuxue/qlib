@@ -49,12 +49,12 @@ class FuturesDataSource(BaseDataSource):
         self.extractor_ak = AkFuturesExtractor(savepath=stock_data_path)
         # 是否实时模式
         self.frequency_sim = frequency_sim 
-        # 从全局变量中取得主流程透传的主体模型,以及对应数据集对象
-        model = global_var.get_value("model")
-        if model is not None:
-            dataset = model.dataset
-            # dataset.build_series_data(no_series_data=True)
-            self.dataset = dataset
+        # 从全局变量中取得主流程透传的主体模型,以及对应数据集对象--cancel
+        # model = global_var.get_value("model")
+        # if model is not None:
+        #     dataset = model.dataset
+        #     # dataset.build_series_data(no_series_data=True)
+        #     self.dataset = dataset
 
     def time_inject(self,code_name=None,begin=False):
         if begin:
@@ -144,13 +144,14 @@ class FuturesDataSource(BaseDataSource):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
         #取得当前月，下个月，下下个月3个月份合约名称
-        contract_names = self.extractor_ak.get_likely_main_contract_names(instrument, date)
+        date_obj = dt_obj.strptime(str(date), '%Y%m%d')
+        contract_names = self.extractor_ak.get_likely_main_contract_names(instrument, date_obj)
         # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
         contract_mapping = {}
         volume_main = 0
         main_name = None
         for symbol in contract_names:
-            item_df = self.load_item_day_data(symbol,date)
+            item_df = self.load_item_day_data(symbol,date_obj)
             if item_df is None or item_df.shape[0]==0:
                 continue
             cur_volume = item_df['volume'].values[0]

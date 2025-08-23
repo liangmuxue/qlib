@@ -401,7 +401,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
 
         if mode=="instrument":
             # 品种模式查询，需要先根据品种取得合约代码再查询
-            symbol = self.data_source.get_main_contract_name(code,date)
+            symbol = self.data_source.get_main_contract_name(code,str(date))
         else:
             symbol = code
                                 

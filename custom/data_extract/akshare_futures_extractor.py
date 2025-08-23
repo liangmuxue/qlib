@@ -377,6 +377,9 @@ class AkFuturesExtractor(FutureExtractor):
                 get_futures_daily_df = get_futures_daily_df[get_futures_daily_df['open'].str.len()>0]
                 get_futures_daily_df['open'] = get_futures_daily_df['open'].astype(float)
             get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
+            # 郑商所代码规范和其他不一致，需要补全
+            if market_code=='CZCE':
+                get_futures_daily_df['code'] = get_futures_daily_df['code'].map(lambda code: code[:2]+'2'+code[2:])
             print("market {} ok".format(market_code))
 
     def import_day_range_contract_data_em(self,data_range=None):
@@ -539,7 +542,7 @@ class AkFuturesExtractor(FutureExtractor):
                 time.sleep(5)
             print("code:{} ok".format(code))
 
-    def get_likely_main_contract_names(self,instrument,date,month_range=3):
+    def get_likely_main_contract_names(self,instrument,date,month_range=3,czce_spec=False):
         """根据品种编码和指定日期，取得可能的主力合约名称"""
         
         #取得当前月，下个月，下下个月,共3个月份合约名称
@@ -548,8 +551,8 @@ class AkFuturesExtractor(FutureExtractor):
         year = date.year
         for i in range(month_range):
             month_item = get_next_month(date,next=i)
-            # 郑商所和其他交易所编码方式不一样,为：代码+月份+年份最后一位
-            if exchange_code=="CZCE":     
+            # 郑商所和其他交易所编码方式不一样,为：代码+年份最后一位+月份
+            if exchange_code=="CZCE" and czce_spec:     
                 if year<=2024:
                     month_item = instrument + month_item.strftime("%y%m")
                 else:
@@ -653,6 +656,7 @@ if __name__ == "__main__":
     # futures_zh_spot_df = ak.futures_zh_spot(symbol='RB2510', market="CF", adjust='0')
     # print(futures_zh_spot_df)
     # extractor.get_day_contract_info()
+    # extractor.get_day_contract()
     # futures_zh_realtime_df = ak.futures_zh_realtime(symbol="白糖")
     # print(futures_zh_realtime_df)    
     # 分时数据
@@ -730,7 +734,7 @@ if __name__ == "__main__":
     # extractor.build_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
-    extractor.import_day_range_contract_data(data_range=(20250630,20250822))
+    extractor.import_day_range_contract_data(data_range=(20250116,20250822))
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250701,20250819))
     # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
