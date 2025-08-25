@@ -376,10 +376,10 @@ class AkFuturesExtractor(FutureExtractor):
                 get_futures_daily_df['open'] = get_futures_daily_df['open'].astype(str)
                 get_futures_daily_df = get_futures_daily_df[get_futures_daily_df['open'].str.len()>0]
                 get_futures_daily_df['open'] = get_futures_daily_df['open'].astype(float)
-            get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
             # 郑商所代码规范和其他不一致，需要补全
             if market_code=='CZCE':
-                get_futures_daily_df['code'] = get_futures_daily_df['code'].map(lambda code: code[:2]+'2'+code[2:])
+                get_futures_daily_df['code'] = get_futures_daily_df['code'].map(lambda code: code[:2]+'2'+code[2:])                
+            get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
             print("market {} ok".format(market_code))
 
     def import_day_range_contract_data_em(self,data_range=None):

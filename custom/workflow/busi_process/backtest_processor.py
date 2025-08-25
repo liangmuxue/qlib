@@ -34,10 +34,10 @@ class BacktestProcessor(BaseProcessor):
         end_date = date_string_transfer(str(end_date))
         # start_date = datetime.date(2021,1,day=5)  
         # 回测开始和结束日期为本期（月、季、年）第一天和最后一天
-        backtest_template["rqalpha"]["base"]["start_date"] = start_date
-
-        backtest_template["rqalpha"]["base"]["end_date"] = end_date
-        dataset_template["kwargs"]["segments"]["classify_range"] = [start_date,end_date]
+        # backtest_template["rqalpha"]["base"]["start_date"] = start_date
+        #
+        # backtest_template["rqalpha"]["base"]["end_date"] = end_date
+        # dataset_template["kwargs"]["segments"]["classify_range"] = [start_date,end_date]
         # 给回测进程植入任务号
         backtest_template["rqalpha"]["extra"]["task_id"] = self.wf_task.task_entity["id"]
         # config_path为当前文件路径--Cancel

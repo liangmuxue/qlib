@@ -124,6 +124,25 @@ class FuturesDataSource(BaseDataSource):
             return False
         return True
     
+    def rectification_order_book_id(self,symbol,inverse=False):
+        """校正合约编码转换问题"""
+        
+        instrument_code = self.get_instrument_code_from_contract_code(symbol)
+        exchange_code = self.get_exchange_from_instrument(instrument_code)
+        # 郑商所有特殊编码规则，需要转换,并且其他交易所都是小写，只有郑商所大写
+        if exchange_code=="CZCE":
+            if inverse:
+                symbol = symbol[:2] + "2" + symbol[2:]
+                symbol = symbol.upper()
+            else:
+                symbol = symbol[:2] + symbol[3:]
+        else:
+            if inverse:
+                symbol = symbol.upper()
+            else:
+                symbol = symbol.lower()
+        return symbol
+        
     def transfer_futures_order_book_id(self,symbol,date):    
         """品种代码转化为合约代码"""
         
@@ -144,7 +163,10 @@ class FuturesDataSource(BaseDataSource):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
         #取得当前月，下个月，下下个月3个月份合约名称
-        date_obj = dt_obj.strptime(str(date), '%Y%m%d')
+        if isinstance(date,str):
+            date_obj = dt_obj.strptime(str(date), '%Y%m%d')
+        else:
+            date_obj = date
         contract_names = self.extractor_ak.get_likely_main_contract_names(instrument, date_obj)
         # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
         contract_mapping = {}

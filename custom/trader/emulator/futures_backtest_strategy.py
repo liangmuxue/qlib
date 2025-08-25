@@ -66,7 +66,7 @@ class FurBacktestStrategy(SimStrategy):
         # 加载当日可以交易的合约品种
         # self.data_source.load_all_contract()               
         # 订阅合约行情
-        sub_contract_names = self.data_source.get_all_contract_names(self.context.now)
+        sub_contract_names = self.data_source.get_all_contract_names(self.context.now.strftime("%Y%m%d"))
         self.context.s_arr = sub_contract_names
         for name in sub_contract_names:
             self.subscribe_market_trading(name)
@@ -559,15 +559,17 @@ class FurBacktestStrategy(SimStrategy):
         bond_limit = total_cash * bond_rate
         positions = self.get_positions()
         current_bond = np.array([pos.margin for pos in positions]).sum()
-        remain_bond = bond_limit - current_bond
+        # 需要满足的资金=剩余资金-已冻结保证金-当前开仓需要保证金
+        remain_bond = total_cash - bond_limit - current_bond
         if remain_bond<0:
             return 0
         # 计算剩余可建仓个数，以及剩余的保证金额度，计算单独一个品种建仓的限制金额
-        position_number = len(self.get_positions())
+        position_number = len(positions)
         remain_number = position_max_number - position_number
         if remain_number<=0:
             return 0
-        single_value = remain_bond/bond_rate/remain_number
+        # 根据剩余资金额度，以及可持仓品种数量和单只持仓份额，计算当前额度限额
+        single_value = total_cash * self.strategy.single_buy_mount_percent/100 * remain_number/position_max_number
         
         self.logger_info("remain_number:{},single_value:{},remain_bond:{}".format(remain_number,single_value,remain_bond))
         return single_value
@@ -827,7 +829,7 @@ class FurBacktestStrategy(SimStrategy):
         day_date = datetime.datetime.strptime(str(day), '%Y%m%d').date()
         if mode=="instrument":
             # 品种模式查询，需要先根据品种取得合约代码再查询
-            symbol = self.data_source.get_main_contract_name(code,day_date)
+            symbol = self.data_source.get_main_contract_name(code,str(day))
             data = date_trading_mappings[(date_trading_mappings['date']==day_date)&(date_trading_mappings['contract']==symbol)]
         else:
             # 合约模式查询，直接查询

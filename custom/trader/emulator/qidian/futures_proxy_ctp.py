@@ -262,8 +262,11 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             return
         if pInvestorPosition is None:
             return
+        
+        data_source = self.listenner.context.env.data_source
         # swig对象转实际业务对象
         symbol = pInvestorPosition.InstrumentID.upper()
+        symbol = data_source.rectification_order_book_id(symbol,inverse=True)        
         quantity = pInvestorPosition.Position
         if quantity==0:
             logger.warning("quantity 0:{}".format(symbol)) 
@@ -760,7 +763,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         req.UserID = self.user
         req.InvestorID = self.user
         req.ExchangeID = ExchangeID
-        req.InstrumentID = InstrumentID.lower()
+        req.InstrumentID = InstrumentID
         req.Direction = Direction
         req.CombOffsetFlag = str(Offset)
         req.CombHedgeFlag = tdapi.THOST_FTDC_HF_Speculation
@@ -951,8 +954,12 @@ class CtpFuturesTrade(BaseTrade):
             logger.warning("Have Not Login!")
             return 
         
+        data_source = self.context.env.data_source
+        
         ExchangeID = order_in.exchange_id
         InstrumentID = order_in.order_book_id
+        # 校正合约编码转换问题
+        InstrumentID  = data_source.rectification_order_book_id(InstrumentID)
         Direction = tuapi.THOST_FTDC_DEN_Buy if order_in.side==SIDE.BUY else tuapi.THOST_FTDC_DEN_Sell
         Direction = str(Direction)
         if order_in.position_effect==POSITION_EFFECT.OPEN:
@@ -965,8 +972,7 @@ class CtpFuturesTrade(BaseTrade):
         PriceType = "2"
         Price = order_in.kwargs['price']
         # 实现最小价格变动范围要求
-        data_source = self.context.env.data_source
-        price_range = data_source.get_contract_info(InstrumentID)["price_range"].astype(float).values[0]
+        price_range = data_source.get_contract_info(order_in.order_book_id)["price_range"].astype(float).values[0]
         PriceRound = round_to_tick(Price,price_range)
         
         Volume = order_in.quantity

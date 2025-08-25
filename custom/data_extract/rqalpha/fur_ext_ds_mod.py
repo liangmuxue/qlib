@@ -93,7 +93,7 @@ class ExtDataMod(AbstractMod):
     def analysis_stat_offline(self,file_path,save_path):   
         """离线分析存储的历史交易数据"""
         
-        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)   
+        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
         trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
         # 只统计已完成订单
         target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
@@ -137,7 +137,7 @@ class ExtDataMod(AbstractMod):
     def analysis_futures_stat_offline(self,file_path,save_path):   
         """离线分析存储的期货历史交易数据"""
         
-        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)   
+        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
         trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
         # 只统计已完成订单
         target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
@@ -201,7 +201,7 @@ class ExtDataMod(AbstractMod):
                 trade_data_df = strategy_obj.trade_entity.trade_data_df
                 with open(trade_data_file, "wb") as fout:
                     pickle.dump(trade_data_df, fout)                  
-            trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+            trade_data_df = trade_data_df.sort_values(by=["trade_datetime","order_book_id"])
             # 只统计已完成订单
             target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
             # 以股票为维度聚合，进行分析
@@ -209,7 +209,7 @@ class ExtDataMod(AbstractMod):
             new_columns = TRADE_COLUMNS + TRADE_EXT_COLUMNS
             stat_data = []
             for name,instrument_df in group_df:
-                instrument_df = instrument_df.sort_values(by=["trade_date"]).reset_index(drop=True)
+                instrument_df = instrument_df.sort_values(by=["trade_datetime"]).reset_index(drop=True)
                 for index,row in instrument_df.iterrows():
                     # 买卖分别配对，进行额度计算
                     if index%2==0 and row["side"]!=SIDE.BUY:
@@ -226,8 +226,8 @@ class ExtDataMod(AbstractMod):
                         buy_price = prev_buy_row["price"]
                         differ_range = (row["price"] - buy_price)/buy_price
                         gain = (row["price"] - buy_price) * row["quantity"]
-                        buy_day = prev_buy_row["trade_date"].strftime('%Y%m%d')
-                        sell_day = row["trade_date"].strftime('%Y%m%d')
+                        buy_day = prev_buy_row["trade_datetime"].strftime('%Y%m%d')
+                        sell_day = row["trade_datetime"].strftime('%Y%m%d')
                         duration = tradedays(buy_day,sell_day)
                         new_row = row.values.tolist() + [buy_price,differ_range,gain,buy_day,duration]
                         stat_data.append(new_row)
@@ -241,7 +241,7 @@ class ExtDataMod(AbstractMod):
     
         pred_result_data = pd.read_csv(pred_path) 
         pred_result_data = pred_result_data.sort_values(by=["date","instrument"])
-        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)   
+        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
         trade_data_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
         trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
 
@@ -258,7 +258,7 @@ class ExtDataMod(AbstractMod):
             # 匹配对应的当日主力合约的开仓交易数据
             trade_row = trade_data_df[(trade_data_df['order_book_id'].str[:-4]==instrument)
                                       &(trade_data_df['position_effect']=='OPEN')
-                                      &(trade_data_df['trade_date'].dt.strftime('%Y%m%d')==str(date))]
+                                      &(trade_data_df['trade_datetime'].dt.strftime('%Y%m%d')==str(date))]
             # 如果没有交易则填充空数值
             if trade_row.shape[0]==0:
                 result_row += [0,'',0,0,0,0,0]
@@ -267,7 +267,7 @@ class ExtDataMod(AbstractMod):
             order_book_id = trade_row['order_book_id'].values[0]
             match_rows = trade_data_df[(trade_data_df['order_book_id']==order_book_id)
                                       &(trade_data_df['position_effect']=='CLOSE')
-                                      &(pd.to_numeric(trade_data_df['trade_date'].dt.strftime('%Y%m%d'))>date)]
+                                      &(pd.to_numeric(trade_data_df['trade_datetime'].dt.strftime('%Y%m%d'))>date)]
             # 如果没有交易则填充空数值
             if match_rows.shape[0]==0:
                 result_row += [-1,order_book_id,trade_row['price'].values[0],0,trade_row['quantity'].values[0],0,0]
@@ -280,7 +280,7 @@ class ExtDataMod(AbstractMod):
             bt_yield_rate = (close_price-price)/price
             if trade_row['side'].values[0]==SIDE.SELL:
                 bt_yield_rate = -bt_yield_rate
-            close_date = match_row['trade_date']
+            close_date = match_row['trade_datetime']
             result_row += [1,order_book_id,price,close_price,quantity,bt_yield_rate,close_date]
             
         stat_df = pd.DataFrame(np.array(result_data),columns = result_columns)

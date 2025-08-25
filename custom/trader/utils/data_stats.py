@@ -103,7 +103,7 @@ class DataStats(object):
         result_file_path = "/home/qdata/workflow/fur_sim_flow_2025/task/162/dump_data/pred_result.pkl"
         with open(result_file_path, "rb") as fin:
             result_data = pickle.load(fin)    
-        result_data['date'] = 20250823
+        result_data['date'] = 20250824
         # result_data.loc[result_data['instrument']=='ZC','instrument'] = 'AP'
         # result_data.loc[result_data['instrument']=='RR','instrument'] = 'CJ'
         # result_data.loc[result_data['instrument']=='PK','instrument'] = 'JD'

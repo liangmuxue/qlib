@@ -404,7 +404,9 @@ class FurSimulationStrategy(FurBacktestStrategy):
             symbol = self.data_source.get_main_contract_name(code,str(date))
         else:
             symbol = code
-                                
+        if symbol is None:
+            return False
+                            
         if symbol in self.contract_today:
             # 如果已经在缓存里，则直接放回缓存中的结果
             return self.contract_today[symbol]==1
