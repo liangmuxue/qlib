@@ -612,13 +612,13 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
         
-        if future_start_datetime==20240822:
-            result_file_path = "custom/data/results/data_compare_val_20240822.pkl"
-            results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
-                       ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
-            with open(result_file_path, "wb") as fout:
-                pickle.dump(results, fout)    
-            print("ggg")  
+        # if future_start_datetime==20240822:
+        #     result_file_path = "custom/data/results/data_compare_val_20240822.pkl"
+        #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
+        #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
+        #     with open(result_file_path, "wb") as fout:
+        #         pickle.dump(results, fout)    
+        #     print("ggg")  
                 
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
@@ -680,7 +680,7 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
         return date_mappings,date_mappings_ext       
         
     def __getitem__(
-        self, idx
+        self, item_idx
     ):
         """以日期为单位,整合行业分类数据"""
         
@@ -700,11 +700,11 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
         price_targets_ori = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
         
         ########### 生成行业数据 #########
-        sw_date_mapping = self.date_mappings_ext[idx]
+        sw_date_mapping = self.date_mappings_ext[item_idx]
         
         for index,ser_idx_infer in enumerate(sw_date_mapping):
             # 记录预测未来第一天的关联日期，用于后续数据对齐
-            future_start_datetime = self.date_list[idx]
+            future_start_datetime = self.date_list[item_idx]
             # 取得原序列索引进行series取数,目前一致
             ori_index = index
             if self.total_target_vals[ori_index] is None:
@@ -723,7 +723,6 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                 offset_begin<self.input_chunk_length,
                 "offset_begin too small",
             )   
-            
             # 使用实际对照索引（刨除指数索引）        
             keep_index = self.keep_index[index]  
             # 目标序列
@@ -770,7 +769,7 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
             raise_if_not(
                 past_end <= len(covariate_series),
                 f"The dataset contains covariates "
-                f"that don't extend far enough into the future. ({idx}-th sample)",
+                f"that don't extend far enough into the future. ({item_idx}-th sample)",
             )
             # 没有对齐？？？前移一位
             covariate_total = covariate_series.random_component_values(copy=False)[
@@ -907,13 +906,13 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                         future_round_targets[k,:,i] = scale_data
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
-        if future_start_datetime==20240822:
-            result_file_path = "custom/data/results/data_compare_pred_20240822.pkl"
-            results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
-                       ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
-            with open(result_file_path, "wb") as fout:
-                pickle.dump(results, fout)    
-            results
+        # if future_start_datetime==20240822:
+        #     result_file_path = "custom/data/results/data_compare_pred_20240822.pkl"
+        #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
+        #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
+        #     with open(result_file_path, "wb") as fout:
+        #         pickle.dump(results, fout)    
+        #     results
             
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 

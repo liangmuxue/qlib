@@ -826,7 +826,7 @@ class FuturesIndustryDRollModule(MlpModule):
             import_index,trend_value,indus_top_index,result_list,ins_result_list = self.build_import_index(output_data=output_list,target_info=target_info_list,
                             target=whole_target,price_target=price_target_list,index_round_targets=index_round_targets,date=date,
                             combine_instrument=combine_content,instrument_index=instrument_in_indus_index)
-            if date==20240825:
+            if date==20240822:
                 print("ggg")
             # 有可能没有候选数据
             if import_index is not None and import_index.shape[0]>0:

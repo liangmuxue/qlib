@@ -877,7 +877,7 @@ class FuturesProcessModel(TftDataframeModel):
         # 先fit再赋值，则以当前数据集生成的mapping为准
         model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
         model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings                     
-        model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
+        model.predict(series=val_series_transformed_new,past_covariates=past_convariates,future_covariates=future_convariates,
                                                     batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))        
         # 再用第二阶段模型生成实际品种结果
         model_name_step2 = self.optargs["model_name_step2"]  
@@ -915,7 +915,7 @@ class FuturesProcessModel(TftDataframeModel):
         # 先fit再赋值，则以当前数据集生成的mapping为准           
         model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
         model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings          
-        pred_result = model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
+        pred_result = model.predict(series=val_series_transformed_new,past_covariates=past_convariates,future_covariates=future_convariates,
                                             batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))
         
         return pred_result 
