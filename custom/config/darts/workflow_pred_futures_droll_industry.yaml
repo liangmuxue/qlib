@@ -5,9 +5,9 @@ market: &market clean_data
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2005-01-01
+    start_time: 2024-01-01
     end_time: 2025-12-31
-    fit_start_time: 2005-01-01
+    fit_start_time: 2024-01-01
     fit_end_time: 2025-12-31
     instruments: *market
     infer_processors:

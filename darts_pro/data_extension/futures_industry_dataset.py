@@ -851,9 +851,9 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
             indus_future_round = future_round_targets[indus_index].copy()
             past_index_round_targets[i] = indus_past_round
             future_index_round_targets[i] = indus_future_round
-            
+
         for i in range(self.past_target_shape[-1]):
-            if self.scale_mode[i] in [0,1]:
+            if self.scale_mode[i] in [0,1,5]:
                 # 分行业归一化
                 scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)

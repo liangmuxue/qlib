@@ -101,8 +101,9 @@ def compare_dataset_consistence():
     with open(pred_file_path, "rb") as fin:
         result_data_pred = pickle.load(fin) 
 
+
     names = ["target_info","past_target_total", "past_covariate_total", "historic_future_covariates_total","future_covariates_total","static_covariate_total"
-               ,"covariate_future_total","past_future_round_targets","index_round_targets"]
+               ,"past_future_round_targets","index_round_targets"]
     eps = 1e-3
     for i in range(1,len(result_data_val)):
         val_item = result_data_val[i]

@@ -852,7 +852,6 @@ class FuturesProcessModel(TftDataframeModel):
         model.model.mode = "predict"
         model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
         
-        
         # 2个阶段需要不同的目标值，在这里通过多配置的模式，并且动态改变val_series序列的列值来实现
         model.scale_mode = scale_mode_step1
         model.model.scale_mode = scale_mode_step1
@@ -866,8 +865,13 @@ class FuturesProcessModel(TftDataframeModel):
             ser_new = ser.drop_columns(rm_cols)
             ser_new.instrument_code = ser.instrument_code
             val_series_transformed_new.append(ser_new)
+        train_series_transformed_new = []
+        for ser in train_series_transformed:
+            ser_new = ser.drop_columns(rm_cols)
+            ser_new.instrument_code = ser.instrument_code
+            train_series_transformed_new.append(ser_new)            
             
-        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed_new,
+        model.fit(train_series_transformed_new, future_covariates=future_convariates, val_series=val_series_transformed_new,
                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)   
         # 先fit再赋值，则以当前数据集生成的mapping为准
@@ -897,11 +901,15 @@ class FuturesProcessModel(TftDataframeModel):
             ser_new = ser.drop_columns(rm_cols)
             ser_new.instrument_code = ser.instrument_code
             val_series_transformed_new.append(ser_new)
-                    
-        # For pred step1 result
+        train_series_transformed_new = []
+        for ser in train_series_transformed:
+            ser_new = ser.drop_columns(rm_cols)
+            ser_new.instrument_code = ser.instrument_code
+            train_series_transformed_new.append(ser_new)                       
+        # For pred step2 result
         model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
         # 进行推理及预测，先fit再predict
-        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed_new,
+        model.fit(train_series_transformed_new, future_covariates=future_convariates, val_series=val_series_transformed_new,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)    
         # 先fit再赋值，则以当前数据集生成的mapping为准           
