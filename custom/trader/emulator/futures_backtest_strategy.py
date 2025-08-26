@@ -106,6 +106,8 @@ class FurBacktestStrategy(SimStrategy):
         self.trade_day = pred_date
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = self.get_previous_trading_date(self.trade_day)
+        if pred_date==20240823:
+            print("ggg")
         # 初始化当日合约对照表
         self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.now)        
         # 根据当前日期，进行预测计算
@@ -132,10 +134,6 @@ class FurBacktestStrategy(SimStrategy):
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
             price = h_bar[0]
-            # # fake
-            # if order_book_id.startswith("000410"):
-            #     price = 7.17
-            
             # 根据多空标志决定买卖方向
             if trend==1:
                 side = SIDE.BUY
@@ -144,11 +142,13 @@ class FurBacktestStrategy(SimStrategy):
             # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）,仓位类型为开仓
             order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.OPEN)
             # 对于开仓候选品种，如果已持仓当前品种，则进行锁仓
-            if self.get_position(order_book_id) is not None:
+            if self.match_position(instrument) is not None:
                 self.lock_list[order_book_id] = order        
-                continue               
+                continue             
             # 加入到候选开仓订单
             candidate_order_list[order_book_id] = order
+        # 锁定品种保存到存储
+        self.trade_entity.add_lock_candidate(self.lock_list,str(pred_date))
         # 开仓候选的订单信息，保存到上下文
         self.candidate_list = candidate_order_list   
 
@@ -530,7 +530,7 @@ class FurBacktestStrategy(SimStrategy):
     ###############################数据逻辑处理部分########################################  
 
     def get_position(self,order_book_id):
-        """取得指定品种的持仓信息，使用当前策略维护的仓位数据"""
+        """取得指定合约的持仓信息，使用当前策略维护的仓位数据"""
         
         # 通过代理类，取得仿真环境的数据
         sim_position = self.sim_position
@@ -540,7 +540,19 @@ class FurBacktestStrategy(SimStrategy):
         dict_data = pos.iloc[0].to_dict()
         pos_obj = DictToObject(dict_data)    
         return pos_obj  
+
+    def match_position(self,instrument):
+        """取得指定品种的持仓信息"""
         
+        match_pos = None
+        for pos in self.get_positions():
+            order_book_id = pos.order_book_id
+            instrument_item = self.data_source.get_instrument_code_from_contract_code(order_book_id)
+            if instrument==instrument_item:
+                return pos    
+            
+        return match_pos 
+            
     def get_last_price(self,order_book_id):
         """取得指定标的最近报价信息"""
 
@@ -569,7 +581,7 @@ class FurBacktestStrategy(SimStrategy):
         if remain_number<=0:
             return 0
         # 根据剩余资金额度，以及可持仓品种数量和单只持仓份额，计算当前额度限额
-        single_value = total_cash * self.strategy.single_buy_mount_percent/100 * remain_number/position_max_number
+        single_value = total_cash * self.strategy.single_buy_mount_percent/100
         
         self.logger_info("remain_number:{},single_value:{},remain_bond:{}".format(remain_number,single_value,remain_bond))
         return single_value

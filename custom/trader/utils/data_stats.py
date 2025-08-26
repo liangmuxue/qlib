@@ -6,14 +6,16 @@ from datetime import datetime,timedelta
 from chinese_calendar import is_holiday
 from trader.utils.date_util import get_tradedays_dur,get_next_working_day,get_prev_working_day
 
+from rqalpha.const import ORDER_STATUS,SIDE
 from data_extract.rqalpha.futures_ds import FuturesDataSource
 from trader.emulator.futures_real_ds import FuturesDataSourceSql
+from backtrader.utils import date
 
-# 回测整合记录项：date--日期，instrument--品种代码，order_book_id--合约编码，
-#       open_price--开仓价,close_price--平仓价,volume--成交量,direction--成交方向(LONG-多方，SHORT-空方)
+# 回测整合记录项：date--日期，instrument--品种代码，trade_flag--交易标志('trade'-交易,'ignore'-忽略,'noclose'-无平仓,'lock'-锁定), order_book_id--合约编码，
+#       open_price--开仓价,close_price--平仓价,volume--成交量,side--成交方向(BUY-多方,SELL-空方)
 
-BACKTEST_RESULT_COLUMNS = ["date","instrument","order_book_id","open_price",
-                       "close_price","volume","direction"]     
+BACKTEST_RESULT_COLUMNS = ["date","instrument","order_book_id","trade_flag","open_price",
+                       "close_price","quantity","side"]     
 
 # 预测整合记录项：date--日期，instrument--品种代码，pred_trend--预测趋势，prev_close--预测前收盘价，
 #       firstday_open,firstday_close,firstday_high,firstday_low,--第1天开盘、收盘、最高、最低
@@ -30,12 +32,15 @@ class DataStats(object):
         
         self.work_dir = work_dir
         self.backtest_dir = backtest_dir
+        self.combine_val_filepath = "val_combine.csv"
+        self.combine_pred_filepath = "pred_combine.csv"
+        self.combine_backtest_filepath = "backtest_combine.csv"
         
         stock_data_path = "/home/qdata/futures_data/juejin/main_1min"
         self.ds = FuturesDataSourceSql("/home/liang/.rqalpha/bundle",stock_data_path=stock_data_path,sim_path=stock_data_path,frequency_sim=False)        
 
-    def combine_pred_result(self):
-        """预测数据中整合实际结果"""
+    def combine_val_result(self):
+        """验证数据中整合实际结果"""
 
         step2_file = os.path.join(self.work_dir,"step2_rs.pkl")
         with open(step2_file, "rb") as fin:
@@ -59,14 +64,15 @@ class DataStats(object):
                         second_bar['open'],second_bar['settle'],second_bar['high'],second_bar['low']]
                 results.append(item)
         results = pd.DataFrame(np.array(results),columns=PRED_RESULT_COLUMNS) 
-        print(results)
+        combine_data_file = os.path.join(self.work_dir,self.combine_val_filepath)
+        results.to_csv(combine_data_file,index=False)  
+        
+    def combine_pred_result(self):
+        """预测数据中整合实际结果"""
 
-    def combine_backtest_result(self):
-        """回测数据中整合实际结果"""
-
-        trading_file = os.path.join(self.backtest_dir,"trade_data.csv")
-        trade_data_df = pd.read_csv(trading_file,parse_dates=['trade_date'],infer_datetime_format=True)   
-        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+        pred_result_file = os.path.join(self.work_dir,"pred_result.pkl")
+        with open(pred_result_file, "rb") as fin:
+            instrument_result_data = pickle.load(fin)  
                     
         date_list = instrument_result_data['date'].sort_values().unique()
         results = []
@@ -77,8 +83,11 @@ class DataStats(object):
             date_item = instrument_result_data[instrument_result_data['date']==date]
             for index,item in date_item.iterrows():
                 instrument = item['instrument']
-                pred_trend = item['trend_flag']
-                prev_bar = self.ds.get_continue_data_by_day(instrument, prev_day.strftime("%Y%m%d")).iloc[0]
+                pred_trend = item['top_flag']
+                prev_bars = self.ds.get_continue_data_by_day(instrument, prev_day.strftime("%Y%m%d"))
+                if prev_bars.shape[0]==0:
+                    continue
+                prev_bar = prev_bars.iloc[0]
                 first_bar = self.ds.get_continue_data_by_day(instrument, cur_day.strftime("%Y%m%d")).iloc[0]
                 second_bar = self.ds.get_continue_data_by_day(instrument, second_day.strftime("%Y%m%d")).iloc[0]
                 item = [date,instrument,pred_trend,prev_bar['settle'],
@@ -86,7 +95,73 @@ class DataStats(object):
                         second_bar['open'],second_bar['settle'],second_bar['high'],second_bar['low']]
                 results.append(item)
         results = pd.DataFrame(np.array(results),columns=PRED_RESULT_COLUMNS) 
-        print(results)
+        combine_data_file = os.path.join(self.work_dir,self.combine_pred_filepath)
+        results.to_csv(combine_data_file,index=False)         
+
+    def combine_backtest_result(self):
+        """回测数据中整合实际结果"""
+        
+        file_path = os.path.join(self.backtest_dir,"trade_data.csv")
+        lock_file_path = os.path.join(self.backtest_dir,"lock.csv")
+        pred_path = os.path.join(self.work_dir,self.combine_pred_filepath)
+        pred_result_data = pd.read_csv(pred_path) 
+        pred_result_data = pred_result_data.sort_values(by=["date","instrument"])
+        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
+        trade_data_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
+        trade_data_df = trade_data_df.sort_values(by=["trade_datetime","order_book_id"])
+        lock_data = pd.read_csv(lock_file_path) 
+        
+        result_data = pd.DataFrame(columns=BACKTEST_RESULT_COLUMNS)
+        # 遍历预测数据，并分别与实际回测数据结果匹配
+        for index,row in pred_result_data.iterrows():
+            item = {}
+            date = row['date']
+            instrument = row['instrument']
+            # 匹配对应的当日主力合约的开仓交易数据
+            trade_date_row = trade_data_df[(trade_data_df['position_effect']=='OPEN')
+                                      &(trade_data_df['trade_datetime'].dt.strftime('%Y%m%d')==str(date))]
+            trade_row = trade_date_row[(trade_date_row['order_book_id'].str[:-4]==instrument)]
+            item['date'] = date
+            item['instrument'] = instrument
+            item['trade_flag'] = 'trade'
+            item['open_price'] = 0
+            item['close_price'] = 0
+            item['quantity'] = 0
+            item['side'] = 'unknown'
+            # 如果没有交易则填充空数值
+            if trade_row.shape[0]==0:
+                # 查看是否锁定，填写标志
+                lock_item = self.get_lock_item(lock_data, date, instrument)
+                if lock_item.shape[0]==0:
+                    item['trade_flag'] = 'ignore'
+                else:
+                    item['order_book_id'] = lock_item['order_book_id'].values[0]
+                    item['trade_flag'] = 'lock'
+                item_df = pd.DataFrame.from_dict(item,orient='index').T
+                result_data = pd.concat([result_data,item_df])
+                continue
+            # 向后查找到对应的平仓交易并记录
+            order_book_id = trade_row['order_book_id'].values[0]
+            item['open_price'] = trade_row['price'].values[0]
+            item['side'] = trade_row['side'].values[0]
+            item['quantity'] = trade_row['quantity'].values[0]
+            match_rows = trade_data_df[(trade_data_df['order_book_id']==order_book_id)
+                                      &(trade_data_df['position_effect']=='CLOSE')
+                                      &(pd.to_numeric(trade_data_df['trade_datetime'].dt.strftime('%Y%m%d'))>date)]
+            # 如果没有交易则设置标志
+            if match_rows.shape[0]==0:
+                item['trade_flag'] = 'noclose'
+                item_df = pd.DataFrame.from_dict(item,orient='index').T
+                result_data = pd.concat([result_data,item_df])
+                continue
+            # 通过排序取得最近的配对交易
+            match_row = match_rows.sort_values(by=["trade_datetime"],ascending=True).iloc[0]
+            item['close_price'] = match_row['price']
+            item_df = pd.DataFrame.from_dict(item,orient='index').T
+            result_data = pd.concat([result_data,item_df])
+        
+        combine_data_file = os.path.join(self.work_dir,self.combine_backtest_filepath)
+        result_data.to_csv(combine_data_file,index=False)      
                 
     def check_step_output(self):
         
@@ -103,20 +178,29 @@ class DataStats(object):
         result_file_path = "/home/qdata/workflow/fur_sim_flow_2025/task/162/dump_data/pred_result.pkl"
         with open(result_file_path, "rb") as fin:
             result_data = pickle.load(fin)    
-        result_data['date'] = 20250824
+        result_data['date'] = 20250825
         # result_data.loc[result_data['instrument']=='ZC','instrument'] = 'AP'
         # result_data.loc[result_data['instrument']=='RR','instrument'] = 'CJ'
         # result_data.loc[result_data['instrument']=='PK','instrument'] = 'JD'
         with open(result_file_path, "wb") as fout:
             pickle.dump(result_data, fout)          
         print(result_data)
+
+
+    #######################  辅助方法  #############################
+
+    def get_lock_item(self,lock_data,date,instrument):
         
+        return lock_data[(lock_data['date']==date)&(lock_data['instrument']==instrument)]        
+
+     
 if __name__ == "__main__":
     stats = DataStats(work_dir="custom/data/results/stats",backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/08")  
     # stats.check_step_output()
-    # stats.combine_pred_result()
-    stats.mock_pred_data()
-    
+    stats.combine_pred_result()
+    # stats.combine_val_result()
+    # stats.mock_pred_data()
+    # stats.combine_backtest_result()
     
     
     

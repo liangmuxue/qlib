@@ -147,12 +147,14 @@ class FuturesDataSourceSql(FuturesDataSource):
 
     def get_continue_data_by_day(self,symbol,day):
         """取得指定品种和对应日期的主力连续交易记录"""
-
-        column_str = ','.join([str(i) for i in _FUTURE_CONTINUES_FIELD_NAMES])
-        item_sql = "select {} from dominant_continues_data where code='{}' " \
-            "and Date(date)='{}'".format(column_str,symbol,date_string_transfer(day))     
-        SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-        item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_CONTINUES_FIELD_NAMES)
+        try:
+            column_str = ','.join([str(i) for i in _FUTURE_CONTINUES_FIELD_NAMES])
+            item_sql = "select {} from dominant_continues_data where code='{}' " \
+                "and Date(date)='{}'".format(column_str,symbol,date_string_transfer(day))     
+            SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
+            item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_CONTINUES_FIELD_NAMES)
+        except Exception as e:
+            print("eee")
         return item_data
     
     def get_time_data_by_day(self,day,symbol):

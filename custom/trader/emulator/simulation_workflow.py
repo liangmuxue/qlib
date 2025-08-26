@@ -147,7 +147,7 @@ class SimulationWorkflow():
         self.strategy_class.init_env()
         # 执行器
         self.executor = AsisExecutor(datetime.now().date(),env=self)
-        # self.executor = Executor(datetime.now().date(),env=self)
+        self.executor = Executor(datetime.now().date(),env=self)
         # 注册相关回调事件
         env.event_bus.add_listener(EVENT.DO_RESTORE, self.strategy_class.refresh_portfolio)   
         env.event_bus.add_listener(EVENT.ORDER_CREATION_PASS, self.strategy_class.on_order_handler)     
@@ -226,9 +226,9 @@ class SimulationWorkflow():
             # 开仓指定品种
             # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
-            self.strategy_class.clear_position()
+            # self.strategy_class.clear_position()
             # self.strategy_class.clear_order()
-            # self.strategy_class.query_position()     
+            self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
             # orders = self.strategy_class.query_order_info("")
             # print("orders len:{}".format(len(orders)))

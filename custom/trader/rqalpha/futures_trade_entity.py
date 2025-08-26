@@ -14,6 +14,7 @@ logger = AppLogger()
 # 交易信息表字段，分别为交易日期，品种代码，买卖类型，多空类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
 TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","long_short","price","quantity","total_price","status","order_id","close_reason","secondary_order_id"]
 TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
+LOCK_COLUMNS = ['date','order_book_id','instrument']
 
 class FuturesTradeEntity(TradeEntity):
     """期货交易对象处理类"""
@@ -35,6 +36,9 @@ class FuturesTradeEntity(TradeEntity):
             self.sys_orders = {}            
 
         self.save_path = save_path
+        # 锁定品种保存路径
+        self.lock_save_path = os.path.join(os.path.dirname(self.save_path),"lock.csv")
+        self.lock_data = pd.DataFrame(columns=LOCK_COLUMNS)
         # 初始化交易日志数据
         self.trade_log_df = pd.DataFrame(columns=TRADE_LOG_COLUMNS)
         self.log_save_path = log_save_path
@@ -216,5 +220,18 @@ class FuturesTradeEntity(TradeEntity):
         
         return data
         
+    def add_lock_candidate(self,lock_list,date):
+        """锁定品种保存到本地存储"""
+        
+        for item in lock_list:
+            instrument = item[:-4]
+            item_data = pd.DataFrame(np.array([[date,item,instrument]]),columns=LOCK_COLUMNS)
+            self.lock_data = pd.concat([self.lock_data,item_data])
+        self.lock_data.to_csv(self.lock_save_path,index=False)
+    
+    def get_lock_item(self,date,instrument):
+        
+        lock_data = self.lock_data
+        return lock_data[(lock_data['date']==date)&(lock_data['instrument']==instrument)]
         
                 

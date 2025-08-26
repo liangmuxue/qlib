@@ -861,6 +861,7 @@ class FuturesProcessModel(TftDataframeModel):
         model.batch_size = self.batch_size     
         model.mode = "predict"
         model.model.mode = "predict"
+        # For pred step1 result
         model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
         # 进行推理及预测，先fit再predict
         model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,

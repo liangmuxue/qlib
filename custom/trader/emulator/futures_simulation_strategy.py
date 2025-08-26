@@ -112,7 +112,9 @@ class FurSimulationStrategy(FurBacktestStrategy):
         exists_orders = self.trade_entity.get_order_list(context.now.date().strftime("%Y%m%d"))
         exists_order_ids = []
         for index,row in exists_orders.iterrows():
-            pos_number += 1
+            if self.get_position(row['order_book_id']) is None:
+                # 如果不在持仓中，才累加pos总数
+                pos_number += 1
             exists_order_ids.append(row['order_book_id'])
         # 处理候选列表
         for item in candidate_list:
