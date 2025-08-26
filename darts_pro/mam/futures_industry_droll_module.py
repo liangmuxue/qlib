@@ -1311,7 +1311,7 @@ class FuturesIndustryDRollModule(MlpModule):
         result_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
         result_target = {}
         if self.train_step_mode==1:
-            with open(self.result_file_path, "wb") as fout:
+            with open(self.inter_rs_filepath, "wb") as fout:
                 pickle.dump(result_date_list, fout)     
             self.result_target = None
             return    

@@ -798,10 +798,16 @@ class FuturesProcessModel(TftDataframeModel):
         self.batch_file_path = self.kwargs["batch_file_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]   
-        
         if dataset is None:
             dataset = self.dataset
-        
+
+        step1_keep_col = dataset.col_def['step1_keep_col']
+        step2_keep_col = dataset.col_def['step2_keep_col']
+        target_mode_step1 = self.optargs["target_mode_step1"]  
+        target_mode_step2 = self.optargs["target_mode_step2"]  
+        scale_mode_step1 = self.optargs["scale_mode_step1"]  
+        scale_mode_step2 = self.optargs["scale_mode_step2"]  
+                                
         input_chunk_length = self.optargs["wave_period"] - self.optargs["forecast_horizon"]
         output_chunk_length = self.optargs["forecast_horizon"]
         expand_length = 2 *(input_chunk_length + output_chunk_length)
@@ -845,7 +851,23 @@ class FuturesProcessModel(TftDataframeModel):
         model.mode = "predict"
         model.model.mode = "predict"
         model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
-        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+        
+        
+        # 2个阶段需要不同的目标值，在这里通过多配置的模式，并且动态改变val_series序列的列值来实现
+        model.scale_mode = scale_mode_step1
+        model.model.scale_mode = scale_mode_step1
+        model.target_mode = target_mode_step1
+        model.model.target_mode = target_mode_step1        
+        target_column = np.array(dataset.col_def['target_column'])
+        real_target_column = target_column[np.array(step1_keep_col)]
+        rm_cols = np.setdiff1d(target_column, real_target_column, assume_unique=False).tolist()
+        val_series_transformed_new = []
+        for ser in val_series_transformed:
+            ser_new = ser.drop_columns(rm_cols)
+            ser_new.instrument_code = ser.instrument_code
+            val_series_transformed_new.append(ser_new)
+            
+        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed_new,
                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)   
         # 先fit再赋值，则以当前数据集生成的mapping为准
@@ -861,10 +883,25 @@ class FuturesProcessModel(TftDataframeModel):
         model.batch_size = self.batch_size     
         model.mode = "predict"
         model.model.mode = "predict"
+        
+        # 2个阶段需要不同的目标值，在这里通过多配置的模式，并且动态改变val_series序列的列值来实现
+        model.scale_mode = scale_mode_step2
+        model.model.scale_mode = scale_mode_step2
+        model.target_mode = target_mode_step2
+        model.model.target_mode = target_mode_step2           
+        target_column = np.array(dataset.col_def['target_column'])
+        real_target_column = target_column[np.array(step2_keep_col)]
+        rm_cols = np.setdiff1d(target_column, real_target_column, assume_unique=False).tolist()
+        val_series_transformed_new = []
+        for ser in val_series_transformed:
+            ser_new = ser.drop_columns(rm_cols)
+            ser_new.instrument_code = ser.instrument_code
+            val_series_transformed_new.append(ser_new)
+                    
         # For pred step1 result
         model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]
         # 进行推理及预测，先fit再predict
-        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed_new,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)    
         # 先fit再赋值，则以当前数据集生成的mapping为准           

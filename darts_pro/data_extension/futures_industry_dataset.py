@@ -913,6 +913,7 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                        ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
             with open(result_file_path, "wb") as fout:
                 pickle.dump(results, fout)    
+            results
             
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
