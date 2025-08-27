@@ -397,11 +397,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         
         ########### 生成行业数据 #########
         sw_date_mapping = self.date_mappings_ext[idx]
-        
+        # 记录预测未来第一天的关联日期，用于后续数据对齐
+        future_start_datetime = self.date_list[idx]
         for index,ser_idx_infer in enumerate(sw_date_mapping):
-            # 记录预测未来第一天的关联日期，用于后续数据对齐
-            future_start_datetime = self.date_list[idx]
-            
             # 取得原序列索引进行series取数,目前一致
             ori_index = index
             if self.total_target_vals[ori_index] is None:

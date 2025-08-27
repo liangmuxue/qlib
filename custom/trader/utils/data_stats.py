@@ -6,6 +6,7 @@ from datetime import datetime,timedelta
 from chinese_calendar import is_holiday
 from trader.utils.date_util import get_tradedays_dur,get_next_working_day,get_prev_working_day
 
+from darts_pro.mam.futures_industry_droll_module import RESULT_FILE_PATH,RESULT_FILE_STEP1,RESULT_FILE_STEP2
 from rqalpha.const import ORDER_STATUS,SIDE
 from data_extract.rqalpha.futures_ds import FuturesDataSource
 from trader.emulator.futures_real_ds import FuturesDataSourceSql
@@ -42,7 +43,7 @@ class DataStats(object):
     def combine_val_result(self):
         """验证数据中整合实际结果"""
 
-        step2_file = os.path.join(self.work_dir,"step2_rs.pkl")
+        step2_file = os.path.join(self.work_dir,RESULT_FILE_STEP2)
         with open(step2_file, "rb") as fin:
             instrument_result_data = pickle.load(fin)  
                     
@@ -103,9 +104,9 @@ class DataStats(object):
         
         file_path = os.path.join(self.backtest_dir,"trade_data.csv")
         lock_file_path = os.path.join(self.backtest_dir,"lock.csv")
-        pred_path = os.path.join(self.work_dir,self.combine_pred_filepath)
-        pred_result_data = pd.read_csv(pred_path) 
-        pred_result_data = pred_result_data.sort_values(by=["date","instrument"])
+        val_path = os.path.join(self.work_dir,self.combine_val_filepath)
+        val_result_data = pd.read_csv(val_path) 
+        val_result_data = val_result_data.sort_values(by=["date","instrument"])
         trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
         trade_data_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
         trade_data_df = trade_data_df.sort_values(by=["trade_datetime","order_book_id"])
@@ -113,7 +114,7 @@ class DataStats(object):
         
         result_data = pd.DataFrame(columns=BACKTEST_RESULT_COLUMNS)
         # 遍历预测数据，并分别与实际回测数据结果匹配
-        for index,row in pred_result_data.iterrows():
+        for index,row in val_result_data.iterrows():
             item = {}
             date = row['date']
             instrument = row['instrument']
@@ -195,12 +196,12 @@ class DataStats(object):
 
      
 if __name__ == "__main__":
-    stats = DataStats(work_dir="custom/data/results/stats",backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/08")  
+    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/11")  
     # stats.check_step_output()
-    stats.combine_pred_result()
+    # stats.combine_pred_result()
     # stats.combine_val_result()
     # stats.mock_pred_data()
-    # stats.combine_backtest_result()
+    stats.combine_backtest_result()
     
     
     

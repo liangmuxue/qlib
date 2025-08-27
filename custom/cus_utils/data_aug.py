@@ -110,8 +110,8 @@ def compare_dataset_consistence():
         pred_item = result_data_pred[i]
         diff = np.abs(val_item - pred_item)
         compare_rs = np.where(diff>eps)
-        if names[i]=="past_future_round_targets":
-            print("ggg")
+        # if names[i]=="past_future_round_targets":
+        #     print("ggg")
         if np.sum(compare_rs)>1:
             print("{} difference:{}".format(names[i],compare_rs))
 

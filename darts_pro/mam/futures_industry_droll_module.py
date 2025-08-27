@@ -24,6 +24,9 @@ from cus_utils.common_compute import compute_price_class,scale_value
 from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from cus_utils.tensor_viz import TensorViz
 
+from pandas.errors import SettingWithCopyWarning
+warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
+
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20230811]
 STAT_DATE = [20220822,20250822]
@@ -31,9 +34,10 @@ INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [1]
 DRAW_SEQ_DETAIL = [0]
-
-from pandas.errors import SettingWithCopyWarning
-warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
+RESULT_FILE_PATH = "custom/data/results/stats"
+RESULT_FILE_STEP1 = "step1_rs.pkl"
+RESULT_FILE_STEP2 = "step2_rs.pkl"
+INTER_RS_FILEPATH = "pred_step1_rs.pkl"
 
 class FuturesIndustryDRollModule(MlpModule):
     """整合行业板块的总体模型"""              
@@ -79,10 +83,10 @@ class FuturesIndustryDRollModule(MlpModule):
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
                                     use_weighted_loss_func=use_weighted_loss_func,batch_file_path=batch_file_path,
                                     device=device,**kwargs)  
-        self.result_file_path = "custom/data/results/step1_rs.pkl"
-        self.result_file_path_step2 = "custom/data/results/step2_rs.pkl"
+        self.result_file_path = os.path.join(RESULT_FILE_PATH,RESULT_FILE_STEP1)
+        self.result_file_path_step2 = os.path.join(RESULT_FILE_PATH,RESULT_FILE_STEP2)
         # For pred step1 result
-        self.inter_rs_filepath = "custom/data/results/pred_step1_rs.pkl"
+        self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH,INTER_RS_FILEPATH)
         self.result_columns = ["date","indus_index","trend_flag","price_inf","ce_inf"]
         
         
@@ -797,6 +801,7 @@ class FuturesIndustryDRollModule(MlpModule):
             output_list = [cls_index,ce_index,output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
+            print("date in combine_result_data:{}".format(date))
             index_round_targets = index_round_targets_3d[i]
             # if self.train_step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
             #     continue  
@@ -826,8 +831,6 @@ class FuturesIndustryDRollModule(MlpModule):
             import_index,trend_value,indus_top_index,result_list,ins_result_list = self.build_import_index(output_data=output_list,target_info=target_info_list,
                             target=whole_target,price_target=price_target_list,index_round_targets=index_round_targets,date=date,
                             combine_instrument=combine_content,instrument_index=instrument_in_indus_index)
-            if date==20240822:
-                print("ggg")
             # 有可能没有候选数据
             if import_index is not None and import_index.shape[0]>0:
                 import_index = np.intersect1d(keep_index,import_index)  
@@ -1262,7 +1265,7 @@ class FuturesIndustryDRollModule(MlpModule):
     def on_predict_start(self):  
         if self.train_step_mode==2:
             # 第二阶段，首先加载预存结果
-            with open(self.result_file_path, "rb") as fin:
+            with open(self.inter_rs_filepath, "rb") as fin:
                 self.result_data = pickle.load(fin)   
                 
     def on_predict_epoch_start(self):  
