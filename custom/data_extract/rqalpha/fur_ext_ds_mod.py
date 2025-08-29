@@ -48,7 +48,7 @@ class ExtDataMod(AbstractMod):
         strategy_obj = self.env.user_strategy.user_context.strategy_class
         ml_context = self.env.user_strategy.user_context.ml_context
         # self.export_trade_data(strategy_obj)
-        self.analysis_stat(strategy_obj,ml_context=ml_context)
+        # self.analysis_stat(strategy_obj,ml_context=ml_context)
         return
     
     def export_trade_data(self,strategy_obj):
@@ -77,7 +77,7 @@ class ExtDataMod(AbstractMod):
         save_path = self.report_save_path + "/plot"
         # 取得预测数据和回测数据，并进行图形化展示
         for index,row in stat_df.iterrows():
-            trade_date = row["trade_date"]
+            trade_date = row["trade_datetime"]
             trade_date_str = trade_date.strftime('%Y%m%d')
             instrument = int(transfer_instrument(row["order_book_id"]))
             pred_df_item = pred_df[(pred_df["pred_date"]==int(trade_date_str))&(pred_df["instrument"]==instrument)]
@@ -94,7 +94,7 @@ class ExtDataMod(AbstractMod):
         """离线分析存储的历史交易数据"""
         
         trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
-        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+        trade_data_df = trade_data_df.sort_values(by=["trade_datetime","order_book_id"])
         # 只统计已完成订单
         target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
         # 以股票为维度聚合，进行分析
@@ -102,12 +102,12 @@ class ExtDataMod(AbstractMod):
         new_columns = TRADE_COLUMNS + TRADE_EXT_COLUMNS
         stat_data = []
         for name,instrument_df in group_df:
-            instrument_df = instrument_df.sort_values(by=["trade_date"]).reset_index(drop=True)
+            instrument_df = instrument_df.sort_values(by=["trade_datetime"]).reset_index(drop=True)
             for index,row in instrument_df.iterrows():
                 # 买卖分别配对，进行额度计算
                 if index%2==0 and row["side"]!=SIDE.BUY:
                     # 需要符合先买后卖原则
-                    logger.warning("buy index not fit:{},{}".format(index,row))
+                    # logger.warning("buy index not fit:{},{}".format(index,row))
                     break
                 if index%2==1 and row["side"]!=SIDE.SELL:
                     # 需要符合先买后卖原则
@@ -121,14 +121,14 @@ class ExtDataMod(AbstractMod):
                     # 计算手续费
                     commission = (row["price"] + buy_price) * row["quantity"] * 0.03/100
                     gain = (row["price"] - buy_price) * row["quantity"] - commission
-                    buy_day = prev_buy_row["trade_date"].strftime('%Y%m%d')
-                    sell_day = row["trade_date"].strftime('%Y%m%d')
+                    buy_day = prev_buy_row["trade_datetime"].strftime('%Y%m%d')
+                    sell_day = row["trade_datetime"].strftime('%Y%m%d')
                     duration = tradedays(buy_day,sell_day)
                     new_row = row.values.tolist() + [buy_price,differ_range,gain,buy_day,duration]
                     stat_data.append(new_row)
         stat_df = pd.DataFrame(np.array(stat_data),columns = new_columns)
         # 按照盈亏排序
-        stat_df = stat_df.sort_values(by=["trade_date"],ascending=True)
+        stat_df = stat_df.sort_values(by=["trade_datetime"],ascending=True)
         # 计算汇总数据
         total_gain = stat_df["gain"].sum()
         logger.info("total_gain:{}".format(total_gain))
@@ -138,7 +138,7 @@ class ExtDataMod(AbstractMod):
         """离线分析存储的期货历史交易数据"""
         
         trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
-        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+        trade_data_df = trade_data_df.sort_values(by=["trade_datetime","order_book_id"])
         # 只统计已完成订单
         target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
         # 以品种为维度聚合，进行分析
@@ -146,7 +146,7 @@ class ExtDataMod(AbstractMod):
         new_columns = TRADE_COLUMNS + FUTURE_TRADE_EXT_COLUMNS
         stat_data = []
         for name,instrument_df in group_df:
-            instrument_df = instrument_df.sort_values(by=["trade_date"]).reset_index(drop=True)
+            instrument_df = instrument_df.sort_values(by=["trade_datetime"]).reset_index(drop=True)
             last_item = None
             for index,row in instrument_df.iterrows():
                 # 买卖分别配对，进行额度计算
@@ -170,8 +170,8 @@ class ExtDataMod(AbstractMod):
                 # 此次盈亏金额
                 gain = differ * row["quantity"] * row['multiplier'] - commission
                 # 统计买卖周期
-                open_day = last_item["trade_date"].strftime('%Y%m%d')
-                close_day = row["trade_date"].strftime('%Y%m%d')
+                open_day = last_item["trade_datetime"].strftime('%Y%m%d')
+                close_day = row["trade_datetime"].strftime('%Y%m%d')
                 duration = tradedays(open_day,close_day)
                 new_row = row.values.tolist() + [open_price,differ_range,gain,open_day,duration]
                 stat_data.append(new_row)
@@ -179,7 +179,7 @@ class ExtDataMod(AbstractMod):
                 last_item = None
         stat_df = pd.DataFrame(np.array(stat_data),columns = new_columns)
         # 按照盈亏排序
-        stat_df = stat_df.sort_values(by=["trade_date"],ascending=True)
+        stat_df = stat_df.sort_values(by=["trade_datetime"],ascending=True)
         # 计算汇总数据
         total_gain = stat_df["gain"].sum()
         logger.info("total_gain:{}".format(total_gain))
@@ -243,7 +243,7 @@ class ExtDataMod(AbstractMod):
         pred_result_data = pred_result_data.sort_values(by=["date","instrument"])
         trade_data_df = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)   
         trade_data_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
-        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
+        trade_data_df = trade_data_df.sort_values(by=["trade_datetime","order_book_id"])
 
         result_data = []
         columns = ['date','instrument','yield_rate','trend_flag']
@@ -273,7 +273,7 @@ class ExtDataMod(AbstractMod):
                 result_row += [-1,order_book_id,trade_row['price'].values[0],0,trade_row['quantity'].values[0],0,0]
                 continue
             # 通过排序取得最近的配对交易
-            match_row = match_rows.sort_values(by=["trade_date"],ascending=True).iloc[0]
+            match_row = match_rows.sort_values(by=["trade_datetime"],ascending=True).iloc[0]
             price = trade_row['price'].values[0]
             close_price = match_row['price']
             quantity = trade_row['quantity'].values[0]
@@ -300,13 +300,13 @@ if __name__ == "__main__":
     ext_mod = ExtDataMod()
     file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/trade_data.csv"
     stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/stat_data.csv"
-    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/06/trade_data.csv"
+    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/11/trade_data.csv"
     stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/06/stat_data.csv"
     # file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/trade_data.csv"
     # stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"    
     # ext_mod.analysis_stat_offline(file_path,stat_path)
     # ext_mod.analysis_futures_stat_offline(file_path,stat_path)
-    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/06/pred_stat_data.csv"   
+    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/11/pred_stat_data.csv"   
     bt_savepath = "/home/qdata/workflow/fur_backtest_flow/trader_data/06/compare_data.csv"  
     pred_path = "custom/data/results/pred_coll.csv"
     ext_mod.analysis_futures_stat_offline(file_path,stat_path)

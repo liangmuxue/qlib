@@ -12,7 +12,7 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 # 交易信息表字段，分别为交易日期，品种代码，买卖类型，多空类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
-TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","long_short","price","quantity","total_price","status","order_id","close_reason","secondary_order_id"]
+TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","long_short","price","quantity","multiplier","total_price","status","order_id","close_reason","secondary_order_id"]
 TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
 LOCK_COLUMNS = ['date','order_book_id','instrument']
 
@@ -109,6 +109,8 @@ class FuturesTradeEntity(TradeEntity):
         """
         
         trade_data_df = self.trade_data_df
+        if trade_data_df.shape[0]==0:
+            return None        
         target_df = trade_data_df[(trade_data_df["order_book_id"]==order_book_id)
                                   &(trade_data_df["position_effect"]==position_effect)&
                                   (trade_data_df["trade_datetime"]<=pd.to_datetime(before_date))]

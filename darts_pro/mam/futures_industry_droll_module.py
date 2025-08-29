@@ -801,7 +801,6 @@ class FuturesIndustryDRollModule(MlpModule):
             output_list = [cls_index,ce_index,output_3d[4][i],output_3d[5][i],output_3d[6][i]]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list>-1)[0][0]]["future_start_datetime"])
-            print("date in combine_result_data:{}".format(date))
             index_round_targets = index_round_targets_3d[i]
             # if self.train_step_mode==2 and not (date>=STAT_DATE[0] and date<=STAT_DATE[1]):
             #     continue  

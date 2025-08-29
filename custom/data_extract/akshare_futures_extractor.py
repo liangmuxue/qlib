@@ -538,6 +538,7 @@ class AkFuturesExtractor(FutureExtractor):
                 futures_zh_minute_sina_df = futures_zh_minute_sina_df[
                     (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))>=begin_date)&
                     (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))<=end_date)]
+                futures_zh_minute_sina_df['code'] = code
                 futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
                 time.sleep(5)
             print("code:{} ok".format(code))
@@ -734,8 +735,8 @@ if __name__ == "__main__":
     # extractor.build_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
-    extractor.import_day_range_contract_data(data_range=(20250116,20250822))
+    # extractor.import_day_range_contract_data(data_range=(20250116,20250822))
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250701,20250819))
-    # extractor.import_day_range_1min_data(data_range=(20250626,20250628))
+    extractor.import_day_range_1min_data(data_range=(20250615,20250828))
             

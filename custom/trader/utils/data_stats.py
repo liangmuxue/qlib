@@ -11,6 +11,7 @@ from rqalpha.const import ORDER_STATUS,SIDE
 from data_extract.rqalpha.futures_ds import FuturesDataSource
 from trader.emulator.futures_real_ds import FuturesDataSourceSql
 from backtrader.utils import date
+from setuptools.tests.config.downloads import output_file
 
 # 回测整合记录项：date--日期，instrument--品种代码，trade_flag--交易标志('trade'-交易,'ignore'-忽略,'noclose'-无平仓,'lock'-锁定), order_book_id--合约编码，
 #       open_price--开仓价,close_price--平仓价,volume--成交量,side--成交方向(BUY-多方,SELL-空方)
@@ -36,6 +37,8 @@ class DataStats(object):
         self.combine_val_filepath = "val_combine.csv"
         self.combine_pred_filepath = "pred_combine.csv"
         self.combine_backtest_filepath = "backtest_combine.csv"
+        self.combine_simulation_filepath = "simulation_combine.csv"
+        self.backtest_analysys_filepath = "backtest_analysys.csv"
         
         stock_data_path = "/home/qdata/futures_data/juejin/main_1min"
         self.ds = FuturesDataSourceSql("/home/liang/.rqalpha/bundle",stock_data_path=stock_data_path,sim_path=stock_data_path,frequency_sim=False)        
@@ -102,8 +105,15 @@ class DataStats(object):
     def combine_backtest_result(self):
         """回测数据中整合实际结果"""
         
-        file_path = os.path.join(self.backtest_dir,"trade_data.csv")
-        lock_file_path = os.path.join(self.backtest_dir,"lock.csv")
+        trade_dir = self.backtest_dir
+        output_file = self.combine_backtest_filepath
+        self.combine_trade_result(trade_dir,output_file=output_file)
+        
+    def combine_trade_result(self,trade_dir,output_file=None):
+        """交易数据中整合实际结果"""
+        
+        file_path = os.path.join(trade_dir,"trade_data.csv")
+        lock_file_path = os.path.join(trade_dir,"lock.csv")
         val_path = os.path.join(self.work_dir,self.combine_val_filepath)
         val_result_data = pd.read_csv(val_path) 
         val_result_data = val_result_data.sort_values(by=["date","instrument"])
@@ -143,6 +153,7 @@ class DataStats(object):
                 continue
             # 向后查找到对应的平仓交易并记录
             order_book_id = trade_row['order_book_id'].values[0]
+            item['order_book_id'] = order_book_id
             item['open_price'] = trade_row['price'].values[0]
             item['side'] = trade_row['side'].values[0]
             item['quantity'] = trade_row['quantity'].values[0]
@@ -161,9 +172,38 @@ class DataStats(object):
             item_df = pd.DataFrame.from_dict(item,orient='index').T
             result_data = pd.concat([result_data,item_df])
         
-        combine_data_file = os.path.join(self.work_dir,self.combine_backtest_filepath)
+        combine_data_file = os.path.join(self.work_dir,output_file)
         result_data.to_csv(combine_data_file,index=False)      
-                
+    
+    def analysis_backtest(self):
+        """回测分析"""
+        
+        backtest_combine_file = os.path.join(self.work_dir,self.combine_backtest_filepath)
+        backtest_combine_data = pd.read_csv(backtest_combine_file) 
+        val_path = os.path.join(self.work_dir,self.combine_val_filepath)
+        val_result_data = pd.read_csv(val_path) 
+        # 先合并匹配回测数据和验证数据
+        combine_result_whole = pd.merge(backtest_combine_data,val_result_data,on=["date","instrument"],how="inner",validate="one_to_many")    
+        combine_result_whole['side_flag'] = np.where(combine_result_whole['side']==SIDE.BUY,1,-1)
+        # 关注具备交易的数据
+        combine_result = combine_result_whole[combine_result_whole['trade_flag']=='trade']
+        combine_result_with_lock = combine_result_whole[combine_result_whole['trade_flag'].isin(['trade','lock'])]
+        # 计算回测的涨跌幅度(毛利不计算手续费)
+        combine_result['gross_profit'] = (combine_result['close_price']-combine_result['open_price'])/combine_result['open_price']*combine_result['side_flag']
+        gross_profit = combine_result['gross_profit'].sum()
+        backtest_win_rate = np.sum(combine_result['gross_profit']>0)/combine_result.shape[0]
+        # 计算对应的验证涨跌幅度
+        combine_result['val_diff'] = (combine_result['secondday_open']-combine_result['prev_close'])/combine_result['prev_close']*combine_result['side_flag']
+        val_diff = combine_result['val_diff'].sum()
+        val_win_rate = np.sum(combine_result['val_diff']>0)/combine_result.shape[0]
+        combine_result_with_lock['val_diff'] = (combine_result_with_lock['secondday_open']-combine_result_with_lock['prev_close'])/combine_result_with_lock['prev_close']*combine_result_with_lock['side_flag']
+        val_diff_with_lock = combine_result_with_lock['val_diff'].sum()        
+        print("val_diff:{},val_win_rate:{},gross_profit:{},backtest_win_rate:{}".format(val_diff,val_win_rate,gross_profit,backtest_win_rate))
+        exp_filepath = os.path.join(self.work_dir,self.backtest_analysys_filepath)
+        combine_result = combine_result[["date","instrument","order_book_id","open_price",
+                       "close_price","side_flag","prev_close","secondday_open","secondday_close","val_diff","gross_profit"]]
+        combine_result.to_csv(exp_filepath,index=False)  
+                  
     def check_step_output(self):
         
         step1_file = os.path.join(self.work_dir,"step1_rs.pkl")
@@ -179,7 +219,7 @@ class DataStats(object):
         result_file_path = "/home/qdata/workflow/fur_sim_flow_2025/task/162/dump_data/pred_result.pkl"
         with open(result_file_path, "rb") as fin:
             result_data = pickle.load(fin)    
-        result_data['date'] = 20250825
+        result_data['date'] = 20250829
         # result_data.loc[result_data['instrument']=='ZC','instrument'] = 'AP'
         # result_data.loc[result_data['instrument']=='RR','instrument'] = 'CJ'
         # result_data.loc[result_data['instrument']=='PK','instrument'] = 'JD'
@@ -196,13 +236,13 @@ class DataStats(object):
 
      
 if __name__ == "__main__":
-    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/11")  
+    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/12")  
     # stats.check_step_output()
     # stats.combine_pred_result()
     # stats.combine_val_result()
-    # stats.mock_pred_data()
-    stats.combine_backtest_result()
-    
+    stats.mock_pred_data()
+    # stats.combine_backtest_result()
+    # stats.analysis_backtest()
     
     
     

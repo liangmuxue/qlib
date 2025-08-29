@@ -50,14 +50,34 @@ class Executor(threading.Thread):
         if now_time>auction_time and self.event_Coll[EVENT.OPEN_AUCTION]==0:
             self.event_Coll[EVENT.OPEN_AUCTION] = 1
             return EVENT.OPEN_AUCTION
-        # 9点进入正式交易时段，生成BAR事件
-        bar_time = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,9,0,0) 
-        if now_time>bar_time:
+        # 如果是交易时间段，则推送BAR事件
+        if self.is_openning(now_time):
             self.event_Coll[EVENT.BAR] += 1
             return EVENT.BAR        
         
         return None
-               
+    
+    def is_openning(self,cur_time):
+        """判断是否开盘"""
+        
+        # 9点-10点15，10:30--11:30,13:00--15:00
+        bar_time_begin = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,9,0,0) 
+        bar_time_end = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,10,15,0) 
+        if cur_time>bar_time_begin and cur_time<bar_time_end:
+            self.event_Coll[EVENT.BAR] += 1
+            return True        
+        bar_time_begin = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,10,30,0) 
+        bar_time_end = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,11,30,0) 
+        if cur_time>bar_time_begin and cur_time<bar_time_end:
+            self.event_Coll[EVENT.BAR] += 1
+            return True   
+        bar_time_begin = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,13,30,0) 
+        bar_time_end = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,15,0,0) 
+        if cur_time>bar_time_begin and cur_time<bar_time_end:
+            self.event_Coll[EVENT.BAR] += 1
+            return True   
+        return False
+                            
     def run(self):
         """模拟盘运行，循环并进行事件推送"""
         
@@ -226,9 +246,9 @@ class SimulationWorkflow():
             # 开仓指定品种
             # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
-            # self.strategy_class.clear_position()
+            self.strategy_class.clear_position()
             # self.strategy_class.clear_order()
-            self.strategy_class.query_position()     
+            # self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
             # orders = self.strategy_class.query_order_info("")
             # print("orders len:{}".format(len(orders)))

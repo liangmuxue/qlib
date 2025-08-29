@@ -753,7 +753,7 @@ class FurBacktestStrategy(SimStrategy):
         # 如果不在当日开仓列表中，再从存储中取，并懒加载
         if order_rtn is None:
             order = self.trade_entity.get_open_order_active(context.now.date().strftime("%Y%m%d"),order_book_id)
-            if order is not None:
+            if order is not None and order.shape[0]>0:
                 order_rtn = self.create_order(order_book_id, order['quantity'], order['side'], order['price'], order['position_effect'])
                 self.open_list[order_book_id] = order_rtn
         return order_rtn   
