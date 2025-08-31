@@ -906,8 +906,8 @@ if __name__ == "__main__":
     VolumeCondition = "1"
     MinVolume = "1"
     # InstrumentName = "zn2606"
-    tdImpl.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
-                       VolumeCondition, MinVolume)
+    # tdImpl.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, Price, Volume, TimeCondition,
+    #                    VolumeCondition, MinVolume)
     # print("OrderInsert .")
     # semaphore.acquire()
     # cancel order
@@ -922,6 +922,6 @@ if __name__ == "__main__":
     #
     time.sleep(3)
     # tdImpl.QryAccount()
-    tdImpl.QryPosition("")
-    # tdImpl.QryOrder("hc2510")
+    # tdImpl.QryPosition("")
+    tdImpl.QryOrder("ap510")
     input("################# 按任意键退出 \n")

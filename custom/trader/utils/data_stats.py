@@ -11,7 +11,6 @@ from rqalpha.const import ORDER_STATUS,SIDE
 from data_extract.rqalpha.futures_ds import FuturesDataSource
 from trader.emulator.futures_real_ds import FuturesDataSourceSql
 from backtrader.utils import date
-from setuptools.tests.config.downloads import output_file
 
 # 回测整合记录项：date--日期，instrument--品种代码，trade_flag--交易标志('trade'-交易,'ignore'-忽略,'noclose'-无平仓,'lock'-锁定), order_book_id--合约编码，
 #       open_price--开仓价,close_price--平仓价,volume--成交量,side--成交方向(BUY-多方,SELL-空方)
@@ -219,7 +218,7 @@ class DataStats(object):
         result_file_path = "/home/qdata/workflow/fur_sim_flow_2025/task/162/dump_data/pred_result.pkl"
         with open(result_file_path, "rb") as fin:
             result_data = pickle.load(fin)    
-        result_data['date'] = 20250829
+        result_data['date'] = 20250831
         # result_data.loc[result_data['instrument']=='ZC','instrument'] = 'AP'
         # result_data.loc[result_data['instrument']=='RR','instrument'] = 'CJ'
         # result_data.loc[result_data['instrument']=='PK','instrument'] = 'JD'

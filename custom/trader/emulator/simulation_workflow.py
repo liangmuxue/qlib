@@ -1,5 +1,5 @@
 from rqalpha.environment import Environment
-from rqalpha.core.events import EVENT
+from trader.rqalpha.core.event import EVENT
 
 import os
 import threading
@@ -51,7 +51,7 @@ class Executor(threading.Thread):
             self.event_Coll[EVENT.OPEN_AUCTION] = 1
             return EVENT.OPEN_AUCTION
         # 如果是交易时间段，则推送BAR事件
-        if self.is_openning(now_time):
+        if self.is_openning(now_time) or True:
             self.event_Coll[EVENT.BAR] += 1
             return EVENT.BAR        
         
@@ -170,6 +170,7 @@ class SimulationWorkflow():
         self.executor = Executor(datetime.now().date(),env=self)
         # 注册相关回调事件
         env.event_bus.add_listener(EVENT.DO_RESTORE, self.strategy_class.refresh_portfolio)   
+        env.event_bus.add_listener(EVENT.ORDER_UNCLOSE, self.strategy_class.on_order_handler)   
         env.event_bus.add_listener(EVENT.ORDER_CREATION_PASS, self.strategy_class.on_order_handler)     
         env.event_bus.add_listener(EVENT.ORDER_CREATION_REJECT, self.strategy_class.on_order_handler)  
         env.event_bus.add_listener(EVENT.TRADE, self.strategy_class.on_trade_handler)     
@@ -250,7 +251,7 @@ class SimulationWorkflow():
             # self.strategy_class.clear_order()
             # self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
-            # orders = self.strategy_class.query_order_info("")
+            # orders = self.strategy_class.query_order_info("jd2510")
             # print("orders len:{}".format(len(orders)))
             # self.strategy_class.query_account()   
             self.asis_execute = True

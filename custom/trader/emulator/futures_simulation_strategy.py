@@ -10,7 +10,8 @@ from rqalpha.apis import cal_style
 from trader.utils.constance import OrderStatusType
 from trader.emulator.portfolio import Portfolio,SimOrder
 from trader.rqalpha.ml_wf_context import FurWorkflowIntergrate
-from rqalpha.core.events import EVENT, Event
+from rqalpha.core.events import Event
+from trader.rqalpha.core.event import EVENT
 from trader.emulator.futures_backtest_strategy import FurBacktestStrategy,POS_COLUMNS
 from trader.rqalpha.dict_mapping import transfer_futures_order_book_id,transfer_instrument
 from trader.utils.date_util import tradedays,get_tradedays_dur
@@ -100,7 +101,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         context.ml_context.prepare_data(pred_date)        
         # 根据预测计算，筛选可以买入的品种
         candidate_list = self.get_candidate_list(pred_date,context=context)
-        # candidate_list = ["000702"]
+        # candidate_list = [(1,"AP")]
         self.lock_list = {}        
         candidate_order_list = {}  
         # 撤单列表
@@ -223,15 +224,18 @@ class FurSimulationStrategy(FurBacktestStrategy):
             self.context.get_trade_proxy().submit_order(order_in)
             return order_in
     
-    def cancel_order(self,order,ctp_order=None):
+    def cancel_order(self,order,need_ref=True):
         """撤单"""
         
         self.logger_info("cancel_order in ,order:{}".format(order.order_book_id))
         # 修改状态为待取消
         self.update_order_status(order,ORDER_STATUS.PENDING_CANCEL,side=order.side, context=self.context,price=order.price)     
         if "OrderSysID" not in order.kwargs:
-            # 需要取得ctp订单的特有信息,只关注当天的
-            orders = self.query_order_info(order.order_book_id)
+            # 取得ctp原订单信息,需要匹配引用订单号
+            if need_ref:
+                orders = self.query_order_info(order.order_book_id,ref_order_id=order.secondary_order_id)
+            else:
+                orders = self.query_order_info(order.order_book_id)
             if len(orders)==0:
                 logger.warning("no order in cancel:{}".format(order.order_book_id))
                 return
@@ -482,8 +486,18 @@ class FurSimulationStrategy(FurBacktestStrategy):
                 position_effect = POSITION_EFFECT.CLOSE_TODAY
             else:
                 position_effect = POSITION_EFFECT.CLOSE
-            order = self.create_order(order_book_id, quantity, side,close_price,position_effect=position_effect)
-            self.context.get_trade_proxy().submit_order(order)
+            
+            # 单笔最大数量限制
+            singel_quantity_limit = 3000
+            order_time = quantity//singel_quantity_limit + 1
+            for _ in range(order_time):
+                if quantity>singel_quantity_limit:
+                    single_quantity = singel_quantity_limit   
+                else:
+                    single_quantity =  quantity          
+                order = self.create_order(order_book_id, single_quantity, side,close_price,position_effect=position_effect)
+                self.context.get_trade_proxy().submit_order(order)
+                quantity = quantity - single_quantity
             
     def query_position(self):
         
@@ -506,15 +520,21 @@ class FurSimulationStrategy(FurBacktestStrategy):
         for order in orders:
             logger.info("order:{}".format(order))      
             
-    def query_order_info(self,order_code=""):
+    def query_order_info(self,order_code="",ref_order_id=None):
         """取得指定日期的订单"""
         
         ctp_trade_proxy = self.context.get_trade_proxy()
         cur_date = self.context.now.date()
-        orders = ctp_trade_proxy.get_day_orders(cur_date,order_code=order_code)
+        # orders = ctp_trade_proxy.get_day_orders(cur_date,order_code=order_code)
+        orders = ctp_trade_proxy.query_order_info(order_code)
+        order_rtn = []
         for order in orders:
-            logger.info("order:{}".format(order))   
-        return orders       
+            # 如果指定引用订单号，则需要匹配
+            if ref_order_id is not None and order.secondary_order_id!=ref_order_id:
+                continue
+            order_rtn.append(order)
+            logger.info("order:{}".format(order))      
+        return order_rtn       
                                
     def open_trade_order(self,order_book_id,side=SIDE.BUY,quantity=10):
         """开仓指定的品种"""
@@ -538,6 +558,6 @@ class FurSimulationStrategy(FurBacktestStrategy):
         for order in orders:
             # 针对未完成的进行撤单
             if order.status==ORDER_STATUS.ACTIVE:
-                self.cancel_order(order)
+                self.cancel_order(order,need_ref=False)
         
         

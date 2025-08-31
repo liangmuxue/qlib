@@ -87,14 +87,23 @@ class FuturesTradeEntity(TradeEntity):
     def update_status(self,order):
         """修改订单状态"""
         
-        print("update_order_status in,order:{}".format(order))
         # 通过订单编号定位记录并修改
         df = self.trade_data_df
         df.loc[df['order_id']==order.order_id,'status'] = order.status
         # 同时更新时间
         df.loc[df['order_id']==order.order_id,'update_datetime'] = datetime.datetime.now()
         self.exp_trade_data(self.save_path)  
-    
+
+    def update_ref_order_id(self,order):
+        """修改第二订单号"""
+        
+        # 通过订单编号定位记录并修改
+        df = self.trade_data_df
+        df.loc[df['order_id']==order.order_id,'secondary_order_id'] = order.secondary_order_id
+        # 同时更新时间
+        df.loc[df['order_id']==order.order_id,'update_datetime'] = datetime.datetime.now()
+        self.exp_trade_data(self.save_path) 
+            
     def get_trade_by_date(self,date):
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[trade_data_df["trade_datetime"]==pd.to_datetime(date)]

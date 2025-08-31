@@ -116,6 +116,13 @@ class FuturesRealDataSource(FuturesDataSource):
             return super().get_all_contract_names(date)
         contract_names = self.extractor_ak.get_day_contract()
         return contract_names        
+    
+    def build_order_ref_seq(self):
+        """订单引用编号生成，使用mysql的序列号进行维护"""
+        
+        sql = "SELECT NEXTVAL('order_ref')"  
+        order_ref = self.dbaccessor.do_query(sql,need_commit=True)[0][0]
+        return order_ref
 
 _STOCK_FIELD_NAMES = [
     'datetime', 'open', 'high', 'low', 'close', 'vol', 'amount'

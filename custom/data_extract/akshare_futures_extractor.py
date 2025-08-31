@@ -538,7 +538,7 @@ class AkFuturesExtractor(FutureExtractor):
                 futures_zh_minute_sina_df = futures_zh_minute_sina_df[
                     (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))>=begin_date)&
                     (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))<=end_date)]
-                futures_zh_minute_sina_df['code'] = code
+                futures_zh_minute_sina_df['code'] = contract_name
                 futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
                 time.sleep(5)
             print("code:{} ok".format(code))

@@ -1,10 +1,18 @@
 import time
-import os
+import numpy as np
+import pandas as pd
 import datetime
 from datetime import timedelta
-from rqalpha.apis import *
-from rqalpha.const import SIDE,ORDER_STATUS
+from typing import Iterable
+
+from rqalpha.apis.api_base import six,cal_style,assure_order_book_id,verify_that
+from rqalpha.const import SIDE,ORDER_STATUS,POSITION_EFFECT,POSITION_DIRECTION
+from trader.rqalpha.core.event import EVENT
 from rqalpha.data.bar_dict_price_board import BarDictPriceBoard
+from rqalpha.model import Instrument,Order
+from rqalpha.environment import Environment
+from rqalpha.utils.exception import RQInvalidArgument
+
 from trader.rqalpha.strategy_class.backtest_base import BaseStrategy,SellReason
 from trader.rqalpha.dict_mapping import transfer_futures_order_book_id,transfer_instrument
 from trader.rqalpha.futures_trade_entity import FuturesTradeEntity
@@ -906,6 +914,15 @@ class FurBacktestStrategy(SimStrategy):
     def on_order_handler(self,context, event):
         order = event.order
         self.logger_info("order handler,event_type::{},order:{}".format(event.event_type,event.order))
+        # 订单未成交事件
+        if event.event_type==EVENT.ORDER_UNCLOSE:
+            self.logger_info("ORDER_UNCLOSE:{},trade_date:{}".format(order.order_book_id,self.trade_day))
+            # 设置第二订单号
+            if order.order_book_id in self.open_list:
+                self.open_list[order.order_book_id].set_secondary_order_id(order.secondary_order_id)         
+            # 更新存储中的第二订单号              
+            self.trade_entity.update_ref_order_id(order)                    
+            return               
         # 未接单事件
         if order.status==ORDER_STATUS.PENDING_NEW:
             self.logger_info("order PENDING_NEW:{},trade_date:{}".format(order.order_book_id,self.trade_day))            
@@ -913,7 +930,7 @@ class FurBacktestStrategy(SimStrategy):
             self.update_order_status(order,ORDER_STATUS.PENDING_NEW,side=order.side, context=self.context)   
             # 更新存储状态               
             self.trade_entity.update_status(order)
-            return            
+            return     
         # 已接单事件
         if order.status==ORDER_STATUS.ACTIVE:
             self.logger_info("order active:{},trade_date:{}".format(order.order_book_id,self.trade_day))

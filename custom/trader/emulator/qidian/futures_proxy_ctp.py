@@ -1,6 +1,4 @@
-from trader.emulator.base_trade_proxy import BaseTrade
-from rqalpha.portfolio import Portfolio
-
+import random
 import copy
 import numpy as np
 import pandas as pd
@@ -16,9 +14,13 @@ from cus_utils.common_compute import round_to_tick
 import CTPAPI.build.thosttraderapi as tdapi 
 import CTPAPI.build.thostmduserapi as tuapi 
 
+from trader.emulator.base_trade_proxy import BaseTrade
+from rqalpha.portfolio import Portfolio
 from rqalpha.const import POSITION_DIRECTION,POSITION_EFFECT,ORDER_STATUS,SIDE
 from rqalpha.apis import Environment
-from rqalpha.core.events import EVENT, Event
+from rqalpha.core.events import Event
+from trader.rqalpha.core.event import EVENT
+
 from trader.rqalpha.model.trade import Trade
 from trader.utils.constance import OrderStatusType,CtpQueryType,CtpSyncFlag,OrderOffsetType
 from trader.utils.ctp_sync_proxy import CtpSyncProxy
@@ -175,7 +177,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         
     def OnErrRtnOrderInsert(self, pInputOrder: "CThostFtdcInputOrderField", pRspInfo: "CThostFtdcRspInfoField") -> "void":
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
-            print("OnErrRtnOrderInsert failed:ErrorMsg:{},ErrorID:{}".format(pRspInfo.ErrorMsg,pRspInfo.ErrorID))
+            print("OnErrRtnOrderInsert failed:{},OrderRef:{},ErrorMsg:{},ErrorID:{}".format(pInputOrder.InstrumentID,pInputOrder.OrderRef,pRspInfo.ErrorMsg,pRspInfo.ErrorID))
             self.listenner.on_order_failed(pInputOrder,reason_id=pRspInfo.ErrorID)
 
         # if pInputOrder is not None:
@@ -393,53 +395,6 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         if pOrder is None:
             logger.warning("pOrder None")
             return
-        # print(f"OnRspQryOrder:"
-        #       f"UserID={pOrder.UserID} "
-        #       f"BrokerID={pOrder.BrokerID} "
-        #       f"InvestorID={pOrder.InvestorID} "
-        #       f"ExchangeID={pOrder.ExchangeID} "
-        #       f"InstrumentID={pOrder.InstrumentID} "
-        #       f"Direction={pOrder.Direction} "
-        #       f"CombOffsetFlag={pOrder.CombOffsetFlag} "
-        #       f"CombHedgeFlag={pOrder.CombHedgeFlag} "
-        #       f"OrderPriceType={pOrder.OrderPriceType} "
-        #       f"LimitPrice={pOrder.LimitPrice} "
-        #       f"VolumeTotalOriginal={pOrder.VolumeTotalOriginal} "
-        #       f"FrontID={pOrder.FrontID} "
-        #       f"SessionID={pOrder.SessionID} "
-        #       f"OrderRef={pOrder.OrderRef} "
-        #       f"TimeCondition={pOrder.TimeCondition} "
-        #       f"GTDDate={pOrder.GTDDate} "
-        #       f"VolumeCondition={pOrder.VolumeCondition} "
-        #       f"MinVolume={pOrder.MinVolume} "
-        #       f"RequestID={pOrder.RequestID} "
-        #       f"InvestUnitID={pOrder.InvestUnitID} "
-        #       f"CurrencyID={pOrder.CurrencyID} "
-        #       f"AccountID={pOrder.AccountID} "
-        #       f"ClientID={pOrder.ClientID} "
-        #       f"IPAddress={pOrder.IPAddress} "
-        #       f"MacAddress={pOrder.MacAddress} "
-        #       f"OrderSysID={pOrder.OrderSysID} "
-        #       f"OrderStatus={pOrder.OrderStatus} "
-        #       f"StatusMsg={pOrder.StatusMsg} "
-        #       f"VolumeTotal={pOrder.VolumeTotal} "
-        #       f"VolumeTraded={pOrder.VolumeTraded} "
-        #       f"OrderSubmitStatus={pOrder.OrderSubmitStatus} "
-        #       f"TradingDay={pOrder.TradingDay} "
-        #       f"InsertDate={pOrder.InsertDate} "
-        #       f"InsertTime={pOrder.InsertTime} "
-        #       f"UpdateTime={pOrder.UpdateTime} "
-        #       f"CancelTime={pOrder.CancelTime} "
-        #       f"UserProductInfo={pOrder.UserProductInfo} "
-        #       f"ActiveUserID={pOrder.ActiveUserID} "
-        #       f"BrokerOrderSeq={pOrder.BrokerOrderSeq} "
-        #       f"TraderID={pOrder.TraderID} "
-        #       f"ClientID={pOrder.ClientID} "
-        #       f"ParticipantID={pOrder.ParticipantID} "
-        #       f"OrderLocalID={pOrder.OrderLocalID} "
-        #       )        
-        #
-
         p_status = str(pOrder.OrderStatus)
         # 从原订单转换为业务订单，避免C++数值传递问题
         side = SIDE.BUY if pOrder.Direction==0 else SIDE.SELL
@@ -451,6 +406,7 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         order.kwargs['FrontID'] = pOrder.FrontID
         order.kwargs['SessionID'] = str(pOrder.SessionID)
         order.kwargs['secondary_order_id'] = pOrder.OrderRef
+        order.set_secondary_order_id(str(pOrder.OrderRef))
         # 状态判断赋值
         if p_status==OrderStatusType.UnClosed.value:
             status = ORDER_STATUS.ACTIVE
@@ -778,8 +734,6 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         req.VolumeCondition = VolumeCondition
         if MinVolume != "":
             req.MinVolume = int(MinVolume)
-        req.OrderRef = str(self.OrderRef)
-        self.OrderRef = self.OrderRef + 1
         req.ForceCloseReason = tdapi.THOST_FTDC_FCC_NotForceClose
         req.ContingentCondition = tdapi.THOST_FTDC_CC_Immediately
         req.OrderLocalID = OrderRef
@@ -857,10 +811,13 @@ class CtpFuturesTrade(BaseTrade):
         # self.semaphore = threading.Semaphore(0)
         # self.semaphore.acquire()
     
-    def build_order_ref_id(self):
+    def build_order_ref_id(self,InstrumentID):
         
-        self.order_ref_id += 1
-        return self.order_ref_id
+        # 调用数据源中的mysql序列号递增函数实现引用编号的维护
+        data_source = self.context.env.data_source
+        order_ref_id = data_source.build_order_ref_seq()
+        
+        return order_ref_id
     
     ########################交易数据获取#################################  
     
@@ -879,7 +836,7 @@ class CtpFuturesTrade(BaseTrade):
         
         # 匹配已存储订单
         for order in self.order_queue:
-            if order.ref_id==order_ref_id:
+            if order.secondary_order_id==order_ref_id:
                 return order
         return None
 
@@ -921,7 +878,13 @@ class CtpFuturesTrade(BaseTrade):
     def query_order_info(self,order_code):
         """请求订单信息"""
         
-        orders = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder.value,order_code.lower(),wait_time=5,multiple=True)
+        data_source = self.context.env.data_source
+        
+        if order_code is not None and len(order_code)>0: 
+            # 校正合约编码转换
+            order_code  = data_source.rectification_order_book_id(order_code)        
+        
+        orders = self.sync_proxy.qry_sync_func(CtpQueryType.QryOrder.value,order_code,wait_time=5,multiple=True)
         
         if orders is None:
             return []
@@ -983,14 +946,16 @@ class CtpFuturesTrade(BaseTrade):
         MinVolume = "1"
         
         # 生成用于串接上下文的唯一编号
-        OrderRef = self.build_order_ref_id()
+        OrderRef = self.build_order_ref_id(InstrumentID)
         # 放入待处理队列
         order = copy.copy(order_in)
-        order.ref_id = str(OrderRef)
+        order.set_secondary_order_id(str(OrderRef))
         # 初始化结果空对象
         order.res_result = TradeOrderRes()
         self.order_queue.append(order)
-                
+        
+        logger.info("do submit,InstrumentID:{},OrderRef:{}".format(InstrumentID,OrderRef))
+        
         self.api.OrderInsert(ExchangeID, InstrumentID, Direction, Offset, PriceType, PriceRound, Volume, TimeCondition,
                        VolumeCondition, MinVolume,OrderRef=OrderRef)   
         
@@ -1025,8 +990,10 @@ class CtpFuturesTrade(BaseTrade):
         order = self.find_cache_order(pOrder.OrderRef)
         pOrder.InstrumentID = pOrder.InstrumentID.upper()
         if order is None:
-            logger.warning("order not in cache:{}".format(pOrder.OrderLocalID))
+            logger.warning("order not in cache:{}".format(pOrder.OrderRef))
             return
+        
+        logger.debug("order in on_order_rtn:{}".format(order))
         
         if pOrder.OrderStatus==OrderStatusType.Canceled.value:
             # 报错后发起相关错误流程
@@ -1100,7 +1067,7 @@ class CtpFuturesTrade(BaseTrade):
         self.context.add_busi_event(Event(EVENT.TRADE, account=account, trade=trade, order=order)) 
 
     def on_order_not_accept(self,pOrder):
-        """订单未提交事件"""        
+        """订单未成交事件"""        
 
         # 返回数据中包含本地上下文标识，用于本地存储的串接
         order_queue = self.find_cache_order(pOrder.OrderRef)
@@ -1108,12 +1075,13 @@ class CtpFuturesTrade(BaseTrade):
             logger.warning("order not in cache:{}".format(pOrder.OrderRef))
             return      
         order = copy.copy(order_queue) 
-        order.set_status(ORDER_STATUS.REJECTED) 
+        # 订单状态设置为活动，以便后续撤单并继续下单
+        order.set_status(ORDER_STATUS.ACTIVE) 
         logger.info("on_order_not_accept in,order:{}".format(order))
-        # 订单未提交事件,使用ORDER_CREATION_REJECT--订单拒绝事件表示    
+        # 订单未成交事件,使用ORDER_UNCLOSE表示，保证后续走撤单并提交新单流程
         env = Environment.get_instance()   
         account = env.get_account(order.order_book_id)  
-        self.context.add_busi_event(Event(EVENT.ORDER_CREATION_REJECT, account=account,order=order)) 
+        self.context.add_busi_event(Event(EVENT.ORDER_UNCLOSE, account=account,order=order)) 
         
     def on_order_accept(self,pOrder):
         """订单已提交事件"""        

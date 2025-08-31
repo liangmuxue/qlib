@@ -31,7 +31,7 @@ class DbAccessor():
                                database=self.database,
                                charset='utf8')
 
-    def do_query(self,sql_str,params=None):
+    def do_query(self,sql_str,params=None,need_commit=False):
         con = self.get_connection()
         cur = con.cursor()
         if params is None:
@@ -39,6 +39,9 @@ class DbAccessor():
         else:
             cur.execute(sql_str,params)
         rows = cur.fetchall()
+        # 使用一些带事务的函数，需要提交事务
+        if need_commit:
+            con.commit()
         cur.close()
         con.close()
         return rows
