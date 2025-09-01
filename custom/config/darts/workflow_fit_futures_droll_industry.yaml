@@ -82,7 +82,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_rsvIndusCciRange6_Step1_202410"
+               model_name: "Futures_cleanData_rsvIndusCciRange6_Step1_202411"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -106,8 +106,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2024-10-30]
-                valid: [2024-10-01, 2024-12-30]
+                train: [2006-01-01, 2024-11-30]
+                valid: [2024-11-01, 2025-01-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

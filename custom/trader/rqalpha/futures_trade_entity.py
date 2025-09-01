@@ -11,13 +11,12 @@ from .trade_entity import TradeEntity
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-# 交易信息表字段，分别为交易日期，品种代码，买卖类型，多空类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
-TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","long_short","price","quantity","multiplier","total_price","status","order_id","close_reason","secondary_order_id"]
-TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
-LOCK_COLUMNS = ['date','order_book_id','instrument']
+
 
 class FuturesTradeEntity(TradeEntity):
     """期货交易对象处理类"""
+
+    LOCK_COLUMNS = ['date','order_book_id','instrument']
     
     def __init__(
         self,
@@ -28,19 +27,19 @@ class FuturesTradeEntity(TradeEntity):
         if save_path is not None:
             self.trade_data_df = self.imp_trade_data(save_path)
             if self.trade_data_df is None or self.trade_data_df.shape[0]==0:
-                self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+                self.trade_data_df = pd.DataFrame(columns=self.TRADE_COLUMNS)
                 self.sys_orders = {} 
         else:
-            self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+            self.trade_data_df = pd.DataFrame(columns=self.TRADE_COLUMNS)
             # 映射系统订单
             self.sys_orders = {}            
 
         self.save_path = save_path
         # 锁定品种保存路径
         self.lock_save_path = os.path.join(os.path.dirname(self.save_path),"lock.csv")
-        self.lock_data = pd.DataFrame(columns=LOCK_COLUMNS)
+        self.lock_data = pd.DataFrame(columns=self.LOCK_COLUMNS)
         # 初始化交易日志数据
-        self.trade_log_df = pd.DataFrame(columns=TRADE_LOG_COLUMNS)
+        self.trade_log_df = pd.DataFrame(columns=self.TRADE_LOG_COLUMNS)
         self.log_save_path = log_save_path
     
     def set_trade_data(self,trade_data):
@@ -71,6 +70,8 @@ class FuturesTradeEntity(TradeEntity):
             secondary_order_id = 0       
         if "close_reason" in order:
             close_reason = order['close_reason'] 
+        elif "close_reason" in order.kwargs:
+            close_reason = order.kwargs['close_reason']             
         else:
             close_reason = None
         trade_datetime = order['trade_datetime']
@@ -236,7 +237,7 @@ class FuturesTradeEntity(TradeEntity):
         
         for item in lock_list:
             instrument = item[:-4]
-            item_data = pd.DataFrame(np.array([[date,item,instrument]]),columns=LOCK_COLUMNS)
+            item_data = pd.DataFrame(np.array([[date,item,instrument]]),columns=self.LOCK_COLUMNS)
             self.lock_data = pd.concat([self.lock_data,item_data])
         self.lock_data.to_csv(self.lock_save_path,index=False)
     

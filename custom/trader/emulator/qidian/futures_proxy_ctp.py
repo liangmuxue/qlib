@@ -996,8 +996,8 @@ class CtpFuturesTrade(BaseTrade):
         logger.debug("order in on_order_rtn:{}".format(order))
         
         if pOrder.OrderStatus==OrderStatusType.Canceled.value:
-            # 报错后发起相关错误流程
-            self.on_order_failed(pOrder,pOrder.StatusMsg)
+            # 撤单事件
+            self.on_order_cancel(pOrder,reason_id=0)
         elif pOrder.OrderStatus==OrderStatusType.UnClosed.value:
             # 报单未提交
             self.on_order_not_accept(pOrder)              
@@ -1072,7 +1072,7 @@ class CtpFuturesTrade(BaseTrade):
         # 返回数据中包含本地上下文标识，用于本地存储的串接
         order_queue = self.find_cache_order(pOrder.OrderRef)
         if order_queue is None:
-            logger.warning("order not in cache:{}".format(pOrder.OrderRef))
+            logger.warning("on_order_not_accept,order not in cache:{}".format(pOrder.OrderRef))
             return      
         order = copy.copy(order_queue) 
         # 订单状态设置为活动，以便后续撤单并继续下单
@@ -1089,7 +1089,7 @@ class CtpFuturesTrade(BaseTrade):
         # 返回数据中包含本地上下文标识，用于本地存储的串接
         order_queue = self.find_cache_order(pOrder.OrderRef)
         if order_queue is None:
-            logger.warning("order not in cache:{}".format(pOrder.OrderRef))
+            logger.warning("on_order_accept,order not in cache:{}".format(pOrder.OrderRef))
             return      
         order = copy.copy(order_queue) 
         order.set_status(ORDER_STATUS.ACTIVE) 
@@ -1105,7 +1105,7 @@ class CtpFuturesTrade(BaseTrade):
         # 返回数据中包含本地上下文标识，用于本地存储的串接
         order_queue = self.find_cache_order(pOrder.OrderRef)
         if order_queue is None:
-            logger.warning("order not in cache:{}".format(pOrder.OrderRef))
+            logger.warning("on_order_failed,order not in cache:{}".format(pOrder.OrderRef))
             return   
         order = copy.copy(order_queue) 
         logger.info("on_order_failed in,order_book_id:{},reason_id:{}".format(order.order_book_id,reason_id))
@@ -1118,8 +1118,15 @@ class CtpFuturesTrade(BaseTrade):
     def on_order_cancel(self,pOrder,reason_id=None):
         """撤单回报"""
         
+        order_queue = self.find_cache_order(pOrder.OrderRef)
+        if order_queue is None:
+            logger.warning("on_order_cancel,order not in cache:{}".format(pOrder.OrderRef))
+            return           
+        order = copy.copy(order_queue) 
+        logger.info("on_order_cancel in,order_book_id:{}".format(order.order_book_id))
         # 如果没有错误，则发起撤销事件
         if reason_id==0:
-            self.context.add_busi_event(Event(EVENT.ORDER_CANCELLATION_PASS, order=pOrder)) 
+            order.mark_cancelled(order.kwargs['close_reason'])
+            self.context.add_busi_event(Event(EVENT.ORDER_CANCELLATION_PASS, order=order)) 
               
         

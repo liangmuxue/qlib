@@ -51,7 +51,7 @@ class Executor(threading.Thread):
             self.event_Coll[EVENT.OPEN_AUCTION] = 1
             return EVENT.OPEN_AUCTION
         # 如果是交易时间段，则推送BAR事件
-        if self.is_openning(now_time) or True:
+        if self.is_openning(now_time):
             self.event_Coll[EVENT.BAR] += 1
             return EVENT.BAR        
         
@@ -60,6 +60,10 @@ class Executor(threading.Thread):
     def is_openning(self,cur_time):
         """判断是否开盘"""
         
+        emu_channel = self.env.env.config.mod.ext_emulation_mod.emu_channel
+        # 24小时模拟韩静，则不区分是否开盘时间
+        if emu_channel=="futures_40001":
+            return True
         # 9点-10点15，10:30--11:30,13:00--15:00
         bar_time_begin = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,9,0,0) 
         bar_time_end = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,10,15,0) 
@@ -167,12 +171,16 @@ class SimulationWorkflow():
         self.strategy_class.init_env()
         # 执行器
         self.executor = AsisExecutor(datetime.now().date(),env=self)
-        self.executor = Executor(datetime.now().date(),env=self)
+        if env.config.mod.ext_emulation_mod.asis_mode:
+            self.executor = AsisExecutor(datetime.now().date(),env=self)
+        else:
+            self.executor = Executor(datetime.now().date(),env=self,wait_time=env.config.extra.context_vars.strategy.open_opt.wait_time)
         # 注册相关回调事件
         env.event_bus.add_listener(EVENT.DO_RESTORE, self.strategy_class.refresh_portfolio)   
         env.event_bus.add_listener(EVENT.ORDER_UNCLOSE, self.strategy_class.on_order_handler)   
         env.event_bus.add_listener(EVENT.ORDER_CREATION_PASS, self.strategy_class.on_order_handler)     
         env.event_bus.add_listener(EVENT.ORDER_CREATION_REJECT, self.strategy_class.on_order_handler)  
+        env.event_bus.add_listener(EVENT.ORDER_CANCELLATION_PASS, self.strategy_class.on_order_handler)  
         env.event_bus.add_listener(EVENT.TRADE, self.strategy_class.on_trade_handler)     
         # 信号控制
         self.semaphore = threading.Semaphore(0)
@@ -248,7 +256,7 @@ class SimulationWorkflow():
             # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
             self.strategy_class.clear_position()
-            # self.strategy_class.clear_order()
+            self.strategy_class.clear_order()
             # self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
             # orders = self.strategy_class.query_order_info("jd2510")

@@ -10,13 +10,14 @@ from rqalpha.const import ORDER_STATUS
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
-# 交易信息表字段，分别为交易日期，股票代码，成交价格，成交量,总价格，成交状态，订单编号,卖出原因
-TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","position_effect","price","quantity","multiplier","total_price","status","order_id","sell_reason","secondary_order_id"]
-TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
-
 class TradeEntity():
     """交易对象处理类"""
-    
+
+    # 交易信息表字段，分别为交易日期，品种代码，买卖类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
+    TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","position_effect","price",
+                     "quantity","multiplier","total_price","status","order_id","close_reason","secondary_order_id"]
+    TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
+   
     def __init__(
         self,
         save_path=None,
@@ -26,20 +27,20 @@ class TradeEntity():
         if save_path is not None:
             self.trade_data_df = self.imp_trade_data(save_path)
             if self.trade_data_df is None or self.trade_data_df.shape[0]==0:
-                self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+                self.trade_data_df = pd.DataFrame(columns=self.TRADE_COLUMNS)
                 self.sys_orders = {} 
         else:
-            self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+            self.trade_data_df = pd.DataFrame(columns=self.TRADE_COLUMNS)
             # 映射系统订单
             self.sys_orders = {}            
 
         self.save_path = save_path
         # 初始化交易日志数据
-        self.trade_log_df = pd.DataFrame(columns=TRADE_LOG_COLUMNS)
+        self.trade_log_df = pd.DataFrame(columns=self.TRADE_LOG_COLUMNS)
         self.log_save_path = log_save_path
         
     def clear_his_data(self):
-        self.trade_data_df = pd.DataFrame(columns=TRADE_COLUMNS)
+        self.trade_data_df = pd.DataFrame(columns=self.TRADE_COLUMNS)
         self.exp_trade_data(self.save_path)
            
     def add_or_update_order(self,order,trade_day,only_add=False):
@@ -63,17 +64,17 @@ class TradeEntity():
         if secondary_order_id is None:
             secondary_order_id = 0
         
-        if hasattr(order, "sell_reason"):
-            sell_reason = order.sell_reason
+        if hasattr(order, "close_reason"):
+            close_reason = order.close_reason
         else:
-            sell_reason = 0
+            close_reason = 0
         update_datetime = datetime.datetime.now()
-        row_data = [trade_date,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,sell_reason,secondary_order_id]
+        row_data = [trade_date,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,close_reason,secondary_order_id]
         # logger.debug("row_data is:{}".format(row_data))
         row_data_np = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
         if self.trade_data_df.shape[0]==0:
-            self.trade_data_df = pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)
+            self.trade_data_df = pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)
             logger.debug("after add,self.trade_data_df:{}".format(self.trade_data_df))
         else:
             item_df = self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
@@ -91,14 +92,14 @@ class TradeEntity():
                 self.trade_data_df = self.trade_data_df[~((self.trade_data_df["order_book_id"]==order.order_book_id)&
                     (self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_day)&
                     (self.trade_data_df["position_effect"]==position_effect))]
-                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)], axis=0)
+                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)], axis=0)
                 # logger.debug("update trade,data:{}".format(row_data_np))
             else:
                 if row_data_np.shape[0]==0:
                     logger.warning("row_data_np empty")
                     return
                 # logger.debug("concat trade,data:{}".format(row_data_np))
-                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=TRADE_COLUMNS)], axis=0)
+                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)], axis=0)
         # 映射系统订单
         self.sys_orders[order.order_book_id] = order
         # 变更后保存数据
@@ -146,7 +147,7 @@ class TradeEntity():
         secondary_order_id = order.secondary_order_id
         if secondary_order_id is None:
             secondary_order_id = 0        
-        row_data = [trade_date,order_book_id,side,price,quantity,total_price,status,order_id,order.sell_reason,secondary_order_id]
+        row_data = [trade_date,order_book_id,side,price,quantity,total_price,status,order_id,order.close_reason,secondary_order_id]
         # 使用订单号查询并更新记录
         self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
         # 变更后保存数据
@@ -195,12 +196,14 @@ class TradeEntity():
         # 取得最后一个交易
         return target_df["trade_datetime"].dt.to_pydatetime().tolist()[-1].strftime('%Y%m%d') 
     
-    def get_order_list(self,trade_date=None):   
-        """取得指定日期的订单"""
+    def get_exits_order_list(self,trade_date=None):   
+        """取得指定日期的当前以报订单"""
         
         if self.trade_data_df.shape[0]==0:
             return self.trade_data_df
-        target_df = self.trade_data_df[(self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d') ==trade_date)]
+        # 查询已报单的活动中状态的记录
+        target_df = self.trade_data_df[(self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d') ==trade_date)&
+                                       (self.trade_data_df["status"]==ORDER_STATUS.ACTIVE)]
         return target_df  
         
     def get_sell_list_active(self,trade_date):   
@@ -274,6 +277,6 @@ class TradeEntity():
         # logger.debug("add log,row_data:{},now_time:{}".format(row_data,now_time))
         log_row_data = row_data + [now_time]
         log_row_data = np.expand_dims(np.array(log_row_data),axis=0)
-        self.trade_log_df = pd.concat([self.trade_log_df,pd.DataFrame(log_row_data,columns=TRADE_LOG_COLUMNS)], axis=0)
+        self.trade_log_df = pd.concat([self.trade_log_df,pd.DataFrame(log_row_data,columns=self.TRADE_LOG_COLUMNS)], axis=0)
         self.trade_log_df.to_csv(self.log_save_path,index=False)
         

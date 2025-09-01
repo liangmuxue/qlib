@@ -7,6 +7,7 @@ import numpy as np
 from rqalpha.environment import Environment
 from rqalpha.apis import cal_style
 
+from trader.rqalpha.strategy_class.backtest_base import SellReason
 from trader.utils.constance import OrderStatusType
 from trader.emulator.portfolio import Portfolio,SimOrder
 from trader.rqalpha.ml_wf_context import FurWorkflowIntergrate
@@ -110,7 +111,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         positions = self.get_positions()
         pos_number = len(positions)
         # 由于当前可能已经进入交易时间了，因此首先查找当日订单，并维护相关数据
-        exists_orders = self.trade_entity.get_order_list(context.now.date().strftime("%Y%m%d"))
+        exists_orders = self.trade_entity.get_exits_order_list(context.now.date().strftime("%Y%m%d"))
         exists_order_ids = []
         for index,row in exists_orders.iterrows():
             if self.get_position(row['order_book_id']) is None:
@@ -475,9 +476,9 @@ class FurSimulationStrategy(FurBacktestStrategy):
             # 取值需要低于当前行情，以保证成交
             price = self.get_last_price(order_book_id)
             if side==SIDE.SELL:
-                close_price = int(price - price * 0.03)
+                close_price = int(price - price * 0.01)
             else:
-                close_price = int(price + price * 0.03)
+                close_price = int(price + price * 0.01)
             quantity = pos.quantity
             if quantity==0:
                 continue
@@ -488,14 +489,15 @@ class FurSimulationStrategy(FurBacktestStrategy):
                 position_effect = POSITION_EFFECT.CLOSE
             
             # 单笔最大数量限制
-            singel_quantity_limit = 3000
+            singel_quantity_limit = 300
             order_time = quantity//singel_quantity_limit + 1
             for _ in range(order_time):
                 if quantity>singel_quantity_limit:
                     single_quantity = singel_quantity_limit   
                 else:
                     single_quantity =  quantity          
-                order = self.create_order(order_book_id, single_quantity, side,close_price,position_effect=position_effect)
+                close_reason = SellReason.FORCE_CLOSE.value
+                order = self.create_order(order_book_id, single_quantity, side,close_price,position_effect=position_effect,close_reason=close_reason)
                 self.context.get_trade_proxy().submit_order(order)
                 quantity = quantity - single_quantity
             
@@ -533,7 +535,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
             if ref_order_id is not None and order.secondary_order_id!=ref_order_id:
                 continue
             order_rtn.append(order)
-            logger.info("order:{}".format(order))      
+            logger.info("order in query:{}".format(order))      
         return order_rtn       
                                
     def open_trade_order(self,order_book_id,side=SIDE.BUY,quantity=10):
