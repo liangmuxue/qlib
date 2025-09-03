@@ -445,6 +445,12 @@ class FurBacktestStrategy(SimStrategy):
             return
         for index,close_item in close_list_active.iterrows():
             close_order = self.get_today_closed_order(close_item.order_book_id,context=context)
+            if "last_cancel_time" in close_order.kwargs:
+                # 如果和上次撤单时间间隔太短，则忽略
+                last_cancel_time = close_order.kwargs["last_cancel_time"]
+                interval_time = (context.now() - last_cancel_time).seconds 
+                if interval_time < 1*60:
+                    continue
             price_now = self.get_last_price(close_item.order_book_id)
             # 止盈平仓未成交，以当前价格重新挂单
             if close_order.kwargs["close_reason"]==SellReason.STOP_RAISE.value:
@@ -519,7 +525,7 @@ class FurBacktestStrategy(SimStrategy):
             # 等待,累加等待时间值
             open_order.kwargs['try_cnt']  += 1               
         
-        # 已拒绝订单，重新按照现在价格下单
+        # 已拒绝开仓订单，重新按照现在价格下单
         open_list_reject = self.trade_entity.get_open_list_reject(str(self.trade_day))
         for index,open_item in open_list_reject.iterrows():
             price_now = self.get_last_price(open_item.order_book_id)
@@ -533,9 +539,11 @@ class FurBacktestStrategy(SimStrategy):
         for index,close_item in close_list_reject.iterrows():
             price_now = self.get_last_price(close_item.order_book_id)
             # 修改状态    
-            self.update_order_status(close_item,ORDER_STATUS.PENDING_NEW,side=open_item.side, context=context)      
+            self.update_order_status(close_item,ORDER_STATUS.PENDING_NEW,side=close_item.side, context=context)      
             # 更新报价     
             self.close_list[close_item.order_book_id].kwargs["price"] = price_now  
+            # 设置撤单时间，避免多次重复撤单
+            self.close_list[close_item.order_book_id].kwargs["last_cancel_time"] = context.now
                                             
     ###############################数据逻辑处理部分########################################  
 
@@ -771,11 +779,20 @@ class FurBacktestStrategy(SimStrategy):
     def get_today_closed_order(self,order_book_id,context=None):
         """取得当日平仓列表"""
         
+        order_rtn = None
         if order_book_id in self.close_list:
             order = self.close_list[order_book_id]
             if order.position_effect==POSITION_EFFECT.CLOSE:
-                return order
-        return None 
+                order_rtn = order
+        # 如果不在当日平仓列表中，再从存储中取，并懒加载
+        if order_rtn is None:
+            order = self.trade_entity.get_close_order_active(context.now.date().strftime("%Y%m%d"),order_book_id)
+            if order is not None and order.shape[0]>0:
+                close_reason = order['close_reason']
+                order_rtn = self.create_order(order_book_id, order['quantity'], order['side'], 
+                                    order['price'], position_effect=order['position_effect'],close_reason=close_reason)
+                self.close_list[order_book_id] = order_rtn            
+        return order_rtn 
        
     def check_instrument(self,instrument,date):
         """检查当前交易日指定品种是否可以交易"""
@@ -972,7 +989,7 @@ class FurBacktestStrategy(SimStrategy):
                     increase_price = int(price_now * increase_range)
                     if increase_price<3:
                         increase_price = 3
-                    side_flag = 1 if order.side==SIDE.BUY else -1
+                    side_flag = 1 if order.position_direction==POSITION_DIRECTION.LONG else -1
                     price_now = price_now + increase_price * side_flag
                     # 创建新订单对象并重置原数据
                     order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,position_effect=POSITION_EFFECT.OPEN)
@@ -984,6 +1001,14 @@ class FurBacktestStrategy(SimStrategy):
             else:
                 # 平仓撤单，按照当前时间段的价格重新挂单        
                 self.logger_info("need resub close order:{}".format(order))
+                price_now = self.get_last_price(order.order_book_id)
+                # 根据配置减价一定的幅度，以保证成交
+                increase_range = self.strategy.open_opt.increase_range   
+                increase_price = int(price_now * increase_range)
+                if increase_price<3:
+                    increase_price = 3
+                side_flag = 1 if order.position_direction==POSITION_DIRECTION.LONG else -1
+                price_now = price_now - increase_price * side_flag                
                 # 创建新订单对象并重置原数据
                 order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,close_reason=order.kwargs['close_reason'],position_effect=POSITION_EFFECT.CLOSE)
                 self.close_list[order.order_book_id] = order_resub

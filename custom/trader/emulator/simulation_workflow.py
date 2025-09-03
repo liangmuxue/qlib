@@ -256,7 +256,7 @@ class SimulationWorkflow():
             # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
             self.strategy_class.clear_position()
-            self.strategy_class.clear_order()
+            # self.strategy_class.clear_order()
             # self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
             # orders = self.strategy_class.query_order_info("jd2510")

@@ -175,7 +175,7 @@ class FuturesTradeEntity(TradeEntity):
         """取得指定未成交开仓订单"""
 
         if self.trade_data_df.shape[0]==0:
-            return self.trade_data_df
+            return None
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.OPEN)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
                                       (trade_data_df["order_book_id"]==order_book_id)&
@@ -184,6 +184,22 @@ class FuturesTradeEntity(TradeEntity):
             return None    
         return target_df.iloc[0]
        
+    def get_close_order_active(self,trade_date,order_book_id):   
+        """取得指定未成交平仓订单"""
+
+        if self.trade_data_df.shape[0]==0:
+            return None
+        trade_data_df = self.trade_data_df
+        if trade_date is not None:
+            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
+                                      (trade_data_df["order_book_id"]==order_book_id)&
+                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]      
+        else:
+            target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]   
+        if target_df.shape[0]==0:
+            return None                              
+        return target_df.iloc[0]
+
     def get_close_list_active(self,trade_date):   
         """取得所有未成交平仓订单"""
 
@@ -196,7 +212,7 @@ class FuturesTradeEntity(TradeEntity):
         else:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]                  
         return target_df  
-    
+        
     def get_open_list_reject(self,trade_date):   
         """取得所有被拒绝的开仓订单"""
 

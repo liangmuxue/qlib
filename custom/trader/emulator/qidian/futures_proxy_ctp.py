@@ -925,6 +925,7 @@ class CtpFuturesTrade(BaseTrade):
         InstrumentID  = data_source.rectification_order_book_id(InstrumentID)
         Direction = tuapi.THOST_FTDC_DEN_Buy if order_in.side==SIDE.BUY else tuapi.THOST_FTDC_DEN_Sell
         Direction = str(Direction)
+        # 平今和平昨的区分
         if order_in.position_effect==POSITION_EFFECT.OPEN:
             Offset = OrderOffsetType.OPEN.value
         elif order_in.position_effect==POSITION_EFFECT.CLOSE_TODAY:

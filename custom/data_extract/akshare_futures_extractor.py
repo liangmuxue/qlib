@@ -648,8 +648,8 @@ if __name__ == "__main__":
     # print(futures_rule_df)
     # futures_rule_df.to_csv(save_path+ "/rule.csv",index=False)
     # 合约情况
-    # contract_df = ak.match_main_contract(symbol="shfe") 
-    # print(contract_df)
+    contract_df = ak.match_main_contract(symbol="shfe") 
+    print(contract_df)
     # hist_em = ak.futures_hist_table_em() 
     # print(hist_em)
     
@@ -738,5 +738,5 @@ if __name__ == "__main__":
     # extractor.import_day_range_contract_data(data_range=(20250116,20250822))
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250701,20250819))
-    extractor.import_day_range_1min_data(data_range=(20250615,20250828))
+    # extractor.import_day_range_1min_data(data_range=(20250615,20250828))
             

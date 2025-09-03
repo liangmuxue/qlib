@@ -55,9 +55,19 @@ class FuturesRealDataSource(FuturesDataSource):
             all_contracts = pd.DataFrame(np.array(all_contracts),columns=['code','main_contract_code'])
             
         self.all_contracts = all_contracts
-        if cache_mode:
-            with open(contract_data_file, "wb") as fout:
-                pickle.dump(all_contracts, fout)              
+        self.check_instrument_match(all_contracts['code'].values)
+        with open(contract_data_file, "wb") as fout:
+            pickle.dump(all_contracts, fout)              
+    
+    def check_instrument_match(self,cur_instruments):
+        """检查训练中的数据与实际品种数据的匹配度"""
+        
+        ins_file_path = "/home/qdata/qlib_data/futures_data/instruments/clean_data.txt"
+        # 从品种列表文件中选取需要导入的品种
+        ins_data = pd.read_table(ins_file_path,sep='\t',header=None)         
+        training_instrument = np.array([row[0] for row in ins_data.values])
+        diff_data = np.setdiff1d(training_instrument, cur_instruments, assume_unique=False) 
+        print("diff_data:{}".format(diff_data))
     
     def get_last_price(self,order_book_id,dt):
         """取得指定标的最近报价信息"""
@@ -154,14 +164,12 @@ class FuturesDataSourceSql(FuturesDataSource):
 
     def get_continue_data_by_day(self,symbol,day):
         """取得指定品种和对应日期的主力连续交易记录"""
-        try:
-            column_str = ','.join([str(i) for i in _FUTURE_CONTINUES_FIELD_NAMES])
-            item_sql = "select {} from dominant_continues_data where code='{}' " \
-                "and Date(date)='{}'".format(column_str,symbol,date_string_transfer(day))     
-            SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-            item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_CONTINUES_FIELD_NAMES)
-        except Exception as e:
-            print("eee")
+        
+        column_str = ','.join([str(i) for i in _FUTURE_CONTINUES_FIELD_NAMES])
+        item_sql = "select {} from dominant_continues_data where code='{}' " \
+            "and Date(date)='{}'".format(column_str,symbol,date_string_transfer(day))     
+        SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
+        item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_CONTINUES_FIELD_NAMES)
         return item_data
     
     def get_time_data_by_day(self,day,symbol):

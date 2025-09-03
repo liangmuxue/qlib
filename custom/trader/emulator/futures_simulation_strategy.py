@@ -69,10 +69,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
         # 加载当日可以交易的合约品种
-        self.data_source.load_all_contract()
-        # 投资组合信息加载，包括账户、持仓、交易等
-        persis_path = env.config.extra.persis_path
-
+        self.data_source.load_all_contract(cache_mode=True)
         # 根据开仓数量配置，设置开仓列表
         position_max_number = self.strategy.position_max_number
         self.open_list = {} 
@@ -84,8 +81,6 @@ class FurSimulationStrategy(FurBacktestStrategy):
         portfolio = self.sync_portfolio(cur_date,por_info)    
         logger.info("account info:{}".format(portfolio.get_account()))
         env.set_portfolio(portfolio)   
-        # 保存投资组合数据到本地存储
-        # TODO
         # 同步当日订单
         if emu_args.sync_data:
             orders = self.sync_orders(cur_date,por_info)   
@@ -102,7 +97,8 @@ class FurSimulationStrategy(FurBacktestStrategy):
         context.ml_context.prepare_data(pred_date)        
         # 根据预测计算，筛选可以买入的品种
         candidate_list = self.get_candidate_list(pred_date,context=context)
-        # candidate_list = [(1,"AP")]
+        candidate_list = [(1,"NI"),(1,"SN"),(1,"WR")]
+        
         self.lock_list = {}        
         candidate_order_list = {}  
         # 撤单列表
