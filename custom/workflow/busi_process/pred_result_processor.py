@@ -9,7 +9,7 @@ from qlib.utils import flatten_dict, get_callable_kwargs, init_instance_by_confi
 from .base_processor import BaseProcessor
 from trader.utils.date_util import get_tradedays_dur,date_string_transfer
 from persistence.common_dict import CommonDictEnum,CommonDict,CommonDictType
-from trader.utils.date_util import get_tradedays_dur
+from trader.utils.date_util import get_months_ago
 
 class PredResultProcessor(BaseProcessor):
     
@@ -24,6 +24,7 @@ class PredResultProcessor(BaseProcessor):
         dataset_template = real_template["task"]["dataset"]
         record_template = real_template["task"]["record"][0]
         
+        cur_date = datetime.strptime(str(working_day),'%Y%m%d')
         start_date = str(config["start_date"])
         start_date = date_string_transfer(start_date)
         # 结束时间取当前日期
@@ -32,7 +33,6 @@ class PredResultProcessor(BaseProcessor):
         end_date_fmt = datetime.strptime(end_date, "%Y%m%d").date()
         # 总数据集定义的开始结束时间,其中结束日期与当前任务日期匹配
         real_template["data_handler_config"]["end_date"] = end_date_fmt
-        # dataset数据集定义的开始结束时间   
         # 验证集开始日期前推3个月
         valid_start_date = get_tradedays_dur(end_date,-30*3)
         # 验证集结束日期为当日
@@ -52,9 +52,9 @@ class PredResultProcessor(BaseProcessor):
         model_template["kwargs"]["batch_file_path"] = os.path.join(asis_path,self.wf_task.get_matched_batchfile_name(working_day,
                                                                     task_type=CommonDictEnum.WORK_TYPE__PRED.value)) 
         record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
-        # 设置模型路径
-        # train_sub_path = self.wf_task.get_matched_model_file_name(working_day,task_type=CommonDictEnum.WORK_TYPE__TRAIN.value)
-        train_sub_path = model_template["kwargs"]["optargs"]["data_path"]
+        # 设置模型路径,根据当前日期所在月份，向前倒推2个月
+        target_month = get_months_ago(cur_date,2)
+        train_sub_path = target_month
         model_template["kwargs"]["optargs"]["work_dir"] = os.path.join(self.wf_task.get_model_path(),train_sub_path) 
         # 设置中间结果路径
         model_template["kwargs"]["optargs"]["inter_rs_filepath"] = os.path.join(self.wf_task.get_dumpdata_path(),"pred_step1_rs.pkl") 

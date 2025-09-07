@@ -130,7 +130,7 @@ class WorkflowTask(object):
                             continue
                 else:        
                     task_entity = self.task_store.get_subtask(main_task_id=self.task_obj["id"],config_id=sub_task.config["id"],working_day=working_day)
-                    # 如果之前的状态是已成功，则跳过
+                    # 如果之前的子任务状态是已成功，则跳过
                     if self.status_judge(task_entity["status"]):
                         continue    
                 # 启动子任务         

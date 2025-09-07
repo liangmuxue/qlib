@@ -9,7 +9,7 @@ from rqalpha.const import SIDE
 
 from trader.emulator.futures_real_ds import FuturesDataSourceSql
 from data_extract.rqalpha.futures_ds import FuturesDataSource
-from trader.rqalpha.futures_trade_entity import TRADE_COLUMNS
+from trader.rqalpha.futures_trade_entity import FuturesTradeEntity
 from trader.utils.date_util import tradedays
 from trader.data_viewer import DataViewer
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
@@ -20,7 +20,9 @@ logger = AppLogger()
 TRADE_EXT_COLUMNS = ["buy_price","differ_range","gain","buy_date","duration"]
 # 期货交易扩展信息用于统计，字段包括：开仓价，差幅、盈亏金额, 开仓日期，买卖间隔天数
 FUTURE_TRADE_EXT_COLUMNS = ["open_price","differ_range","gain","open_date","duration"]
-
+TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","position_effect","price",
+                 "quantity","multiplier","total_price","status","order_id","close_reason","secondary_order_id"]
+    
 class ExtDataMod(AbstractMod):
     """用于加载自定义数据源"""
     
@@ -300,8 +302,8 @@ if __name__ == "__main__":
     ext_mod = ExtDataMod()
     file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/trade_data.csv"
     stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/stat_data.csv"
-    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/11/trade_data.csv"
-    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/06/stat_data.csv"
+    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/03/trade_data.csv"
+    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/03/stat_data.csv"
     # file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/trade_data.csv"
     # stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"    
     # ext_mod.analysis_stat_offline(file_path,stat_path)

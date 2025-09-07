@@ -542,8 +542,6 @@ class FurBacktestStrategy(SimStrategy):
             self.update_order_status(close_item,ORDER_STATUS.PENDING_NEW,side=close_item.side, context=context)      
             # 更新报价     
             self.close_list[close_item.order_book_id].kwargs["price"] = price_now  
-            # 设置撤单时间，避免多次重复撤单
-            self.close_list[close_item.order_book_id].kwargs["last_cancel_time"] = context.now
                                             
     ###############################数据逻辑处理部分########################################  
 
@@ -1011,6 +1009,7 @@ class FurBacktestStrategy(SimStrategy):
                 price_now = price_now - increase_price * side_flag                
                 # 创建新订单对象并重置原数据
                 order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,close_reason=order.kwargs['close_reason'],position_effect=POSITION_EFFECT.CLOSE)
+                # 设置撤单时间，避免多次重复撤单
+                order_resub.kwargs["last_cancel_time"] = context.now                
                 self.close_list[order.order_book_id] = order_resub
-                self.logger_debug("resub closelist set end:{}".format(order.order_book_id))            
                     

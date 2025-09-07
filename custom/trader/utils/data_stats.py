@@ -70,10 +70,10 @@ class DataStats(object):
         combine_data_file = os.path.join(self.work_dir,self.combine_val_filepath)
         results.to_csv(combine_data_file,index=False)  
         
-    def combine_pred_result(self):
+    def combine_pred_result(self,pred_dir=None):
         """预测数据中整合实际结果"""
 
-        pred_result_file = os.path.join(self.work_dir,"pred_result.pkl")
+        pred_result_file = os.path.join(pred_dir,"pred_result.pkl")
         with open(pred_result_file, "rb") as fin:
             instrument_result_data = pickle.load(fin)  
                     
@@ -101,6 +101,28 @@ class DataStats(object):
         combine_data_file = os.path.join(self.work_dir,self.combine_pred_filepath)
         results.to_csv(combine_data_file,index=False)         
 
+    def match_val_and_pred(self,val_result_file,pred_result_file,date_range=[20241201,20241231]):
+        """匹配验证结果和预测结果是否一致"""
+
+        step2_file = os.path.join(self.work_dir,val_result_file)
+        with open(step2_file, "rb") as fin:
+            instrument_result_data = pickle.load(fin)  
+
+        with open(pred_result_file, "rb") as fin:
+            pred_result_data = pickle.load(fin)  
+                                
+        date_list = instrument_result_data[(instrument_result_data['date']>=date_range[0])
+                                &(instrument_result_data['date']<=date_range[1])].sort_values().unique()
+        match_results = {}
+        for date in date_list:
+            cur_day = datetime.strptime(str(date), "%Y%m%d")
+            val_item = instrument_result_data[instrument_result_data['date']==date]
+            pred_item = pred_result_data[pred_result_data['date']==date]
+            mat_res = np.intersect1d(val_item['instrument'].values,pred_item['instrument'].values)
+            match_results[date] = mat_res
+        
+        match_results
+        
     def combine_backtest_result(self):
         """回测数据中整合实际结果"""
         
@@ -235,11 +257,12 @@ class DataStats(object):
 
      
 if __name__ == "__main__":
-    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/12")  
+    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03")  
     # stats.check_step_output()
-    # stats.combine_pred_result()
+    # stats.combine_pred_result(pred_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03")
+    stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
     # stats.combine_val_result()
-    stats.mock_pred_data()
+    # stats.mock_pred_data()
     # stats.combine_backtest_result()
     # stats.analysis_backtest()
     

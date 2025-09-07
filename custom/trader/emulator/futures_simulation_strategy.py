@@ -97,7 +97,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         context.ml_context.prepare_data(pred_date)        
         # 根据预测计算，筛选可以买入的品种
         candidate_list = self.get_candidate_list(pred_date,context=context)
-        candidate_list = [(1,"NI"),(1,"SN"),(1,"WR")]
+        candidate_list = [(0,"A"),(0,"C"),(0,"WR")]
         
         self.lock_list = {}        
         candidate_order_list = {}  
@@ -108,12 +108,20 @@ class FurSimulationStrategy(FurBacktestStrategy):
         pos_number = len(positions)
         # 由于当前可能已经进入交易时间了，因此首先查找当日订单，并维护相关数据
         exists_orders = self.trade_entity.get_exits_order_list(context.now.date().strftime("%Y%m%d"))
-        exists_order_ids = []
+        exists_order_ids = {}
         for index,row in exists_orders.iterrows():
-            if self.get_position(row['order_book_id']) is None:
+            pos = self.get_position(row['order_book_id'])
+            # 除了品种代码一致外，方向也需要一致
+            if pos is None:
                 # 如果不在持仓中，才累加pos总数
                 pos_number += 1
-            exists_order_ids.append(row['order_book_id'])
+            else:
+                trend_flag = 1 if pos.direction==POSITION_DIRECTION.LONG else 0
+                trade_data_trend = 1 if row['side']==SIDE.BUY else 0
+                if trade_data_trend!=trend_flag:
+                    pos_number += 1
+                else:
+                    exists_order_ids[row['order_book_id']] = trend_flag
         # 处理候选列表
         for item in candidate_list:
             trend = item[0]
@@ -125,7 +133,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
             # 代码转化为标准格式
             order_book_id = self.data_source.transfer_futures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
             # 如果已在订单中，则忽略
-            if order_book_id in exists_order_ids:
+            if order_book_id in exists_order_ids and trend==exists_order_ids[order_book_id]:
                 continue            
             # 以昨日收盘价格作为当前卖盘价格
             h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="settle")
@@ -368,7 +376,14 @@ class FurSimulationStrategy(FurBacktestStrategy):
         env = Environment.get_instance()
         return env.portfolio
 
-
+    def match_position_order(self,pos,exists_order):
+        """持仓和订单进行比较，查看是否属于一个品种"""
+        
+        # 除了品种代码一致外，方向也需要一致
+        if pos.order_book_id==exists_order.order_book_id and pos.position_effect==exists_order.position_effect:
+            return True
+        return False
+        
     def get_position(self,order_book_id):
         """取得指定品种的持仓信息，使用当前策略维护的仓位数据"""
         

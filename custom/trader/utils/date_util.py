@@ -140,6 +140,13 @@ def get_first_and_last_datetime(day):
     
     return first_timestamp,last_timestamp
 
+def get_months_ago(date,months=1):
+    """取得指定日期前几个月的时间日期"""
+    
+    ago_time = date - relativedelta(months=months)
+    target_month = ago_time.strftime('%Y%m')
+    return target_month
+
 def get_previous_month(date):
     """取得上个月月份字符串"""
     

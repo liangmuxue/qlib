@@ -2,6 +2,7 @@ from data_extract.his_data_extractor import HisDataExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 
+import copy
 import re
 import time
 import datetime
@@ -18,7 +19,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from trader.utils.date_util import get_next_working_day,get_next_month,is_working_day
+from trader.utils.date_util import get_next_working_day,get_next_month,is_working_day,date_string_transfer
 from cus_utils.log_util import AppLogger
 from data_extract.his_data_extractor import FutureExtractor,get_period_name
 from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_minute_sina
@@ -593,19 +594,45 @@ class AkFuturesExtractor(FutureExtractor):
         qlib_dir = "/home/qdata/qlib_data/futures_data/instruments"
         clean_data_file = "clean_data.txt"
         total_file = "all.txt"
+        # 去除金融期货、重金属，以及上市日期太短的
+        total_path = os.path.join(qlib_dir,total_file)
+        clean_data_path = os.path.join(qlib_dir,clean_data_file)
+        columns = ['code','begin','end']
+        all = pd.read_table(total_path,sep='\t',header=None)   
+        all.columns = columns
+        keep_instruments = [] 
+        for index,row in all.iterrows():
+            code = row['code']
+            begin = int(date_string_transfer(row['begin'],2))
+            end = int(date_string_transfer(row['end'],2))
+            if begin>20200101 or end<20250901:
+                continue
+            exchange_code = self.get_exchange_from_instrument(code)
+            if exchange_code in ['CFFEX','INE']:
+                continue
+            if code in ['AU','AG','ZS_JRQH','ZS_NMFI']:
+                continue
+            keep_instruments.append(code)
+        clean_data = all[all['code'].isin(keep_instruments)]
+        clean_data.to_csv(clean_data_path, sep='\t', index=False,header=None)
+
+    def rebuild_qlib_instrument(self):
+        """qlib品种名单列表重新生成，主要是更新日期"""
+        
+        qlib_dir = "/home/qdata/qlib_data/futures_data/instruments"
+        clean_data_file = "clean_data.txt"
+        total_file = "all.txt"
         # 上一步骤已经生成了all.txt的日期对照，在这里把日期对照关系同步到具体文件
         total_path = os.path.join(qlib_dir,total_file)
         clean_data_path = os.path.join(qlib_dir,clean_data_file)
         columns = ['code','begin','end']
         all = pd.read_table(total_path,sep='\t',header=None)   
         all.columns = columns
-        all.set_index('code')
         clean_data = pd.read_table(clean_data_path,sep='\t',header=None)   
         clean_data.columns = columns
-        clean_data.set_index('code')
-        clean_data.update(all)
+        clean_data = all[all['code'].isin(clean_data['code'].values)]
         clean_data.to_csv(clean_data_path, sep='\t', index=False,header=None)
-    
+            
     def get_realtime_data(self,symbol,market):
         """新浪实时行情"""
         
@@ -648,8 +675,8 @@ if __name__ == "__main__":
     # print(futures_rule_df)
     # futures_rule_df.to_csv(save_path+ "/rule.csv",index=False)
     # 合约情况
-    contract_df = ak.match_main_contract(symbol="shfe") 
-    print(contract_df)
+    # contract_df = ak.match_main_contract(symbol="shfe") 
+    # print(contract_df)
     # hist_em = ak.futures_hist_table_em() 
     # print(hist_em)
     
@@ -664,7 +691,8 @@ if __name__ == "__main__":
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2509", period="1")
     # print(futures_zh_minute_sina_df)
     # 历史行情
-    # futures_hist_em_df = futures_hist_em(symbol="AP", period="daily")
+    # futures_hist_em_df = futures_hist_em(symbol="BB", period="daily")
+    # futures_hist_em_df['date'] = futures_hist_em_df['时间']
     # print(futures_hist_em_df)    
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="RB0", period="1")
     # print(futures_zh_minute_sina_df)
@@ -732,7 +760,8 @@ if __name__ == "__main__":
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     # qlib品种名单列表生成
-    # extractor.build_qlib_instrument()
+    extractor.build_qlib_instrument()
+    # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
     # extractor.import_day_range_contract_data(data_range=(20250116,20250822))
