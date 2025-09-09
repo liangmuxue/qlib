@@ -84,7 +84,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanData_rsvDetail_Step2_202507"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
                step_mode: 2
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
