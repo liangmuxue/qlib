@@ -255,26 +255,15 @@ class FuturesProcessModel(TftDataframeModel):
         emb_size = dataset.get_emb_size()
         # emb_size = 500
         load_weight = self.optargs["load_weight"]
-        if "monitor" in self.optargs:
-            monitor = dataset
-        else:
-            monitor = None
-        
-        # map_location = torch.device("cpu")
-        map_location = None
+        device = self._build_device()
         
         if load_weight:
             best_weight = self.optargs["best_weight"]    
-            self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
-                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=map_location)
-            self.model.model.model_name = self.optargs["model_name"]
-            self.model.batch_size = self.batch_size     
-            self.model.model.monitor = monitor
-            self.model.model.mode = self.type 
-            self.model.model.step_mode = self.optargs["step_mode"]
+            self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(self.model)
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
-            self.model.monitor = monitor     
                
         self.model.mode = self.type 
         
@@ -353,25 +342,16 @@ class FuturesProcessModel(TftDataframeModel):
         emb_size = dataset.get_emb_size()
         # emb_size = 500
         load_weight = self.optargs["load_weight"]
-        if "monitor" in self.optargs:
-            monitor = dataset
-        else:
-            monitor = None
-        
         # map_location = torch.device("cpu")
-        map_location = None
+        device = self._build_device()
         
         if load_weight:
             best_weight = self.optargs["best_weight"]    
-            self.model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
-                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=map_location)
-            self.model.batch_size = self.batch_size     
-            self.model.model.batch_size = self.batch_size   
-            self.model.model.monitor = monitor
-            self.model.model.train_step_mode = self.optargs["step_mode"]    
+            self.model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(self.model)  
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=2) 
-            self.model.monitor = monitor        
         
         self.model.mode = self.type  
         
@@ -390,7 +370,26 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
-
+    
+    def rebuild_model_params(self,model):
+        
+        self.model.model.model_name = self.optargs["model_name"]
+        self.model.batch_size = self.batch_size     
+        self.model.model.mode = self.type 
+        self.model.model.step_mode = self.optargs["step_mode"]        
+        
+        
+        gpu_params = self.gpus
+        self.model.trainer_params['devices'] = gpu_params
+        self.model.trainer_params['gpus'] = len(gpu_params)
+        
+    def _build_device(self):
+        
+        gpu_params = self.gpus
+        cudas = ",".join([str(x) for x in gpu_params])
+        device = "cuda:" + cudas
+        return device
+    
     def _build_model(self,dataset,emb_size=1000,use_model_name=True,mode=0):
         """生成模型"""
         
@@ -413,7 +412,8 @@ class FuturesProcessModel(TftDataframeModel):
         model_type = self.optargs["model_type"]
         if not use_model_name:
             model_name = None
-        
+        gpu_params = self.gpus
+        gpus_size = len(gpu_params)
         # 自定义回调函数
         lightning_callbacks = []
         if "lightning_callbacks" in  self.kwargs:
@@ -422,8 +422,10 @@ class FuturesProcessModel(TftDataframeModel):
                 callback = init_instance_by_config(
                     config,
                 )   
-                lightning_callbacks.append(callback)             
-        
+                lightning_callbacks.append(callback)          
+                   
+        pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}    
+           
         if mode==0:  
             my_model = FuturesModel(
                     input_chunk_length=input_chunk_length,
@@ -461,7 +463,7 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
-                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    pl_trainer_kwargs=pl_trainer_kwargs,
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==1:  
@@ -503,7 +505,7 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
                     step_mode=step_mode,
-                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    pl_trainer_kwargs=pl_trainer_kwargs,
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==2:  
@@ -545,7 +547,7 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
                     train_step_mode=train_step_mode,
-                    pl_trainer_kwargs={"accelerator": "gpu", "devices": [0],"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
+                    pl_trainer_kwargs=pl_trainer_kwargs,
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )     
         return my_model

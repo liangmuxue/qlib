@@ -97,7 +97,11 @@ class TFTExtModel(MixedCovariatesTorchModel):
             del model_kwargs["rolling_size"]
         
         if "devices" in model_kwargs["pl_trainer_kwargs"]:
-            self.device = "cuda:" + str(model_kwargs["pl_trainer_kwargs"]["devices"][0])
+            # cudas = ",".join([str(x) for x in model_kwargs["pl_trainer_kwargs"]["devices"]])
+            # cudas = "cuda:" + cudas
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            print("device in load:{}".format(device))
+            self.device = device
         else:
             self.device = "cpu"
         self.use_weighted_loss_func = use_weighted_loss_func

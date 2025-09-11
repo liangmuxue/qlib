@@ -53,6 +53,9 @@ class BaseMixModule(PLMixedCovariatesModule):
         del kwargs["batch_size"]             
         # 模拟初始化，实际未使用
         super().__init__(**kwargs)
+        
+        self.to(device)
+         
         self.train_sample = train_sample
         self.past_split = past_split
         self.filter_conv_index = filter_conv_index
@@ -82,6 +85,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         self.classify_vr_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,device=device)        
         self.classify_tar_layer = self._construct_classify_layer(len(past_split),self.output_chunk_length,device=device)  
         # 使用不确定多重损失函数
+        
         self.criterion = self.create_loss(self.sub_models,device=device)
                     
         self.val_results = {}

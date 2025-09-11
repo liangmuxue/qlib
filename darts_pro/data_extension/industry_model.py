@@ -276,7 +276,7 @@ class IndustryModel(DateTogeModel):
         
         file_path = os.path.join(checkpoint_dir, file_name)
         print("weights file_path:",file_path) 
-        model.model = model._load_from_checkpoint(file_path, **kwargs)
+        model.model = model._load_from_checkpoint(file_path, **kwargs).to(kwargs['device'])
         # model.model = model.model.to(kwargs.get("map_location"))
         model.batch_file_path = kwargs["batch_file_path"]
         model.model.set_filepath(kwargs["batch_file_path"])

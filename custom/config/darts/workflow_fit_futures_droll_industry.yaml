@@ -52,8 +52,8 @@ task:
         class: FuturesProcessModel
         module_path: darts_pro.futures_process
         kwargs:
-            GPU: 0
-            batch_size: 16
+            GPU: [0,1,2,3,4,5,6,7] 
+            batch_size: 12
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -66,7 +66,7 @@ task:
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
-               total_iters: 4.5e4
+               total_iters: 3e3
                # base_lr: 0.5e-4
                # max_lr: 1.5e-3
                # cycle_momentum: False
@@ -82,7 +82,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_rsvIndusCciRange6_Step1_202507"
+               model_name: "Futures_cleanData_rsvIndusCciRange6_Step1_202410"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
@@ -106,8 +106,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2025-07-30]
-                valid: [2025-07-01, 2025-08-30]
+                train: [2006-01-01, 2024-10-30]
+                valid: [2024-10-01, 2024-12-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
