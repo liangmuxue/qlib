@@ -448,7 +448,7 @@ class FurBacktestStrategy(SimStrategy):
             if "last_cancel_time" in close_order.kwargs:
                 # 如果和上次撤单时间间隔太短，则忽略
                 last_cancel_time = close_order.kwargs["last_cancel_time"]
-                interval_time = (context.now() - last_cancel_time).seconds 
+                interval_time = (context.now - last_cancel_time).seconds 
                 if interval_time < 1*60:
                     continue
             price_now = self.get_last_price(close_item.order_book_id)

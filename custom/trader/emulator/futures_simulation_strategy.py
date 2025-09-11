@@ -97,7 +97,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         context.ml_context.prepare_data(pred_date)        
         # 根据预测计算，筛选可以买入的品种
         candidate_list = self.get_candidate_list(pred_date,context=context)
-        candidate_list = [(0,"FU"),(0,"FG"),(0,"FB")]
+        # candidate_list = [(0,"FU"),(0,"FG"),(0,"FB")]
         
         self.lock_list = {}        
         candidate_order_list = {}  
