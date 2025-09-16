@@ -261,7 +261,7 @@ class FuturesProcessModel(TftDataframeModel):
             best_weight = self.optargs["best_weight"]    
             self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
-            self.rebuild_model_params(self.model)
+            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
                
@@ -349,7 +349,7 @@ class FuturesProcessModel(TftDataframeModel):
             best_weight = self.optargs["best_weight"]    
             self.model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
-            self.rebuild_model_params(self.model)  
+            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=2) 
         
@@ -371,17 +371,17 @@ class FuturesProcessModel(TftDataframeModel):
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
     
-    def rebuild_model_params(self,model):
+    def rebuild_model_params(self,model,model_name=None):
         
-        self.model.model.model_name = self.optargs["model_name"]
-        self.model.batch_size = self.batch_size     
-        self.model.model.mode = self.type 
-        self.model.model.step_mode = self.optargs["step_mode"]        
+        model.model.model_name = model_name
+        model.batch_size = self.batch_size     
+        model.model.mode = self.type 
+        model.model.step_mode = self.optargs["step_mode"]        
         
         
         gpu_params = self.gpus
-        self.model.trainer_params['devices'] = gpu_params
-        self.model.trainer_params['gpus'] = len(gpu_params)
+        model.trainer_params['devices'] = gpu_params
+        model.trainer_params['gpus'] = len(gpu_params)
         
     def _build_device(self):
         
@@ -842,12 +842,14 @@ class FuturesProcessModel(TftDataframeModel):
         for series in val_series_transformed:
             time_idx = time_idx_mapping[time_idx_mapping.index==series.instrument_code].values[0]
             series.last_time_idx = time_idx
-            
+        
+        device = self._build_device()
         best_weight = self.optargs["best_weight"]  
         # 首先使用总体模型生成总体趋势结果
         model_name_step1 = self.optargs["model_name_step1"]  
-        model = FuturesIndustryModel.load_from_checkpoint(model_name_step1,work_dir=self.optargs["work_dir"],
+        model = FuturesIndustryModel.load_from_checkpoint(model_name_step1,work_dir=self.optargs["work_dir"],device=device,
                                                          best=best_weight,batch_file_path=self.batch_file_path)
+        self.rebuild_model_params(model,model_name=model_name_step1)  
         model.model.step_mode = 1
         model.batch_size = self.batch_size     
         model.mode = "predict"
@@ -876,6 +878,7 @@ class FuturesProcessModel(TftDataframeModel):
         model.fit(train_series_transformed_new, future_covariates=future_convariates, val_series=val_series_transformed_new,
                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)   
+        
         # 先fit再赋值，则以当前数据集生成的mapping为准
         model.model.train_sw_ins_mappings = model.train_sw_ins_mappings
         model.model.valid_sw_ins_mappings = model.valid_sw_ins_mappings                     
@@ -883,8 +886,9 @@ class FuturesProcessModel(TftDataframeModel):
                                                     batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))        
         # 再用第二阶段模型生成实际品种结果
         model_name_step2 = self.optargs["model_name_step2"]  
-        model = FuturesIndustryModel.load_from_checkpoint(model_name_step2,work_dir=self.optargs["work_dir"],
+        model = FuturesIndustryModel.load_from_checkpoint(model_name_step2,work_dir=self.optargs["work_dir"],device=device,
                                                          best=best_weight,batch_file_path=self.batch_file_path)
+        self.rebuild_model_params(model,model_name=model_name_step2)  
         model.model.step_mode = 2
         model.batch_size = self.batch_size     
         model.mode = "predict"

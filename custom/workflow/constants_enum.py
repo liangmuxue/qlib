@@ -4,9 +4,10 @@ from enum import Enum, unique
 
 @unique
 class WorkflowType(Enum):
-    """工作流类别，1回测 2实盘"""
+    """工作流类别，1回测 2仿真 3实盘 """
     backtest = 1 
-    offer = 2
+    simulation = 2
+    offer = 3
 
 @unique
 class WorkflowStatus(Enum):

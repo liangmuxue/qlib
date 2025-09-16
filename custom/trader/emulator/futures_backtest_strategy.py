@@ -136,8 +136,8 @@ class FurBacktestStrategy(SimStrategy):
                 continue
             # 代码转化为标准格式
             order_book_id = self.data_source.transfer_futures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
-            # 以昨日收盘价格作为当前卖盘价格,注意使用未复权的数据
-            h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="close")
+            # 以昨日收盘价格作为当前卖盘价格
+            h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="settle")
             if h_bar is None:
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
@@ -327,9 +327,11 @@ class FurBacktestStrategy(SimStrategy):
             trade_date = self.trade_entity.get_trade_date_by_instrument(order_book_id,POSITION_EFFECT.OPEN,context.now)
             if trade_date is None:
                 logger.warning("trade not found:{},{}".format(order_book_id,now_date))
-                continue
-            # 检查是否超期，以决定是否平仓
-            dur_days = tradedays(trade_date,now_date)
+                # 如果没有交易记录，则默认超期卖出
+                dur_days = keep_day_number
+            else:
+                # 检查是否超期，以决定是否平仓
+                dur_days = tradedays(trade_date,now_date)
             if dur_days>=keep_day_number:
                 # 检查当前时间段是否可以挂单平仓
                 if not self.is_trade_opening(context.now):
@@ -448,7 +450,7 @@ class FurBacktestStrategy(SimStrategy):
             if "last_cancel_time" in close_order.kwargs:
                 # 如果和上次撤单时间间隔太短，则忽略
                 last_cancel_time = close_order.kwargs["last_cancel_time"]
-                interval_time = (context.now() - last_cancel_time).seconds 
+                interval_time = (context.now - last_cancel_time).seconds 
                 if interval_time < 1*60:
                     continue
             price_now = self.get_last_price(close_item.order_book_id)
@@ -499,7 +501,7 @@ class FurBacktestStrategy(SimStrategy):
                 continue
             dt = env.calendar_dt
             bar = self.get_prevday_bar(open_item.order_book_id)
-            price_last_day = bar['close']               
+            price_last_day = bar['settle']               
             side_flag = 1 if open_order.side==SIDE.BUY else -1
             # 如果超出昨日收盘,价格在可变范围内(配置项)，则按照新价格重新挂单
             if (price_now - price_last_day)*side_flag/price_last_day*100<pred_open_ignore_rate \
@@ -514,12 +516,13 @@ class FurBacktestStrategy(SimStrategy):
                 self.logger_info("pred_buy_exceed_rate ,now:{},price_last_day:{}".format(price_now,price_last_day))          
                 # 发起撤单
                 self.cancel_order(open_order)    
-            # 如果超过等待时间次数，则更换品种
-            if open_order.kwargs['try_cnt'] > try_cnt_limit and not open_order.kwargs["need_resub"]:
+            # 如果超过等待时间次数，则按照新价格重新挂单
+            if open_order.kwargs['try_cnt']>try_cnt_limit and not open_order.kwargs["need_resub"]:
                 self.logger_info("try_cnt expire:{}".format(open_order.kwargs['try_cnt']))
-                open_order.kwargs['try_cnt'] = 0
-                # 设置重新挂单标志，并发起撤单
-                self.reset_order_list(open_order)
+                # 如果多次撤单仍未成交，则不重新挂单，直接撤单后续换品种
+                if not open_order.kwargs['try_cnt']>try_cnt_limit*3:
+                    # 设置重新挂单标志，并发起撤单
+                    self.reset_order_list(open_order)
                 self.cancel_order(open_order)                  
                 continue      
             # 等待,累加等待时间值
@@ -731,7 +734,7 @@ class FurBacktestStrategy(SimStrategy):
             return True
         return False
         
-    def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None):
+    def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None,try_cnt=0):
         """代理api的订单创建方法"""
         
         order_book_id = id_or_ins
@@ -749,7 +752,7 @@ class FurBacktestStrategy(SimStrategy):
             # 自定义属性
             price=price,
             multiplier=multiplier,
-            try_cnt=0, 
+            try_cnt=try_cnt, 
             close_reason=close_reason,  
             need_resub=False, 
             exchange_id=exchange_code      
@@ -977,8 +980,9 @@ class FurBacktestStrategy(SimStrategy):
             self.trade_entity.add_or_update_order(order,str(self.trade_day))    
             
             if order.order_book_id in self.open_list:
+                order_ori = self.open_list[order.order_book_id]
                 # 开仓撤单，检查相关标志，决定重新挂单还是换品种
-                if self.open_list[order.order_book_id].kwargs["need_resub"]:
+                if order_ori.kwargs["need_resub"]:
                     self.logger_info("need resub order:{}".format(order))
                     # 如果具备重新报单标志，则参照最新价格重新生成订单
                     price_now = self.get_last_price(order.order_book_id)
@@ -989,8 +993,9 @@ class FurBacktestStrategy(SimStrategy):
                         increase_price = 3
                     side_flag = 1 if order.position_direction==POSITION_DIRECTION.LONG else -1
                     price_now = price_now + increase_price * side_flag
-                    # 创建新订单对象并重置原数据
-                    order_resub = self.create_order(order.order_book_id, order.quantity, order.side, price_now,position_effect=POSITION_EFFECT.OPEN)
+                    # 创建新订单对象并重置原数据,注意需要保留之前的try_cnt数据
+                    order_resub = self.create_order(order.order_book_id, order.quantity, order.side, 
+                                        price_now,position_effect=POSITION_EFFECT.OPEN,try_cnt=order_ori.kwargs["try_cnt"])
                     self.open_list[order.order_book_id] = order_resub
                     self.logger_debug("resub open list set end:{}".format(order.order_book_id))
                 else:

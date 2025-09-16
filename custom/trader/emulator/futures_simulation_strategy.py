@@ -97,7 +97,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         context.ml_context.prepare_data(pred_date)        
         # 根据预测计算，筛选可以买入的品种
         candidate_list = self.get_candidate_list(pred_date,context=context)
-        candidate_list = [(0,"FU"),(0,"FG"),(0,"FB")]
+        # candidate_list = [(0,"P"),(0,"FG"),(0,"FB")]
         
         self.lock_list = {}        
         candidate_order_list = {}  
@@ -179,6 +179,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
     def open_auction(self,context, bar_dict):
         """集合竞价入口"""
         
+        return
         self.order_process(context)
          
     def handle_bar(self,context, bar_dict):
@@ -269,7 +270,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         portfolio = Portfolio(balance,frozen,margin,positions,financing_rate,trade_date=date,data_proxy=env.data_proxy,persis_path=persis_path)
         return portfolio
  
-    def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None):
+    def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None,try_cnt=0):
         """代理api的订单创建方法"""
         
         order_book_id = id_or_ins
@@ -288,7 +289,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
             # 自定义属性
             price=price,
             multiplier=multiplier,
-            try_cnt=0, 
+            try_cnt=try_cnt, 
             close_reason=close_reason,  
             need_resub=False, 
             exchange_id=exchange_code      

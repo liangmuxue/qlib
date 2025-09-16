@@ -184,7 +184,7 @@ class FuturesDataSource(BaseDataSource):
         return main_name       
 
     
-    def get_k_data(self, order_book_id, start_dt, end_dt,frequency=None,need_prev=True,institution=False):
+    def get_k_data(self, order_book_id, start_dt, end_dt,frequency=None,need_prev=False):
         """从已下载的文件中，加载K线数据"""
         
         self.time_inject(begin=True)
@@ -216,7 +216,7 @@ class FuturesDataSource(BaseDataSource):
         # item_data = item_data.iloc[0].to_dict()
         return item_data
 
-    def get_bar(self, order_book_id, dt, frequency,need_prev=True):
+    def get_bar(self, order_book_id, dt, frequency,need_prev=False):
         if frequency != '1m' and frequency != '1d':
             return super(FuturesDataSource, self).get_bar(order_book_id, dt, frequency)
         
@@ -224,7 +224,7 @@ class FuturesDataSource(BaseDataSource):
             # 如果不在交易时间，则不出数
             return None
         else:
-            bar_data = self.get_k_data(order_book_id, dt, dt,frequency=frequency,need_prev=False)
+            bar_data = self.get_k_data(order_book_id, dt, dt,frequency=frequency,need_prev=need_prev)
 
         if bar_data is None or bar_data.empty:
             return None

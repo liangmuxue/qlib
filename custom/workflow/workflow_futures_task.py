@@ -477,14 +477,22 @@ class WorkflowSubTask(object):
         # 根据任务配置，决定节假日是否不执行相关任务
         if self.config["run_in_holiday"]==0 and (not is_working_day(str(working_day))):
             self.task_ignore_handler(ignore_status=WorkflowSubStatus.freq_ignore.value)
+            logger.info("ignore task cause not working day")
             return WorkflowSubStatus.freq_ignore.value   
         
         # 任务频次类型筛选，如果不符合当天的任务频次，则忽略此任务
         frequency_types = self.get_frequency_types(str(working_day))
         if self.config["frequency"] not in frequency_types:
             self.task_ignore_handler(ignore_status=WorkflowSubStatus.freq_ignore.value)
+            logger.info("ignore task cause not frequency not match")
             return WorkflowSubStatus.freq_ignore.value        
 
+        # 在模拟或实盘模式下,并且频次为实时,工作日期必须与当前日期保持一致
+        if self.main_task.config["type"]!=WorkflowType.backtest.value \
+            and self.config["frequency"]==FrequencyType.REAL.value and working_day!=int(datetime.now().strftime("%Y%m%d")):
+            logger.info("ignore task cause working day not match now ")
+            return WorkflowSubStatus.freq_ignore.value  
+        
         # 在任务主表中设置当前子任务
         self.main_task.task_store.update_workflow_current_task(self.main_task.task_obj["task_batch"],self.task_entity["id"])           
         # 根据配置文件，执行实际任务
