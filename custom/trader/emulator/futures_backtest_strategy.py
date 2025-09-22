@@ -108,14 +108,15 @@ class FurBacktestStrategy(SimStrategy):
         
         self.logger_info("before_trading.now:{}".format(context.now))
         
+        # 每个交易日前，先初始化交易代理环境
+        env = Environment.get_instance()
+        env.broker.trade_proxy.init_env()
         # 时间窗定义
         self.time_line = 0
         pred_date = int(context.now.strftime('%Y%m%d'))
         self.trade_day = pred_date
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = self.get_previous_trading_date(self.trade_day)
-        if pred_date==20240823:
-            print("ggg")
         # 初始化当日合约对照表
         self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.now)        
         # 根据当前日期，进行预测计算
@@ -149,8 +150,8 @@ class FurBacktestStrategy(SimStrategy):
                 side = SIDE.SELL
             # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）,仓位类型为开仓
             order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.OPEN)
-            # 对于开仓候选品种，如果已持仓当前品种，则进行锁仓
-            if self.match_position(instrument) is not None:
+            # 对于开仓候选品种，如果已持仓当前品种，则进行锁仓--cancel by lmx
+            if self.match_position(instrument) is not None and False:
                 self.lock_list[order_book_id] = order        
                 continue             
             # 加入到候选开仓订单
@@ -183,8 +184,10 @@ class FurBacktestStrategy(SimStrategy):
         # 生成热加载数据，提升查询性能
         if self.strategy.building_hot_data:
             self.data_source.build_hot_loading_data(pred_date,self.close_list,reset=True) 
-            self.data_source.build_hot_loading_data(pred_date,self.open_list)        
-            self.data_source.build_hot_loading_data(pred_date,self.get_positions())    
+            self.data_source.build_hot_loading_data(pred_date,self.open_list)   
+            self.data_source.build_hot_loading_data(pred_date,self.candidate_list)    
+            pos_keys = [pos.order_book_id for pos in self.get_positions()]
+            self.data_source.build_hot_loading_data(pred_date,pos_keys)    
 
         
     def after_trading(self,context):
@@ -258,6 +261,8 @@ class FurBacktestStrategy(SimStrategy):
             # 买入数量需要根据当前额度进行计算,还需要兼顾合约乘数
             multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
             # 实时计算单个品种购买的额度
+            if self.trade_day==20241011:
+                print("ggg")
             single_value = self.compute_build_quantity()
             quantity = int(single_value/price/multiplier)
             # if price*quantity>30000:
@@ -370,6 +375,8 @@ class FurBacktestStrategy(SimStrategy):
                 continue
             self.time_inject(code_name="get_today_closed_order")
             pos_info = self.get_position(order_book_id)
+            if pos_info is None:
+                print("ggg")
             amount = pos_info.quantity
             self.time_inject(code_name="get_position")
             # 根据原持仓品种的多空类别决定平仓相关参数
@@ -576,8 +583,7 @@ class FurBacktestStrategy(SimStrategy):
         """取得指定标的最近报价信息"""
 
         env = Environment.get_instance()
-        last_dt = env.trading_dt + timedelta(minutes=-1)
-        return self.data_source.get_last_price(order_book_id,last_dt)
+        return self.data_source.get_prev_price(order_book_id,env.trading_dt)
     
     def compute_build_quantity(self):
         """计算可以买入的单个品种的金额限制"""
@@ -585,13 +591,13 @@ class FurBacktestStrategy(SimStrategy):
         position_max_number = self.strategy.position_max_number  
         bond_rate = self.strategy.bond_rate    
         # 总资产 
-        total_cash = self.get_cash()
+        total_value = self.get_total_value()
         # 保证金不能超出限制
-        bond_limit = total_cash * bond_rate
+        bond_limit = total_value * bond_rate
         positions = self.get_positions()
         current_bond = np.array([pos.margin for pos in positions]).sum()
         # 需要满足的资金=剩余资金-已冻结保证金-当前开仓需要保证金
-        remain_bond = total_cash - bond_limit - current_bond
+        remain_bond = total_value - bond_limit - current_bond
         if remain_bond<0:
             return 0
         # 计算剩余可建仓个数，以及剩余的保证金额度，计算单独一个品种建仓的限制金额
@@ -600,7 +606,7 @@ class FurBacktestStrategy(SimStrategy):
         if remain_number<=0:
             return 0
         # 根据剩余资金额度，以及可持仓品种数量和单只持仓份额，计算当前额度限额
-        single_value = total_cash * self.strategy.single_buy_mount_percent/100
+        single_value = total_value * self.strategy.single_buy_mount_percent/100
         
         self.logger_info("remain_number:{},single_value:{},remain_bond:{}".format(remain_number,single_value,remain_bond))
         return single_value

@@ -1,7 +1,7 @@
 import os
 import datetime
 import time
-from datetime import date
+from datetime import date, timedelta
 from datetime import datetime as dt_obj
 import numpy as np
 import pandas as pd
@@ -454,10 +454,12 @@ class FuturesDataSource(BaseDataSource):
         
         if reset:
             self.hot_data_mappings = {}
+            self.hot_data_symbol_mappings = {}
         
         def hot_data_create(symbol,date):
             # 从存储中拿到当天所有分钟数据，并放入热区
             item_df = self.get_time_data_by_day(str(date),symbol)
+            self.hot_data_symbol_mappings[symbol] = item_df
             for row in item_df.iterrows():
                 hot_key_str = self.get_hot_key(row[1]['datetime'],symbol)
                 self.hot_data_mappings[hot_key_str] = row                          
@@ -473,11 +475,23 @@ class FuturesDataSource(BaseDataSource):
         if dt>open_timing:
             return True
         return False
-           
+    
+    def get_prev_price(self,order_book_id,now_dt):
+        """取得上一分钟交易数据，注意需要考虑中间的休市时间"""
+        
+        if now_dt.hour==10 and now_dt.minute==30:
+            last_dt = datetime.datetime(now_dt.year,now_dt.month,now_dt.day,10,15,0)
+        elif now_dt.hour==13 and now_dt.minute==30:
+            last_dt = datetime.datetime(now_dt.year,now_dt.month,now_dt.day,11,30,0)
+        else:
+            last_dt = now_dt + timedelta(minutes=-1)       
+        price = self.get_last_price(order_book_id, last_dt)
+        return price
+                
     def get_last_price(self,order_book_id,dt):
         """取得指定标的最近报价信息"""
 
-        # 如果未开盘则取昨日收盘价,开盘后取上一分钟收盘价
+        # 如果未开盘则取昨日收盘价,开盘后取当前时间点收盘价
         if not self.is_trade_opening(dt):
             prev_day = get_tradedays_dur(dt, -1) 
             bar = self.get_bar(order_book_id,prev_day,"1d")
@@ -489,7 +503,19 @@ class FuturesDataSource(BaseDataSource):
         hot_key_str = self.get_hot_key(dt,order_book_id)
         if hot_key_str in self.hot_data_mappings:
             return self.hot_data_mappings[hot_key_str][1]['close']
-        bar = self.get_bar(order_book_id,dt,"1m")
+        # 分钟数据键值对没有，再从当日品种热区里找
+        if order_book_id in self.hot_data_symbol_mappings:
+            item_data = self.hot_data_symbol_mappings[order_book_id]
+            target_data = item_data[item_data['datetime']<=pd.to_datetime(dt)]
+            if target_data.shape[0]>0:
+                target_data = target_data.sort_values(by=["datetime"],ascending=False)
+                return target_data['close'].values[0]
+        # 都没有，再从存储中查
+        recent_datetime = self.get_recent_date_by_date(order_book_id,dt)
+        if recent_datetime is None:
+            return None        
+        # 取得当日距离指定时间最近的交易
+        bar = self.get_bar(order_book_id,recent_datetime,"1m")
         if bar is None:
             return None
         return bar['close']

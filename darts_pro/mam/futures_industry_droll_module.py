@@ -37,6 +37,7 @@ DRAW_SEQ_DETAIL = [0]
 RESULT_FILE_PATH = "custom/data/results/stats"
 RESULT_FILE_STEP1 = "step1_rs.pkl"
 RESULT_FILE_STEP2 = "step2_rs.pkl"
+RESULT_FILE_VIEW = "step2_rs.csv"
 INTER_RS_FILEPATH = "pred_step1_rs.pkl"
 
 class FuturesIndustryDRollModule(MlpModule):
@@ -85,6 +86,7 @@ class FuturesIndustryDRollModule(MlpModule):
                                     device=device,**kwargs)  
         self.result_file_path = os.path.join(RESULT_FILE_PATH,RESULT_FILE_STEP1)
         self.result_file_path_step2 = os.path.join(RESULT_FILE_PATH,RESULT_FILE_STEP2)
+        self.result_view_file_path= os.path.join(RESULT_FILE_PATH,RESULT_FILE_VIEW)
         # For pred step1 result
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH,INTER_RS_FILEPATH)
         self.result_columns = ["date","indus_index","trend_flag","price_inf","ce_inf"]
@@ -489,7 +491,21 @@ class FuturesIndustryDRollModule(MlpModule):
                     import_price_result_item = import_price_result[(import_price_result['date']>=STAT_DATE[0])&(import_price_result['date']<=STAT_DATE[1])]
                     # print("ins result:\n",import_price_result_item[['date','instrument','result','yield_rate','trend_flag']])  
                     with open(self.result_file_path_step2, "wb") as fout:
-                        pickle.dump(import_price_result_item, fout)                  
+                        pickle.dump(import_price_result_item, fout)      
+                    # 累加历次的val结果，整合后进行统计
+                    ["imp_index","instrument","yield_rate","result"]
+                    col_data_types = {"imp_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_flag":int,
+                                           "date":int}                       
+                    if os.path.exists(self.result_view_file_path):
+                        import_price_result_total = pd.read_csv(self.result_view_file_path,dtype=col_data_types)  
+                        # 去重
+                        date_min = import_price_result_item["date"].min()
+                        date_max = import_price_result_item["date"].max()
+                        import_price_result_total = import_price_result_total[(import_price_result_total['date']<date_min)|(import_price_result_total['date']>date_max)]
+                        import_price_result_total = pd.concat([import_price_result_total,import_price_result_item])
+                        import_price_result_total.to_csv(self.result_view_file_path) 
+                    else:        
+                        import_price_result_item.to_csv(self.result_view_file_path)                 
                                         
             tar_viz = global_var.get_value("viz_data")
             viz_result = global_var.get_value("viz_result_detail")
@@ -1045,7 +1061,8 @@ class FuturesIndustryDRollModule(MlpModule):
         
         open_array = target_info["open_array"][self.input_chunk_length-1:]
         price_array = target_info["price_array"][self.input_chunk_length-1:]    
-        diff_range = (open_array[-1] - price_array[0])/price_array[0]*100
+        diff_range = (price_array[-1] - price_array[0])/price_array[0]*100
+        # diff_range = (open_array[-1] - price_array[0])/price_array[0]*100
         range_class = get_simple_class(diff_range)
         
         return diff_range,range_class

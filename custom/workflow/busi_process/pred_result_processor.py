@@ -81,9 +81,8 @@ class PredResultProcessor(BaseProcessor):
         df_result = results[0]
         model_template = self.config["task"]["model"]
         pred_data_file = model_template["kwargs"]["pred_data_file"]
-        # 生成预测数据，以下一工作日作为基准文件名
-        next_working_day = get_tradedays_dur(str(working_day),1).strftime("%Y%m%d")
-        file_path = self.wf_task.get_pred_data_part_filepath(pred_data_file,next_working_day)
+        # 生成预测数据，以当前工作日作为基准文件名
+        file_path = self.wf_task.get_pred_data_part_filepath(pred_data_file,str(working_day))
         file_name = os.path.split(file_path)[1]
         # 保留每次的预测记录
         with open(file_path, "wb") as fout:

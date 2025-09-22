@@ -6,7 +6,7 @@ from datetime import datetime,timedelta
 from chinese_calendar import is_holiday
 from trader.utils.date_util import get_tradedays_dur,get_next_working_day,get_prev_working_day
 
-from darts_pro.mam.futures_industry_droll_module import RESULT_FILE_PATH,RESULT_FILE_STEP1,RESULT_FILE_STEP2
+from darts_pro.mam.futures_industry_droll_module import RESULT_FILE_PATH,RESULT_FILE_STEP1,RESULT_FILE_STEP2,RESULT_FILE_VIEW
 from rqalpha.const import ORDER_STATUS,SIDE
 from data_extract.rqalpha.futures_ds import FuturesDataSource
 from trader.emulator.futures_real_ds import FuturesDataSourceSql
@@ -42,12 +42,12 @@ class DataStats(object):
         stock_data_path = "/home/qdata/futures_data/juejin/main_1min"
         self.ds = FuturesDataSourceSql("/home/liang/.rqalpha/bundle",stock_data_path=stock_data_path,sim_path=stock_data_path,frequency_sim=False)        
 
-    def combine_val_result(self):
+    def combine_val_result(self,date_range=None):
         """验证数据中整合实际结果"""
 
-        step2_file = os.path.join(self.work_dir,RESULT_FILE_STEP2)
-        with open(step2_file, "rb") as fin:
-            instrument_result_data = pickle.load(fin)  
+        val_data_file = os.path.join(self.work_dir,RESULT_FILE_VIEW)
+        col_data_types = {"imp_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_flag":int,"date":int}   
+        instrument_result_data = pd.read_csv(val_data_file,dtype=col_data_types)
                     
         date_list = instrument_result_data['date'].sort_values().unique()
         results = []
@@ -59,7 +59,11 @@ class DataStats(object):
             for index,item in date_item.iterrows():
                 instrument = item['instrument']
                 pred_trend = item['trend_flag']
-                prev_bar = self.ds.get_continue_data_by_day(instrument, prev_day.strftime("%Y%m%d")).iloc[0]
+                prev_bar = self.ds.get_continue_data_by_day(instrument, prev_day.strftime("%Y%m%d"))
+                if prev_bar.shape[0]==0:
+                    print("{} has no data in {}".format(instrument,date))
+                    continue
+                prev_bar = prev_bar.iloc[0]
                 first_bar = self.ds.get_continue_data_by_day(instrument, cur_day.strftime("%Y%m%d")).iloc[0]
                 second_bar = self.ds.get_continue_data_by_day(instrument, second_day.strftime("%Y%m%d")).iloc[0]
                 item = [date,instrument,pred_trend,prev_bar['settle'],
@@ -67,6 +71,13 @@ class DataStats(object):
                         second_bar['open'],second_bar['settle'],second_bar['high'],second_bar['low']]
                 results.append(item)
         results = pd.DataFrame(np.array(results),columns=PRED_RESULT_COLUMNS) 
+        results['date'] = results['date'].astype(int).astype(int)
+        results['pred_trend'] = results['pred_trend'].astype(int)
+        results['diff'] = (results['secondday_open'].astype(float) - results['prev_close'].astype(float))/results['prev_close'].astype(float)
+        results['side_flag'] = np.where(results['pred_trend']==1,1,-1)
+        results['diff'] = results['diff'] * results['side_flag'] 
+        if date_range is not None:
+            results = results[(results['date']>=date_range[0])&(results['date']<=date_range[1])]
         combine_data_file = os.path.join(self.work_dir,self.combine_val_filepath)
         results.to_csv(combine_data_file,index=False)  
         
@@ -196,7 +207,7 @@ class DataStats(object):
         combine_data_file = os.path.join(self.work_dir,output_file)
         result_data.to_csv(combine_data_file,index=False)      
     
-    def analysis_backtest(self):
+    def analysis_backtest(self,date_range=None):
         """回测分析"""
         
         backtest_combine_file = os.path.join(self.work_dir,self.combine_backtest_filepath)
@@ -223,6 +234,8 @@ class DataStats(object):
         exp_filepath = os.path.join(self.work_dir,self.backtest_analysys_filepath)
         combine_result = combine_result[["date","instrument","order_book_id","open_price",
                        "close_price","side_flag","prev_close","secondday_open","secondday_close","val_diff","gross_profit"]]
+        if date_range is not None:
+            combine_result = combine_result[(combine_result['date']>=date_range[0])&(combine_result['date']<=date_range[1])]
         combine_result.to_csv(exp_filepath,index=False)  
                   
     def check_step_output(self):
@@ -260,11 +273,11 @@ if __name__ == "__main__":
     stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03")  
     # stats.check_step_output()
     # stats.combine_pred_result(pred_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03")
-    stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
-    # stats.combine_val_result()
+    # stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
+    stats.combine_val_result(date_range=[20241001,20250330])
     # stats.mock_pred_data()
-    # stats.combine_backtest_result()
-    # stats.analysis_backtest()
+    stats.combine_backtest_result()
+    stats.analysis_backtest(date_range=[20241001,20250330])
     
     
     

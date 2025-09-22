@@ -66,7 +66,7 @@ task:
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
-               total_iters: 3e4
+               total_iters: 5e4
                # base_lr: 0.5e-4
                # max_lr: 1.5e-3
                # cycle_momentum: False
@@ -82,7 +82,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData_rsvIndusCciRange6_Step1_202408"
+               model_name: "Futures_cleanData_rsvIndusCciRange6_Step1_202502"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -106,8 +106,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2024-08-31]
-                valid: [2024-08-01, 2024-10-30]
+                train: [2006-01-01, 2025-02-28]
+                valid: [2025-02-01, 2025-04-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

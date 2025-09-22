@@ -110,6 +110,19 @@ class FuturesTrade(BaseTrade):
             if order.order_book_id==order_book_id:
                 order._status = status
     
+    def add_or_update_order_in_queue(self,order_in):
+        
+        target_order_queue = []
+        has_replace = False
+        for order in self.order_queue:
+            if order_in.order_book_id==order.order_book_id:
+                target_order_queue.append(order_in)
+                has_replace = True
+            else:
+                target_order_queue.append(order)      
+        if not has_replace:
+            target_order_queue.append(order_in)  
+        self.order_queue = target_order_queue
     
     ########################交易数据获取#################################  
      
@@ -143,8 +156,8 @@ class FuturesTrade(BaseTrade):
         self.context._env.event_bus.publish_event(Event(EVENT.ORDER_CREATION_PASS, account=account, order=order))   
         # 放入待处理队列
         order_in = copy.copy(order)
-        self.order_queue.append(order_in)
-
+        self.add_or_update_order_in_queue(order_in)
+    
     def cancel_order(self,order):
         """撤单"""
         

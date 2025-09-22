@@ -174,6 +174,8 @@ class ExtDataMod(AbstractMod):
                 # 统计买卖周期
                 open_day = last_item["trade_datetime"].strftime('%Y%m%d')
                 close_day = row["trade_datetime"].strftime('%Y%m%d')
+                if close_day=='20241101' and row['order_book_id']=='AP2412':
+                    print("ggg")
                 duration = tradedays(open_day,close_day)
                 new_row = row.values.tolist() + [open_price,differ_range,gain,open_day,duration]
                 stat_data.append(new_row)
@@ -308,7 +310,7 @@ if __name__ == "__main__":
     # stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"    
     # ext_mod.analysis_stat_offline(file_path,stat_path)
     # ext_mod.analysis_futures_stat_offline(file_path,stat_path)
-    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/11/pred_stat_data.csv"   
+    # stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/11/pred_stat_data.csv"   
     bt_savepath = "/home/qdata/workflow/fur_backtest_flow/trader_data/06/compare_data.csv"  
     pred_path = "custom/data/results/pred_coll.csv"
     ext_mod.analysis_futures_stat_offline(file_path,stat_path)

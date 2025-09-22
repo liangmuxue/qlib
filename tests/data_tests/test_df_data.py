@@ -100,19 +100,18 @@ def test_predResult_data():
     result_data = result_data[(result_data['date']>=20220511)&(result_data['date']<=20220511)]
     result_data.to_csv("custom/data/results/pred_result.csv")
 
-def update_predResult_data():
+def check_predResult_data():
     result_file_path = "/home/qdata/workflow/fur_sim_flow_2025/task/162/dump_data/pred_result.pkl"
+    result_file_path = "/home/qdata/workflow/fur_backtest_flow/task/159/dump_data//pred_result.pkl"
     with open(result_file_path, "rb") as fin:
         result_data = pickle.load(fin)    
-    result_data['date'] = 20250819
-    with open(result_file_path, "wb") as fout:
-        pickle.dump(result_data, fout)        
+    result_data    
               
 if __name__ == "__main__":
     # test_ori()
     # test_pred_data()
     # test_predResult_data()
-    update_predResult_data()
+    check_predResult_data()
     # test_busi_data()
     
     

@@ -169,7 +169,21 @@ class FuturesDataSourceSql(FuturesDataSource):
         SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
         item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_CONTINUES_FIELD_NAMES)
         return item_data
-    
+
+    def get_recent_date_by_date(self,symbol,date):
+        """取得指定时间最近的交易时间"""
+        
+        day = date.strftime("%Y%m%d")
+        datetime_str = date.strftime("%Y-%m-%d %H:%M:%S")
+        column_str = ','.join([str(i) for i in _FUTURE_REAL1MIN_FIELD_NAMES])
+        item_sql = "select datetime from dominant_real_data_1min where code='{}' " \
+            "and Date(datetime)='{}' and datetime<='{}' order by datetime desc".format(symbol,date_string_transfer(day),datetime_str)     
+        SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
+        item_data = pd.DataFrame(SQL_Query, columns=["datetime"])
+        if item_data.shape[0]==0:
+            return None
+        return item_data['datetime'].dt.to_pydatetime()[0]
+       
     def get_time_data_by_day(self,day,symbol):
         """取得指定品种和对应日期的分时交易记录"""
 
