@@ -163,38 +163,34 @@ class FuturesProcessModel(TftDataframeModel):
         emb_size = dataset.get_emb_size()
         # emb_size = 500
         load_weight = self.optargs["load_weight"]
-        if "monitor" in self.optargs:
-            monitor = dataset
-        else:
-            monitor = None
-            
+        # map_location = torch.device("cpu")
+        device = self._build_device()
+        
         if load_weight:
             best_weight = self.optargs["best_weight"]    
-            self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
-                                                             best=best_weight,batch_file_path=self.batch_file_path)
-            self.model.batch_size = self.batch_size     
-            self.model.mode = "train"
-            self.model.model.monitor = monitor
+            self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
         else:
-            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=0) 
-            self.model.monitor = monitor        
-
-                    
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
+        
+        self.model.mode = self.type  
+        
         if self.type=="pred_futures_togather":  
-            self.model.mode = self.type
-            self.model.model.mode = self.type        
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                      max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)
-            self.model.model.train_sw_ins_mappings = self.model.train_sw_ins_mappings
-            self.model.model.valid_sw_ins_mappings = self.model.valid_sw_ins_mappings            
+            self.model.model.mode = self.type  
+            self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            # self.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings
+            # self.model.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings  
             trainer.validate(model=model,dataloaders=val_loader)
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0)  
-
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
 
     def fit_futures_industry(
         self,
@@ -255,19 +251,20 @@ class FuturesProcessModel(TftDataframeModel):
         emb_size = dataset.get_emb_size()
         # emb_size = 500
         load_weight = self.optargs["load_weight"]
+        # map_location = torch.device("cpu")
         device = self._build_device()
         
         if load_weight:
             best_weight = self.optargs["best_weight"]    
-            self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+            self.model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
-            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])
+            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
-               
-        self.model.mode = self.type 
         
-        if self.type=="pred_futures_industry":  
+        self.model.mode = self.type  
+        
+        if self.type=="pred_futures_droll_industry":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
@@ -467,7 +464,7 @@ class FuturesProcessModel(TftDataframeModel):
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==1:  
-            step_mode = self.optargs["step_mode"]
+            train_step_mode = self.optargs["step_mode"]
             my_model = FuturesIndustryModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
@@ -504,10 +501,10 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
-                    step_mode=step_mode,
+                    train_step_mode=train_step_mode,
                     pl_trainer_kwargs=pl_trainer_kwargs,
                     # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
-                )
+                )     
         if mode==2:  
             train_step_mode = self.optargs["step_mode"]
             my_model = FuturesIndustryDRollModel(
@@ -716,17 +713,18 @@ class FuturesProcessModel(TftDataframeModel):
             series.last_time_idx = time_idx
             
         best_weight = self.optargs["best_weight"]    
-        self.model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
+        model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
                                                          best=best_weight,batch_file_path=self.batch_file_path)
-        self.model.batch_size = self.batch_size     
-        self.model.mode = "predict"
-        self.model.model.monitor = None
-        self.model.model.mode = "predict"
-        self.model.model.train_sw_ins_mappings = self.model.train_sw_ins_mappings
-        self.model.model.valid_sw_ins_mappings = self.model.valid_sw_ins_mappings   
+        model_name = self.optargs["model_name"]  
+        self.rebuild_model_params(model,model_name=model_name)  
+        model.model.step_mode = 1
+        model.batch_size = self.batch_size     
+        model.mode = "predict"
+        model.model.mode = "predict"
+        model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]        
         
         # 进行推理及预测，先fit再predict
-        self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+        model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)               
         

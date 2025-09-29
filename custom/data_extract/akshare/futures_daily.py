@@ -15,9 +15,10 @@ from io import BytesIO, StringIO
 import numpy as np
 import pandas as pd
 import requests
+from typing import Dict
+import httpx
 
 from akshare.futures import cons
-from akshare.futures.requests_fun import requests_link
 
 calendar = cons.get_calendar()
 
@@ -479,12 +480,11 @@ def get_shfe_daily(date: str = "20220415") -> pd.DataFrame:
         # warnings.warn("%s非交易日" % day.strftime("%Y%m%d"))
         return pd.DataFrame()
     try:
-        json_data = json.loads(
-            requests_link(
-                cons.SHFE_DAILY_URL_20250630 % (day.strftime("%Y%m%d")),
-                headers=cons.shfe_headers,
-            ).text
-        )
+        proxies = {"http://":"http://amos:mrliang@8.140.193.104:7110",
+                   "https://":"http://amos:mrliang@8.140.193.104:7110"}        
+        with httpx.Client(proxies=proxies) as client:
+            response = client.get(cons.SHFE_DAILY_URL_20250630 % (day.strftime("%Y%m%d")))
+            json_data = json.loads(response.text)   
     except requests.HTTPError as reason:
         if reason.response != 404:
             print(cons.SHFE_DAILY_URL_20250630 % (day.strftime("%Y%m%d")), reason)
@@ -545,7 +545,7 @@ def get_dce_daily(date: str = "20220308") -> pd.DataFrame:
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
-        "Content-Length": "86",
+        # "Content-Length": "86",
         "Content-Type": "application/json",
         "Host": "www.dce.com.cn",
         "Origin": "http://www.dce.com.cn",
@@ -561,6 +561,9 @@ def get_dce_daily(date: str = "20220308") -> pd.DataFrame:
         "contractId": "",
         "optionSeries": "",
         "statisticsType": 0,
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
     }
     r = requests.post(url, json=params, headers=headers)
     data_df = pd.DataFrame(r.json()['data'])
@@ -667,6 +670,42 @@ def get_futures_daily(
         temp_df = temp_df[~temp_df["symbol"].str.contains("efp")]
         return temp_df
 
+def requests_link(
+    url: str,
+    encoding: str = "utf-8",
+    method: str = "get",
+    data: Dict = None,
+    headers: Dict = None,
+    proxy={},
+):
+    """
+    利用 requests 请求网站, 爬取网站内容, 如网站链接失败, 可重复爬取 20 次
+    :param url: string 网站地址
+    :param encoding: string 编码类型: "utf-8", "gbk", "gb2312"
+    :param method: string 访问方法: "get", "post"
+    :param data: dict 上传数据: 键值对
+    :param headers: dict 游览器请求头: 键值对
+    :return: requests.response 爬取返回内容: response
+    """
+    i = 0
+    while True:
+        try:
+            if method == "get":
+                r = requests.get(url, timeout=20, headers=headers, proxies=proxy)
+                r.encoding = encoding
+                return r
+            elif method == "post":
+                r = requests.post(url, timeout=20, data=data, headers=headers, proxies=proxy)
+                r.encoding = encoding
+                return r
+            else:
+                raise ValueError("请提供正确的请求方式")
+        except:  # noqa: E722
+            i += 1
+            print(f"第{str(i)}次链接失败, 最多尝试 20 次")
+            time.sleep(5)
+            if i > 20:
+                return None
 
 if __name__ == "__main__":
     get_futures_daily_df = get_futures_daily(

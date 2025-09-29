@@ -11,7 +11,7 @@
 
 行业指标 复用整体计算中的各行业数据 'CCI5' SCALE_MODE:0 , TARGET_MODE:0
 
-整体指标 'RSV5' SCALE_MODE:5 , TARGET_MODE:5
+整体指标 'RSV5' SCALE_MODE:5 , TARGET_MODE:6
 
 分项指标  'RSV5' SCALE_MODE:0(按照行业内计算) or 2(整个计算), TARGET_MODE:2(按照行业内计算) or 3(整个计算)
 

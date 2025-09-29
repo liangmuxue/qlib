@@ -61,7 +61,8 @@ class FurIndustryMixer(nn.Module):
             self.cls_sub_models = nn.ModuleList(sub_cls_model_list)                 
         if self.target_mode in [3]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item())
-
+        if self.target_mode in [6]:
+            self.ins_layer = LinelessLayer(self.combine_nodes_num.shape[0],1)
         
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""
@@ -94,8 +95,12 @@ class FurIndustryMixer(nn.Module):
             # 关联比较模式，叠加整合网络
             index_data_combine = self.combine_layer(index_data_combine)  
         elif self.target_mode==5:
-            # 独立衡量模式
-            index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]            
+            # 按行业时间轴衡量模式
+            index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]     
+        elif self.target_mode==6:
+            # 整体时间轴衡量模式
+            index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]       
+            index_data_combine = self.ins_layer(index_data_combine)               
         elif self.target_mode==1:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)
             index_data_combine = self.seq_layer(index_data_combine)

@@ -22,7 +22,7 @@ import requests
 from trader.utils.date_util import get_next_working_day,get_next_month,is_working_day,date_string_transfer
 from cus_utils.log_util import AppLogger
 from data_extract.his_data_extractor import FutureExtractor,get_period_name
-from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_minute_sina
+from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_minute_sina,get_exchange_symbol_map
 from data_extract.akshare.futures_daily import get_futures_daily
 
 class AkFuturesExtractor(FutureExtractor):
@@ -470,12 +470,15 @@ class AkFuturesExtractor(FutureExtractor):
         
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(variety_sql)   
+        _, _, e_symbol_mkt, _ = (
+            get_exchange_symbol_map()
+        )
         # 依次轮询各个品种，取得对应数据并插入数据库  
         for row in result_rows:
             var_code = row[0]
             # if var_code!="AP":
             #     continue
-            futures_hist_em_df = futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date))
+            futures_hist_em_df = futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date),e_symbol_mkt=e_symbol_mkt)
             if futures_hist_em_df is None:
                 continue
             futures_hist_em_df = futures_hist_em_df.rename(
@@ -760,12 +763,12 @@ if __name__ == "__main__":
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     # qlib品种名单列表生成
-    extractor.build_qlib_instrument()
+    # extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
-    # extractor.import_day_range_contract_data(data_range=(20250116,20250822))
+    # extractor.import_day_range_contract_data(data_range=(20250924,20250925))
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
-    # extractor.import_day_range_continues_data(data_range=(20250701,20250819))
-    # extractor.import_day_range_1min_data(data_range=(20250615,20250828))
+    extractor.import_day_range_continues_data(data_range=(20250926,20250926))
+    # extractor.import_day_range_1min_data(data_range=(20250924,20250925))
             

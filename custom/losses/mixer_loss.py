@@ -358,7 +358,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         ins_class_item = target_class_item[ins_all_inner]
                         inner_index = ins_all_inner[torch.where(ins_class_item>=0)[0]]
                         round_targets_item = future_round_targets_factor[j,inner_index]    
-                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)           
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item) / 10          
                     elif target_mode==2:
                         # 在行业内进行品种比较    
                         inner_class_item = target_class_item[ins_all]
@@ -392,11 +392,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if target_mode in [3]:
                     loss_sum = loss_sum + cls_loss[i]      
                 if target_mode in [5]:
-                    # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标
+                    # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标,多行业指标模式
                     diff_target = long_diff_seq_targets[:,indus_data_index,-1,i]
                     ce_loss[i] = self.mse_loss(sw_index_data,diff_target)        
                     loss_sum = loss_sum + ce_loss[i]   
-                                                                 
+                if target_mode in [6]:
+                    # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标，整体指标模式
+                    diff_target = long_diff_seq_targets[:,main_index,-1,i]
+                    ce_loss[i] = torch.abs(sw_index_data.squeeze()-diff_target).mean()        
+                    loss_sum = loss_sum + ce_loss[i]                                                                   
         # if epoch_num>=self.lock_epoch_num:
         #     # 综合策略损失评判
         #     if optimizers_idx==(len(output)) or optimizers_idx==-1:

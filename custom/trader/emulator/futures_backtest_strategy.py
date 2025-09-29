@@ -150,8 +150,8 @@ class FurBacktestStrategy(SimStrategy):
                 side = SIDE.SELL
             # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）,仓位类型为开仓
             order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.OPEN)
-            # 对于开仓候选品种，如果已持仓当前品种，则进行锁仓--cancel by lmx
-            if self.match_position(instrument) is not None and False:
+            # 对于开仓候选品种，如果已持仓当前品种，则进行锁仓
+            if self.match_position(instrument) is not None:
                 self.lock_list[order_book_id] = order        
                 continue             
             # 加入到候选开仓订单

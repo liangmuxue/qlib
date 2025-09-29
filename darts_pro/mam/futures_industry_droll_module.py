@@ -493,7 +493,6 @@ class FuturesIndustryDRollModule(MlpModule):
                     with open(self.result_file_path_step2, "wb") as fout:
                         pickle.dump(import_price_result_item, fout)      
                     # 累加历次的val结果，整合后进行统计
-                    ["imp_index","instrument","yield_rate","result"]
                     col_data_types = {"imp_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_flag":int,
                                            "date":int}                       
                     if os.path.exists(self.result_view_file_path):

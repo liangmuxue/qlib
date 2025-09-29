@@ -112,7 +112,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # Fake Shape
         self.sw_indus_shape = [rank_num_max,input_chunk_length+output_chunk_length]  
         
-        # 创建整体目标涨跌评估数据,不进行归一化
+        # 创建整体目标涨跌评估数据,进行归一化
         self.cut_len = cut_len
         self.total_target_vals = self.build_total_tar_scale_data(target_series,scale_mode=scale_mode,cut_len=self.output_chunk_length)
         # indus_target_vals = []
@@ -141,7 +141,12 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 diff_range = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["diff_range"].values        
                 open_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["OPEN"].values                                           
+                                    &(df_data["instrument_rank"]==code)]["OPEN"].values      
+                # 对于行业或者总体指标，需要计算下属所有品种的差值的平均
+                if series.instrument_code=="ZS_ALL":
+                    df_zs_all = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
+                                       &(~df_data['instrument'].str.startswith('ZS'))]
+                    diff_range = df_zs_all.groupby("datetime_number")["diff_range"].mean().values                                                    
                 self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array)
             # 保存到本地
             save_ass_data = global_var.get_value("save_ass_data")

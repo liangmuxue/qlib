@@ -216,7 +216,14 @@ class SimAccount():
         """可用资金"""
         
         return self._total_cash - self._margin - self._frozen_cash
-        
+
+    @property
+    def total_value(self):
+        """
+        [float]总权益
+        """
+        return self.cash
+           
     def set_frozen_cash(self,frozen_cash):
         self._frozen_cash = frozen_cash
 
