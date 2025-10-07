@@ -101,7 +101,10 @@ class FuturesProcessModel(TftDataframeModel):
             return   
         if self.type=="predict_indus_and_detail":
             self.predict_indus_and_detail(dataset)   
-            return                           
+            return       
+        if self.type.startswith("build_val_result"):
+            self.build_val_result(dataset)
+            return                               
         print("Do Nothing")
 
     def fit_futures_togather(
@@ -184,9 +187,21 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.mode = self.type  
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            # self.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings
-            # self.model.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings  
             trainer.validate(model=model,dataloaders=val_loader)
+            
+            stat_result = self.model.model.stat_result
+            result_view_file_path = self.model.model.result_view_file_path
+            # 累加保存到本地
+            if os.path.exists(result_view_file_path):
+                stat_result_total = pd.read_csv(result_view_file_path)  
+                # 去重
+                date_min = stat_result["date"].min()
+                date_max = stat_result["date"].max()
+                stat_result_total = stat_result_total[(stat_result_total['date']<date_min)|(stat_result_total['date']>date_max)]
+                stat_result_total = pd.concat([stat_result_total,stat_result])
+            else:        
+                stat_result_total = stat_result
+            stat_result_total.to_csv(result_view_file_path)            
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
@@ -272,9 +287,9 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.mode = self.type  
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            # self.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings
-            # self.model.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings  
+            
             trainer.validate(model=model,dataloaders=val_loader)
+                        
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
@@ -668,6 +683,11 @@ class FuturesProcessModel(TftDataframeModel):
                 print("no match for:",elem.dtype)
         return tuple(aggregated)   
 
+    def build_val_result(self,dataset=None):
+        """生成验证结果,并整合保存"""
+        
+        self.fit_futures_industry(dataset)
+        
     def build_pred_result(self,pred_date,dataset=None):    
         """根据预测区间参数进行预测，pred_range为二元数组，数组元素类型为date"""        
 
@@ -701,7 +721,7 @@ class FuturesProcessModel(TftDataframeModel):
         # 记录实际截止日期对应的序列编号最大值，后续与模拟数据进行区分
         time_idx_mapping = dataset.df_all.groupby("instrument")["time_idx"].max()
         # 为了和训练阶段保持一致处理，需要补充模拟数据
-        df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length) 
+        df_expands = dataset.expand_mock_df(dataset.df_all,expand_length=expand_length,begin_date=int(start_date)) 
         # 生成模拟数据后重置日期区间,以生成足够日期范围的val_series_transformed
         segments = {"train":[total_range[0],last_day],"valid":[begin_day,last_day]}  
         # 再次生成序列数据            
@@ -711,17 +731,16 @@ class FuturesProcessModel(TftDataframeModel):
         for series in val_series_transformed:
             time_idx = time_idx_mapping[time_idx_mapping.index==series.instrument_code].values[0]
             series.last_time_idx = time_idx
-            
+        
+        device = self._build_device()  
         best_weight = self.optargs["best_weight"]    
-        model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],
+        model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
                                                          best=best_weight,batch_file_path=self.batch_file_path)
         model_name = self.optargs["model_name"]  
         self.rebuild_model_params(model,model_name=model_name)  
-        model.model.step_mode = 1
         model.batch_size = self.batch_size     
         model.mode = "predict"
         model.model.mode = "predict"
-        model.model.inter_rs_filepath = self.optargs["inter_rs_filepath"]        
         
         # 进行推理及预测，先fit再predict
         model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
@@ -729,7 +748,7 @@ class FuturesProcessModel(TftDataframeModel):
                  max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)               
         
         # 进行预测           
-        pred_result = self.model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
+        pred_result = model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
                                             batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))
         
         return pred_result        

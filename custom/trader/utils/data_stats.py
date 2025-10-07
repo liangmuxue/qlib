@@ -6,11 +6,15 @@ from datetime import datetime,timedelta
 from chinese_calendar import is_holiday,get_workdays
 from trader.utils.date_util import get_tradedays_dur,get_next_working_day,get_prev_working_day
 
-from darts_pro.mam.futures_industry_droll_module import RESULT_FILE_PATH,RESULT_FILE_STEP1,RESULT_FILE_STEP2,RESULT_FILE_VIEW
 from rqalpha.const import ORDER_STATUS,SIDE
-from data_extract.rqalpha.futures_ds import FuturesDataSource
 from trader.emulator.futures_real_ds import FuturesDataSourceSql
 from backtrader.utils import date
+
+RESULT_FILE_PATH = "custom/data/results/stats"
+RESULT_FILE_STEP1 = "step1_rs.pkl"
+RESULT_FILE_STEP2 = "step2_rs.pkl"
+RESULT_FILE_VIEW = "coll_result.csv"
+INTER_RS_FILEPATH = "pred_step1_rs.pkl"
 
 # 回测整合记录项：date--日期，instrument--品种代码，trade_flag--交易标志('trade'-交易,'ignore'-忽略,'noclose'-无平仓,'lock'-锁定), order_book_id--合约编码，
 #       open_price--开仓价,close_price--平仓价,volume--成交量,side--成交方向(BUY-多方,SELL-空方)
@@ -63,7 +67,7 @@ class DataStats(object):
             date_item = val_data[val_data['date']==date]
             for index,item in date_item.iterrows():
                 instrument = item['instrument']
-                pred_trend = item['trend_flag']
+                pred_trend = item['pred_trend']
                 prev_bar = self.ds.get_continue_data_by_day(instrument, prev_day.strftime("%Y%m%d"))
                 if prev_bar.shape[0]==0:
                     print("{} prev_bar has no data in {}".format(instrument,date))
@@ -118,6 +122,11 @@ class DataStats(object):
                         second_bar['open'],second_bar['settle'],second_bar['high'],second_bar['low']]
                 results.append(item)
         results = pd.DataFrame(np.array(results),columns=PRED_RESULT_COLUMNS) 
+        results['date'] = results['date'].astype(int).astype(int)
+        results['pred_trend'] = results['pred_trend'].astype(int)
+        results['side_flag'] = np.where(results['pred_trend']==1,1,-1)
+        results['diff'] = (results['secondday_close'].astype(float) - results['prev_close'].astype(float))/results['prev_close'].astype(float)
+        results['diff'] = results['diff'] * results['side_flag']         
         combine_data_file = os.path.join(self.work_dir,self.combine_pred_filepath)
         results.to_csv(combine_data_file,index=False)         
 
@@ -269,7 +278,15 @@ class DataStats(object):
         with open(step2_file, "rb") as fin:
             instrument_result_data = pickle.load(fin)  
         print(indus_result_data)    
+
+    def check_pred_output(self):
         
+        result_file_path = "/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/pred_result.pkl"
+        result_file_path = "/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/pred_part/pred_result_20250408.pkl"
+        with open(result_file_path, "rb") as fin:
+            result_data = pickle.load(fin)    
+        print(result_data)    
+               
     def mock_pred_data(self):      
         
         result_file_path = "/home/qdata/workflow/fur_sim_flow_2025/task/162/dump_data/pred_result.pkl"
@@ -292,15 +309,16 @@ class DataStats(object):
 
      
 if __name__ == "__main__":
-    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03")  
-    stats.analysis_val_data()
+    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/05")  
+    # stats.analysis_val_data()
     # stats.check_step_output()
-    # stats.combine_pred_result(pred_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03")
+    stats.check_pred_output()
+    # stats.combine_pred_result(pred_dir="/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/")
     # stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
-    # stats.combine_val_result(date_range=[20241001,20250330])
+    # stats.combine_val_result(date_range=[20250301,20250531])
     # stats.mock_pred_data()
     # stats.combine_backtest_result()
-    # stats.analysis_backtest(date_range=[20241001,20250330])
+    # stats.analysis_backtest(date_range=[20250301,20250531])
     
     
     

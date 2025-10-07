@@ -103,8 +103,8 @@ class FuturesPredRecorder(TftRecorder):
         pred_result_list = None
         # 进行预测，取得预测结果
         for pred_date in trade_dates:
-            # pred_result = self.model.build_pred_result(str(pred_date),dataset=dataset)
-            pred_result = self.model.build_pred_result_2step(str(pred_date),dataset=dataset)
+            pred_result = self.model.build_pred_result(str(pred_date),dataset=dataset)
+            # pred_result = self.model.build_pred_result_2step(str(pred_date),dataset=dataset)
             if pred_result_list is None:
                 pred_result_list = pred_result[pred_date]
             else:

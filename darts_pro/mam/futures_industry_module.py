@@ -11,8 +11,6 @@ import warnings
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import precision_score, recall_score, f1_score
 
 from .mlp_module import MlpModule
 import cus_utils.global_var as global_var
@@ -22,24 +20,18 @@ from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 
 from cus_utils.common_compute import compute_price_class,scale_value
 from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
-from cus_utils.tensor_viz import TensorViz
-from trader.utils.data_stats import DataStats
+from trader.utils.data_stats import DataStats,RESULT_FILE_PATH,RESULT_FILE_VIEW,INTER_RS_FILEPATH
 
 from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20250318,20250319,20250320]
-STAT_DATE = [20240316,20260325]
+STAT_DATE = [20240527,20260527]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = [1]
-RESULT_FILE_PATH = "custom/data/results/stats"
-RESULT_FILE_STEP1 = "step1_rs.pkl"
-RESULT_FILE_STEP2 = "step2_rs.pkl"
-RESULT_FILE_VIEW = "coll_result.csv"
-INTER_RS_FILEPATH = "pred_step1_rs.pkl"
 
 class FuturesIndustryModule(MlpModule):
     """整合行业板块的总体模型"""              
@@ -85,8 +77,6 @@ class FuturesIndustryModule(MlpModule):
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
                                     use_weighted_loss_func=use_weighted_loss_func,batch_file_path=batch_file_path,
                                     device=device,**kwargs)  
-        self.result_file_path = os.path.join(RESULT_FILE_PATH,RESULT_FILE_STEP1)
-        self.result_file_path_step2 = os.path.join(RESULT_FILE_PATH,RESULT_FILE_STEP2)
         self.result_view_file_path = os.path.join(RESULT_FILE_PATH,RESULT_FILE_VIEW)
         # For pred step1 result
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH,INTER_RS_FILEPATH)
@@ -446,18 +436,7 @@ class FuturesIndustryModule(MlpModule):
             
             # 生成进一步的结果指标
             stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03") 
-            stat_result = stats.compute_val_result(coll_result.rename(columns={'trend_value':'trend_flag'}))
-            # 累加保存到本地
-            if os.path.exists(self.result_view_file_path):
-                stat_result_total = pd.read_csv(self.result_view_file_path)  
-                # 去重
-                date_min = stat_result["date"].min()
-                date_max = stat_result["date"].max()
-                stat_result_total = stat_result_total[(stat_result_total['date']<date_min)|(stat_result_total['date']>date_max)]
-                stat_result_total = pd.concat([stat_result_total,stat_result])
-                stat_result_total.to_csv(self.result_view_file_path) 
-            else:        
-                stat_result.to_csv(self.result_view_file_path)              
+            self.stat_result = stats.compute_val_result(coll_result.rename(columns={'trend_value':'pred_trend'}))
             
             viz_result = global_var.get_value("viz_result")
             viz_result_detail = global_var.get_value("viz_result_detail")
@@ -975,12 +954,7 @@ class FuturesIndustryModule(MlpModule):
         sw_ins_mappings = self.valid_sw_ins_mappings
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
         result_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
-        result_target = {}
-        if self.train_step_mode==1:
-            with open(self.inter_rs_filepath, "wb") as fout:
-                pickle.dump(result_date_list, fout)     
-            self.result_target = None
-            return    
+        result_target = {}  
         # 根据原始数组，生成实际品种信息
         if result_date_list is None:
             self.result_target = None

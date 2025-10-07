@@ -117,6 +117,8 @@ class FurBacktestStrategy(SimStrategy):
         self.trade_day = pred_date
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = self.get_previous_trading_date(self.trade_day)
+        if self.trade_day==20250407:
+            print("ggg")
         # 初始化当日合约对照表
         self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.now)        
         # 根据当前日期，进行预测计算
@@ -261,8 +263,6 @@ class FurBacktestStrategy(SimStrategy):
             # 买入数量需要根据当前额度进行计算,还需要兼顾合约乘数
             multiplier = self.data_source.get_contract_info(order_book_id)["multiplier"].astype(float).values[0]
             # 实时计算单个品种购买的额度
-            if self.trade_day==20241011:
-                print("ggg")
             single_value = self.compute_build_quantity()
             quantity = int(single_value/price/multiplier)
             # if price*quantity>30000:
@@ -375,8 +375,6 @@ class FurBacktestStrategy(SimStrategy):
                 continue
             self.time_inject(code_name="get_today_closed_order")
             pos_info = self.get_position(order_book_id)
-            if pos_info is None:
-                print("ggg")
             amount = pos_info.quantity
             self.time_inject(code_name="get_position")
             # 根据原持仓品种的多空类别决定平仓相关参数
@@ -627,7 +625,7 @@ class FurBacktestStrategy(SimStrategy):
                 break
         if key_can is None:
             key_can = list(self.candidate_list.keys())[0]
-           
+        
         self.open_list[key_can] = self.candidate_list.pop(key_can)
                 
         return self.open_list[key_can]       

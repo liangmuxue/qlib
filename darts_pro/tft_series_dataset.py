@@ -355,12 +355,15 @@ class TFTSeriesDataset(TFTDataset):
             return covariates_array            
 
         # 在series中植入业务编号，以便后续调试排查
-        def inset_codes(target_series):
+        def inset_codes(target_series,df_data=None):
             for index,series in enumerate(target_series):
                 group_col_val = series.static_covariates[group_column].values[0]
                 instrument_code = self.get_group_code_by_rank(group_col_val)
                 series.instrument_code = instrument_code
                 series.last_time_idx = series.time_index.stop
+                # 序列中植入日期数组，用于后续数据筛选
+                if df_data is not None:
+                    series.datetime_arr =  df_data[df_data['instrument']==instrument_code]['datetime_number'].values
 
         # 生成过去协变量，并归一化
         logger.info("begin build_covariates")
@@ -371,7 +374,7 @@ class TFTSeriesDataset(TFTDataset):
         future_convariates = build_covariates(future_columns)    
         # 在series中植入业务编号，以便后续调试排查
         inset_codes(train_series)
-        inset_codes(val_series)
+        inset_codes(val_series,df_data=df_val)
         
         # 补充未来协变量数据,与验证数据相对应    
         if fill_future:           
@@ -785,7 +788,7 @@ class TFTSeriesDataset(TFTDataset):
         df_target = self.df_all[(self.df_all["instrument"]==instrument)&(self.df_all["time_idx"]>=time_range[0])&(self.df_all["time_idx"]<time_range[1])]
         return df_target   
     
-    def expand_mock_df(self,ori_df,expand_length=10):
+    def expand_mock_df(self,ori_df,expand_length=10,begin_date=None):
         """给已有时间序列扩展添加模拟数据"""
         
         warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
@@ -802,7 +805,12 @@ class TFTSeriesDataset(TFTDataset):
             # 取得验证集最大时间序号，作为累加的开始时间序号
             start_time_index = group_data[time_column].max()
             last_datetime = group_data[group_data['time_idx']==(start_time_index)]['datetime'].values[0]
-            last_datetime = pd.to_datetime(str(last_datetime)).strftime('%Y%m%d')
+            # 统一使用传参日期作为起始日期，避免品种序列日期缺失
+            if begin_date is not None:
+                start_date = begin_date
+            else:
+                start_date = get_tradedays_dur(last_datetime,1)
+            start_date = pd.to_datetime(str(start_date)).strftime('%Y%m%d')
             # 原有长度需要大于扩展长度，否则无法复制虚拟值
             assert group_data.shape[0]>expand_length
             # 从最近的部分复制
@@ -810,8 +818,8 @@ class TFTSeriesDataset(TFTDataset):
             # 累加时间序列编号
             df_expand["time_idx"] = np.array([start_time_index+1+i for i in range(expand_length)])
             # 累计取得后续日期序列
-            datetime_end = get_tradedays_dur(last_datetime,expand_length)
-            datetime_range = get_tradedays(last_datetime,datetime_end)[1:]
+            datetime_end = get_tradedays_dur(start_date,expand_length-1)
+            datetime_range = get_tradedays(start_date,datetime_end)
             df_expand["datetime_number"] = np.array(datetime_range).astype(np.int32)
             df_expand["datetime"] = pd.to_datetime(df_expand["datetime_number"].astype(str),format="%Y%m%d")
             df_expand["month"] = df_expand.datetime.dt.month - 1

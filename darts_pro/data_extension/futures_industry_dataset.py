@@ -21,6 +21,7 @@ from darts import TimeSeries
 from cus_utils.common_compute import normalization_except_outlier,interquartile_range
 from tft.class_define import CLASS_VALUES,get_simple_class,get_complex_class
 
+from trader.utils.date_util import get_tradedays
 from cus_utils.db_accessor import DbAccessor
 import cus_utils.global_var as global_var
 from cus_utils.encoder_cus import rolling_norm
@@ -422,7 +423,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             offset_begin = ser_idx_infer - target_series.time_index[0]
             if offset_begin<self.input_chunk_length:
                 continue
-            
             # 使用实际股票对照索引（刨除指数索引）        
             keep_index = self.keep_index[index]  
             # 目标序列
@@ -438,7 +438,15 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             past_end_ser = past_start_ser + self.input_chunk_length
             future_start_ser = past_end_ser
             future_end_ser = future_start_ser + self.output_chunk_length
-            
+            # 在验证模式下，忽略时间间隔太大的序列
+            if self.mode=='valid':
+                datetime_arr = target_series.datetime_arr[past_start_ser:past_end_ser+1].astype(int)
+                val_begin_date = datetime.strptime(str(datetime_arr[0]), "%Y%m%d")
+                val_end_date = datetime.strptime(str(datetime_arr[-1]), "%Y%m%d")
+                dur_number = len(get_tradedays(val_begin_date,val_end_date))
+                if dur_number>2*self.input_chunk_length:
+                    continue
+                
             # 取得整体评估量化数据
             total_target_vals = self.total_target_vals[ori_index][past_start_ser:future_end_ser]
             round_targets[keep_index] = total_target_vals    
@@ -615,8 +623,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
         
-        # if future_start_datetime==20240822:
-        #     result_file_path = "custom/data/results/data_compare_val_20240822.pkl"
+        # if future_start_datetime==20250527:
+        #     result_file_path = "custom/data/results/data_compare_val_20250527.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
         #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
         #     with open(result_file_path, "wb") as fout:
@@ -716,16 +724,14 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
             target_series = self.target_series[ori_index]        
             # 如果最后的序列号与当前序列号的差值不足序列输出长度(注意，这里以实际最大序列编号来衡量)，则忽略
             offset_end = target_series.time_index.stop - ser_idx_infer
-            raise_if(
-                offset_end<self.output_chunk_length,
-                "offset_end too small",
-            )            
+            if offset_end<self.output_chunk_length:
+                print("offset_end too small:{}".format(target_series.instrument_code))    
+                continue       
             # 如果开始的序列号与当前序列号的差值不足序列输入长度，则忽略
             offset_begin = ser_idx_infer - target_series.time_index[0]
-            raise_if(
-                offset_begin<self.input_chunk_length,
-                "offset_begin too small",
-            )   
+            if offset_begin<self.input_chunk_length:
+                print("offset_begin too small:{}".format(target_series.instrument_code))   
+                continue  
             # 使用实际对照索引（刨除指数索引）        
             keep_index = self.keep_index[index]  
             # 目标序列
@@ -909,13 +915,13 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                         future_round_targets[k,:,i] = scale_data
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
-        # if future_start_datetime==20240822:
-        #     result_file_path = "custom/data/results/data_compare_pred_20240822.pkl"
-        #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
-        #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
-        #     with open(result_file_path, "wb") as fout:
-        #         pickle.dump(results, fout)    
-        #     results
+        if future_start_datetime==20250407:
+            result_file_path = "custom/data/results/data_compare_predresult_20250407.pkl"
+            results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
+                       ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
+            with open(result_file_path, "wb") as fout:
+                pickle.dump(results, fout)    
+            results
             
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
