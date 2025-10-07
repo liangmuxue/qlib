@@ -259,7 +259,7 @@ class DataStats(object):
           
     def analysis_val_data(self,date_range=None):
         
-        val_coll_path = os.path.join(self.work_dir,"coll_result.csv")
+        val_coll_path = os.path.join(self.work_dir," .csv")
         val_result_data = pd.read_csv(val_coll_path)        
         date_num = val_result_data['date'].unique().shape[0]
         diff_total = val_result_data['diff'].sum()
@@ -282,7 +282,6 @@ class DataStats(object):
     def check_pred_output(self):
         
         result_file_path = "/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/pred_result.pkl"
-        result_file_path = "/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/pred_part/pred_result_20250408.pkl"
         with open(result_file_path, "rb") as fin:
             result_data = pickle.load(fin)    
         print(result_data)    
@@ -312,13 +311,13 @@ if __name__ == "__main__":
     stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/05")  
     # stats.analysis_val_data()
     # stats.check_step_output()
-    stats.check_pred_output()
+    # stats.check_pred_output()
     # stats.combine_pred_result(pred_dir="/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/")
     # stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
-    # stats.combine_val_result(date_range=[20250301,20250531])
+    stats.combine_val_result(date_range=[20250301,20250531])
     # stats.mock_pred_data()
-    # stats.combine_backtest_result()
-    # stats.analysis_backtest(date_range=[20250301,20250531])
+    stats.combine_backtest_result()
+    stats.analysis_backtest(date_range=[20250301,20250531])
     
     
     

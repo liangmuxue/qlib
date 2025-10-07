@@ -117,7 +117,7 @@ class FurBacktestStrategy(SimStrategy):
         self.trade_day = pred_date
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = self.get_previous_trading_date(self.trade_day)
-        if self.trade_day==20250407:
+        if self.trade_day==20250314:
             print("ggg")
         # 初始化当日合约对照表
         self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.now)        
@@ -874,7 +874,9 @@ class FurBacktestStrategy(SimStrategy):
         if mode=="instrument":
             # 品种模式查询，需要先根据品种取得合约代码再查询
             symbol = self.data_source.get_main_contract_name(code,str(day))
-            data = date_trading_mappings[(date_trading_mappings['date']==day_date)&(date_trading_mappings['contract']==symbol)]
+            if symbol is None:
+                return False
+            data = date_trading_mappings[(date_trading_mappings['date']==day_date)&(date_trading_mappings['contract'].str.upper()==symbol.upper())]
         else:
             # 合约模式查询，直接查询
             data = date_trading_mappings[(date_trading_mappings['date']==day_date)&(date_trading_mappings['contract']==code)]

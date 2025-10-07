@@ -162,7 +162,7 @@ class FuturesDataSource(BaseDataSource):
     def get_main_contract_name(self,instrument,date):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
-        #取得当前月，下个月，下下个月3个月份合约名称
+        #取得有可能的所有合约名称
         if isinstance(date,str):
             date_obj = dt_obj.strptime(str(date), '%Y%m%d')
         else:
@@ -325,7 +325,7 @@ class FuturesDataSource(BaseDataSource):
     def load_item_day_data(self,symbol,date):  
         """加载指定日期和合约名称的日线数据"""
         
-        item_sql = "select code,date,open,close,high,low,volume,hold,settle from dominant_real_data where code='{}' " \
+        item_sql = "select UPPER(code),date,open,close,high,low,volume,hold,settle from dominant_real_data where code='{}' " \
             "and date='{}'".format(symbol,date.strftime('%Y-%m-%d'))
         result_rows = self.dbaccessor.do_query(item_sql)   
         if len(result_rows)==0:

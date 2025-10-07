@@ -547,10 +547,10 @@ class AkFuturesExtractor(FutureExtractor):
                 time.sleep(5)
             print("code:{} ok".format(code))
 
-    def get_likely_main_contract_names(self,instrument,date,month_range=3,czce_spec=False):
+    def get_likely_main_contract_names(self,instrument,date,month_range=12,czce_spec=False):
         """根据品种编码和指定日期，取得可能的主力合约名称"""
         
-        #取得当前月，下个月，下下个月,共3个月份合约名称
+        #取得当前月，以及后续多个月份的所有合约名称
         month_arr = []
         exchange_code = self.get_exchange_from_instrument(instrument)
         year = date.year
@@ -565,6 +565,7 @@ class AkFuturesExtractor(FutureExtractor):
             else:
                 month_item = month_item.strftime("%y%m")
                 month_item = instrument + month_item
+            month_item = month_item.upper()
             month_arr.append(month_item)
             
         return month_arr
