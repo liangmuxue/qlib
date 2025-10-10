@@ -25,6 +25,9 @@ from data_extract.his_data_extractor import FutureExtractor,get_period_name
 from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_minute_sina,get_exchange_symbol_map
 from data_extract.akshare.futures_daily import get_futures_daily
 
+from cus_utils.log_util import AppLogger
+logger = AppLogger()
+
 class AkFuturesExtractor(FutureExtractor):
     """akshare期货数据源"""
 
@@ -488,7 +491,7 @@ class AkFuturesExtractor(FutureExtractor):
             futures_hist_em_df['settle'] = futures_hist_em_df['close']
             futures_hist_em_df.drop(columns=['涨跌','涨跌幅','成交额'])
             futures_hist_em_df[tar_cols].to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
-            print("{} import ok".format(var_code))
+            print("import_day_range_continues_data {}  ok".format(var_code))
             time.sleep(2)
 
     def import_day_range_1min_data(self,data_range=None):
@@ -526,6 +529,112 @@ class AkFuturesExtractor(FutureExtractor):
         # 遍历所有品种，并分别取得历史数据
         for result in result_rows:
             code = result[0]
+            # if code!="CJ":
+            #     continue
+            # 取得比较接近的合约
+            contract_names = self.get_likely_main_contract_names(code,cur_date)
+            for contract_name in contract_names:
+                # 直接从文件中读取
+                item_save_path = os.path.join(self.get_1min_save_path(),"{}.csv".format(contract_name))
+                if not os.path.exists(item_save_path):
+                    logger.warning("main data not found in:{}".format(item_save_path))
+                    continue
+                futures_zh_minute_sina_df = pd.read_csv(item_save_path)                
+                # 只取超出原有数据日期的数据
+                futures_zh_minute_sina_df = futures_zh_minute_sina_df[
+                    (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))>=begin_date)&
+                    (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))<=end_date)]
+                futures_zh_minute_sina_df['code'] = contract_name
+                futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
+                time.sleep(5)
+            print("code:{} ok".format(code))
+
+    def import_day_range_1min_data_cross(self,data_range=None):
+        """导入分钟历史数据,交错模式"""
+        
+        begin_date,end_date = data_range
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        dtype = {
+            'code': sqlalchemy.String,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,   
+            'settle': sqlalchemy.FLOAT,          
+            "date": sqlalchemy.DateTime
+        }        
+        date_sql = "select max(datetime) from dominant_real_data_1min_cross"
+        result_rows = self.dbaccessor.do_query(date_sql) 
+        max_datetime = result_rows[0][0]
+        if max_datetime is None:
+            max_date = 0
+        else:
+            max_date = int(max_datetime.strftime("%Y%m%d")) 
+        next_date_date = get_next_working_day(datetime.datetime.strptime(str(end_date), "%Y%m%d"))
+        next_date = int(next_date_date.strftime("%Y%m%d"))
+        next_date_begin_str = next_date_date.strftime("%Y-%m-%d") +  " 00:00:00"
+        next_date_begin = datetime.datetime.strptime(next_date_begin_str,"%Y-%m-%d %H:%M:%S")
+        next_date_end_str = next_date_date.strftime("%Y-%m-%d") +  " 23:59:59"
+        next_date_mid_str = next_date_date.strftime("%Y-%m-%d") +  " 12:00:00"
+        next_date_mid = datetime.datetime.strptime(next_date_mid_str,"%Y-%m-%d %H:%M:%S")
+        # 如果超出了当天上午收盘时间，则认为已经导入过了
+        if max_date>end_date or (max_date==next_date and max_datetime.hour>12):
+            print("exceed date in import_day_range_1min_data_cross:{}".format(max_datetime))
+            return
+        if max_date>begin_date:
+            begin_date = max_date   
+        
+        # 在此模式下，首先拷贝当天已经导入的分钟数据，然后导入下一天上午的数据
+        begin_time_str = date_string_transfer(str(begin_date)) + " 00:00:00"
+        end_time_str = date_string_transfer(str(end_date)) + " 23:59:59"
+        del_sql = "delete from dominant_real_data_1min_cross where datetime>='{}' and datetime<='{}'". \
+            format(begin_time_str,next_date_end_str)   
+        # 先删后增
+        self.dbaccessor.do_updateto(del_sql)
+        sql = ("insert into dominant_real_data_1min_cross select * from dominant_real_data_1min " + 
+            "where datetime>='{}' and datetime<='{}'").format(begin_time_str,end_time_str)   
+        self.dbaccessor.do_inserto(sql)               
+        # 不下载期权数据
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        result_rows = self.dbaccessor.do_query(variety_sql)    
+        # 遍历所有品种，并分别取得历史数据,只需要取得下一天上午的数据
+        for result in result_rows:
+            code = result[0]
+            # 取得比较接近的合约
+            contract_names = self.get_likely_main_contract_names(code,next_date_date.date())
+            for contract_name in contract_names:
+                # 直接从文件中读取
+                item_save_path = os.path.join(self.get_1min_save_path(),"{}.csv".format(contract_name))
+                if not os.path.exists(item_save_path):
+                    logger.warning("main data not found in:{}".format(item_save_path))
+                    continue
+                futures_zh_minute_sina_df = pd.read_csv(item_save_path)
+                # 只取当天上午的数据
+                futures_zh_minute_sina_df = futures_zh_minute_sina_df[
+                    (pd.to_datetime(futures_zh_minute_sina_df['datetime'])>=next_date_begin)&
+                    (pd.to_datetime(futures_zh_minute_sina_df['datetime'])<=next_date_mid)]                
+                if futures_zh_minute_sina_df.shape[0]>0:
+                    futures_zh_minute_sina_df.to_sql('dominant_real_data_1min_cross', engine, index=False, if_exists='append',dtype=dtype)  
+                else:
+                    logger.warning("no match data in:{}".format(contract_name))
+    
+    def get_1min_save_path(self):
+        save_path = os.path.join(self.savepath,"item/min")
+        return save_path
+    
+    def store_1min_data(self,data_range=None):    
+        """保存1分钟数据到本地文件""" 
+        
+        cur_date = datetime.datetime.now().date()
+        # 筛选合适的数据
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        result_rows = self.dbaccessor.do_query(variety_sql)       
+        # 遍历所有品种，并分别取得历史数据,只需要取得下一天上午的数据
+        for result in result_rows:
+            code = result[0]
             # 取得比较接近的合约
             contract_names = self.get_likely_main_contract_names(code,cur_date)
             for contract_name in contract_names:
@@ -538,46 +647,15 @@ class AkFuturesExtractor(FutureExtractor):
                 if status_code==0:
                     print("contract {} has no data".format(contract_name))
                     continue                    
-                # 只取超出原有数据日期的数据
-                futures_zh_minute_sina_df = futures_zh_minute_sina_df[
-                    (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))>=begin_date)&
-                    (pd.to_numeric(pd.to_datetime(futures_zh_minute_sina_df['datetime']).dt.strftime('%Y%m%d'))<=end_date)]
-                futures_zh_minute_sina_df['code'] = contract_name
-                futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
+                if futures_zh_minute_sina_df.shape[0]>0:
+                    futures_zh_minute_sina_df['code'] = contract_name
+                    futures_zh_minute_sina_df = futures_zh_minute_sina_df.reset_index(drop=True)
+                    # 存储到文件
+                    item_save_path = os.path.join(self.get_1min_save_path(),"{}.csv".format(contract_name))
+                    futures_zh_minute_sina_df.to_csv(item_save_path,index=None)
                 time.sleep(5)
-            print("code:{} ok".format(code))
-
-    def get_likely_main_contract_names(self,instrument,date,month_range=12,czce_spec=False):
-        """根据品种编码和指定日期，取得可能的主力合约名称"""
+            logger.info("store_1min_data,code:{} ok".format(code))        
         
-        #取得当前月，以及后续多个月份的所有合约名称
-        month_arr = []
-        exchange_code = self.get_exchange_from_instrument(instrument)
-        year = date.year
-        for i in range(month_range):
-            month_item = get_next_month(date,next=i)
-            # 郑商所和其他交易所编码方式不一样,为：代码+年份最后一位+月份
-            if exchange_code=="CZCE" and czce_spec:     
-                if year<=2024:
-                    month_item = instrument + month_item.strftime("%y%m")
-                else:
-                    month_item = instrument + month_item.strftime("%y")[1]  + month_item.strftime("%m") 
-            else:
-                month_item = month_item.strftime("%y%m")
-                month_item = instrument + month_item
-            month_item = month_item.upper()
-            month_arr.append(month_item)
-            
-        return month_arr
-
-    def get_exchange_from_instrument(self,instrument_code):
-        
-        sql = "select e.code from trading_variety v,futures_exchange e where v.exchange_id=e.id and v.code='{}' ".format(instrument_code)
-        result_rows = self.dbaccessor.do_query(sql)  
-        if len(result_rows)==0:
-            return None        
-        return result_rows[0][0]
-           
     def get_last_minutes_data(self,symbol):
         """取得指定品种最近一分钟数据"""
         

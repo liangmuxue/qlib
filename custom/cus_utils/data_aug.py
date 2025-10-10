@@ -1,8 +1,13 @@
+import os
 import torch
 import numpy as np
 import pandas as pd
 import random
 import pickle
+from datetime import datetime
+
+from cus_utils.db_accessor import DbAccessor
+from pickle import TRUE
 
 class DictToObject:
     def __init__(self, dictionary):
@@ -115,6 +120,75 @@ def compare_dataset_consistence():
         if np.sum(compare_rs)>1:
             print("{} difference:{}".format(names[i],compare_rs))
 
+def compare_clean_data_and_continus_data(match_date=None):
+    """比较用于训练的数据和主连数据是否一致及完备"""
+    
+    dbaccessor = DbAccessor({})
+    ins_file_path = "/home/qdata/qlib_data/futures_data/instruments/clean_data.txt"
+    ins_data = pd.read_table(ins_file_path,sep='\t',header=None)
+    compare_results = []
+    for row in ins_data.values:
+        symbol = row[0] 
+        sql = "select c.date,v.exchange_id from dominant_continues_data_cross c left join trading_variety v on " \
+            "c.code=v.code where c.code='{}' order by date desc limit 1".format(symbol)
+        result = dbaccessor.do_query(sql)
+        if len(result)==0:
+            date = 0
+            exchange_id = 0
+        else:
+            date = int(result[0][0].strftime("%Y%m%d"))
+            exchange_id = int(result[0][1])
+        compare_results.append([symbol,date,exchange_id])
+    # print(compare_results)
+    compare_results = pd.DataFrame(np.array(compare_results),columns=['code','date','exchange_id'])
+    compare_results['date'] = compare_results['date'].astype(int)
+    compare_results['exchange_id'] = compare_results['exchange_id'].astype(int)
+    lack_data = compare_results[compare_results['date']<match_date]
+    print("lack data:{}".format(lack_data))
+    print("min date:{}".format(lack_data['date'].min()))
+    return lack_data
+
+def compare_clean_data_and_1min_cross_data(match_date=None):
+    """比较用于训练的数据和1分钟主力合约交错数据是否一致及完备"""
+    
+    dbaccessor = DbAccessor({})
+    from data_extract.akshare_futures_extractor import AkFuturesExtractor
+    extractor = AkFuturesExtractor(savepath="/home/qdata/futures_data")   
+    
+    ins_file_path = "/home/qdata/qlib_data/futures_data/instruments/clean_data.txt"
+    ins_data = pd.read_table(ins_file_path,sep='\t',header=None)
+    compare_results = []
+    for row in ins_data.values:
+        symbol = row[0] 
+        main_contract_name = extractor.get_main_contract_name(symbol, str(match_date), use_1min_data=True)
+        item_save_path = os.path.join(extractor.get_1min_save_path(),"{}.csv".format(main_contract_name))
+        # 检查分钟数据（交错模式）的合约文件是否存在
+        if not os.path.exists(item_save_path):
+            file_exists_flag = 0
+            main_code = symbol
+            date = '2005-01-01 00:00:00'
+        else:
+            file_exists_flag = 1
+            sql = "select datetime from dominant_real_data_1min_cross where code='{}' order by datetime desc limit 1".format(main_contract_name)
+            result = dbaccessor.do_query(sql)
+            if len(result)==0:
+                date = '2005-01-01 00:00:00'
+                main_code = symbol
+            else:
+                date = result[0][0]
+                main_code = main_contract_name
+        compare_results.append([symbol,main_code,date,file_exists_flag])
+    # print(compare_results)
+    compare_results = pd.DataFrame(np.array(compare_results),columns=['code','main_code','date','file_exists_flag'])
+    compare_results['file_exists_flag'] = compare_results['file_exists_flag'].astype(int)
+    compare_results['date'] = compare_results['date'].astype('datetime64[ns]')
+    match_date_date = datetime.strptime(str(match_date), "%Y%m%d")
+    lack_data = compare_results[compare_results['date']<match_date_date]
+    print(compare_results)
+    print("lack data:{}".format(lack_data))
+    # print("min date:{}".format(lack_data['date'].min()))
+    return lack_data
+           
 def swig_object_to_dict(obj):
     """Swig Object to Dict"""
     
@@ -141,7 +215,9 @@ if __name__ == "__main__":
     # aug_data_view(file_path)
     # aug_data_to_pd(file_path,pd_file_path,['datetime','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label','ori_label'])\
     # aug_pd_data_view(pd_file_path)
-    compare_dataset_consistence()
+    # compare_dataset_consistence()
+    # compare_clean_data_and_continus_data(match_date=20250930)
+    compare_clean_data_and_1min_cross_data(match_date=20250930)
     
        
     

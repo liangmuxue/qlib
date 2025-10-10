@@ -22,9 +22,7 @@ from trader.utils.date_util import tradedays,get_tradedays_dur,is_working_day
 from data_extract.rqalpha.fur_ds_proxy import FurDataProxy
 from data_extract.his_data_extractor import PeriodType
 from cus_utils.data_aug import DictToObject
-from cus_utils.data_filter import get_topN_dict
 from cus_utils.log_util import AppLogger
-from gunicorn import instrument
 logger = AppLogger()
 
 def get_time(f):

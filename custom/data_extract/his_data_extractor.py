@@ -13,7 +13,7 @@ import pandas as pd
 import pickle
 from persistence.common_dict import CommonDictType,CommonDict
 from pandas._libs.tslibs import period
-from trader.utils.date_util import get_tradedays_dur,date_string_transfer
+from trader.utils.date_util import get_tradedays_dur,date_string_transfer,get_next_month
 from scripts.dump_bin import DumpDataAll
 
 from cus_utils.db_accessor import DbAccessor
@@ -529,8 +529,130 @@ class FutureExtractor(HisDataExtractor):
         self.col_data_types = {"symbol":str,"open":float,"high":float,"low":float,"close":float,
                                "volume":float,"hold":float}        
         self.sim_path = sim_path
+    
+    def get_recent_main_from_contiues_cross_record(self,instrument):
+        
+        sql = "select date,main_code from dominant_continues_data_cross where code='{}' order by date desc limit 1".format(instrument)
+        result = self.dbaccessor.do_query(sql)
+        if len(result)==0:
+            return None,None
+        return result[0]
 
+    def load_item_day_data(self,symbol,date):  
+        """加载指定日期和合约名称的日线数据"""
+        
+        busi_columns = ["code","datetime","open","close","high","low","volume","hold","settle"]
+        item_sql = "select UPPER(code),date,open,close,high,low,volume,hold,settle from dominant_real_data where code='{}' " \
+            "and date='{}'".format(symbol,date.strftime('%Y-%m-%d'))
+        result_rows = self.dbaccessor.do_query(item_sql)   
+        if len(result_rows)==0:
+            return None
+        result = pd.DataFrame(np.expand_dims(np.array(list(result_rows[0])),0),columns=busi_columns) 
+        return result    
+
+    def get_item_day_data_by_1min(self,symbol,date):  
+        """根据1分钟数据，计算生成加载指定日期和合约名称的日线数据"""
+        
+        begin_time = date.strftime('%Y-%m-%d') + " 00:00:00"
+        end_time = date.strftime('%Y-%m-%d') + " 23:59:59"
+        item_sql = "select code,sum(volume) as volume from dominant_real_data_1min_cross where code='{}' " \
+            "and datetime>='{}' and datetime<='{}'".format(symbol,begin_time,end_time)
+        result_rows = self.dbaccessor.do_query(item_sql)   
+        if len(result_rows)==0 or result_rows[0][0] is None:
+            return None
+        result = pd.DataFrame(np.expand_dims(np.array(list(result_rows[0])),0),columns=['code','volume']) 
+        result['volume'] = result['volume'].astype(float)
+        return result  
             
+    def get_main_contract_name(self,instrument,date,use_1min_data=False):
+        """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
+        
+        #取得有可能的所有合约名称
+        if isinstance(date,str):
+            date_obj = datetime.datetime.strptime(str(date), '%Y%m%d').date()
+        else:
+            date_obj = date
+        contract_names = self.get_likely_main_contract_names(instrument, date_obj)
+        # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
+        volume_main = 0
+        main_name = None
+        for symbol in contract_names:
+            if use_1min_data:
+                # 使用1分钟年数据累加计算日K数据
+                item_df = self.get_item_day_data_by_1min(symbol,date_obj)   
+            else:             
+                item_df = self.load_item_day_data(symbol,date_obj)
+            if item_df is None or item_df.shape[0]==0:
+                continue
+            cur_volume = item_df['volume'].values[0]
+            if volume_main<cur_volume:
+                volume_main = cur_volume
+                main_name = item_df['code'].values[0]
+            
+        return main_name 
+        
+    def get_likely_main_contract_names(self,instrument,date,month_range=12,czce_spec=False,ref=True):
+        """根据品种编码和指定日期，取得可能的主力合约名称"""
+        
+        #取得当前月，以及后续多个月份的所有合约名称
+        month_arr = []
+        exchange_code = self.get_exchange_from_instrument(instrument)
+        year = date.year
+        # 如果是参考模式，则从连续合约记录中取得最近的主力合约，并根据合约中的月份进行推算，取得后续的合约月份
+        if ref:
+            rec_date,main_code = self.get_recent_main_from_contiues_cross_record(instrument)
+            if main_code is None:
+                logger.warning("no data in main_code query:{}".format(instrument))
+                return month_arr
+            main_month = self.get_month_from_contrac_name(main_code, exchange_code=exchange_code)
+            main_month_date = datetime.datetime.strptime(main_month, "%y%m")
+            # 不能太早于连续合约的对应日期
+            if date.year<rec_date.year or (date.year==rec_date.year and (date.month - rec_date.month)<-3):
+                logger.warning("{} date too early:{}".format(instrument,date))
+                return month_arr
+            # 不能太晚于连续合约的对应日期
+            delta = date - rec_date
+            month_num = delta.days//30 + 1
+            if month_num>2:
+                logger.warning("{} date too late:{}".format(instrument,date))
+                return month_arr
+            # 取尽量少的月份,仍需要兼顾前面的月份
+            for i in range(month_num-2,month_num+3):
+                month_item = get_next_month(main_month_date,next=i)
+                month_item = month_item.strftime("%y%m")
+                month_item = instrument + month_item                
+                month_arr.append(month_item)
+            return month_arr
+                       
+        for i in range(month_range):
+            month_item = get_next_month(date,next=i)
+            # 郑商所和其他交易所编码方式不一样,为：代码+年份最后一位+月份
+            if exchange_code=="CZCE" and czce_spec:     
+                if year<=2024:
+                    month_item = instrument + month_item.strftime("%y%m")
+                else:
+                    month_item = instrument + month_item.strftime("%y")[1]  + month_item.strftime("%m") 
+            else:
+                month_item = month_item.strftime("%y%m")
+                month_item = instrument + month_item
+            month_item = month_item.upper()
+            month_arr.append(month_item)
+            
+        return month_arr
+    
+    def get_month_from_contrac_name(self,contrac_name,exchange_code=None):
+        """从合约中取得对应月份"""
+        
+        return contrac_name[-4:]
+    
+    def get_exchange_from_instrument(self,instrument_code):
+        
+        sql = "select e.code from trading_variety v,futures_exchange e where v.exchange_id=e.id and v.code='{}' ".format(instrument_code)
+        result_rows = self.dbaccessor.do_query(sql)  
+        if len(result_rows)==0:
+            return None        
+        return result_rows[0][0]
+                
 if __name__ == "__main__":    
     
     from data_extract.akshare_extractor import AkExtractor
