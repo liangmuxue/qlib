@@ -41,7 +41,6 @@ class AkFuturesExtractor(FutureExtractor):
             return "{}/item/{}/institution".format(self.savepath,period_name)
         return "{}/item/{}/csv_data".format(self.savepath,period_name)
       
-      
     #######################   数据加载 ######################################     
 
           
@@ -86,6 +85,17 @@ class AkFuturesExtractor(FutureExtractor):
                  
         return item_data
 
+    def data_clean(self,item_data):
+        """数据清洗"""
+        
+        # 收盘排查
+        item_data_clean = item_data[item_data["close"]>0]
+        item_data_clean = item_data_clean[item_data_clean["close"]/item_data_clean["open"]-1<0.2]
+        # 高低价格排查
+        item_data_clean = item_data_clean[(item_data_clean["high"]-item_data_clean["low"])>=0]
+        
+        return item_data_clean
+    
     def extract_main_item_data(self,code,start_date=None,end_date=None,period=PeriodType.DAY.value):  
         """取得单个品种的主力合约历史行情数据"""
         
@@ -306,16 +316,21 @@ class AkFuturesExtractor(FutureExtractor):
         # 清空临时表
         self.dbaccessor.do_updateto("drop table temp_spot_price")  
     
-    def export_to_qlib(self):
+    def export_to_qlib(self,cross_mode=True):
         """导出到qlib"""
         
         # 首先从数据库导出到csv
         save_path = "{}/day/csv_data".format(self.item_savepath)
-        date_sql = "select distinct(code) from dominant_continues_data"
+        # 使用交错表
+        if cross_mode:
+            table = "dominant_continues_data_cross"
+        else:
+            table = "dominant_continues_data"
+        date_sql = "select distinct(code) from {}".format(table)
         result_rows = self.dbaccessor.do_query(date_sql)    
         for index,result in enumerate(result_rows):
             code = result[0]
-            item_sql = "select date,open,close,high,low,volume,hold,settle from dominant_continues_data where code='{}'".format(code)
+            item_sql = "select date,open,close,high,low,volume,hold,settle from {} where code='{}'".format(table,code)
             item_rows = self.dbaccessor.do_query(item_sql)    
             filename = "{}/{}.csv".format(save_path,code)
             with open(filename,mode='w',encoding='utf-8') as f:
@@ -698,6 +713,19 @@ class AkFuturesExtractor(FutureExtractor):
         clean_data = all[all['code'].isin(keep_instruments)]
         clean_data.to_csv(clean_data_path, sep='\t', index=False,header=None)
 
+    def build_cleandata_table(self):
+        ins_file_path = "/home/qdata/qlib_data/futures_data/instruments/clean_data.txt"
+        ins_data = pd.read_table(ins_file_path,sep='\t',header=None)
+        data = pd.DataFrame(ins_data.values,columns=['instrument','begin_date','end_date'])
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        dtype = {
+            "instrument": sqlalchemy.String,         
+            "begin_date": sqlalchemy.DateTime,
+            "end_date": sqlalchemy.DateTime
+        }        
+        data.to_sql('clean_data', engine, index=False, if_exists='append',dtype=dtype)                              
+        
     def rebuild_qlib_instrument(self):
         """qlib品种名单列表重新生成，主要是更新日期"""
         
@@ -830,8 +858,6 @@ if __name__ == "__main__":
     # extractor.import_variety_trade_schedule()    
     # 导入主力连续历史数据
     # extractor.import_his_data()
-    # 导入主力合约历史数据
-    # extractor.import_main_his_data()    
     # 导入历史拓展数据
     # extractor.import_extension_data()
     # 生成行业板块历史行情数据
@@ -839,8 +865,9 @@ if __name__ == "__main__":
     # 导入外盘数据
     # extractor.extract_outer_data()
     # 导出到qlib
-    # extractor.export_to_qlib()
+    extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
+    # extractor.build_cleandata_table()
     # qlib品种名单列表生成
     # extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
@@ -848,6 +875,6 @@ if __name__ == "__main__":
     ############ 历史合约数据导入 ###################
     # extractor.import_day_range_contract_data(data_range=(20250924,20250925))
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
-    extractor.import_day_range_continues_data(data_range=(20250926,20250926))
+    # extractor.import_day_range_continues_data(data_range=(20250926,20250926))
     # extractor.import_day_range_1min_data(data_range=(20250924,20250925))
             

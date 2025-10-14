@@ -87,7 +87,7 @@ class DataStats(object):
         results['date'] = results['date'].astype(int).astype(int)
         results['pred_trend'] = results['pred_trend'].astype(int)
         results['side_flag'] = np.where(results['pred_trend']==1,1,-1)
-        results['diff'] = (results['secondday_close'].astype(float) - results['prev_close'].astype(float))/results['prev_close'].astype(float)
+        results['diff'] = (results['secondday_open'].astype(float) - results['firstday_open'].astype(float))/results['firstday_open'].astype(float)
         results['diff'] = results['diff'] * results['side_flag'] 
         if date_range is not None:
             results = results[(results['date']>=date_range[0])&(results['date']<=date_range[1])]
@@ -316,8 +316,8 @@ if __name__ == "__main__":
     # stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
     stats.combine_val_result(date_range=[20250301,20250531])
     # stats.mock_pred_data()
-    stats.combine_backtest_result()
-    stats.analysis_backtest(date_range=[20250301,20250531])
+    # stats.combine_backtest_result()
+    # stats.analysis_backtest(date_range=[20250301,20250531])
     
     
     

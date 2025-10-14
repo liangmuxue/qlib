@@ -216,8 +216,8 @@ if __name__ == "__main__":
     # aug_data_to_pd(file_path,pd_file_path,['datetime','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label','ori_label'])\
     # aug_pd_data_view(pd_file_path)
     # compare_dataset_consistence()
-    # compare_clean_data_and_continus_data(match_date=20250930)
-    compare_clean_data_and_1min_cross_data(match_date=20250930)
+    compare_clean_data_and_continus_data(match_date=20251009)
+    # compare_clean_data_and_1min_cross_data(match_date=20251009)
     
        
     

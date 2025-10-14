@@ -20,6 +20,7 @@
 <时间轴>
 预测pred_result:使用子任务表中的start_date和end_date,每日进行
 回测backtest: 表中开始结束日期保持一致（保证只执行一次），本身回测的日期范围使用配置文件中的start_date和end_date
+错位日K数据： 早盘数据算作前一天的
 
 [实盘模拟]
 TODO:

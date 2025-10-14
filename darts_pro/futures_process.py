@@ -47,7 +47,6 @@ from trader.utils.date_util import get_tradedays_dur,get_tradedays
 from .tft_process_dataframe import TftDataframeModel 
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from sklearn.preprocessing import MinMaxScaler
-from darts_pro.data_extension.futures_togather_dataset import FuturesTogatherDataset
 from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset
 from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 
@@ -81,8 +80,8 @@ class FuturesProcessModel(TftDataframeModel):
         if self.type.startswith("fit_futures_industry"):
             self.fit_futures_industry(dataset)
             return        
-        if self.type.startswith("fit_futures_droll_industry"):
-            self.fit_futures_droll_industry(dataset)
+        if self.type.startswith("fit_futures_bidi"):
+            self.fit_futures_bidi(dataset)
             return            
         if self.type.startswith("pred_futures_industry"):
             self.fit_futures_industry(dataset)
@@ -90,8 +89,8 @@ class FuturesProcessModel(TftDataframeModel):
         if self.type.startswith("pred_futures_togather"):
             self.fit_futures_togather(dataset)
             return     
-        if self.type.startswith("pred_futures_droll_industry"):
-            self.fit_futures_droll_industry(dataset)
+        if self.type.startswith("pred_futures_bidi"):
+            self.fit_futures_bidi(dataset)
             return            
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)   
@@ -295,7 +294,7 @@ class FuturesProcessModel(TftDataframeModel):
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
 
-    def fit_futures_droll_industry(
+    def fit_futures_bidi(
         self,
         dataset: TFTFuturesDataset,
     ):
@@ -359,15 +358,15 @@ class FuturesProcessModel(TftDataframeModel):
         
         if load_weight:
             best_weight = self.optargs["best_weight"]    
-            self.model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+            self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
             self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
         else:
-            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=2) 
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=0) 
         
         self.model.mode = self.type  
         
-        if self.type=="pred_futures_droll_industry":  
+        if self.type=="pred_futures_bidi":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
@@ -375,9 +374,21 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.mode = self.type  
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            # self.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings
-            # self.model.model.valid_sw_ins_mappings = val_loader.dataset.sw_ins_mappings  
             trainer.validate(model=model,dataloaders=val_loader)
+            
+            stat_result = self.model.model.stat_result
+            result_view_file_path = self.model.model.result_view_file_path
+            # 累加保存到本地
+            if os.path.exists(result_view_file_path):
+                stat_result_total = pd.read_csv(result_view_file_path)  
+                # 去重
+                date_min = stat_result["date"].min()
+                date_max = stat_result["date"].max()
+                stat_result_total = stat_result_total[(stat_result_total['date']<date_min)|(stat_result_total['date']>date_max)]
+                stat_result_total = pd.concat([stat_result_total,stat_result])
+            else:        
+                stat_result_total = stat_result
+            stat_result_total.to_csv(result_view_file_path)            
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,

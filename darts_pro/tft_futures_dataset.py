@@ -34,12 +34,13 @@ class TFTFuturesDataset(TFTSeriesDataset):
         """数据预处理"""
  
         # 补充行业数据
-        indus_sql = "select code,industry_id from trading_variety union (select upper(concat('zs_',code)), id from futures_industry where delete_flag=0)"   
+        indus_sql = "select code,industry_id,IF(length(night_time_range)>1,1,0) as night_flag from trading_variety union " \
+            "(select upper(concat('zs_',code)), id,0 from futures_industry where delete_flag=0)"   
         indus_data = self.dbaccessor.do_query(indus_sql)
         indus_info_arr = []
         for item in indus_data:
             indus_info_arr.append([item[i] for i in range(len(item))])     
-        indus_info = pd.DataFrame(np.array(indus_info_arr),columns=["instrument","industry"]).astype({"instrument":str,"industry":str})                     
+        indus_info = pd.DataFrame(np.array(indus_info_arr),columns=["instrument","industry","night_flag"]).astype({"instrument":str,"industry":str,"night_flag":int})                     
         # 补充扩展数据
         ext_sql = "select CAST(date_format(e.date,'%Y%m%d') AS SIGNED),t.code,e.dom_basis_rate,e.near_basis_rate from " \
             "extension_trade_info e left join trading_variety t on e.var_id=t.id"
@@ -58,7 +59,6 @@ class TFTFuturesDataset(TFTSeriesDataset):
             outer_info_arr.append([item[i] for i in range(len(item))])
         outer_info = pd.DataFrame(np.array(outer_info_arr),columns=["datetime_number","instrument","ot_close"]).astype(
             {"datetime_number":int,"instrument":str,"ot_close":float})          
-        data_filter = DataFilter()
         # 清除序列长度不够的品种
         group_column = self.get_group_column()
         time_column = self.col_def["time_column"]     
