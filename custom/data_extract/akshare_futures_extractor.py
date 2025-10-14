@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from trader.utils.date_util import get_next_working_day,get_next_month,is_working_day,date_string_transfer
+from trader.utils.date_util import get_prev_working_day,get_next_working_day,get_next_month,is_working_day,date_string_transfer
 from cus_utils.log_util import AppLogger
 from data_extract.his_data_extractor import FutureExtractor,get_period_name
 from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_minute_sina,get_exchange_symbol_map
@@ -588,8 +588,10 @@ class AkFuturesExtractor(FutureExtractor):
             max_date = 0
         else:
             max_date = int(max_datetime.strftime("%Y%m%d")) 
-        next_date_date = get_next_working_day(datetime.datetime.strptime(str(end_date), "%Y%m%d"))
-        next_date = int(next_date_date.strftime("%Y%m%d"))
+        
+        # 当天作为截止日期 
+        next_date = end_date
+        next_date_date = datetime.datetime.strptime(str(end_date), "%Y%m%d")
         next_date_begin_str = next_date_date.strftime("%Y-%m-%d") +  " 00:00:00"
         next_date_begin = datetime.datetime.strptime(next_date_begin_str,"%Y-%m-%d %H:%M:%S")
         next_date_end_str = next_date_date.strftime("%Y-%m-%d") +  " 23:59:59"
@@ -602,20 +604,22 @@ class AkFuturesExtractor(FutureExtractor):
         if max_date>begin_date:
             begin_date = max_date   
         
-        # 在此模式下，首先拷贝当天已经导入的分钟数据，然后导入下一天上午的数据
-        begin_time_str = date_string_transfer(str(begin_date)) + " 00:00:00"
+        # 在此模式下，首先拷贝前一天已经导入的分钟数据，然后导入当天上午的数据
+        prev_day = get_prev_working_day(datetime.datetime.strptime(str(begin_date), "%Y%m%d"))
+        begin_time_str = prev_day.strftime("%Y-%m-%d") + " 00:00:00"
         end_time_str = date_string_transfer(str(end_date)) + " 23:59:59"
+        end_time_before_str = date_string_transfer(str(end_date)) + " 00:00:00"
         del_sql = "delete from dominant_real_data_1min_cross where datetime>='{}' and datetime<='{}'". \
             format(begin_time_str,next_date_end_str)   
         # 先删后增
         self.dbaccessor.do_updateto(del_sql)
         sql = ("insert into dominant_real_data_1min_cross select * from dominant_real_data_1min " + 
-            "where datetime>='{}' and datetime<='{}'").format(begin_time_str,end_time_str)   
+            "where datetime>='{}' and datetime<'{}'").format(begin_time_str,end_time_before_str)   
         self.dbaccessor.do_inserto(sql)               
         # 不下载期权数据
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(variety_sql)    
-        # 遍历所有品种，并分别取得历史数据,只需要取得下一天上午的数据
+        # 遍历所有品种，并分别取得历史数据,只需要取得当天上午的数据
         for result in result_rows:
             code = result[0]
             # 取得比较接近的合约

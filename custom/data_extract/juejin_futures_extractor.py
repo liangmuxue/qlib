@@ -19,6 +19,7 @@ from trader.utils.date_util import get_tradedays_dur,date_string_transfer,get_tr
 
 from cus_utils.log_util import AppLogger
 from backtrader.utils import date
+from pydantic.types import conint
 logger = AppLogger()
 
 _FUTURE_REAL1MIN_FIELD_NAMES = [
@@ -324,10 +325,18 @@ class JuejinFuturesExtractor(FutureExtractor):
                 # 打日盘类型标记
                 item_df['type'] = item_df['date'].apply(_build_type_flag)      
                 # 通过手动增加夜盘时间的方式，保证夜盘和早盘在同一日期
-                item_df.loc[item_df['type']==3,'date'] = item_df[item_df['type']==3]['date'] + pd.Timedelta(hours=3)        
+                item_df.loc[item_df['type']==3,'date'] = item_df[item_df['type']==3]['date'] + pd.Timedelta(hours=3)
                 # 分组汇总取得每日的早、午、晚盘数据
                 gp = item_df.groupby([item_df['date'].dt.date,'type'])
-                agg_data = gp.apply(_apply_combine,columns=columns).reset_index(drop=True, inplace=False)                
+                agg_data = gp.apply(_apply_combine,columns=columns).reset_index(drop=True, inplace=False)  
+                # 有可能第二天是非工作日，还需要进一步校准
+                tradedays_begin = item_df['date'].min().date()
+                tradedays_end = item_df['date'].max().date()                
+                tradedays = get_tradedays(tradedays_begin,tradedays_end)
+                agg_data = self.adj_agg_part_data(agg_data, tradedays)     
+                # 清洗无效数据
+                agg_data = agg_data[agg_data['date'].astype(str).str.len()==10]   
+                agg_data = agg_data[agg_data['volume'].astype(float)>0]                                              
                 agg_data.to_sql('dominant_real_data_part', engine, index=False, if_exists='append',dtype=dtype)
                 print("import_main_his_data_part {} ok,shape:{}".format(filepath,item_df.shape[0]))
                 
@@ -380,9 +389,9 @@ class JuejinFuturesExtractor(FutureExtractor):
         end_date = date_range[1]
         begin_date_str = date_string_transfer(str(begin_date))
         end_date_str = date_string_transfer(str(end_date))
-        # 后置一天，用于匹配下一天的午盘数据作为当天后一段数据
-        next_end_date = get_tradedays_dur(str(end_date),1).strftime("%Y%m%d")
-        tradedays = get_tradedays(str(begin_date),str(next_end_date))
+        # 前置一天，用于匹配前一天的午盘数据
+        before_begin_date_str = get_tradedays_dur(str(begin_date),-1).strftime("%Y%m%d")
+        tradedays = get_tradedays(str(begin_date),str(end_date))
         
         def _build_type_flag(dt):
             if dt.hour>=9 and dt.hour<12:
@@ -405,15 +414,19 @@ class JuejinFuturesExtractor(FutureExtractor):
             rtn_data = pd.DataFrame(np.array([[code,date,open_price,close,high,low,volume,k_type]]),columns=columns)
             return rtn_data
         
-        # 清空之前多余的数据
-        del_sql = "delete from dominant_real_data_part where date>='{}' and date<='{}'".format(begin_date_str,end_date_str)
-        self.dbaccessor.do_updateto(del_sql)        
+        # 清空之前多余的数据,由于需要错位数据，因此分几个部分进行删除
+        del_sql = "delete from dominant_real_data_part where date>='{}' and date<'{}'".format(begin_date_str,end_date_str)
+        self.dbaccessor.do_updateto(del_sql) 
+        # 删除前一天下午盘的数据
+        del_sql = "delete from dominant_real_data_part where date='{}' and type=2".format(before_begin_date_str)
+        self.dbaccessor.do_updateto(del_sql) 
+        # 删除当天晚盘和早盘的数据
+        del_sql = "delete from dominant_real_data_part where date='{}' and type in(1,3)".format(end_date_str)
+        self.dbaccessor.do_updateto(del_sql)                
         # 循环取得所有数据文件并获取对应数据
         for instrument in instrument_arr:
-            # if instrument!="WR":
+            # if instrument!="AL":
             #     continue
-            # if np.all(lack_data['code']!=instrument):
-            #     continue       
             agg_data_total = []
             # 按照日期轮询
             for index,day in enumerate(tradedays):
@@ -422,17 +435,17 @@ class JuejinFuturesExtractor(FutureExtractor):
                     prev_day = tradedays[index-1]
                 else:
                     prev_day = get_tradedays_dur(day,-1).strftime("%Y%m%d")
-                # 从前一天21点到当天下午3点半之间，作为一个交易日
-                begin_time = date_string_transfer(prev_day) + " 21:00:00"
-                end_time = date_string_transfer(day) + " 15:30:00"                
-                g_sql = "select distinct code from dominant_real_data_1min where code like '{}____' and datetime>='{}' and datetime<='{}'".format(instrument,begin_time,end_time)
+                # 由于交错模式需要从中午开始，因此取数从前一天下午开盘到当天上午收盘之间，作为一个交易日
+                begin_time = date_string_transfer(prev_day) + " 13:00:00"
+                end_time = date_string_transfer(day) + " 12:00:00"                
+                g_sql = "select distinct code from dominant_real_data_1min_cross where code like '{}____' and datetime>='{}' and datetime<='{}'".format(instrument,begin_time,end_time)
                 code_list = self.dbaccessor.do_query(g_sql)
                 if len(code_list)==0:
                     logger.warning("g_sql no result:{}".format(g_sql))
                     continue
                 code_list = [item[0] for item in code_list]
                 for code in code_list:
-                    sql = "select {} from dominant_real_data_1min where code='{}' and datetime>='{}' and datetime<='{}'".format(columns_str,code,begin_time,end_time)
+                    sql = "select {} from dominant_real_data_1min_cross where code='{}' and datetime>='{}' and datetime<='{}'".format(columns_str,code,begin_time,end_time)
                     item_df = pd.read_sql(sql,engine.connect(),parse_dates=['datetime'])  
                     item_df = item_df.rename(columns={'datetime': 'date'})
                     if item_df.shape[0]==0:
@@ -440,15 +453,80 @@ class JuejinFuturesExtractor(FutureExtractor):
                     # 打日盘类型标记
                     item_df['type'] = item_df['date'].apply(_build_type_flag)    
                     # 通过手动增加夜盘时间的方式，保证夜盘和早盘在同一日期
-                    item_df.loc[item_df['type']==3,'date'] = item_df[item_df['type']==3]['date'] + pd.Timedelta(hours=3)        
+                    item_df.loc[item_df['type']==3,'date'] = item_df[item_df['type']==3]['date'] + pd.Timedelta(hours=3)    
                     # 分组汇总取得每日的早、午、晚盘数据
                     gp = item_df.groupby([item_df['date'].dt.date,'type'])
                     agg_data = gp.apply(_apply_combine,columns=columns).reset_index(drop=True, inplace=False)
+                    # 清洗无效数据
+                    agg_data = agg_data[agg_data['date'].astype(str).str.len()==10]   
+                    agg_data = agg_data.groupby("date").apply(
+                        lambda x: x.sort_values(by='volume', ascending=False).drop_duplicates(subset=['type'],keep='first'))  
+                    agg_data.reset_index(drop=True, inplace=True)  
                     agg_data_total.append(agg_data)    
             agg_data_total = pd.concat(agg_data_total)
+            # 有可能第二天是非工作日，还需要进一步校准
+            agg_data_total = self.adj_agg_part_data(agg_data_total, tradedays)
             agg_data_total.to_sql('dominant_real_data_part', engine, index=False, if_exists='append',dtype=dtype) 
             logger.info("import_main_his_data_part_from_1min_data,{} to sql ok".format(instrument))               
-                     
+    
+    def rebuild_part_data(self):
+        
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database),
+            pool_size=30,
+            max_overflow=50)    
+        dtype = {
+            'code': sqlalchemy.String,
+            "date": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'type': sqlalchemy.INT, 
+        }  
+        qlib_dir = "/home/qdata/qlib_data/futures_data/instruments"
+        clean_data_file = "clean_data.txt"
+        clean_data_path = os.path.join(qlib_dir,clean_data_file)
+        clean_data = pd.read_table(clean_data_path,sep='\t',header=None)
+        instrument_arr = clean_data.values[:,0]        
+        for instrument in instrument_arr:
+            # if instrument!="AL":
+            #     continue            
+            sql = "select code,date,open,close,high,low,volume,type from dominant_real_data_part_copy where code like '{}____'".format(instrument)
+            agg_df = pd.read_sql(sql,engine.connect(),parse_dates=['date'])  
+            tradedays_begin = agg_df['date'].min().date()
+            tradedays_end = agg_df['date'].max().date()
+            tradedays = get_tradedays(tradedays_begin,tradedays_end)
+            for code,agg_item_df in agg_df.groupby("code"):
+                # if not code=="AL2510":
+                #     continue
+                agg_adj_df = self.adj_agg_part_data(agg_item_df,tradedays)
+                # 清洗无效数据
+                agg_adj_df = agg_adj_df[agg_adj_df['date'].astype(str).str.len()==10]   
+                agg_adj_df = agg_adj_df[agg_adj_df['volume'].astype(float)>0]     
+                agg_adj_df = agg_adj_df.groupby("date").apply(
+                    lambda x: x.sort_values(by='volume', ascending=False).drop_duplicates(subset=['type'],keep='first'))  
+                agg_adj_df.reset_index(drop=True, inplace=True)     
+                agg_adj_df.to_sql('dominant_real_data_part', engine, index=False, if_exists='append',dtype=dtype) 
+            logger.info("rebuild_part_data,{} to sql ok".format(instrument))    
+            
+    def adj_agg_part_data(self,agg_data,tradedays):
+        
+        # 对非工作日数据部分进行校准
+        agg_data_night_notin_workingday = agg_data[(agg_data['type']==3)
+                &(~pd.to_datetime(agg_data['date']).dt.strftime("%Y%m%d").isin(tradedays))]  
+        agg_data_night_in_workingday = agg_data[(agg_data['type']==3)
+                &(pd.to_datetime(agg_data['date']).dt.strftime("%Y%m%d").isin(tradedays))]  
+        agg_data_day = agg_data[(agg_data['type']!=3)]
+        
+        def change_date(date):    
+            new_date = get_tradedays_dur(date,1).strftime("%Y-%m-%d")
+            return new_date
+             
+        agg_data_night_notin_workingday.loc[agg_data_night_notin_workingday['type']>0,'date'] = agg_data_night_notin_workingday['date'].apply(change_date)
+        return pd.concat([agg_data_day,agg_data_night_in_workingday,agg_data_night_notin_workingday])
+                   
     def import_continues_data_local_by_main(self,date_range=[201301,202512]):
         """参考主力合约，从本地导入主力连续历史行情数据"""
         
@@ -565,7 +643,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         rtn_data = pd.DataFrame(np.array([[symbol,date_str,open_price,close,high,low,volume,settle]]),columns=columns)
         return rtn_data
     
-    def import_continues_cross_from_his_data_part(self,date_range=[20050701,20250901]):
+    def import_continues_cross_from_his_data_part(self,date_range=[20050701,20251010]):
         """从分片合约表中取得数据，导入到历史数据日K表（交错表）"""
 
         qlib_dir = "/home/qdata/qlib_data/futures_data/instruments"
@@ -606,7 +684,10 @@ class JuejinFuturesExtractor(FutureExtractor):
                 next_date = get_tradedays_dur(str(day),1).strftime("%Y-%m-%d")
                 # 开盘价同一从第一天的下午开盘取
                 open_sql = "select open from dominant_real_data_part where date='{}' and code='{}' and type=2".format(day_str,main_code)
-                open_price = self.dbaccessor.do_query(open_sql)[0][0]
+                open_result = self.dbaccessor.do_query(open_sql)
+                if len(open_result)==0:
+                    continue
+                open_price = open_result[0][0]
                 # 收盘价从第二天早盘收盘价中取
                 close_sql = "select close from dominant_real_data_part where date='{}' and code='{}' and type=1".format(next_date,main_code) 
                 close_result = self.dbaccessor.do_query(close_sql)
@@ -869,10 +950,11 @@ if __name__ == "__main__":
     # extractor.import_main_his_data_local()
     # extractor.import_main_his_data_part()
     # extractor.import_main_his_data_part_from_1min_data()
+    # extractor.rebuild_part_data()
     # 导入主力合约1分钟历史行情数据
     # extractor.import_main_1min_data_local(date_range=[202401,202512])
     # 导入主力连续合约日K数据,错位导入
-    # extractor.import_continues_cross_from_his_data_part()
+    extractor.import_continues_cross_from_his_data_part()
     # extractor.import_continues_cross_from_main_1min_data()
     # 根据主力合约数据，导入主力连续日行情数据
     # extractor.import_continues_data_local_by_main()

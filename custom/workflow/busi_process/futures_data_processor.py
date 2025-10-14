@@ -56,9 +56,15 @@ class FuturesDataProcessor(BaseProcessor):
             )           
             # 如果自动导入模式，则以当前日工作日前一工作日作为开始结束日期
             if self.auto_import:
-                prev_day = datetime.strptime(str(working_day), '%Y%m%d').date()
-                start_date = int(get_prev_working_day(prev_day).strftime('%Y%m%d'))
-                end_date = int(get_prev_working_day(prev_day).strftime('%Y%m%d'))
+                cross_mode = config["kwargs"]["cross_mode"]
+                if cross_mode:
+                    start_date = working_day
+                    end_date = working_day                  
+                else:
+                    cur_day = datetime.strptime(str(working_day), '%Y%m%d').date()
+                    start_date = int(get_prev_working_day(cur_day).strftime('%Y%m%d'))
+                    end_date = int(get_prev_working_day(cur_day).strftime('%Y%m%d'))
+                
             # 动态调用导入数据对应的类方法 
             import_func_names = config["kwargs"]["data_import_func_names"]
             for import_func_name in import_func_names:
