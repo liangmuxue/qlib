@@ -5,7 +5,7 @@ import os
 import glob
 import shutil  
 from pathlib import Path
-
+from sqlalchemy import create_engine
 import numpy as np
 import datetime
 from tqdm import tqdm
@@ -529,7 +529,14 @@ class FutureExtractor(HisDataExtractor):
         self.col_data_types = {"symbol":str,"open":float,"high":float,"low":float,"close":float,
                                "volume":float,"hold":float}        
         self.sim_path = sim_path
-    
+
+    def create_engine(self):
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database),
+            pool_size=300,
+            max_overflow=500)
+        return engine   
+       
     def get_recent_main_from_contiues_cross_record(self,instrument):
         
         sql = "select date,main_code from dominant_continues_data_cross where code='{}' order by date desc limit 1".format(instrument)
@@ -538,6 +545,19 @@ class FutureExtractor(HisDataExtractor):
             return None,None
         return result[0]
 
+    def get_recent_main_from_1min_record(self,instrument,date_str):
+        """根据1分钟数据计算主力合约"""
+        
+        date_begin_str = date_str + " 00:00:00"
+        date_end_str = date_str + " 23:59:59"
+        sql = "select code,sum(volume) as volume from dominant_real_data_1min where " \
+            "code like '{}____' and datetime>='{}' and datetime<='{}' group by code order by volume desc limit 1" \
+            .format(instrument,date_begin_str,date_end_str)
+        result = self.dbaccessor.do_query(sql)
+        if len(result)==0:
+            return None
+        return result[0][0]
+    
     def load_item_day_data(self,symbol,date):  
         """加载指定日期和合约名称的日线数据"""
         
@@ -563,33 +583,50 @@ class FutureExtractor(HisDataExtractor):
         result = pd.DataFrame(np.expand_dims(np.array(list(result_rows[0])),0),columns=['code','volume']) 
         result['volume'] = result['volume'].astype(float)
         return result  
-            
+    
+    def get_batch_main_contrac_name(self,instrument,date_range):
+
+        begin_date_str = date_string_transfer(str(date_range[0])) + " 00:00:00"
+        end_date_str = date_string_transfer(str(date_range[1])) + " 23:59:59"
+                       
+        sql = "select code,DATE_FORMAT(date,'%Y%m%d') from (select code,Date(datetime) as date,sum(volume) as volume " \
+            "from dominant_real_data_1min where code like '{}____' and datetime>='{}' and datetime<='{}' " \
+            "group by Date(datetime),code order by Date(datetime),volume desc) t group by date".format(instrument,begin_date_str,end_date_str)      
+        results = self.dbaccessor.do_query(sql)
+        main_code_mapping = {}
+        for result in results:   
+            main_code_mapping[result[1]] = result[0]   
+        return main_code_mapping              
+    
     def get_main_contract_name(self,instrument,date,use_1min_data=False):
         """根据品种编码和指定日期，根据交易情况，确定对应的主力合约"""
         
-        #取得有可能的所有合约名称
-        if isinstance(date,str):
-            date_obj = datetime.datetime.strptime(str(date), '%Y%m%d').date()
-        else:
-            date_obj = date
-        contract_names = self.get_likely_main_contract_names(instrument, date_obj)
-        # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
-        volume_main = 0
-        main_name = None
-        for symbol in contract_names:
-            if use_1min_data:
-                # 使用1分钟年数据累加计算日K数据
-                item_df = self.get_item_day_data_by_1min(symbol,date_obj)   
-            else:             
-                item_df = self.load_item_day_data(symbol,date_obj)
-            if item_df is None or item_df.shape[0]==0:
-                continue
-            cur_volume = item_df['volume'].values[0]
-            if volume_main<cur_volume:
-                volume_main = cur_volume
-                main_name = item_df['code'].values[0]
-            
-        return main_name 
+        date = date_string_transfer(date)
+        return self.get_recent_main_from_1min_record(instrument, date)
+    
+        # #取得有可能的所有合约名称
+        # if isinstance(date,str):
+        #     date_obj = datetime.datetime.strptime(str(date), '%Y%m%d').date()
+        # else:
+        #     date_obj = date
+        # contract_names = self.get_likely_main_contract_names(instrument, date_obj)
+        # # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
+        # volume_main = 0
+        # main_name = None
+        # for symbol in contract_names:
+        #     if use_1min_data:
+        #         # 使用1分钟年数据累加计算日K数据
+        #         item_df = self.get_item_day_data_by_1min(symbol,date_obj)   
+        #     else:             
+        #         item_df = self.load_item_day_data(symbol,date_obj)
+        #     if item_df is None or item_df.shape[0]==0:
+        #         continue
+        #     cur_volume = item_df['volume'].values[0]
+        #     if volume_main<cur_volume:
+        #         volume_main = cur_volume
+        #         main_name = item_df['code'].values[0]
+        #
+        # return main_name 
         
     def get_likely_main_contract_names(self,instrument,date,month_range=12,czce_spec=False,ref=True):
         """根据品种编码和指定日期，取得可能的主力合约名称"""
@@ -623,7 +660,9 @@ class FutureExtractor(HisDataExtractor):
                 month_item = instrument + month_item                
                 month_arr.append(month_item)
             return month_arr
-                       
+        
+        
+                      
         for i in range(month_range):
             month_item = get_next_month(date,next=i)
             # 郑商所和其他交易所编码方式不一样,为：代码+年份最后一位+月份

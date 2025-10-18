@@ -27,7 +27,8 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20250318,20250319,20250320]
-STAT_DATE = [20240527,20260527]
+STAT_DATE = [20250318,20250318]
+# TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [0]
@@ -405,6 +406,7 @@ class FuturesBidiModule(MlpModule):
         """重载父类方法"""
 
         (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets) = target 
+        # 只保留最后一天的数值，作为损失目标
         future_round_targets = past_future_round_targets[:,:,-1,:]  
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -464,7 +466,7 @@ class FuturesBidiModule(MlpModule):
                     continue    
                 
                 coll_item = coll_result[coll_result['date']==date]
-                trend_output_value = coll_item['trend_output_value'].values[0]
+                # trend_output_value = coll_item['trend_output_value'].values[0]
                 
                 for j in range(len(self.past_split)):
                     inner_class_item = target_class_item[ins_all]
@@ -478,14 +480,16 @@ class FuturesBidiModule(MlpModule):
                         price_array_range = np.array([self.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
                         price_array_range = price_array_range/10
                         name_arr = []
-                        for index,item in enumerate(ts_arr[instruments]):
-                            if item['instrument'] in coll_item['instrument'].values.tolist():
-                                name_arr.append(item["instrument"]+"_match")
+                        for inner_index,item in enumerate(ts_arr[instruments]):
+                            match_item = coll_item[coll_item['instrument']==item['instrument']]
+                            if match_item.shape[0]>0:
+                                trend = match_item['trend_value'].values[0]
+                                name_arr.append(item["instrument"]+"_match_"+str(trend))
                             else:
                                 name_arr.append(item["instrument"])
                         view_data = np.stack([ins_output,fur_round_target,price_array_range]).transpose(1,0)
                         win = "detail_target_{}_{}=".format(j,viz_total_size)
-                        target_title = "Detail_{},date:{}".format(trend_output_value,date)                            
+                        target_title = "Detail ,date:{}".format(date)                            
                         viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred","target","price"])   
                                     
     def dump_val_data(self,val_batch,outputs,detail_loss):
@@ -721,7 +725,7 @@ class FuturesBidiModule(MlpModule):
         
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
-        import_index_list = self.strategy_top_bidi(cls_values,target=target,target_info=target_info,
+        import_index_list = self.strategy_top_bidi(ce_values,cls_values,target=target,target_info=target_info,
                                             index_round_targets=index_round_targets,combine_instrument=combine_instrument)
  
         # 构建结果集
@@ -730,12 +734,13 @@ class FuturesBidiModule(MlpModule):
         result_list['date'] = date       
         return result_list
 
-    def strategy_top_bidi(self,cls,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
+    def strategy_top_bidi(self,ce,cls,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
         """筛选品种明细,使用双向模式"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         cls_ins = cls[0]
+        cls_ins = cls[1]
 
         # 接着计算具体品种             
         top_num = 2
@@ -791,7 +796,7 @@ class FuturesBidiModule(MlpModule):
         price_array = target_info["price_array"] 
         # 收盘与前收盘价差作为衡量指标
         diff_range = (price_array[-1] - price_array[self.input_chunk_length-1])/price_array[self.input_chunk_length-1]*100
-        # 开盘与前开盘价差作为衡量指标
+        # 预测l结束日期的开盘与预测开始日期的开盘价差作为衡量指标
         diff_range = (open_array[-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
         # 价差展示，从过去一直延续到预测当日，未包含最后一条记录
         diff_range_arr = np.array([(open_array[-i-1] - price_array[-i-3])/price_array[-i-3]*100 for i in range(self.cut_len)])[::-1]

@@ -73,7 +73,11 @@ class DataStats(object):
                     print("{} prev_bar has no data in {}".format(instrument,date))
                     continue
                 prev_bar = prev_bar.iloc[0]
-                first_bar = self.ds.get_continue_data_by_day(instrument, cur_day.strftime("%Y%m%d")).iloc[0]
+                first_bar = self.ds.get_continue_data_by_day(instrument, cur_day.strftime("%Y%m%d"))
+                if first_bar.shape[0]==0:
+                    print("{} first_bar has no data in {}".format(instrument,date))
+                    continue
+                first_bar = first_bar.iloc[0]
                 second_bar = self.ds.get_continue_data_by_day(instrument, second_day.strftime("%Y%m%d"))
                 if second_bar.shape[0]==0:
                     print("{} second_bar has no data in {}".format(instrument,date))

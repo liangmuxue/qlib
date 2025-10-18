@@ -376,19 +376,19 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             trainer.validate(model=model,dataloaders=val_loader)
             
-            stat_result = self.model.model.stat_result
-            result_view_file_path = self.model.model.result_view_file_path
-            # 累加保存到本地
-            if os.path.exists(result_view_file_path):
-                stat_result_total = pd.read_csv(result_view_file_path)  
-                # 去重
-                date_min = stat_result["date"].min()
-                date_max = stat_result["date"].max()
-                stat_result_total = stat_result_total[(stat_result_total['date']<date_min)|(stat_result_total['date']>date_max)]
-                stat_result_total = pd.concat([stat_result_total,stat_result])
-            else:        
-                stat_result_total = stat_result
-            stat_result_total.to_csv(result_view_file_path)            
+            # stat_result = self.model.model.stat_result
+            # result_view_file_path = self.model.model.result_view_file_path
+            # # 累加保存到本地
+            # if os.path.exists(result_view_file_path):
+            #     stat_result_total = pd.read_csv(result_view_file_path)  
+            #     # 去重
+            #     date_min = stat_result["date"].min()
+            #     date_max = stat_result["date"].max()
+            #     stat_result_total = stat_result_total[(stat_result_total['date']<date_min)|(stat_result_total['date']>date_max)]
+            #     stat_result_total = pd.concat([stat_result_total,stat_result])
+            # else:        
+            #     stat_result_total = stat_result
+            # stat_result_total.to_csv(result_view_file_path)            
         else:
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,

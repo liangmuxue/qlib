@@ -19,7 +19,7 @@ data_handler_config: &data_handler_config
               'RESI5','CLOSE','REFCLOSE','HOLD','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','AOS','HIGH_QTLU5','REV5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
               'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
-              'IMXD5']                                      
+              'IMXD5','open_range']                                      
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -82,7 +82,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataCross_rsvDetail_202501"
+               model_name: "Futures_cleanDataCrossFrom1min_rsvDetailAndPrice_202502"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -93,7 +93,7 @@ task:
                forecast_horizon: &forecast_horizon 2
                cut_len: 27
                dropout: 0.5
-               past_split: [[0,15]]
+               past_split: [[0,15],[15,30]]
                target_mode: [3,3,2,1,3]
                scale_mode: [2,2,0,2,0]
                filter_conv_index: -1
@@ -106,8 +106,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2025-01-31]
-                valid: [2025-01-01, 2025-03-31]
+                train: [2006-01-01, 2025-02-28]
+                valid: [2025-02-01, 2025-04-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -130,13 +130,13 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['RSV5','RSV5','CCI5','SUMPMA5','RSV5']
+                target_column: ['RSV5','open_range','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
-                past_covariate_col: ['HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'HOLD','KSFT','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','KMID','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                past_covariate_col: ['VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
                                   ] 
                 static_covariate_col: ['industry','night_flag']    

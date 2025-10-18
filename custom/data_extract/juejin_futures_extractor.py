@@ -5,7 +5,6 @@ from data_extract.his_data_extractor import FutureExtractor,PeriodType,MarketTyp
 import os
 from pathlib import Path
 import csv
-from sqlalchemy import create_engine
 import warnings
 from pandas.errors import SettingWithCopyWarning
 
@@ -151,15 +150,15 @@ class JuejinFuturesExtractor(FutureExtractor):
         
         return None
 
-    def get_time_data_by_day_sql(self,day,symbol):
-        """取得指定品种和对应日期的分时交易记录,注意是从交错记录表中获取"""
+    def get_time_data_by_day_sql(self,day,symbol,engine=None):
+        """取得指定品种和对应日期的分时交易记录"""
 
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
-        
+        begin_date_str = date_string_transfer(str(day)) + " 00:00:00"
+        end_date_str = date_string_transfer(str(day)) + " 23:59:59"
+                
         column_str = ','.join([str(i) for i in _FUTURE_REAL1MIN_FIELD_NAMES])
-        item_sql = "select {} from dominant_real_data_1min_cross where code='{}' " \
-            "and Date(datetime)='{}'".format(column_str,symbol,date_string_transfer(day))     
+        item_sql = "select {} from dominant_real_data_1min where code='{}' " \
+            "and datetime>='{}' and datetime<='{}'".format(column_str,symbol,begin_date_str,end_date_str)     
         SQL_Query = pd.read_sql_query(item_sql, engine.connect())
         item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_REAL1MIN_FIELD_NAMES)
         return item_data
@@ -209,8 +208,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         begin_date = datetime.datetime.strptime(str(date_range[0]), '%y%m')
         end_date = datetime.datetime.strptime(str(date_range[1]), '%y%m')
         
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
         pd.set_option('display.unicode.ambiguous_as_wide', True)
         pd.set_option('display.unicode.east_asian_width', True)
         
@@ -265,8 +263,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         begin_date = datetime.datetime.strptime(str(date_range[0]), '%Y%m')
         end_date = datetime.datetime.strptime(str(date_range[1]), '%Y%m')
         
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
         pd.set_option('display.unicode.ambiguous_as_wide', True)
         pd.set_option('display.unicode.east_asian_width', True)
         
@@ -278,6 +275,7 @@ class JuejinFuturesExtractor(FutureExtractor):
             'high': sqlalchemy.FLOAT,
             'low': sqlalchemy.FLOAT,
             'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,
             'type': sqlalchemy.INT, 
         }      
         columns = list(dtype.keys())
@@ -299,7 +297,8 @@ class JuejinFuturesExtractor(FutureExtractor):
             low = group_data['low'].min()
             volume = group_data['volume'].astype(float).sum()
             k_type = group_data.iloc[0]['type']
-            rtn_data = pd.DataFrame(np.array([[code,date,open_price,close,high,low,volume,k_type]]),columns=columns)
+            hold = group_data.iloc[-1]['hold']
+            rtn_data = pd.DataFrame(np.array([[code,date,open_price,close,high,low,volume,hold,k_type]]),columns=columns)
             return rtn_data
     
         # 循环取得所有数据文件并获取对应数据
@@ -350,10 +349,7 @@ class JuejinFuturesExtractor(FutureExtractor):
     def import_main_his_data_part_from_1min_data(self,date_range=[20250912,20251012]):
         """从1分钟数据，导入所有合约历史日行情(分日盘阶段)数据"""
         
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database),
-            pool_size=30,
-            max_overflow=50)
+        engine = self.create_engine()
         pd.set_option('display.unicode.ambiguous_as_wide', True)
         pd.set_option('display.unicode.east_asian_width', True)
         
@@ -365,6 +361,7 @@ class JuejinFuturesExtractor(FutureExtractor):
             'high': sqlalchemy.FLOAT,
             'low': sqlalchemy.FLOAT,
             'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,
             'type': sqlalchemy.INT, 
         }     
         dtype_1min = {
@@ -375,6 +372,7 @@ class JuejinFuturesExtractor(FutureExtractor):
             'high': sqlalchemy.FLOAT,
             'low': sqlalchemy.FLOAT,
             'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,
         }          
         columns = list(dtype.keys())
         columns_1min = list(dtype_1min.keys())
@@ -411,7 +409,8 @@ class JuejinFuturesExtractor(FutureExtractor):
             low = group_data['low'].min()
             volume = group_data['volume'].astype(float).sum()
             k_type = group_data.iloc[0]['type']
-            rtn_data = pd.DataFrame(np.array([[code,date,open_price,close,high,low,volume,k_type]]),columns=columns)
+            hold = group_data.iloc[-1]['hold']
+            rtn_data = pd.DataFrame(np.array([[code,date,open_price,close,high,low,volume,hold,k_type]]),columns=columns)
             return rtn_data
         
         # 清空之前多余的数据,由于需要错位数据，因此分几个部分进行删除
@@ -436,7 +435,7 @@ class JuejinFuturesExtractor(FutureExtractor):
                 else:
                     prev_day = get_tradedays_dur(day,-1).strftime("%Y%m%d")
                 # 由于交错模式需要从中午开始，因此取数从前一天下午开盘到当天上午收盘之间，作为一个交易日
-                begin_time = date_string_transfer(prev_day) + " 13:00:00"
+                begin_time = date_string_transfer(prev_day) + " 13:00"
                 end_time = date_string_transfer(day) + " 12:00:00"                
                 g_sql = "select distinct code from dominant_real_data_1min_cross where code like '{}____' and datetime>='{}' and datetime<='{}'".format(instrument,begin_time,end_time)
                 code_list = self.dbaccessor.do_query(g_sql)
@@ -463,6 +462,8 @@ class JuejinFuturesExtractor(FutureExtractor):
                         lambda x: x.sort_values(by='volume', ascending=False).drop_duplicates(subset=['type'],keep='first'))  
                     agg_data.reset_index(drop=True, inplace=True)  
                     agg_data_total.append(agg_data)    
+            if len(agg_data_total)==0:
+                continue
             agg_data_total = pd.concat(agg_data_total)
             # 有可能第二天是非工作日，还需要进一步校准
             agg_data_total = self.adj_agg_part_data(agg_data_total, tradedays)
@@ -471,10 +472,7 @@ class JuejinFuturesExtractor(FutureExtractor):
     
     def rebuild_part_data(self):
         
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database),
-            pool_size=30,
-            max_overflow=50)    
+        engine = self.create_engine()   
         dtype = {
             'code': sqlalchemy.String,
             "date": sqlalchemy.DateTime,
@@ -544,8 +542,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         d_list = list(dtype.keys())
         column_str = ','.join([str(i) for i in d_list])
 
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
                 
         ins_file_path = "/home/qdata/qlib_data/futures_data/instruments/clean_data.txt"
         # 从品种列表文件中选取需要导入的品种
@@ -586,11 +583,11 @@ class JuejinFuturesExtractor(FutureExtractor):
         # upt_sql = "update dominant_continues_data set settle=close"        
         # self.dbaccessor.do_updateto(upt_sql)   
 
-    def _compute_section_trading_data(self,section_trading,symbol=None,date_str=None,columns=None):
+    def _compute_section_trading_data(self,section_trading,symbol=None,date_str=None,columns=None,date_column=None):
         if section_trading.shape[0]==0:
             print("ggg")
-        max_index = section_trading['datetime'].idxmax()
-        min_index = section_trading['datetime'].idxmin()
+        max_index = section_trading[date_column].idxmax()
+        min_index = section_trading[date_column].idxmin()
         max_row = section_trading.loc[max_index]
         min_row = section_trading.loc[min_index]
         open_price = min_row['open']
@@ -602,20 +599,20 @@ class JuejinFuturesExtractor(FutureExtractor):
         rtn_data = pd.DataFrame(np.array([[symbol,date_str,open_price,close,high,low,volume,settle]]),columns=columns)
         return rtn_data
                 
-    def _apply_compute(self,group_data,columns=None):
-        date_str = group_data.iloc[0]['datetime'].date().strftime("%Y-%m-%d")
-        symbol = group_data.iloc[0]['code']
+    def _apply_compute(self,group_data,columns=None,date_column="datetime",symbol_column="code"):
+        date_str = group_data.iloc[0][date_column].date().strftime("%Y-%m-%d")
+        symbol = group_data.iloc[0][symbol_column]
         specific_time_str = date_str + " 12:00:00"
         specific_time = pd.to_datetime(specific_time_str)
-        early_trading = group_data[group_data['datetime']<specific_time]
+        early_trading = group_data[group_data[date_column]<specific_time]
         if early_trading.shape[0]>0:
-            early_data = self._compute_section_trading_data(early_trading,symbol=symbol,date_str=date_str,columns=columns)
+            early_data = self._compute_section_trading_data(early_trading,symbol=symbol,date_str=date_str,columns=columns,date_column=date_column)
             early_data['type'] = 'early'
         else:
             early_data = None
-        late_trading = group_data[group_data['datetime']>specific_time]
+        late_trading = group_data[group_data[date_column]>specific_time]
         if late_trading.shape[0]>0:
-            late_data = self._compute_section_trading_data(late_trading,symbol=symbol,date_str=date_str,columns=columns)
+            late_data = self._compute_section_trading_data(late_trading,symbol=symbol,date_str=date_str,columns=columns,date_column=date_column)
             late_data['type'] = 'late'
         else:
             late_data = None            
@@ -643,7 +640,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         rtn_data = pd.DataFrame(np.array([[symbol,date_str,open_price,close,high,low,volume,settle]]),columns=columns)
         return rtn_data
     
-    def import_continues_cross_from_his_data_part(self,date_range=[20050701,20251010]):
+    def import_continues_cross_from_his_data_part(self,date_range=[20050701,20251012]):
         """从分片合约表中取得数据，导入到历史数据日K表（交错表）"""
 
         qlib_dir = "/home/qdata/qlib_data/futures_data/instruments"
@@ -688,8 +685,8 @@ class JuejinFuturesExtractor(FutureExtractor):
                 if len(open_result)==0:
                     continue
                 open_price = open_result[0][0]
-                # 收盘价从第二天早盘收盘价中取
-                close_sql = "select close from dominant_real_data_part where date='{}' and code='{}' and type=1".format(next_date,main_code) 
+                # 收盘价和持仓量从第二天早盘收盘价中取
+                close_sql = "select close,hold from dominant_real_data_part where date='{}' and code='{}' and type=1".format(next_date,main_code) 
                 close_result = self.dbaccessor.do_query(close_sql)
                 if len(close_result)==0:
                     if len(result)<=1:
@@ -697,7 +694,7 @@ class JuejinFuturesExtractor(FutureExtractor):
                         continue
                     # 主力合约切换时,需要使用第二主力合约
                     sec_item = result[sort_seq[1]]                    
-                    close_sql = "select close from dominant_real_data_part where date='{}' and code='{}' and type=1".format(next_date,sec_item[0]) 
+                    close_sql = "select close,hold from dominant_real_data_part where date='{}' and code='{}' and type=1".format(next_date,sec_item[0]) 
                     close_result = self.dbaccessor.do_query(close_sql)
                     next_main_code = sec_item[0]
                     if len(close_result)==0:
@@ -706,6 +703,7 @@ class JuejinFuturesExtractor(FutureExtractor):
                 else:
                     next_main_code = main_code
                 close_price = close_result[0][0]   
+                hold = close_result[0][1]
                 # 合并2天的数据，并计算最高最低和成交量
                 combine_sql = "select high,low,volume from dominant_real_data_part where date='{}' and code='{}' and type=2" \
                     " union (select high,low,volume from dominant_real_data_part where date='{}' and code='{}' and type in (1,3))" \
@@ -714,14 +712,14 @@ class JuejinFuturesExtractor(FutureExtractor):
                 high = combine_result[:,0].astype(float).max()
                 low = combine_result[:,1].astype(float).min()  
                 volume = combine_result[:,2].astype(float).sum()      
-                insert_sql = "insert into dominant_continues_data_cross(code,date,open,close,high,low,volume,main_code) values('{}','{}',{},{},{},{},{},'{}') " \
-                    .format(instrument,day_str,open_price,close_price,high,low,volume,main_code)
+                insert_sql = "insert into dominant_continues_data_cross(code,date,open,close,high,low,volume,hold,main_code) values('{}','{}',{},{},{},{},{},{},'{}') " \
+                    .format(instrument,day_str,open_price,close_price,high,low,volume,hold,main_code)
                 self.dbaccessor.do_inserto(insert_sql)
             logger.info("import_continues_from_his_data_part {} ok".format(instrument))
-        upt_sql = "update dominant_continues_data_cross set hold=0,settle=close"
+        upt_sql = "update dominant_continues_data_cross set settle=close"
         self.dbaccessor.do_updateto(upt_sql)
         
-    def import_continues_from_1min_data_cross(self,date_range=[200501,202512]):
+    def import_continues_cross_from_1min_data_cross(self,date_range=[200501,202512]):
         """通过1分钟连续合约数据，导入到主力连续合约日历史行情数据,注意是从午盘后错位导入"""
 
         qlib_dir = "/home/qdata/qlib_data/futures_data/instruments"
@@ -730,8 +728,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         clean_data = pd.read_table(clean_data_path,sep='\t',header=None)
         instrument_arr = clean_data.values[:,0]
                 
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
 
         dtype = {
             'symbol': sqlalchemy.String,
@@ -760,7 +757,7 @@ class JuejinFuturesExtractor(FutureExtractor):
             cnt = self.dbaccessor.do_query(sql)[0][0]
             if cnt>0:
                 continue
-            exchange_code = self.get_exchange_from_instrument(instrument)
+            exchange_code = self.get_juejin_exchange_code(instrument)
             file_name = "{}9999.{}.csv".format(instrument, exchange_code)
             data_path = os.path.join(continues_1min_file_path,file_name)
             if not os.path.exists(data_path):
@@ -769,7 +766,7 @@ class JuejinFuturesExtractor(FutureExtractor):
             item_df = pd.read_csv(data_path,parse_dates=['date'])  
             # 分组汇总取得早盘的开盘和收盘，以及午盘的开盘和收盘，并进行错位计算
             gp = item_df.groupby(item_df['date'].dt.date)
-            agg_data = gp.apply(self._apply_compute,columns=columns).reset_index(drop=True, inplace=False)
+            agg_data = gp.apply(self._apply_compute,columns=columns,date_column="date",symbol_column="symbol").reset_index(drop=True, inplace=False)
             early_data = agg_data[agg_data['type']=='early']
             late_data = agg_data[agg_data['type']=='late']
             late_data['date'] = late_data['date'].astype(str)
@@ -794,7 +791,7 @@ class JuejinFuturesExtractor(FutureExtractor):
             # data_cross.to_csv(save_path)
             logger.info("{} ok,shape:{}".format(instrument,data_cross.shape[0]))
     
-    def import_continues_cross_from_main_1min_data(self,date_range=[20250701,20250927]):
+    def import_continues_cross_from_main_1min_data(self,date_range=[20250107,20250927]):
         """通过1分钟主力合约数据，导入到连续合约日历史行情数据,注意是从午盘后错位导入"""
         
         warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
@@ -805,8 +802,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         clean_data = pd.read_table(clean_data_path,sep='\t',header=None)
         instrument_arr = clean_data.values[:,0]
                 
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
 
         dtype = {
             'symbol': sqlalchemy.String,
@@ -830,29 +826,39 @@ class JuejinFuturesExtractor(FutureExtractor):
         end_date_str = date_string_transfer(str(end_date))
         # 后置一天，用于匹配下一天的午盘数据作为当天后一段数据
         next_end_date = get_tradedays_dur(str(end_date),1).strftime("%Y%m%d")
-        tradedays = get_tradedays(str(begin_date),str(next_end_date))
+        tradedays = get_tradedays(str(begin_date),str(end_date))
         from cus_utils.data_aug import compare_clean_data_and_continus_data
-        lack_data = compare_clean_data_and_continus_data(match_date=20250925) 
+        # lack_data = compare_clean_data_and_continus_data(match_date=20250925) 
         # 循环取得所有数据文件并获取对应数据
         for instrument in instrument_arr:
-            # if instrument!="WR":
+            # if instrument<="P":
             #     continue
             # if np.all(lack_data['code']!=instrument):
             #     continue       
             # 清空之前多余的数据
-            sql = "delete from dominant_continues_data_cross where code='{}' and date>='{}' and date<='{}'".format(instrument,begin_date_str,end_date_str)
+            sql = "delete from dominant_continues_data_cross where code='{}' and date>='{}'".format(instrument,begin_date_str)
             self.dbaccessor.do_updateto(sql)
             data_cross_total = []
+            # 批量获取所有日期的主力合约
+            main_code_mapping = self.get_batch_main_contrac_name(instrument, [begin_date,next_end_date])
             # 按照日期轮询
-            for day in tradedays:
+            for index,day in enumerate(tradedays):
                 # 从主力一分钟数据中选取
-                symbol = self.get_main_contract_name(instrument,day,use_1min_data=True)
+                # symbol = self.get_main_contract_name(instrument,day,use_1min_data=True)
                 next_date = get_tradedays_dur(day,1).strftime("%Y%m%d")
-                item_df = self.get_time_data_by_day_sql(day, symbol)
+                if day not in main_code_mapping:
+                    logger.warning("no date in main_code_mapping:{},{}".format(day,instrument))
+                    continue  
+                if next_date not in main_code_mapping:
+                    logger.warning("no next date in main_code_mapping:{},{}".format(day,instrument))
+                    continue                   
+                symbol = main_code_mapping[day]
+                item_df = self.get_time_data_by_day_sql(day, symbol,engine=engine)
                 # 有可能由于日期切换，发生主力合约切换，因此使用cross数据再次进行主力合约匹配
-                symbol_next = self.get_main_contract_name(instrument,next_date,use_1min_data=True)
-                item_df_next = self.get_time_data_by_day_sql(next_date, symbol_next)
+                symbol_next = main_code_mapping[next_date]
+                item_df_next = self.get_time_data_by_day_sql(next_date, symbol_next,engine=engine)
                 if item_df.shape[0]==0 or item_df_next.shape[0]==0:
+                    logger.warning("no data in item:{},{}".format(day,symbol))
                     continue
                 # 分别从前后2天取得早盘的开盘和收盘，以及午盘的开盘和收盘，并进行错位计算
                 gp = item_df.groupby(item_df['datetime'].dt.date)
@@ -872,7 +878,9 @@ class JuejinFuturesExtractor(FutureExtractor):
                 data_cross['main_code'] = data_cross['symbol']
                 data_cross = data_cross.drop(columns=['symbol'])
                 # logger.info("{} single ok,date:{}".format(instrument,day)) 
-                data_cross.to_sql('dominant_continues_data_cross', engine, index=False, if_exists='append',dtype=dtype_sql)
+                data_cross_total.append(data_cross)
+            data_cross_total = pd.concat(data_cross_total)
+            data_cross.to_sql('dominant_continues_data_cross', engine, index=False, if_exists='append',dtype=dtype_sql)
             logger.info("{} to sql ok".format(instrument))        
 
     def import_main_1min_data_local(self,date_range=[202201,202512]):
@@ -883,8 +891,7 @@ class JuejinFuturesExtractor(FutureExtractor):
         begin_date = datetime.datetime.strptime(str(date_range[0]), '%Y%m')
         end_date = datetime.datetime.strptime(str(date_range[1]), '%Y%m')
         
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
 
         dtype = {
             'symbol': sqlalchemy.String,
@@ -940,7 +947,14 @@ class JuejinFuturesExtractor(FutureExtractor):
         
         mappings = pd.DataFrame(np.array(mappings),columns=["cate","instrument"])
         return mappings
-
+    
+    def get_juejin_exchange_code(self,instrument_code):
+        sql = "select e.juejin_code from trading_variety v,futures_exchange e where v.exchange_id=e.id and v.code='{}' ".format(instrument_code)
+        result_rows = self.dbaccessor.do_query(sql)  
+        if len(result_rows)==0:
+            return None        
+        return result_rows[0][0]
+    
 if __name__ == "__main__":    
     
     extractor = JuejinFuturesExtractor(savepath="/home/qdata/futures_data",sim_path="/home/qdata/futures_data/juejin/main_1min")   
@@ -954,8 +968,9 @@ if __name__ == "__main__":
     # 导入主力合约1分钟历史行情数据
     # extractor.import_main_1min_data_local(date_range=[202401,202512])
     # 导入主力连续合约日K数据,错位导入
-    extractor.import_continues_cross_from_his_data_part()
-    # extractor.import_continues_cross_from_main_1min_data()
+    # extractor.import_continues_cross_from_his_data_part()
+    # extractor.import_continues_cross_from_1min_data_cross()
+    extractor.import_continues_cross_from_main_1min_data()
     # 根据主力合约数据，导入主力连续日行情数据
     # extractor.import_continues_data_local_by_main()
     # begin = datetime.datetime.strptime("20220501", "%Y%m%d").date()

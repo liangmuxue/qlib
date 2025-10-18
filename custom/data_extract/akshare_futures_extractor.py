@@ -568,8 +568,7 @@ class AkFuturesExtractor(FutureExtractor):
         """导入分钟历史数据,交错模式"""
         
         begin_date,end_date = data_range
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
         dtype = {
             'code': sqlalchemy.String,
             'open': sqlalchemy.FLOAT,
