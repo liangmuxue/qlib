@@ -84,31 +84,31 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
         def rl_apply(df_target,div,open_mode=False):
             values = df_target.values
+            if open_mode:
+                begin = values[-2]
+            else:
+                begin = values[0]            
             if div:
-                if open_mode:
-                    begin = values[-2]
-                else:
-                    begin = values[0]
                 if begin==0:
                     begin += 1e-3
                 diff_range = (values[-1] - begin)/begin
             else:
-                diff_range = (values[-1] - values[0])
+                diff_range = (values[-1] - begin)
             # df_target['diff_range'] = diff_range
             return diff_range     
         def compute_diff(source_col,target_col,div=True,open_mode=False):
             diff_range = df.groupby(group_column)[source_col].rolling(window=self.pred_len+1).apply(rl_apply,args=(div,open_mode,)).values
-            # diff_range = np.concatenate([diff_range,np.zeros((self.pred_len-1))])[self.pred_len-1:]
             df[target_col] = diff_range  
         compute_diff("label_ori","diff_range")
         compute_diff("VOLUME_CLOSE","VOLUME_RANGE")
-        compute_diff("RSV5","rsv_diff",div=False)
+        compute_diff("RSV5","rsv_diff",div=False,open_mode=True)
         compute_diff("QTLUMA5","qtluma_diff",div=False)
         compute_diff("QTLU5","qtlu_diff",div=True)
         compute_diff("CCI5","cci_diff",div=False)
-        compute_diff("BULLS","bulls_diff",div=False)
+        compute_diff("BULLS","bulls_diff",div=False,open_mode=True)
         compute_diff("SUMPMA5","sumpma_diff",div=False)
-        compute_diff("OPEN","open_range",open_mode=True)
+        compute_diff("OPEN","open_range")
+        compute_diff("CLOSE","close_range",open_mode=True)
         
         # 生成行业均值数据
         df = self.build_industry_mean(df,indus_info=indus_info)     

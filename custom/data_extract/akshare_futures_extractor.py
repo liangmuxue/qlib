@@ -316,7 +316,7 @@ class AkFuturesExtractor(FutureExtractor):
         # 清空临时表
         self.dbaccessor.do_updateto("drop table temp_spot_price")  
     
-    def export_to_qlib(self,cross_mode=True):
+    def export_to_qlib(self,cross_mode=False):
         """导出到qlib"""
         
         # 首先从数据库导出到csv
@@ -497,6 +497,7 @@ class AkFuturesExtractor(FutureExtractor):
             # if var_code!="AP":
             #     continue
             futures_hist_em_df = futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date),e_symbol_mkt=e_symbol_mkt)
+            # futures_hist_em_df = ak.futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date))
             if futures_hist_em_df is None:
                 continue
             futures_hist_em_df = futures_hist_em_df.rename(
@@ -507,7 +508,7 @@ class AkFuturesExtractor(FutureExtractor):
             futures_hist_em_df.drop(columns=['涨跌','涨跌幅','成交额'])
             futures_hist_em_df[tar_cols].to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
             print("import_day_range_continues_data {}  ok".format(var_code))
-            time.sleep(2)
+            time.sleep(15)
 
     def import_day_range_1min_data(self,data_range=None):
         """导入分钟历史数据"""

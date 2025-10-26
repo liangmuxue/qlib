@@ -157,7 +157,7 @@ class TftDataHandler(DataHandlerLP):
             fields += ["$turnover"]
             names += ["TURNOVER_CLOSE"]            
         if "rolling" in config:
-            windows = config["rolling"].get("windows", [5, 10, 20, 30, 60])
+            windows = config["rolling"].get("windows", [3,5, 10, 20, 30, 60])
             include = config["rolling"].get("include", None)
             exclude = config["rolling"].get("exclude", [])
             # `exclude` in dataset config unnecessary filed
@@ -232,9 +232,9 @@ class TftDataHandler(DataHandlerLP):
             if use("CNTN"):
                 fields += ["Mean($close<Ref($close, 1), %d)" % d for d in windows]
                 names += ["CNTN%d" % d for d in windows]
-            if use("KURT"):
-                fields += ["Kurt($close, %d)" % d for d in windows]
-                names += ["KURT%d" % d for d in windows]           
+            # if use("KURT"):
+            #     fields += ["Kurt($close, %d)" % d for d in windows]
+            #     names += ["KURT%d" % d for d in windows]           
             if use("SKEW"):
                 fields += ["Skew($close, %d)" % d for d in windows]
                 names += ["SKEW%d" % d for d in windows]                          

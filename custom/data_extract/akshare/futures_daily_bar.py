@@ -16,7 +16,9 @@ from typing import Tuple, Dict
 import numpy as np
 import pandas as pd
 import requests
-
+import httpx
+from fake_useragent import UserAgent
+    
 from akshare.futures import cons
 from akshare.futures.requests_fun import requests_link
 
@@ -736,31 +738,6 @@ def get_futures_daily(
         temp_df = temp_df[~temp_df["symbol"].str.contains("efp")]
         return temp_df
 
-
-if __name__ == "__main__":
-    get_futures_daily_df = get_futures_daily(
-        start_date="20250102", end_date="20250102", market="DCE"
-    )
-    print(get_futures_daily_df)
-
-    get_dce_daily_df = get_dce_daily(date="20241118")
-    print(get_dce_daily_df)
-
-    get_cffex_daily_df = get_cffex_daily(date="20230810")
-    print(get_cffex_daily_df)
-
-    get_ine_daily_df = get_ine_daily(date="20230818")
-    print(get_ine_daily_df)
-
-    get_czce_daily_df = get_czce_daily(date="20210513")
-    print(get_czce_daily_df)
-
-    get_shfe_daily_df = get_shfe_daily(date="20210517")
-    print(get_shfe_daily_df)
-
-    get_gfex_daily_df = get_gfex_daily(date="20221228")
-    print(get_gfex_daily_df)
-
 def futures_hist_em(
     symbol: str = "热卷主连",
     period: str = "daily",
@@ -828,8 +805,8 @@ def futures_hist_em(
         "ut": "7eea3edcaed734bea9cbfc24409ed989",
         "forcect": "1",
     }
-    r = requests.get(url, timeout=15, params=params, headers={'Connection':'close'})
-    data_json = r.json()
+    # data_json = fetch_with_httpx(url, params)
+    data_json = fetch_with_request(url, params)
     temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
     if temp_df is None or temp_df.shape[0]==0:
         return None
@@ -920,4 +897,51 @@ def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1") -> pd.Data
     temp_df["hold"] = pd.to_numeric(temp_df["hold"], errors="coerce")
     return 1,temp_df
 
+def fetch_with_httpx(url,params,):
+    headers = {
+        "user-agent": UserAgent().random,
+    }    
+    proxies = {"http://":"http://amos:mrliang@8.140.193.104:7110",
+               "https://":"http://amos:mrliang@8.140.193.104:7110"}        
+    with httpx.Client(proxies=proxies) as client:
+        response = client.get(url, params=params, headers=headers, cookies=None)
+        # print(response.text)  
+        json_data = json.loads(response.text)      
+    return json_data    
 
+def fetch_with_request(url,params):
+    r = requests.get(url, timeout=15, params=params, headers={'Connection':'close'})
+    return r.json()
+
+if __name__ == "__main__":
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    # url = "https://www.baidu.com"
+    params = {
+        "secid": "113.cum",
+        "klt": "101",
+        "fqt": "1",
+        "lmt": "10000",
+        "end": "20500000",
+        "iscca": "1",
+        "fields1": "f1,f2,f3,f4,f5,f6,f7,f8",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64",
+        "ut": "7eea3edcaed734bea9cbfc24409ed989",
+        "forcect": "1",
+    }
+    
+    headers = {
+        "user-agent": UserAgent().random,
+    }
+    # client = httpx.Client(http2=True)
+    # resp = httpx.get(url, params=params, headers=headers, cookies=None)
+    proxies = {"http://":"http://amos:mrliang@8.140.193.104:7110",
+               "https://":"http://amos:mrliang@8.140.193.104:7110"}        
+    with httpx.Client(proxies=proxies) as client:
+        response = client.get(url, params=params, headers=headers, cookies=None)
+        # print(response.text)  
+        json_data = json.loads(response.text)      
+        json_data
+    # headers={'Connection':'close','User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36 Edg/111.0.1661.41'}
+    # r = requests.get(url, timeout=15, params=params, headers=headers)
+    # data_json = r.json()    
+    # print(data_json)

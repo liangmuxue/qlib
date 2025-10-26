@@ -472,3 +472,43 @@ class UncertaintyLoss(nn.Module):
             loss *= weights.expand_as(loss)
         loss = torch.mean(loss)
         return loss   
+    
+class EfficientLambdaRank(nn.Module):
+    """LambdaRank损失，逐对比较相对损失"""
+    
+    def __init__(self, sigma=1.0, top_k=100,margin_threhold=0.2):
+        super().__init__()
+        self.sigma = sigma
+        self.top_k = top_k
+        self.margin_threhold = margin_threhold
+        
+    def forward(self, scores, gains):
+        """
+        scores: 模型预测得分 [batch_size]
+        gains: 真实收益 [batch_size]
+        """
+        n = scores.shape[0]
+        loss = 0.0
+        pair_count = 0
+        
+        # 只计算收益差加大的品种对
+        for i in range(n):
+            for j in range(i+1, n):
+                if gains[i] > gains[j] + self.margin_threhold:
+                    # 简化的delta_ndcg近似
+                    pos_i = torch.sum(scores > scores[i]).float()
+                    pos_j = torch.sum(scores > scores[j]).float()
+                    
+                    # 计算位置权重（高位更重要）
+                    weight_i = 1.0 / torch.log2(2.0 + pos_i)
+                    weight_j = 1.0 / torch.log2(2.0 + pos_j)
+                    delta_ndcg = torch.abs(weight_i - weight_j)
+                    
+                    # 计算pairwise概率
+                    p_ij = 1.0 / (1.0 + torch.exp(self.sigma * (scores[j] - scores[i])))
+                    
+                    # 累计损失
+                    loss += -torch.log(p_ij) * delta_ndcg
+                    pair_count += 1
+                    
+        return loss / (pair_count + 1e-8) if pair_count > 0 else torch.tensor(0.0)

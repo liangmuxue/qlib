@@ -18,7 +18,7 @@ data_handler_config: &data_handler_config
               col_list: &col_list ['MACD','ATR5','RSI5','RSI20','OBV5','label_ori','price_norm','VOLUME_CLOSE','WVMA5','BETA5','RSQR5','RVI',
               'RESI5','CLOSE','REFCLOSE','HOLD','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','AOS','HIGH_QTLU5','REV5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
-              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
+              'SKEW5','QTLU10','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
               'IMXD5','open_range']                                      
     learn_processors:
         - class: DropnaLabel
@@ -82,7 +82,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataCrossFrom1min_rsvDetailAndPrice_202502"
+               model_name: "Futures_cleanDataStep3_rsvWithRank_202502"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -90,10 +90,10 @@ task:
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
-               forecast_horizon: &forecast_horizon 2
+               forecast_horizon: &forecast_horizon 3
                cut_len: 27
                dropout: 0.5
-               past_split: [[0,15],[15,30]]
+               past_split: [[0,15]]
                target_mode: [3,3,2,1,3]
                scale_mode: [2,2,0,2,0]
                filter_conv_index: -1
@@ -106,8 +106,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2006-01-01, 2025-02-28]
-                valid: [2025-02-01, 2025-04-30]
+                train: [2005-01-01, 2025-02-28]
+                valid: [2025-01-15, 2025-04-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
-from losses.mtl_loss import UncertaintyLoss
+from losses.mtl_loss import UncertaintyLoss,EfficientLambdaRank
 from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normalization
 from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
@@ -186,104 +186,10 @@ class FuturesStrategyLoss(FuturesCombineLoss):
             
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]       
 
-class ListwiseRegressionLoss(nn.Module):
-    def __init__(self, tau=1.0, reduction='mean'):
-        """
-        Plackett-Luce排序损失
-        :param tau: 温度系数，控制排序置信度（默认1.0）
-        :param reduction: 损失聚合方式（'mean'或'sum'）
-        """
-        super().__init__()
-        self.tau = tau
-        self.reduction = reduction
-
-    def forward(self, y_pred, y_true, group_ids=None):
-        """
-        :param y_pred: 模型预测值，形状为 [batch_size]
-        :param y_true: 真实标签值，形状为 [batch_size]
-        :param group_ids: 组标识（如查询ID），形状为 [batch_size]
-        :return: 排序损失值
-        """
-        loss = 0.0
-        unique_groups = torch.unique(group_ids)
-        
-        for group in unique_groups:
-            # 提取当前组的预测和标签
-            mask = (group_ids == group)
-            s_group = y_pred[mask]  # 预测得分
-            y_group = y_true[mask]  # 真实标签
-            
-            # 按真实标签降序排列的索引
-            _, sorted_indices = torch.sort(y_group, descending=True)
-            s_sorted = s_group[sorted_indices]
-            
-            # 计算Plackett-Luce损失（向量化实现）
-            n = len(s_sorted)
-            if n == 0:
-                continue
-                
-            # 构造下三角掩码矩阵 [n, n]
-            mask = torch.tril(torch.ones(n, n, device=y_pred.device)).bool()
-            
-            # 扩展得分矩阵 [n, n]
-            s_expanded = s_sorted.unsqueeze(1).expand(-1, n)
-            
-            # 计算logits并应用温度系数 [n, n]
-            logits = s_expanded / self.tau
-            
-            # 仅保留当前步骤之后的候选
-            logits = logits.masked_fill(~mask, -1e9)
-            
-            # 计算log概率：log(exp(s_k) / sum_{j>=k} exp(s_j))
-            log_probs = logits - torch.logsumexp(logits, dim=1, keepdim=True)
-            
-            # 仅取对角线元素（每一步选择的正确项的log概率）
-            group_loss = -log_probs.diagonal().sum()
-            
-            loss += group_loss
-        
-        if self.reduction == 'mean':
-            return loss / len(unique_groups)
-        else:
-            return loss
-
-def listMLE(y_pred, y_true, eps=1e-5, padded_value_indicator=-1):
-    """
-    ListMLE loss introduced in "Listwise Approach to Learning to Rank - Theory and Algorithm".
-    :param y_pred: predictions from the model, shape [batch_size, slate_length]
-    :param y_true: ground truth labels, shape [batch_size, slate_length]
-    :param eps: epsilon value, used for numerical stability
-    :param padded_value_indicator: an indicator of the y_true index containing a padded item, e.g. -1
-    :return: loss value, a torch.Tensor
-    """
-    # shuffle for randomised tie resolution
-    random_indices = torch.randperm(y_pred.shape[-1])
-    y_pred_shuffled = y_pred[:, random_indices]
-    y_true_shuffled = y_true[:, random_indices]
-
-    y_true_sorted, indices = y_true_shuffled.sort(descending=True, dim=-1)
-
-    mask = y_true_sorted == padded_value_indicator
-
-    preds_sorted_by_true = torch.gather(y_pred_shuffled, dim=1, index=indices)
-    preds_sorted_by_true[mask] = float("-inf")
-
-    max_pred_values, _ = preds_sorted_by_true.max(dim=1, keepdim=True)
-
-    preds_sorted_by_true_minus_max = preds_sorted_by_true - max_pred_values
-
-    cumsums = torch.cumsum(preds_sorted_by_true_minus_max.exp().flip(dims=[1]), dim=1).flip(dims=[1])
-
-    observation_loss = torch.log(cumsums + eps) - preds_sorted_by_true_minus_max
-
-    observation_loss[mask] = 0.0
-
-    return torch.mean(torch.sum(observation_loss, dim=1))
-
 class FuturesIndustryLoss(UncertaintyLoss):
     """整合不同行业板块，并基于策略选取的损失"""
 
-    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,tau=0.1,output_chunk_length=2,cut_len=2):
+    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,tau=0.1,output_chunk_length=2,cut_len=2,loss_weights=None):
         
         super(FuturesIndustryLoss, self).__init__(ref_model=ref_model,device=device)
         
@@ -292,10 +198,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
         self.device = device  
         self.target_mode = target_mode
         
-        # 排序损失部分，用于整体走势衡量
-        self.listwise = ListwiseRegressionLoss(tau=tau)
         self.output_chunk_length = output_chunk_length 
         self.cut_len = cut_len
+        self.log_vars = nn.Parameter(torch.zeros(len(loss_weights)))
+        self.loss_weights = loss_weights
         
     def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
         """Multiple Loss Combine"""
@@ -344,7 +250,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         if indus_index.shape[0]<2:
                             continue
                         # 板块整体损失计算
-                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10  
+                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10
                         # if target_mode==1: 
                         #     ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),time_diff_targets.unsqueeze(-1))  
                     elif target_mode==3:
@@ -358,7 +264,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         ins_class_item = target_class_item[ins_all_inner]
                         inner_index = ins_all_inner[torch.where(ins_class_item>=0)[0]]
                         round_targets_item = future_round_targets_factor[j,inner_index]    
-                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item) / 10          
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)
+                        # 使用top值计算损失
+                        select_number = 5
+                        top_raise_index = torch.argsort(-sv_out_item)[:select_number]
+                        top_fall_index = torch.argsort(sv_out_item)[:select_number]
+                        total_index = torch.cat([top_raise_index,top_fall_index])
+                        # 相对排序损失
+                        ce_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], round_targets_item[total_index])                           
+                        # ce_loss[i] += self.ccc_loss_comp(sv_out_item[total_index],round_targets_item[total_index]) / 10           
+                        # ce_loss[i] += self.mse_loss(sv_out_item[total_index].unsqueeze(-1),round_targets_item[total_index].unsqueeze(-1))   
                     elif target_mode==2:
                         # 在行业内进行品种比较    
                         inner_class_item = target_class_item[ins_all]
@@ -390,7 +305,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]               
                 if target_mode in [3]:
-                    loss_sum = loss_sum + cls_loss[i]      
+                    # for i, loss in enumerate([cls_loss[i],ce_loss[i]]):
+                    #     precision = torch.exp(-self.log_vars[i])
+                    #     loss_sum += precision * loss + 0.5 * self.log_vars[i]                    
+                    loss_sum = loss_sum + self.loss_weights[0] * cls_loss[i] + self.loss_weights[1] * ce_loss[i] 
+                    # loss_sum = loss_sum + cls_loss[i] + ce_loss[i] / (ce_loss[i] / cls_loss[i]).detach()
                 if target_mode in [5]:
                     # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标,多行业指标模式
                     diff_target = long_diff_seq_targets[:,indus_data_index,-1,i]
@@ -400,7 +319,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标，整体指标模式
                     diff_target = long_diff_seq_targets[:,main_index,-1,i]
                     ce_loss[i] = torch.abs(sw_index_data.squeeze()-diff_target).mean()        
-                    loss_sum = loss_sum + ce_loss[i]                                                                   
+                    loss_sum = loss_sum + ce_loss[i]             
+                                                                          
         # if epoch_num>=self.lock_epoch_num:
         #     # 综合策略损失评判
         #     if optimizers_idx==(len(output)) or optimizers_idx==-1:
@@ -426,85 +346,34 @@ class FuturesIndustryLoss(UncertaintyLoss):
             
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
 
-
-class FuturesIndustryDRollLoss(UncertaintyLoss):
-    """整合不同行业板块，并基于策略选取的损失"""
-
-    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,tau=0.1,lambda_reg=0):
+    def _compute_gradient_components(self, task_losses):
+        """计算每个任务对共享参数的梯度贡献"""
+        gradient_components = []
         
-        super(FuturesIndustryDRollLoss, self).__init__(ref_model=ref_model,device=device)
-        
-        self.lock_epoch_num = lock_epoch_num
-        self.ref_model = ref_model
-        self.device = device  
-        self.target_mode = target_mode
-        
-        # 排序损失部分，用于整体走势衡量
-        self.listwise = ListwiseRegressionLoss(tau=tau)
-        self.lambda_reg = lambda_reg 
-        
-    def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
-        """Multiple Loss Combine"""
-
-        (output,vr_class,_) = output_ori
-        (target,target_class,combine_index_round_target) = target_ori
-        
-        corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
-        cls_loss = torch.zeros([len(output)]).to(self.device)
-        fds_loss = torch.zeros([len(output)]).to(self.device)
-        ce_loss = torch.zeros([len(output)]).to(self.device)
-        loss_sum = torch.tensor(0.0).to(self.device) 
-        
-        industry_index = [i for i in range(target_class.shape[-1])]
-        industry_rel_index = [i for i in range(target_class.shape[-1])]
-        main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
-        industry_rel_index.remove(main_index)
-        index_round_target = combine_index_round_target[:,:,main_index,:]
-        
-        for i in range(len(output)):
-            target_mode = self.target_mode[i]
-            if optimizers_idx==i or optimizers_idx==-1:
-                output_item = output[i] 
-                # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
-                _,sv,sw_index_data = output_item  
-                round_targets_item = index_round_target[...,i]
-                target_class_single = target_class[:,:,main_index]
-                round_targets_last = []
-                sw_index_last = []
-                for j in range(target_class_single.shape[0]):
-                    # 如果存在缺失值，则忽略，不比较
-                    target_class_item = target_class_single[j]
-                    keep_index = torch.where(target_class_item>=0)[0]   
-                    if keep_index.shape[0]<3:
-                        continue
-                    round_targets_inner = round_targets_item[j,keep_index]     
-                    round_targets_last.append(round_targets_inner[-1])
-                    # 分别衡量每个行业的时间段差分数值
-                    idx = 0
-                    indus_sv = []
-                    indus_target = []
-                    for indus_index in industry_index:
-                        if indus_index==main_index:
-                            continue
-                        target_class_indus = target_class[j,:,indus_index]
-                        keep_index = torch.where(target_class_indus>=0)[0]
-                        if keep_index.shape[0]<3:
-                            continue                          
-                        sv_item = sv[j,:,idx,i]
-                        idx += 1
-                        sv_item = sv_item[keep_index]
-                        if keep_index[-1]==(combine_index_round_target.shape[1]-1):
-                            indus_sv.append(sv_item[-1])    
-                            indus_target.append(combine_index_round_target[j,-1,indus_index,i])                     
-                        indus_round_target_item = combine_index_round_target[j,keep_index,indus_index,i]
-                        cls_loss[i] += self.ccc_loss_comp(sv_item,indus_round_target_item)
-                cls_loss[i] = cls_loss[i]/target_class_single.shape[0]
-                # 行业类别的横向比较
-                indus_target = combine_index_round_target[:,-1,industry_rel_index,i]
-                # indus_target = normalization(indus_target,mode="torch",axis=1)
-                ce_loss[i] = self.mse_loss(sw_index_data,indus_target)
-                if target_mode==0:
-                    loss_sum = loss_sum + cls_loss[i] # + ce_loss[i]
+        for i, task_loss in enumerate(task_losses):
+            # 保存当前梯度状态
+            self.model.zero_grad()
             
-        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]          
+            # 计算单个任务的梯度
+            weighted_loss = self.task_weights[i] * task_loss
+            weighted_loss.backward(retain_graph=True)
+            
+            # 获取该任务的梯度贡献
+            task_grads = {}
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    task_grads[name] = param.grad.clone()
+            
+            gradient_components.append(task_grads)
+            
+        return gradient_components
+    
+    def _get_parameter_gradients(self):
+        """获取模型参数的当前梯度"""
+        gradients = {}
+        for name, param in self.model.named_parameters():
+            if param.grad is not None:
+                gradients[name] = param.grad.clone()
+        return gradients
+
             

@@ -157,7 +157,12 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 with open(ass_data_path, "wb") as fout:
                     pickle.dump(self.ass_data, fout) 
         self.check_instrument_data()
-        
+    
+    def create_scaler(self,feature_range):
+        scaler = MinMaxScaler(feature_range=feature_range)
+        # scaler = StandardScaler() 
+        return scaler
+     
     def check_instrument_data(self,dump_file=False):
         """校验训练及验证的品种的一致性"""
         
@@ -193,8 +198,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         time_column = dataset.get_time_column()   
         date_list = df_data[datetime_col].unique()      
         date_list = np.sort(date_list)
-        # 由于使用future_datetime方式对齐，因此从前面截取input序列长度,后面截取output序列长度用于预测长度预留
-        date_list = date_list[self.input_chunk_length:-self.output_chunk_length]        
+        # 由于使用future_datetime方式对齐，因此从前面截取input序列长度
+        date_list = date_list[self.input_chunk_length:]        
         self.date_list = date_list
         # 生成对应的时间协变量映射数据
         date_conv_columns = dataset.get_future_columns()
@@ -343,12 +348,12 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
-                # combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1)             
+                # combine_values[:,i] = self.create_scaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1)             
             if scale_mode[i] in [1,2,3]:
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
-                # combine_values[:,i] = MinMaxScaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1) 
+                # combine_values[:,i] = self.create_scaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1) 
             elif scale_mode[i]==5:
                 # 只剔除异常值，不归一化
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
@@ -378,7 +383,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
     
                
     def __len__(self):
-        return self.date_list.shape[0]
+        # 需要预留output长度，用于预测日期对齐
+        return self.date_list.shape[0] - self.output_chunk_length
 
 
     def __getitem__(
@@ -427,7 +433,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             keep_index = self.keep_index[index]  
             # 目标序列
             target_vals = target_series.random_component_values(copy=False)[...,:self.target_num]
-            # 对应的起始索引号属于future_datetime,因此减去序列输入长度，即为计算序列起始索引
+            # ,因对应的起始索引号属于future_datetime此减去序列输入长度，即为计算序列起始索引
             past_start = ser_idx_infer - self.input_chunk_length
             past_end = past_start + self.input_chunk_length
             future_start = past_end
@@ -462,7 +468,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
             open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
-            scaler = MinMaxScaler(feature_range=(1e-5, 1))
+            scaler = self.create_scaler(feature_range=(1e-5, 1))
             scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
             price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
             price_targets_ori[keep_index] = price_array    
@@ -503,7 +509,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             future_covariate = f_conv_values[future_start:future_end]
             historic_future_covariate = f_conv_values[past_start:past_end]
             # 直接从映射数据中取得当前日期对应的未来协变量
-            date_covs = self.date_covs_list.iloc[idx:idx+2]
+            date_covs = self.date_covs_list.iloc[idx:idx+self.output_chunk_length]
             future_covariate = date_covs[self.date_conv_columns].values
                         
             past_target_total[keep_index] = past_target
@@ -529,7 +535,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         for i in range(real_past_target.shape[0]):
             real_past_target_item = real_past_target[i]
             real_future_reshape_item = real_future_target[i]
-            target_scaler = MinMaxScaler(feature_range=(1e-5, 1))
+            target_scaler = self.create_scaler(feature_range=(1e-5, 1))
             target_scaler.fit(real_past_target_item)
             scale_data_past = target_scaler.transform(real_past_target_item)
             scale_data_future = target_scaler.transform(real_future_reshape_item)
@@ -540,7 +546,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         real_covariate_total= past_covariate_total[real_index]
         for i in range(real_covariate_total.shape[0]):
             real_past_conv = real_covariate_total[i]
-            past_conv_scale = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
+            past_conv_scale = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
             past_covariate_total[real_index[i]] = past_conv_scale
             
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
@@ -567,15 +573,15 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0,1,5]:
                 # 分行业归一化
-                scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
+                scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
                 future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
-                long_diff_seq_targets[:,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
+                long_diff_seq_targets[:,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
                 
         # 统合归一化所有行业板块的整体预测数值
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0]:
-                future_index_round_targets[self.indus_rel_index,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[self.indus_rel_index,:,i])
+                future_index_round_targets[self.indus_rel_index,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[self.indus_rel_index,:,i])
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
         index_round_targets = np.concatenate([past_index_round_targets,future_index_round_targets],axis=1)
 
@@ -600,12 +606,12 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                         # 过滤全部趋近于0的数据
                         if past_data_item.max()<1e-4:
                             continue
-                        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_item)
+                        scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_data_item)
                         past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
                         scale_data = scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
                         future_round_targets[k,:,i] = scale_data
                     # 针对目标值，再次归一化以加速收敛                    
-                    future_round_targets[index_real,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
+                    future_round_targets[index_real,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
                 # 对于数值模式，只进行一次过去未来的归一化，区分全品种和行业内部的归一化操作
                 if (self.scale_mode[i]==1 and inner_idx!=self.main_index_rel) or (self.scale_mode[i]==3 and inner_idx==self.main_index_rel):
                     for k in index_real:
@@ -613,7 +619,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                         # 过滤全部趋近于0的数据
                         if past_data_item.max()<1e-4:
                             continue
-                        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_item)
+                        scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_data_item)
                         past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
                         scale_data= scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
                         future_round_targets[k,:,i] = scale_data
@@ -622,14 +628,14 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 如果当天没有交易，则保留空值
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
-        
-        if future_start_datetime==20250318:
-            result_file_path = "custom/data/results/data_compare_val_20250318.pkl"
-            results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
-                       ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
-            with open(result_file_path, "wb") as fout:
-                pickle.dump(results, fout)    
-            print("ggg")  
+        #
+        # if future_start_datetime==20250318:
+        #     result_file_path = "custom/data/results/data_compare_val_20250318.pkl"
+        #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
+        #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
+        #     with open(result_file_path, "wb") as fout:
+        #         pickle.dump(results, fout)    
+        #     print("ggg")  
                 
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
@@ -664,8 +670,6 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                          max_samples_per_ts=max_samples_per_ts,covariate_type=covariate_type,use_static_covariates=use_static_covariates,scale_mode=scale_mode,
                          cut_len=cut_len)
         
-           
-
     def build_date_mappings(self,df_data,dataset=None,instrument_number=None):
         """生成日期映射关系"""
         
@@ -763,7 +767,7 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
             rsv_diff = self.ass_data[code][4][past_start_ser:future_end_ser]
-            scaler = MinMaxScaler(feature_range=(1e-5, 1))
+            scaler = self.create_scaler(feature_range=(1e-5, 1))
             scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
             price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
             price_targets_ori[keep_index] = price_array    
@@ -827,7 +831,7 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
         for i in range(real_past_target.shape[0]):
             real_past_target_item = real_past_target[i]
             real_future_reshape_item = real_future_target[i]
-            target_scaler = MinMaxScaler(feature_range=(1e-5, 1))
+            target_scaler = self.create_scaler(feature_range=(1e-5, 1))
             target_scaler.fit(real_past_target_item)
             scale_data_past = target_scaler.transform(real_past_target_item)
             scale_data_future = target_scaler.transform(real_future_reshape_item)
@@ -838,7 +842,7 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
         real_covariate_total= past_covariate_total[real_index]
         for i in range(real_covariate_total.shape[0]):
             real_past_conv = real_covariate_total[i]
-            past_conv_scale = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
+            past_conv_scale = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
             past_covariate_total[real_index[i]] = past_conv_scale
             
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
@@ -863,15 +867,15 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0,1,5]:
                 # 分行业归一化
-                scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
+                scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
                 future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
-                long_diff_seq_targets[:,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
+                long_diff_seq_targets[:,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
                 
         # 单独归一化未来行业板块整体预测数值
         for i in range(self.past_target_shape[-1]):
             if self.scale_mode[i] in [0]:
-                future_index_round_targets[self.indus_rel_index,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[self.indus_rel_index,:,i])
+                future_index_round_targets[self.indus_rel_index,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[self.indus_rel_index,:,i])
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
         index_round_targets = np.concatenate([past_index_round_targets,future_index_round_targets],axis=1)
 
@@ -896,12 +900,12 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                         # 过滤全部趋近于0的数据
                         if past_data_item.max()<1e-4:
                             continue
-                        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_item)
+                        scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_data_item)
                         past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
                         scale_data = scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
                         future_round_targets[k,:,i] = scale_data
                     # 针对目标值，再次归一化以加速收敛                    
-                    future_round_targets[index_real,:,i] = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
+                    future_round_targets[index_real,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
                 # 对于数值模式，只进行一次过去未来的归一化，区分全品种和行业内部的归一化操作
                 if (self.scale_mode[i]==1 and idx!=self.main_index_rel) or (self.scale_mode[i]==3 and idx==self.main_index_rel):
                     for k in index_real:
@@ -909,7 +913,7 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                         # 过滤全部趋近于0的数据
                         if past_data_item.max()<1e-4:
                             continue
-                        scaler = MinMaxScaler(feature_range=(1e-5, 1)).fit(past_data_item)
+                        scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_data_item)
                         past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
                         scale_data= scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
                         future_round_targets[k,:,i] = scale_data

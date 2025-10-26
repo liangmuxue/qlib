@@ -177,68 +177,6 @@ def test_nor():
     a-=0.5+0.1
     print(a)
 
-def test_grad():       
-
-    class TrainDataset(Dataset):
-        def __init__(self):
-            super(TrainDataset, self).__init__()
-            self.data = []
-            for i in range(1,1000):
-                for j in range(1,1000):
-                    self.data.append([i,j])
-        def __getitem__(self, index):
-            input_data = self.data[index]
-            label = input_data[0] + input_data[1]
-            return torch.Tensor(input_data),torch.Tensor([label])
-        def __len__(self):
-            return len(self.data)
-    
-    class TestNet(nn.Module):
-        def __init__(self):
-            super(TestNet, self).__init__()
-            self.net1 = nn.Linear(2,1)
-    
-        def forward(self, x):
-            x = self.net1(x)
-            return x
-    
-    def train():
-        traindataset = TrainDataset()
-        traindataloader = DataLoader(dataset = traindataset,batch_size=1,shuffle=False)
-        testnet = TestNet().cuda()
-        myloss = nn.MSELoss().cuda()
-        optimizer = optim.SGD(testnet.parameters(), lr=0.001 )
-        for epoch in range(100):
-            for data,label in traindataloader :
-                print("\n=====begin iter=====")
-                data = data.cuda()
-                label = label.cuda()
-                output = testnet(data)
-                print("input",data)
-                print("output",output)
-                print("label",label)
-                loss = myloss(output,label)
-                optimizer.zero_grad()
-                for name, parms in testnet.named_parameters():    
-                    print('-->name:', name)
-                    print('-->para:', parms)
-                    print('-->grad_requirs:',parms.requires_grad)
-                    print('-->grad_value:',parms.grad)
-                    print("===")
-                loss.backward()
-                optimizer.step()
-                print("=============after step===========")
-                for name, parms in testnet.named_parameters():    
-                    print('-->name:', name)
-                    print('-->para:', parms)
-                    print('-->grad_requirs:',parms.requires_grad)
-                    print('-->grad_value:',parms.grad)
-                    print("===")
-                print(optimizer)
-                input("=====end iter=====")
-
-    train()
-
 def test_js():
     
     def js_div(p_output, q_output, get_softmax=True):
@@ -277,9 +215,117 @@ def test_slice():
     index = torch.ones([10,2,3]).long()
     t = torch.gather(x, 1, index)  
     print(t.shape)
+
+def test_multi_grad():
+    
+    # 定义模型
+    model = nn.Sequential(
+        nn.Linear(10, 5),
+        nn.ReLU(),
+        nn.Linear(5, 2)
+    )
+    
+    # 模拟数据
+    x = torch.randn(32, 10)
+    target1 = torch.randint(0, 2, (32,)).float()
+    target2 = torch.randn(32, 1)
+    
+    # 损失函数
+    criterion1 = nn.CrossEntropyLoss()
+    criterion2 = nn.MSELoss()
+    
+    # 前向传播
+    output = model(x)
+    output1 = output[:, 0]  # 第一个任务输出
+    output2 = output[:, 1]  # 第二个任务输出
+    
+    # 计算损失
+    loss1 = criterion1(output1, target1)
+    loss2 = criterion2(output2.unsqueeze(1), target2)
+    loss_total = loss1 + loss2
+    loss_total.backward(retain_graph=True)
+    # 查看TOTAL梯度
+    print("total backward 后的梯度:")
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            print(f"{name}: gradient norm = {param.grad.norm().item():.4f}")    
+    model.zero_grad()
+    
+    # 分别 backward - 保留计算图
+    loss1.backward(retain_graph=True)
+    
+    # 查看第一个损失的梯度
+    print("第一次 backward 后的梯度:")
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            print(f"{name}: gradient norm = {param.grad.norm().item():.4f}")
+            
+    model.zero_grad()
+    # 第二个 backward
+    loss2.backward()
+    
+    print("\n第二次 backward 后的梯度:")
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            print(f"{name}: gradient norm = {param.grad.norm().item():.4f}")
+    
+    # 更新参数
+    optimizer = torch.optim.Adam(model.parameters())
+    optimizer.step()
+    optimizer.zero_grad()
         
+    # def get_gradients(model, loss):
+    #     """计算并返回指定损失的梯度"""
+    #     # 清零之前的梯度
+    #     for param in model.parameters():
+    #         if param.grad is not None:
+    #             param.grad.data.zero_()
+    #
+    #     # 计算当前损失的梯度
+    #     loss.backward(retain_graph=True)
+    #
+    #     # 提取梯度
+    #     gradients = {}
+    #     for name, param in model.named_parameters():
+    #         if param.grad is not None:
+    #             gradients[name] = param.grad.clone()
+    #
+    #     return gradients
+    #
+    # # 分别获取两个损失的梯度
+    # gradients1 = get_gradients(model, loss1)
+    # gradients2 = get_gradients(model, loss2)
+    #
+    # # 分析梯度
+    # print("Loss1 梯度分析:")
+    # for name, grad in gradients1.items():
+    #     print(f"{name}: mean={grad.mean().item():.6f}, std={grad.std().item():.6f}")
+    #
+    # print("\nLoss2 梯度分析:")
+    # for name, grad in gradients2.items():
+    #     print(f"{name}: mean={grad.mean().item():.6f}, std={grad.std().item():.6f}")
+    #
+    # # 计算梯度相似度
+    # cosine_similarities = {}
+    # for name in gradients1.keys():
+    #     if name in gradients2:
+    #         cos_sim = torch.cosine_similarity(
+    #             gradients1[name].flatten(), 
+    #             gradients2[name].flatten(), 
+    #             dim=0
+    #         )
+    #         cosine_similarities[name] = cos_sim.item()
+    #
+    # print("\n梯度余弦相似度:")
+    # for name, sim in cosine_similarities.items():
+    #     print(f"{name}: {sim:.4f}")
+    #
+
+        
+
+       
 if __name__ == "__main__":
-    test_slice()
+    # test_slice()
     # test_tensor()    
     # test_sort()
     # test_kmeans()
@@ -287,7 +333,7 @@ if __name__ == "__main__":
     # test_mul()
     # test_corr()
     # test_pca()
-    # test_grad()
+    test_multi_grad()
     # test_js()
     # test_cos()
     # test_nor()

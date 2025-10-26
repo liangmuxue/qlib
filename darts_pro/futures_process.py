@@ -639,12 +639,13 @@ class FuturesProcessModel(TftDataframeModel):
         analysis_columns = ["label_ori","REV5","IMAX5","QTLUMA5","OBV5","CCI5","KMID","KLEN","KMID2","KUP","KUP2",
                             "KLOW","KLOW2","KSFT","RSV5", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
-        analysis_columns = ["RSV5","QTLU5","CNTN5","SUMPMA5","CCI5"]
-        # analysis_columns = ["QTLUMA5",'QTLU5','IMXD5','SKEW5','KURT5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
-        # analysis_columns = ["rsv_diff","qtluma_diff",'qtlu_diff','cci_diff','bulls_diff','sumpma_diff']
+        analysis_columns = ["RSV5","QTLU5","CNTN5","BULLS","CCI5"]
+        analysis_columns = ['RSV10','CCI10','CNTN10','QTLU10','QTLUMA10']
+        # analysis_columns = ["QTLUMA5",'QTLU5','IMXD5','SKEW5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
+        # analysis_columns = ['rsv_diff','bulls_diff','cci_diff','diff_range','close_range']
         
         results = []
-        price_col = 'diff_range'
+        price_col = 'open_range'
         # price_col = 'CLOSE'
         custom_date = None
         # custom_date = [20221025]

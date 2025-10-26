@@ -12,12 +12,13 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
 
+from cus_utils.process import create_from_cls_and_kwargs
 from .mlp_module import MlpModule
 import cus_utils.global_var as global_var
 from darts_pro.act_model.fur_industry_ts import FurIndustryMixer,FurStrategy
 from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
-
+from .multiTask_optimizer import MultiTaskOptimizer
 from cus_utils.common_compute import compute_price_class,scale_value
 from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
 from trader.utils.data_stats import DataStats,RESULT_FILE_PATH,RESULT_FILE_VIEW,INTER_RS_FILEPATH
@@ -26,13 +27,13 @@ from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20250318,20250319,20250320]
-STAT_DATE = [20250318,20250318]
+TRACK_DATE = [20250418,20250425]
+STAT_DATE = [20240318,20260318]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [0]
-DRAW_SEQ_DETAIL = [1]
+DRAW_SEQ_DETAIL = [0]
 
 class FuturesBidiModule(MlpModule):
     """期货双向判断的模型"""              
@@ -72,7 +73,9 @@ class FuturesBidiModule(MlpModule):
         self.cut_len = cut_len
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
         self.train_step_mode = train_step_mode
-        
+        # 任务初始权重
+        self.task_weights = torch.tensor([0.5, 0.5])  
+                
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
                                     categorical_embedding_sizes,dropout,add_relative_index,norm_type,past_split=past_split,
@@ -82,7 +85,7 @@ class FuturesBidiModule(MlpModule):
         # For pred step1 result
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH,INTER_RS_FILEPATH)
         self.result_columns = ["date","indus_index","trend_flag","price_inf","ce_inf"]
-        
+       
         
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -176,7 +179,7 @@ class FuturesBidiModule(MlpModule):
             return model
 
     def create_loss(self,model,device="cpu"):
-        return FuturesIndustryLoss(device=device,ref_model=model,lock_epoch_num=self.lock_epoch_num,target_mode=self.target_mode,cut_len=self.cut_len)       
+        return FuturesIndustryLoss(device=device,ref_model=model,lock_epoch_num=self.lock_epoch_num,target_mode=self.target_mode,cut_len=self.cut_len,loss_weights=self.task_weights)       
     
 
     def _construct_classify_layer(self, input_dim,output_dim,device=None):
@@ -192,7 +195,36 @@ class FuturesBidiModule(MlpModule):
         strategy_model = FurStrategy(target_num=len(self.past_split),select_num=self.select_num,trend_threhold=self.trend_threhold)        
         return strategy_model
     
-        
+    def configure_optimizers(self):
+        """定制优化器"""
+
+        optimizers = []
+        optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}  
+        # 使用自定义优化器，用于调整多任务损失函数权重和梯度策略
+        for i in range(len(self.past_split)):
+            # base_lr = self.lr_scheduler_kwargs["base_lr"] 
+            mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(),optimizer_kws,
+                            model=self.sub_models[i],task_weights=self.task_weights,use_gradient_surgery=True, use_adaptive_clip=False)  
+            optimizers.append(mt_optimizer)
+        # 对应优化器，生成多个学习率
+        lr_schedulers = []
+        for i in range(len(self.past_split)):
+            lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
+            lr_sched_kws["optimizer"] = optimizers[i]
+            lr_monitor = lr_sched_kws.pop("monitor", None)
+            lr_scheduler = create_from_cls_and_kwargs(
+                self.lr_scheduler_cls, lr_sched_kws
+            )
+            lr_scheduler_config = {
+                "scheduler": lr_scheduler,
+                "interval": self.lr_freq["interval"],
+                "frequency": self.lr_freq["frequency"],              
+                "monitor": lr_monitor if lr_monitor is not None else "val_loss",
+            } 
+            lr_schedulers.append(lr_scheduler_config)  
+        lr_schedulers.append(lr_scheduler_config) 
+        return optimizers, lr_schedulers     
+            
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
         optimizer_idx=-1
@@ -250,7 +282,6 @@ class FuturesBidiModule(MlpModule):
     def on_validation_epoch_start(self):  
         self.import_price_result = None
         self.total_imp_cnt = 0
-        
     
     def get_optimizer_size(self):
         return len(self.past_split) + 1
@@ -291,20 +322,11 @@ class FuturesBidiModule(MlpModule):
             if ce_loss[i]!=0:
                 self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append((corr_loss_combine.detach(),ce_loss.detach(),fds_loss.detach(),cls_loss.detach()))
-            total_loss += loss     
             # 手动更新参数
             opt = self.trainer.optimizers[i]
-            opt.zero_grad()
-            # 前面的轮次，只更新主网络
-            if self.current_epoch<self.lock_epoch_num:
-                if i<(self.get_optimizer_size()-1):
-                    self.manual_backward(loss)
-                    opt.step()
-                    self.lr_schedulers()[i].step()    
-            else:
-                self.manual_backward(loss)
-                opt.step()
-                self.lr_schedulers()[i].step()                  
+            loss_total = [cls_loss[i],ce_loss[i]]
+            update_info = opt.step(loss_total)
+            self.lr_schedulers()[i].step()                  
                                        
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  
@@ -313,7 +335,7 @@ class FuturesBidiModule(MlpModule):
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss,detail_loss,output 
-
+    
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -342,7 +364,7 @@ class FuturesBidiModule(MlpModule):
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
                     (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
-        self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True)
+        self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
         preds_combine = []
         for i in range(len(self.past_split)):
             if ce_loss[i]!=0:
@@ -740,7 +762,7 @@ class FuturesBidiModule(MlpModule):
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         cls_ins = cls[0]
-        cls_ins = cls[1]
+        # cls_ins = cls[1]
 
         # 接着计算具体品种             
         top_num = 2
@@ -795,7 +817,7 @@ class FuturesBidiModule(MlpModule):
         open_array = target_info["open_array"]
         price_array = target_info["price_array"] 
         # 收盘与前收盘价差作为衡量指标
-        diff_range = (price_array[-1] - price_array[self.input_chunk_length-1])/price_array[self.input_chunk_length-1]*100
+        diff_range = (price_array[-1] - price_array[-self.output_chunk_length-1])/price_array[-self.output_chunk_length-1]*100
         # 预测l结束日期的开盘与预测开始日期的开盘价差作为衡量指标
         diff_range = (open_array[-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
         # 价差展示，从过去一直延续到预测当日，未包含最后一条记录
