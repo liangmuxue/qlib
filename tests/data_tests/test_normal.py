@@ -113,7 +113,13 @@ def test_c_head():
     cppHeader = CppHeaderParser.CppHeader("custom/trader/emulator/openctp/ThostFtdcUserApiDataType.h")
     for define in cppHeader.deines:
         print(define)
-     
+
+def test_dict_merge():
+    a = {"a":1}
+    b = {"b":1}
+    a.update(b)
+    print(a)
+
 if __name__ == "__main__":
     # test_days_dur()
 
@@ -121,6 +127,7 @@ if __name__ == "__main__":
     # test_date()
     # test_math()
     # test_time_compute()
-    test_c_head()
+    # test_c_head()
+    test_dict_merge()
     # debug_data()
     

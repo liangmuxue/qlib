@@ -58,7 +58,7 @@ task:
             n_jobs: 20
             log_every_n_steps: 50
             type: 'fit_futures_bidi'
-            n_epochs : 200
+            n_epochs : 120
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
@@ -66,7 +66,7 @@ task:
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
-               total_iters: 5e4
+               total_iters: 3e4
                # base_lr: 0.5e-4
                # max_lr: 1.5e-3
                # cycle_momentum: False
@@ -82,9 +82,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataStep3_rsvWithRank_202502"
+               model_name: "Futures_cleanDataStep3_rsvAgainWithRank_202501"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
@@ -106,8 +106,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2005-01-01, 2025-02-28]
-                valid: [2025-01-15, 2025-04-30]
+                train: [2005-01-01, 2025-01-30]
+                valid: [2024-12-15, 2025-03-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

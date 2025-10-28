@@ -322,10 +322,18 @@ class FuturesBidiModule(MlpModule):
             if ce_loss[i]!=0:
                 self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             self.loss_data.append((corr_loss_combine.detach(),ce_loss.detach(),fds_loss.detach(),cls_loss.detach()))
-            # 手动更新参数
+            # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
-            loss_total = [cls_loss[i],ce_loss[i]]
-            update_info = opt.step(loss_total)
+            update_info = opt.step([cls_loss[i],ce_loss[i]])
+            total_loss = total_loss + update_info["total_loss"]
+            # 当前总梯度和分量梯度
+            self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
+            self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
+            self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
+            # self.log("cls_conflict_cnt", update_info["conflict_analysis"]["cls_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=True)
+            self.log("cls_similarity", update_info["conflict_analysis"]["cls_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
+            self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
+            # self.log("ce_similarity", update_info["conflict_analysis"]["ce_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=True)            
             self.lr_schedulers()[i].step()                  
                                        
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -446,9 +454,10 @@ class FuturesBidiModule(MlpModule):
         # 打印相关指标
         if rate_total is not None and rate_total.shape[0]>0:
             for col in rate_total.columns:
-                self.log(col, rate_total[col].values[0], prog_bar=True)  
+                if col!="total_cnt":
+                    self.log(col, rate_total[col].values[0], prog_bar=True)  
             # self.log("total_diff",total_diff, prog_bar=True) 
-            self.log("date_total_num",date_total_num, prog_bar=True) 
+            # self.log("date_total_num",date_total_num, prog_bar=False) 
         
         output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_total, \
             past_future_round_targets_total,long_diff_index_targets_total,index_round_targets_3d,target_info_3d = self.combine_output_total(self.output_result)

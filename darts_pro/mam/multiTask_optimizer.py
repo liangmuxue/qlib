@@ -11,7 +11,7 @@ def calculate_gradient_norm(gradient):
     total_norm = total_norm ** (1. / 2)
     return total_norm
 
-def pc_grad(gradient_components, task_weights):
+def pc_grad(gradient_components, task_weights,direction=0):
     """
     PCGrad: 通过投影消除梯度冲突
     """
@@ -34,11 +34,16 @@ def pc_grad(gradient_components, task_weights):
                     
                     # 如果梯度方向冲突（点积为负）
                     if dot_product < 0:
-                        # 将梯度j投影到梯度i的正交补空间
-                        projection = (dot_product / 
-                                    (torch.norm(task_grads[i]) ** 2 + 1e-8)) * task_grads[i]
-                        task_grads[j] = task_grads[j] - projection
-        
+                        if direction==0:
+                            # 将梯度j投影到梯度i的正交补空间
+                            projection = (dot_product / 
+                                        (torch.norm(task_grads[i]) ** 2 + 1e-8)) * task_grads[i]
+                            task_grads[j] = task_grads[j] - projection
+                        else:
+                            # 将梯度i投影到梯度j的正交补空间
+                            projection = (dot_product / 
+                                        (torch.norm(task_grads[j]) ** 2 + 1e-8)) * task_grads[j]
+                            task_grads[i] = task_grads[i] - projection                            
         # 加权合并处理后的梯度
         final_grad = torch.zeros_like(task_grads[0])
         for i, grad in enumerate(task_grads):
@@ -131,11 +136,11 @@ class MultiTaskGradientCalculator():
                
         if return_components:
             # 单独计算损失和梯度
-            gradient_components = self._compute_gradient_components(task_losses)
+            gradient_components,loss_total = self._compute_gradient_components(task_losses)
             main_grads = self._get_parameter_gradients()
-            # 执行此步骤是为了清空计算图，由此计算出的参数梯度没有实际意义，后续需要用实际梯度替换
+            # 执行此步骤是为了清空计算图，由此计算出的参数梯度没有实际意义，后续需要用实际梯度替换--cancel
             # task_losses[-1].backward()            
-            return main_grads, gradient_components
+            return main_grads, gradient_components,loss_total
         else:
             # 直接计算总损失
             self.model.zero_grad()           
@@ -149,14 +154,14 @@ class MultiTaskGradientCalculator():
     def _compute_gradient_components(self, task_losses):
         """计算每个任务对共享参数的梯度贡献"""
         gradient_components = []
-      
+        loss_total = []
         for i, task_loss in enumerate(task_losses):
             # 首先清空梯度才能真正体现单个损失的回传梯度
             self.model.zero_grad()              
             # 计算单个任务的梯度，保留计算图，后续统一处理
             weighted_loss = self.task_weights[i] * task_loss
             weighted_loss.backward(retain_graph=True)     
-            
+            loss_total.append(weighted_loss)
             # 获取该任务的梯度贡献
             task_grads = {}
             for name, param in self.model.named_parameters():
@@ -165,7 +170,7 @@ class MultiTaskGradientCalculator():
             
             gradient_components.append(task_grads)
         
-        return gradient_components
+        return gradient_components,loss_total
     
     def _get_parameter_gradients(self):
         """获取模型参数的当前梯度"""
@@ -191,7 +196,7 @@ class MultiTaskOptimizer(Adam):
         # 1. 计算梯度
         if self.use_gradient_surgery:
             # 需要梯度分量进行梯度手术
-            total_gradients, gradient_components = self.gradient_calculator.compute_gradients(
+            total_gradients, gradient_components,loss_total = self.gradient_calculator.compute_gradients(
                 task_losses, return_components=True
             )
             
@@ -203,24 +208,42 @@ class MultiTaskOptimizer(Adam):
                 total_gradients = adaptive_gradient_processing(total_gradients, conflict_analysis)     
             else:
                 # 应用梯度手术
-                total_gradients = pc_grad(gradient_components, self.task_weights)
+                total_gradients = pc_grad(gradient_components, self.task_weights,direction=0)
         else:
             # 标准梯度计算
             total_gradients = self.gradient_calculator.compute_gradients(task_losses)
             gradient_components = None
             conflict_analysis = {}
         
-        # conflict_analysis_total_0 = analyze_gradient_conflicts([gradient_components[0],total_gradients])
-        # conflict_analysis_total_1 = analyze_gradient_conflicts([gradient_components[1],total_gradients])
-        grad_value_0 = calculate_gradient_norm(gradient_components[0])
-        grad_value_1 = calculate_gradient_norm(gradient_components[1])
+        def combine_conflict_analysis(conflicts):
+            
+            conflict_count = 0
+            avg_similarity_total = 0
+            for name in conflicts.keys():
+                count = conflicts[name]['conflict_count']
+                conflict_count += count
+                avg_similarity = conflicts[name]['avg_similarity']
+                avg_similarity_total += avg_similarity
+            return conflict_count/len(conflicts.keys()),avg_similarity_total/len(conflicts.keys())
+            
+        conflict_analysis_total_cls = analyze_gradient_conflicts([gradient_components[0],total_gradients])
+        conflict_analysis_total_ce = analyze_gradient_conflicts([gradient_components[1],total_gradients])
+        cls_conflict_count,cls_similarity= combine_conflict_analysis(conflict_analysis_total_cls)
+        ce_conflict_count,ce_similarity= combine_conflict_analysis(conflict_analysis_total_ce)
+        
         # 3. 手动设置梯度并更新参数
         self._set_gradients(total_gradients)
+        # Grad Cut
+        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3, norm_type=2)        
         super().step()
         
+        show_loss = 0
+        for loss in loss_total:
+            show_loss = show_loss + loss
         return {
+            'total_loss': show_loss,
             'total_grad_norm': self._compute_total_grad_norm(total_gradients),
-            'conflict_analysis': conflict_analysis,
+            'conflict_analysis': {'cls_conflict':[cls_conflict_count,cls_similarity],'ce_conflict':[ce_conflict_count,ce_similarity]},
             'task_grad_norms': [self._compute_grad_norm(comp) for comp in gradient_components] 
                 if gradient_components else None
         }

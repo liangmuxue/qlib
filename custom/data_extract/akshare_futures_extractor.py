@@ -452,7 +452,7 @@ class AkFuturesExtractor(FutureExtractor):
             futures_hist_em_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
             print("{} import ok".format(symbol))            
             
-    def import_day_range_continues_data(self,data_range=None):
+    def import_day_range_continues_data(self,data_range=None,channel="sina"):
         """导入指定日期范围的主连数据"""
         
         begin_date,end_date = data_range
@@ -496,20 +496,40 @@ class AkFuturesExtractor(FutureExtractor):
             var_code = row[0]
             # if var_code!="AP":
             #     continue
-            futures_hist_em_df = futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date),e_symbol_mkt=e_symbol_mkt)
-            # futures_hist_em_df = ak.futures_hist_em(symbol=var_code,start_date=str(begin_date),end_date=str(end_date))
-            if futures_hist_em_df is None:
-                continue
-            futures_hist_em_df = futures_hist_em_df.rename(
-                columns={"时间": "date","开盘": "open","最高": "high","最低": "low","收盘": "close",
-                         "成交量": "volume","持仓量": "hold"})
-            futures_hist_em_df['code'] = var_code
-            futures_hist_em_df['settle'] = futures_hist_em_df['close']
-            futures_hist_em_df.drop(columns=['涨跌','涨跌幅','成交额'])
-            futures_hist_em_df[tar_cols].to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
+            if channel=="sina":
+                futures_hist_df = self.import_continues_from_sina(begin_date, end_date, var_code)
+                if futures_hist_df is None:
+                    continue                
+            else:               
+                futures_hist_df = self.import_continues_from_em(begin_date, end_date, var_code, e_symbol_mkt)
+                if futures_hist_df is None:
+                    continue
+            futures_hist_df['code'] = var_code
+            futures_hist_df[tar_cols].to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
             print("import_day_range_continues_data {}  ok".format(var_code))
             time.sleep(15)
 
+    def import_continues_from_em(self,begin_date,end_date,symbol=None,e_symbol_mkt=None):
+        
+        futures_hist_df = futures_hist_em(symbol=symbol,start_date=str(begin_date),end_date=str(end_date),e_symbol_mkt=e_symbol_mkt)
+        if futures_hist_df is None:
+            return None
+        futures_hist_df = futures_hist_df.rename(
+            columns={"时间": "date","开盘": "open","最高": "high","最低": "low","收盘": "close",
+                     "成交量": "volume","持仓量": "hold"}) 
+        futures_hist_df.drop(columns=['涨跌','涨跌幅','成交额'])  
+        futures_hist_df['settle'] = futures_hist_df['close']             
+        return futures_hist_df
+
+    def import_continues_from_sina(self,begin_date,end_date,symbol=None):
+        
+        begin_date_str = date_string_transfer(str(begin_date))
+        end_date_str = date_string_transfer(str(end_date))
+        main_code = symbol + "0"
+        futures_hist_df = self.extract_item_data(main_code)       
+        futures_hist_df = futures_hist_df[(futures_hist_df['date']>=begin_date_str)&(futures_hist_df['date']<=end_date_str)]    
+        return futures_hist_df
+        
     def import_day_range_1min_data(self,data_range=None):
         """导入分钟历史数据"""
         
@@ -869,7 +889,7 @@ if __name__ == "__main__":
     # 导入外盘数据
     # extractor.extract_outer_data()
     # 导出到qlib
-    extractor.export_to_qlib()
+    # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     # extractor.build_cleandata_table()
     # qlib品种名单列表生成
