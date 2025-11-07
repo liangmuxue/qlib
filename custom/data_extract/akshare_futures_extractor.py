@@ -488,9 +488,10 @@ class AkFuturesExtractor(FutureExtractor):
         
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(variety_sql)   
-        _, _, e_symbol_mkt, _ = (
-            get_exchange_symbol_map()
-        )
+        if channel=="em":
+            _, _, e_symbol_mkt, _ = (
+                get_exchange_symbol_map()
+            )
         # 依次轮询各个品种，取得对应数据并插入数据库  
         for row in result_rows:
             var_code = row[0]

@@ -74,7 +74,7 @@ class FuturesBidiModule(MlpModule):
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
         self.train_step_mode = train_step_mode
         # 任务初始权重
-        self.task_weights = torch.tensor([0.5, 0.5])  
+        self.task_weights = torch.tensor([0.8, 0.2])  
                 
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
@@ -315,7 +315,7 @@ class FuturesBidiModule(MlpModule):
         for i in range(self.get_optimizer_size()-1):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), 
-                            (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets),optimizers_idx=i)
+                            (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets,target_info),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
             if cls_loss[i]!=0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
@@ -324,17 +324,20 @@ class FuturesBidiModule(MlpModule):
             self.loss_data.append((corr_loss_combine.detach(),ce_loss.detach(),fds_loss.detach(),cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
-            update_info = opt.step([cls_loss[i],ce_loss[i]])
-            total_loss = total_loss + update_info["total_loss"]
-            # 当前总梯度和分量梯度
-            self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
-            self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
-            self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
-            # self.log("cls_conflict_cnt", update_info["conflict_analysis"]["cls_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=True)
-            self.log("cls_similarity", update_info["conflict_analysis"]["cls_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
-            self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
-            # self.log("ce_similarity", update_info["conflict_analysis"]["ce_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=True)            
-            self.lr_schedulers()[i].step()                  
+            update_info = opt.step([cls_loss[i],ce_loss[i]],batch_idx=batch_idx)
+            # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
+            self.lr_schedulers()[i].step() 
+            if update_info is not None:
+                total_loss = total_loss + update_info["total_loss"]
+                # 当前总梯度和分量梯度
+                self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                # self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
+                # self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
+                self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                # self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
+                # self.log("ce_similarity", update_info["conflict_analysis"]["ce_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=True)            
+                               
                                        
         self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("lr",self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  
@@ -370,7 +373,7 @@ class FuturesBidiModule(MlpModule):
         
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets),optimizers_idx=-1)
+                    (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets,target_info),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
         preds_combine = []
@@ -435,12 +438,12 @@ class FuturesBidiModule(MlpModule):
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
 
-        (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets) = target 
+        (future_target,target_class,past_future_round_targets,index_round_targets,long_diff_index_targets,target_info) = target 
         # 只保留最后一天的数值，作为损失目标
         future_round_targets = past_future_round_targets[:,:,-1,:]  
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        return self.criterion(output,(future_target,target_class,future_round_targets,index_round_targets,long_diff_index_targets),
+        return self.criterion(output,(future_target,target_class,future_round_targets,index_round_targets,long_diff_index_targets,target_info),
                     sw_ins_mappings=sw_ins_mappings,optimizers_idx=optimizers_idx,top_num=self.top_num,epoch_num=self.current_epoch)        
 
 
@@ -456,8 +459,9 @@ class FuturesBidiModule(MlpModule):
             for col in rate_total.columns:
                 if col!="total_cnt":
                     self.log(col, rate_total[col].values[0], prog_bar=True)  
-            # self.log("total_diff",total_diff, prog_bar=True) 
-            # self.log("date_total_num",date_total_num, prog_bar=False) 
+            
+            anno_yield = rate_total['yield_rate'].values[0] * (240/date_total_num) / (4*2) 
+            self.log("anno_yield",anno_yield, prog_bar=True) 
         
         output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_total, \
             past_future_round_targets_total,long_diff_index_targets_total,index_round_targets_3d,target_info_3d = self.combine_output_total(self.output_result)
@@ -465,6 +469,7 @@ class FuturesBidiModule(MlpModule):
         
         # 如果是测试模式，则在此进行可视化
         if self.mode is not None and self.mode.startswith("pred_") :
+            self.log("date_total_num",date_total_num, prog_bar=True) 
             # 生成进一步的结果指标
             stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03") 
             self.stat_result = stats.compute_val_result(coll_result.rename(columns={'trend_value':'pred_trend'}))
@@ -493,6 +498,8 @@ class FuturesBidiModule(MlpModule):
                 ts_arr = target_info_3d[index]
                 
                 date = int(ts_arr[keep_index][0]["future_start_datetime"])
+                if index==0:
+                    self.log("first_date",date, prog_bar=True) 
                 if not date in TRACK_DATE:
                     continue    
                 
