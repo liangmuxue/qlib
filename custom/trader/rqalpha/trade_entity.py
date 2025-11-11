@@ -14,7 +14,7 @@ class TradeEntity():
     """交易对象处理类"""
 
     # 交易信息表字段，分别为交易日期，品种代码，买卖类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
-    TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","position_effect","price",
+    TRADE_COLUMNS = ["trade_date","trade_datetime","update_datetime","order_book_id","side","position_effect","price",
                      "quantity","multiplier","total_price","status","order_id","close_reason","secondary_order_id"]
     TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
    
@@ -43,70 +43,6 @@ class TradeEntity():
         self.trade_data_df = pd.DataFrame(columns=self.TRADE_COLUMNS)
         self.exp_trade_data(self.save_path)
            
-    def add_or_update_order(self,order,trade_day,only_add=False):
-        """添加(或更新)订单信息"""
-        
-        logger.debug("add_or_update_order in,order:{}".format(order))
-        trade_date = order.datetime
-        order_book_id = order.order_book_id
-        side = order.side
-        position_effect = order.position_effect
-        # 订单价格为冻结价格
-        price = order.frozen_price
-        quantity = order.quantity
-        # 交易状态
-        status = order.status
-        order_id = order.order_id
-        # 透传合约乘数
-        multiplier = order.kwargs['multiplier']
-        # 存储对于实际仿真或实盘系统的交易订单号
-        secondary_order_id = order.secondary_order_id
-        if secondary_order_id is None:
-            secondary_order_id = 0
-        
-        if hasattr(order, "close_reason"):
-            close_reason = order.close_reason
-        else:
-            close_reason = 0
-        update_datetime = datetime.datetime.now()
-        row_data = [trade_date,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,close_reason,secondary_order_id]
-        # logger.debug("row_data is:{}".format(row_data))
-        row_data_np = np.expand_dims(np.array(row_data),axis=0)
-        # 生成DataFrame
-        if self.trade_data_df.shape[0]==0:
-            self.trade_data_df = pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)
-            logger.debug("after add,self.trade_data_df:{}".format(self.trade_data_df))
-        else:
-            item_df = self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
-                                             (self.trade_data_df["side"]==order.side)&
-                                         (self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_day)]
-            if item_df.shape[0]>0:
-                # 如果设置了只添加标志，则保持原有记录
-                if only_add:
-                    return                
-                # 有可能是之前撤单后新发起的订单，这类订单需要更新
-                prev_datetime = item_df['trade_datetime'].values[0]
-                # 保留之前的发起订单的时间
-                row_data_np[0,0] = prev_datetime
-                # 先删除再增加
-                self.trade_data_df = self.trade_data_df[~((self.trade_data_df["order_book_id"]==order.order_book_id)&
-                    (self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_day)&
-                    (self.trade_data_df["position_effect"]==position_effect))]
-                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)], axis=0)
-                # logger.debug("update trade,data:{}".format(row_data_np))
-            else:
-                if row_data_np.shape[0]==0:
-                    logger.warning("row_data_np empty")
-                    return
-                # logger.debug("concat trade,data:{}".format(row_data_np))
-                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)], axis=0)
-        # 映射系统订单
-        self.sys_orders[order.order_book_id] = order
-        # 变更后保存数据
-        if self.save_path is not None:
-            self.exp_trade_data(self.save_path)
-            # 日志记录
-            self.add_log(row_data)
         
         
     def get_sys_order(self,order_book_id):   
@@ -125,37 +61,6 @@ class TradeEntity():
         if self.save_path is not None:
             self.exp_trade_data(self.save_path)
                                            
-    def add_trade(self,trade,default_status=ORDER_STATUS.FILLED):
-        """添加交易信息，需要先具备订单信息"""
-        
-        order = self.get_order_by_id(trade.order_id)
-        if order is None or order.shape[0]==0:
-            logger.warning("order id not exists:{}".format(trade.order_id))
-            return
-        
-        trade_date = trade.datetime
-        order_book_id = trade.order_book_id
-        side = trade.side
-        price = trade.last_price
-        quantity = trade.last_quantity
-        # 自己计算总成交额
-        total_price = price*quantity + trade.tax + trade.transaction_cost
-        # 交易状态为已成交
-        status = default_status
-        order_id = trade.order_id
-        # 存储对于实际仿真或实盘系统的交易订单号
-        secondary_order_id = order.secondary_order_id
-        if secondary_order_id is None:
-            secondary_order_id = 0        
-        row_data = [trade_date,order_book_id,side,price,quantity,total_price,status,order_id,order.close_reason,secondary_order_id]
-        # 使用订单号查询并更新记录
-        self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
-        # 变更后保存数据
-        if self.save_path is not None:
-            self.exp_trade_data(self.save_path)   
-            # 日志记录
-            self.add_log(row_data)
-                    
     def get_order_by_id(self,order_id):
         """根据订单号查询订单"""
         

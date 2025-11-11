@@ -71,7 +71,37 @@ class FuturesModel(IndustryRollModel):
             # 透传行业分类和品种映射关系，后续使用
             self.valid_sw_ins_mappings = ds.sw_ins_mappings     
         return ds      
-    
+
+    def _build_inference_dataset(
+        self,
+        target: Sequence[TimeSeries],
+        past_covariates: Optional[Sequence[TimeSeries]],
+        future_covariates: Optional[Sequence[TimeSeries]],
+        max_samples_per_ts: Optional[int],
+        mode="predict",
+        pred_date=None,
+    ):
+        """创建推理数据集"""
+        
+        self.cut_len = self.ext_kwargs['cut_len']
+        ds = FuturesInferenceDataset(
+            target_series=target,
+            covariates=past_covariates,
+            future_covariates=future_covariates,
+            input_chunk_length=self.input_chunk_length,
+            output_chunk_length=self.output_chunk_length,
+            cut_len=self.cut_len,
+            max_samples_per_ts=None,
+            use_static_covariates=True,
+            target_num=len(self.past_split),
+            scale_mode=self.scale_mode,
+            pred_date=pred_date,
+            mode=mode
+        ) 
+        # 透传行业分类和股票映射关系，后续使用
+        self.valid_sw_ins_mappings = ds.sw_ins_mappings            
+        return ds
+        
     def _create_model(self, train_sample) -> nn.Module:
         """重载创建模型方法，使用自定义模型"""
         

@@ -54,7 +54,7 @@ class FuturesTrade(BaseTrade):
             # 对待处理订单进行判定
             if order.status==RQ_ORDER_STATUS.ACTIVE:
                 # 取得当前价格，如果小于订单报价，则成单处理
-                cur_price = env.data_source.get_last_price(order.order_book_id,env.trading_dt)  
+                cur_price = env.data_source.get_current_price(order.order_book_id,env.trading_dt)  
                 if cur_price is None or np.isnan(cur_price):
                     continue
                 # 卖单的挂单价需要小于等于当前价格

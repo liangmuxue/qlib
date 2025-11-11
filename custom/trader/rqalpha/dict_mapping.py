@@ -16,10 +16,7 @@ def transfer_order_book_id(instrument,type=1):
     return "{}.XSHE".format(instrument)
 
 def transfer_futures_order_book_id(instrument,type=1):
-    """期货代码转换为rqalpha格式
-        PARAMS:
-             type 1 沪市A股 0 深市A股
-    """
+    """期货代码转换为rqalpha格式"""
     
     if isinstance(instrument,int):
         instrument = str(instrument)

@@ -7,11 +7,12 @@ from rqalpha.interface import AbstractMod
 from rqalpha.const import ORDER_STATUS
 from rqalpha.const import SIDE
 
-from trader.emulator.futures_real_ds import FuturesDataSourceSql
+from trader.emulator.futures_sql_ds import FuturesDataSourceSql
 from data_extract.rqalpha.futures_ds import FuturesDataSource
 from trader.rqalpha.futures_trade_entity import FuturesTradeEntity
 from trader.utils.date_util import tradedays
 from trader.data_viewer import DataViewer
+from trader.rqalpha.trade_entity import TradeEntity
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -20,8 +21,7 @@ logger = AppLogger()
 TRADE_EXT_COLUMNS = ["buy_price","differ_range","gain","buy_date","duration"]
 # 期货交易扩展信息用于统计，字段包括：开仓价，差幅、盈亏金额, 开仓日期，买卖间隔天数
 FUTURE_TRADE_EXT_COLUMNS = ["open_price","differ_range","gain","open_date","duration"]
-TRADE_COLUMNS = ["trade_datetime","update_datetime","order_book_id","side","position_effect","price",
-                 "quantity","multiplier","total_price","status","order_id","close_reason","secondary_order_id"]
+TRADE_COLUMNS = TradeEntity().TRADE_COLUMNS
     
 class ExtDataMod(AbstractMod):
     """用于加载自定义数据源"""

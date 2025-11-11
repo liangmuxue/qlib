@@ -14,7 +14,7 @@ from cus_utils.data_aug import DictToObject
 from qlib.utils import init_instance_by_config
 from trader.utils.date_util import tradedays
 from trader.emulator.qidian.futures_proxy_ctp import CtpFuturesTrade
-from trader.emulator.futures_real_ds import FuturesRealDataSource, FuturesDataSourceSql
+from trader.emulator.futures_real_ds import FuturesRealDataSource
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()

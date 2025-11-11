@@ -99,9 +99,8 @@ def aug_data_process(file_path,train_path=None,test_path=None,sp_rate=0.7):
 def compare_dataset_consistence():
     """比较验证数据与推理数据的一致性"""
     
-    val_file_path = "custom/data/results/data_compare_val_20250527.pkl"
-    val_file_path = "custom/data/results/data_compare_predresult_20250407.pkl"
-    pred_file_path = "custom/data/results/data_compare_pred_20250407.pkl"
+    val_file_path = "custom/data/results/data_compare_val_20250304.pkl"
+    pred_file_path = "custom/data/results/data_compare_predresult_20250304.pkl"
     with open(val_file_path, "rb") as fin:
         result_data_val = pickle.load(fin)           
     with open(pred_file_path, "rb") as fin:
@@ -215,8 +214,8 @@ if __name__ == "__main__":
     # aug_data_view(file_path)
     # aug_data_to_pd(file_path,pd_file_path,['datetime','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label','ori_label'])\
     # aug_pd_data_view(pd_file_path)
-    # compare_dataset_consistence()
-    compare_clean_data_and_continus_data(match_date=20251009)
+    compare_dataset_consistence()
+    # compare_clean_data_and_continus_data(match_date=20251009)
     # compare_clean_data_and_1min_cross_data(match_date=20251009)
     
        

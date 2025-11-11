@@ -28,7 +28,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20250418,20250425]
-STAT_DATE = [20240318,20260318]
+STAT_DATE = [20250304,20250304]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
@@ -471,8 +471,20 @@ class FuturesBidiModule(MlpModule):
         if self.mode is not None and self.mode.startswith("pred_") :
             self.log("date_total_num",date_total_num, prog_bar=True) 
             # 生成进一步的结果指标
-            stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/03") 
-            self.stat_result = stats.compute_val_result(coll_result.rename(columns={'trend_value':'pred_trend'}))
+            coll_result_output = coll_result.rename(columns={'trend_value':'pred_trend'})
+            # stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/05") 
+            # stat_result = stats.compute_val_result(coll_result.rename(columns={'trend_value':'pred_trend'}))
+            col_data_types = {"top_index":int,"instrument":str,"yield_rate":float,"result":int,"pred_trend":int,"date":int}               
+            if os.path.exists(self.result_view_file_path):
+                import_price_result_total = pd.read_csv(self.result_view_file_path,dtype=col_data_types)  
+                # 去重
+                date_min = coll_result_output["date"].min()
+                date_max = coll_result_output["date"].max()
+                import_price_result_total = import_price_result_total[(import_price_result_total['date']<date_min)|(import_price_result_total['date']>date_max)]
+                import_price_result_total = pd.concat([import_price_result_total,coll_result_output])
+                import_price_result_total.to_csv(self.result_view_file_path) 
+            else:        
+                coll_result_output.to_csv(self.result_view_file_path)                 
             
             viz_result = global_var.get_value("viz_result")
             viz_result_detail = global_var.get_value("viz_result_detail")
@@ -728,10 +740,16 @@ class FuturesBidiModule(MlpModule):
             # 如果是预测模式，则只输出结果,不验证
             if predict_mode:
                 result_date_list = result_list
+                coll_results = []
+                for index,row in result_list.iterrows():
+                    imp_idx = row['top_index']
+                    overroll_trend = row['top_flag']
+                    ts = target_info_list[imp_idx]
+                    coll_results.append([imp_idx,ts["instrument"],overroll_trend])                    
                 continue
-  
+
             # 验证准确性
-            coll_results = self.collect_result_compindex(date=date,target_info=target_info_list,result_list=result_list,keep_index=keep_index)
+            coll_results = self.collect_result_compindex(date=date,target_info=target_info_list,result_list=result_list,keep_index=keep_index)  
             # 把结果数据整合到预测记录中
             if result_total_list is None:
                 result_total_list = coll_results

@@ -8,7 +8,7 @@ import os
 
 from rqalpha.environment import Environment
 
-from trader.utils.date_util import get_tradedays_dur,date_string_transfer
+from trader.utils.date_util import get_prev_working_day,date_string_transfer
 from cus_utils.db_accessor import DbAccessor
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 from data_extract.juejin_futures_extractor import JuejinFuturesExtractor
@@ -142,92 +142,3 @@ _FUTURE_REAL1MIN_FIELD_NAMES = [
 _FUTURE_CONTINUES_FIELD_NAMES = [
     'date','code', 'open', 'close', 'high', 'low', 'volume', 'hold','settle'
 ]
-   
-class FuturesDataSourceSql(FuturesDataSource):
-    """期货自定义数据源,数据库模式"""
-    
-    def __init__(self,path,stock_data_path=None,sim_path=None,frequency_sim=True):
-        super(FuturesDataSourceSql, self).__init__(path,stock_data_path=stock_data_path,sim_path=sim_path,frequency_sim=frequency_sim)
-
-    def has_current_data(self,day,symbol):
-        """当日是否开盘交易"""
-
-        # 直接使用sql查询,检查当日是否有分时数据
-        item_sql = "select count(1) from dominant_continues_data_1min where code='{}' " \
-            "and Date(datetime)='{}'".format(symbol,day.strftime('%Y-%m-%d'))
-        cnt = self.dbaccessor.do_query(item_sql)[0][0]      
-        if cnt==0:
-            return False
-        return True
-
-    def get_continue_data_by_day(self,symbol,day):
-        """取得指定品种和对应日期的主力连续交易记录"""
-        
-        column_str = ','.join([str(i) for i in _FUTURE_CONTINUES_FIELD_NAMES])
-        item_sql = "select {} from dominant_continues_data where code='{}' " \
-            "and Date(date)='{}'".format(column_str,symbol,date_string_transfer(day))     
-        SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-        item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_CONTINUES_FIELD_NAMES)
-        return item_data
-
-    def get_recent_date_by_date(self,symbol,date):
-        """取得指定时间最近的交易时间"""
-        
-        day = date.strftime("%Y%m%d")
-        datetime_str = date.strftime("%Y-%m-%d %H:%M:%S")
-        column_str = ','.join([str(i) for i in _FUTURE_REAL1MIN_FIELD_NAMES])
-        item_sql = "select datetime from dominant_real_data_1min where code='{}' " \
-            "and Date(datetime)='{}' and datetime<='{}' order by datetime desc".format(symbol,date_string_transfer(day),datetime_str)     
-        SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-        item_data = pd.DataFrame(SQL_Query, columns=["datetime"])
-        if item_data.shape[0]==0:
-            return None
-        return item_data['datetime'].dt.to_pydatetime()[0]
-       
-    def get_time_data_by_day(self,day,symbol):
-        """取得指定品种和对应日期的分时交易记录"""
-
-        column_str = ','.join([str(i) for i in _FUTURE_REAL1MIN_FIELD_NAMES])
-        item_sql = "select {} from dominant_real_data_1min where code='{}' " \
-            "and Date(datetime)='{}'".format(column_str,symbol,date_string_transfer(day))     
-        SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-        item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_REAL1MIN_FIELD_NAMES)
-        return item_data
-            
-    def get_k_data(self, order_book_id, start_dt, end_dt,frequency=None,need_prev=True):
-        """从已下载的文件中，加载K线数据"""
-        
-        self.time_inject(begin=True)
-        # 可以加载不同的频次类型数据
-        if frequency=="1m":
-            column_str = ','.join([str(i) for i in _FUTURE_REAL1MIN_FIELD_NAMES])
-            item_sql = "select {} from dominant_real_data_1min where code='{}' " \
-                "and datetime='{}'".format(column_str,order_book_id,start_dt.strftime('%Y-%m-%d %H:%M:%S'))     
-            SQL_Query = pd.read_sql_query(item_sql, self.dbaccessor.get_connection())
-            item_data = pd.DataFrame(SQL_Query, columns=_FUTURE_REAL1MIN_FIELD_NAMES)
-            if item_data is None or item_data.shape[0]==0:
-                return None                
-            item_data["last"] = item_data["close"]    
-            self.time_inject(code_name="load_item_df")   
-                       
-        # 日线数据使用akshare的数据源
-        if frequency=="1d":
-            start_dt = datetime(start_dt.year, start_dt.month, start_dt.day).date() 
-            end_dt = datetime(end_dt.year, end_dt.month, end_dt.day).date()
-            item_data = self.load_item_day_data(order_book_id,start_dt)
-            if item_data is None or item_data.shape[0]==0:
-                return None               
-            # 使用结算价作为当日最终价格
-            item_data["last"] = item_data["settle"]    
-            # 字段和rq统一
-            item_data['symbol'] = item_data['code']        
-            item_data = item_data.rename(columns={"date":"datetime"})
-        self.time_inject(code_name="dt query,{}".format(frequency))     
-
-        # 取得前一个交易时段收盘
-        item_data["prev_close"]= np.NaN
-        if need_prev:
-            item_data["prev_close"] = self._get_prev_close(order_book_id, start_dt,frequency=frequency)
-        # item_data = item_data.iloc[0].to_dict()
-        return item_data    
-            

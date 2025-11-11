@@ -11,7 +11,7 @@ from rqalpha.const import TRADING_CALENDAR_TYPE
 from rqalpha.data.base_data_source import BaseDataSource
 from rqalpha.model.tick import TickObject
 from rqalpha.model.instrument import Instrument
-from trader.utils.date_util import get_tradedays_dur,get_tradedays,get_prev_working_day,get_next_month
+from trader.utils.date_util import get_tradedays_dur,get_tradedays,get_prev_working_day,get_next_day
 from cus_utils.db_accessor import DbAccessor
 from cus_utils.string_util import find_first_digit_position
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
@@ -19,7 +19,6 @@ from data_extract.juejin_futures_extractor import JuejinFuturesExtractor
 from data_extract.akshare_extractor import AkExtractor
 from trader.rqalpha.dict_mapping import judge_market,transfer_instrument
 from data_extract.rqalpha.fur_ds_proxy import FutureInfoStore
-import cus_utils.global_var as global_var
 from dateutil.relativedelta import relativedelta
 from data_extract.akshare_futures_extractor import AkFuturesExtractor
 
@@ -49,13 +48,23 @@ class FuturesDataSource(BaseDataSource):
         self.extractor_ak = AkFuturesExtractor(savepath=stock_data_path)
         # 是否实时模式
         self.frequency_sim = frequency_sim 
-        # 从全局变量中取得主流程透传的主体模型,以及对应数据集对象--cancel
-        # model = global_var.get_value("model")
-        # if model is not None:
-        #     dataset = model.dataset
-        #     # dataset.build_series_data(no_series_data=True)
-        #     self.dataset = dataset
-
+        self.load_all_trading_variety()
+    
+    def load_all_trading_variety(self):
+        """预加载所有品种基础数据"""
+        
+        trading_variety_data = self.get_all_trading_variety()
+        trading_variety_mapping = {}
+        for index,row in trading_variety_data.iterrows():
+            trading_variety_mapping[row['code']] = row
+        self.trading_variety_mapping = trading_variety_mapping
+    
+    def get_trading_variety_info(self,order_book_id):
+        
+        symbol_code = self.get_instrument_code_from_contract_code(order_book_id)
+        symbol_obj = self.trading_variety_mapping[symbol_code]
+        return symbol_obj
+    
     def time_inject(self,code_name=None,begin=False):
         if begin:
             self.time_begin = time.time()
@@ -93,7 +102,6 @@ class FuturesDataSource(BaseDataSource):
             ins = Instrument(params)
             instruments.append(ins)
         return instruments
-        
         
     def build_trading_contract_mapping(self,date):  
         """生成对应日期的所有可交易合约的对照表"""
@@ -150,7 +158,7 @@ class FuturesDataSource(BaseDataSource):
         return main_contract_code
         
     def get_time_data_by_day(self,day,symbol):
-        """取得指定品种和对应日期的分时交易记录"""
+        """取得指定品种和对应日期的分时交易记录,TODO：注意需要加入前一天晚盘"""
 
         return self.extractor.get_time_data_by_day(day,symbol)
 
@@ -167,7 +175,7 @@ class FuturesDataSource(BaseDataSource):
             date_obj = dt_obj.strptime(str(date), '%Y%m%d')
         else:
             date_obj = date
-        contract_names = self.extractor_ak.get_likely_main_contract_names(instrument, date_obj)
+        contract_names = self.extractor_ak.get_likely_main_contract_names(instrument, date_obj,ref=False)
         # 检查潜在合约的上一日成交金额，如果超出10%则进行合约切换
         contract_mapping = {}
         volume_main = 0
@@ -220,7 +228,7 @@ class FuturesDataSource(BaseDataSource):
         if frequency != '1m' and frequency != '1d':
             return super(FuturesDataSource, self).get_bar(order_book_id, dt, frequency)
         
-        if frequency == '1m' and not self.is_trade_opening(dt):
+        if frequency == '1m' and not self.is_trade_opening_for_contract(order_book_id,dt):
             # 如果不在交易时间，则不出数
             return None
         else:
@@ -359,14 +367,14 @@ class FuturesDataSource(BaseDataSource):
         
         if contract_code is not None:
             item_code = self.get_instrument_code_from_contract_code(contract_code)
-            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range,COALESCE(day_time_range, '')  from trading_variety where code='{}' ".format(item_code)
+            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range,COALESCE(day_time_range, ''),day_time_range,night_time_range  from trading_variety where code='{}' ".format(item_code)
         else:
-            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range,COALESCE(day_time_range, '')  from trading_variety where isnull(magin_radio)=0"
+            item_sql = "select name,code,multiplier,limit_rate,magin_radio,price_range,COALESCE(day_time_range, ''),day_time_range,night_time_range  from trading_variety where isnull(magin_radio)=0"
         result_rows = self.dbaccessor.do_query(item_sql)  
         result_arr = np.array(result_rows)         
         if result_arr.shape[0]==0:
             return result_arr
-        result_arr = pd.DataFrame(result_arr,columns=["name","code","multiplier","limit_rate","magin_radio","price_range","trading_hours"])
+        result_arr = pd.DataFrame(result_arr,columns=["name","code","multiplier","limit_rate","magin_radio","price_range","trading_hours","day_time_range","night_time_range"])
         
         return result_arr
         
@@ -393,7 +401,7 @@ class FuturesDataSource(BaseDataSource):
         
         
     def get_trading_minutes_for(self,instrument, trading_dt):
-        """取得对应合约的交易时间段"""
+        """取得对应合约的交易时间段,注意如果包含晚盘，则晚盘开始作为开盘"""
         
         if isinstance(instrument,str):
             contract_symbol = instrument
@@ -405,7 +413,6 @@ class FuturesDataSource(BaseDataSource):
         result_rows = self.dbaccessor.do_query(sql)  
         if len(result_rows)==0:
             return None
-        ac_time_range = result_rows[0][1]
         day_time_range = result_rows[0][2]
         night_time_range = result_rows[0][3]
         # 从时间范围定义拆解为分钟列表
@@ -425,11 +432,20 @@ class FuturesDataSource(BaseDataSource):
             if len(item)<3:
                 continue
             begin_end = item.split("-")
-            start = trading_dt.strftime('%Y-%m-%d ') + begin_end[0].strip()
-            try:
-                end = trading_dt.strftime('%Y-%m-%d ') + begin_end[1].strip()
-            except Exception:
-                print("eee")
+            start_time = begin_end[0].strip()
+            end_time = begin_end[1].strip()
+            # 如果当前阶段为晚盘，则日期前提一天
+            if start_time=="21:00":
+                prev_trading_dt = get_prev_working_day(trading_dt)
+                start = prev_trading_dt.strftime('%Y-%m-%d ') + start_time
+                # 如果为跨天的夜盘，需要使用下一个自然日作为结束日期
+                if end_time.startswith("0"):
+                    end = get_next_day(prev_trading_dt).strftime('%Y-%m-%d ') + end_time
+                else:
+                    end = prev_trading_dt.strftime('%Y-%m-%d ') + end_time
+            else:            
+                start = trading_dt.strftime('%Y-%m-%d ') + start_time
+                end = trading_dt.strftime('%Y-%m-%d ') + end_time
             min_list = pd.date_range(start=start, end=end,freq='min')
             trading_minutes.update(set(min_list.to_pydatetime().tolist()))
             
@@ -443,6 +459,12 @@ class FuturesDataSource(BaseDataSource):
             return None        
         return result_rows[0][0]
 
+    def get_all_trading_variety(self):
+        """取得所有可交易品种"""
+        
+        data = self.get_contract_info()
+        return data
+    
     ############################### Busi Data Logic ###########################################
     
     def get_hot_key(self,date_time,symbol):
@@ -475,29 +497,92 @@ class FuturesDataSource(BaseDataSource):
         if dt>open_timing:
             return True
         return False
-    
+
+    def is_trade_opening_for_contract(self,order_book_id,trading_dt):
+        
+        symbol_obj = self.get_trading_variety_info(order_book_id)
+        return self.is_trade_opening_for_symbol(symbol_obj,trading_dt)
+        
+    def is_trade_opening_for_symbol(self,symbol_obj,trading_dt):
+        """检查指定时间下的指定品种是否可以交易"""
+        
+        day_time_range = symbol_obj['day_time_range']
+        night_time_range = symbol_obj['night_time_range']
+        
+        split_range = []
+        if not ',' in day_time_range:
+            split_range.append(day_time_range)
+        else:
+            split_range += day_time_range.split(",")
+        if not ',' in night_time_range:
+            split_range.append(night_time_range)
+        else:
+            split_range += night_time_range.split(",")    
+        
+        def between_time(start,end,dt):
+            start_time = datetime.datetime.strptime(start, '%Y-%m-%d %H:%M:%S')
+            end_time = datetime.datetime.strptime(end, '%Y-%m-%d %H:%M:%S')
+            if start_time<=dt<=end_time:
+                return True
+            return False
+                
+        # 遍历所有切分段，拆解为每个分钟
+        for item in split_range:
+            if len(item)<3:
+                return False
+            begin_end = item.split("-")
+            start_time = begin_end[0].strip()
+            end_time = begin_end[1].strip()
+            # 如果当前阶段为晚盘，则日期前提一天
+            if start_time=="21:00":
+                # 如果为跨天的夜盘，则从0点计算开始时间
+                if end_time.startswith("0"):
+                    start = trading_dt.strftime('%Y-%m-%d ') + "00:00:00"
+                    end = trading_dt.strftime('%Y-%m-%d ') + end_time + ":00"
+                    if between_time(start,end,trading_dt):
+                        return True           
+                    # 追加到当日24点的交易时间段     
+                    start = trading_dt.strftime('%Y-%m-%d ') + start_time + ":00"
+                    end = trading_dt.strftime('%Y-%m-%d ') + "23:59:59"
+                    if between_time(start,end,trading_dt):
+                        return True                            
+                else:
+                    start = trading_dt.strftime('%Y-%m-%d ') + start_time + ":00"
+                    end = trading_dt.strftime('%Y-%m-%d ') + end_time + ":00"
+                    if between_time(start,end,trading_dt):
+                        return True                    
+            else:            
+                start = trading_dt.strftime('%Y-%m-%d ') + start_time + ":00"
+                end = trading_dt.strftime('%Y-%m-%d ') + end_time + ":00"
+                if between_time(start,end,trading_dt):
+                    return True
+            
+        return False 
+               
     def get_prev_price(self,order_book_id,now_dt):
-        """取得上一分钟交易数据，注意需要考虑中间的休市时间"""
+        """取得上一分钟交易数据，注意需要考虑中间的休市时间以及晚盘的时间"""
         
         if now_dt.hour==10 and now_dt.minute==30:
             last_dt = datetime.datetime(now_dt.year,now_dt.month,now_dt.day,10,15,0)
         elif now_dt.hour==13 and now_dt.minute==30:
             last_dt = datetime.datetime(now_dt.year,now_dt.month,now_dt.day,11,30,0)
+        elif now_dt.hour==21 and now_dt.minute==0:
+            last_dt = datetime.datetime(now_dt.year,now_dt.month,now_dt.day,15,0,0)            
         else:
             last_dt = now_dt + timedelta(minutes=-1)       
         price = self.get_last_price(order_book_id, last_dt)
         return price
-                
-    def get_last_price(self,order_book_id,dt):
+
+    def get_last_price(self,order_book_id,dt,fileds="close"):
         """取得指定标的最近报价信息"""
 
         # 如果未开盘则取昨日收盘价,开盘后取当前时间点收盘价
-        if not self.is_trade_opening(dt):
+        if not self.is_trade_opening_for_contract(order_book_id,dt):
             prev_day = get_tradedays_dur(dt, -1) 
             bar = self.get_bar(order_book_id,prev_day,"1d")
             if bar is None:
                 return None
-            return bar['close']
+            return bar[fileds]
         
         # 首先从热区加载，如果没有再从存储中读取
         hot_key_str = self.get_hot_key(dt,order_book_id)

@@ -746,8 +746,8 @@ class FuturesProcessModel(TftDataframeModel):
         
         device = self._build_device()  
         best_weight = self.optargs["best_weight"]    
-        model = FuturesIndustryModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
-                                                         best=best_weight,batch_file_path=self.batch_file_path)
+        model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
         model_name = self.optargs["model_name"]  
         self.rebuild_model_params(model,model_name=model_name)  
         model.batch_size = self.batch_size     

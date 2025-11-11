@@ -27,8 +27,11 @@ def get_prev_working_day(day):
         
 def get_previous_day(day):
     """取得指定日期的上一日"""
-    
     return day + timedelta(days=-1)
+
+def get_next_day(day):
+    """取得指定日期的下一日"""
+    return day + timedelta(days=1)
     
 def is_working_day(day):
     """判断是否节假日"""

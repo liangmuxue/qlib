@@ -628,7 +628,7 @@ class FutureExtractor(HisDataExtractor):
         #
         # return main_name 
         
-    def get_likely_main_contract_names(self,instrument,date,month_range=12,czce_spec=False,ref=True):
+    def get_likely_main_contract_names(self,instrument,date,month_range=12,czce_spec=False,ref=False):
         """根据品种编码和指定日期，取得可能的主力合约名称"""
         
         #取得当前月，以及后续多个月份的所有合约名称

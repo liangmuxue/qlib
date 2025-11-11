@@ -65,6 +65,8 @@ class Strategy(object):
     def before_trading(self, event):
         with ExecutionContext(EXECUTION_PHASE.BEFORE_TRADING):
             with ModifyExceptionFromType(EXC_TYPE.USER_EXC):
+                # 植入交易日期，用于后续对照
+                self._user_context.trade_date = event.trade_date
                 self._before_trading(self._user_context)
 
     @run_when_strategy_not_hold

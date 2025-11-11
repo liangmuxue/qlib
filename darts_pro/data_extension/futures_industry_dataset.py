@@ -384,7 +384,10 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                
     def __len__(self):
         # 需要预留output长度，用于预测日期对齐
-        return self.date_list.shape[0] - self.output_chunk_length
+        if self.mode=="predict":
+            return self.date_list.shape[0] 
+        else:
+            return self.date_list.shape[0] - self.output_chunk_length
 
 
     def __getitem__(
@@ -628,14 +631,14 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 如果当天没有交易，则保留空值
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
-        #
-        # if future_start_datetime==20250318:
-        #     result_file_path = "custom/data/results/data_compare_val_20250318.pkl"
-        #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
-        #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
-        #     with open(result_file_path, "wb") as fout:
-        #         pickle.dump(results, fout)    
-        #     print("ggg")  
+        
+        if future_start_datetime==20250304:
+            result_file_path = "custom/data/results/data_compare_val_20250304.pkl"
+            results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
+                       ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
+            with open(result_file_path, "wb") as fout:
+                pickle.dump(results, fout)    
+            print("ggg")  
                 
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
@@ -919,8 +922,8 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                         future_round_targets[k,:,i] = scale_data
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
-        if future_start_datetime==20250407:
-            result_file_path = "custom/data/results/data_compare_predresult_20250407.pkl"
+        if future_start_datetime==20250304:
+            result_file_path = "custom/data/results/data_compare_predresult_20250304.pkl"
             results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
                        ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
             with open(result_file_path, "wb") as fout:

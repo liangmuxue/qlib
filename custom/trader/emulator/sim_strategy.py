@@ -155,7 +155,6 @@ class SimStrategy(BaseStrategy):
         # 如果之前有新增候选买入，在此添加
         for index,(k,v) in enumerate(self.new_buy_list.items()):
             self.buy_list[k] = v        
-        # 如果非实时模式，则需要在相应前等待几秒，以保证先处理外部通知事件
         if self.handle_bar_wait:
             time.sleep(3)
         self.logger_debug("handle_bar process:{}".format(context.now))
@@ -283,7 +282,7 @@ class SimStrategy(BaseStrategy):
             )                    
         return order
     
-    def submit_order(self,amount,order_in=None):
+    def submit_order(self,amount,order_in=None,context=None):
         """代理api的订单提交方法"""
         
         order_book_id = order_in.order_book_id
@@ -309,7 +308,7 @@ class SimStrategy(BaseStrategy):
             if not str(order_in._order_id).startswith("rq_"):
                 order_in._order_id = "rq_{}".format(order_in._order_id)    
             # 添加到本地订单库
-            self.trade_entity.add_or_update_order(order_in,str(self.trade_day))            
+            self.trade_entity.add_or_update_order(order_in,str(self.trade_day),context=context)            
             # 调用代理方法        
             env.broker.submit_order(order_in)
             return order_in

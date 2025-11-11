@@ -107,21 +107,21 @@ class SimulationEventSource(AbstractEventSource):
                     for calendar_dt in trading_minutes:
                         if last_dt is not None and calendar_dt < last_dt:
                             continue
-
-                        if calendar_dt < dt_before_day_trading:
-                            trading_dt = calendar_dt.replace(year=date.year, month=date.month, day=date.day)
-                        else:
-                            trading_dt = calendar_dt
+                        # 一般都会从晚盘开始
+                        trading_dt = calendar_dt
                         if before_trading_flag:
+                            # 首先调用盘前和集合竞价事件
                             before_trading_flag = False
                             yield Event(
                                 EVENT.BEFORE_TRADING,
-                                calendar_dt=calendar_dt - timedelta(minutes=30),
+                                trade_date=date,
+                                calendar_dt=calendar_dt,
                                 trading_dt=trading_dt - timedelta(minutes=30)
                             )
                             yield Event(
                                 EVENT.OPEN_AUCTION,
-                                calendar_dt=calendar_dt - timedelta(minutes=3),
+                                trade_date=date,
+                                calendar_dt=calendar_dt,
                                 trading_dt=trading_dt - timedelta(minutes=3),
                             )
                         if self._universe_changed:
@@ -130,10 +130,10 @@ class SimulationEventSource(AbstractEventSource):
                             exit_loop = False
                             break
                         # yield handle bar
-                        yield Event(EVENT.BAR, calendar_dt=calendar_dt, trading_dt=trading_dt)
+                        yield Event(EVENT.BAR, trade_date=date,calendar_dt=calendar_dt, trading_dt=trading_dt)
                     if exit_loop:
                         done = True
-
+                # 调用盘后事件
                 dt = self._get_after_trading_dt(date)
                 yield Event(EVENT.AFTER_TRADING, calendar_dt=dt, trading_dt=dt)
         elif frequency == "tick":

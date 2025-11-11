@@ -55,16 +55,16 @@ class Executor(object):
         for index,event in enumerate(list(self._env.event_source.events(conf.start_date, conf.end_date, conf.frequency))):
             # 回测模式，临时限制时间,加速运行(先不考虑夜盘)
             now = event.trading_dt
-            first_time = datetime(now.year,now.month,now.day,9,0,0) 
-            begin_time = datetime(now.year,now.month,now.day,9,3,0) 
+            night_first_time = datetime(now.year,now.month,now.day,9,0,0) 
+            day_first_time = datetime(now.year,now.month,now.day,9,3,0) 
             end_time = datetime(now.year,now.month,now.day,14,50,0) 
             night_time = datetime(now.year,now.month,now.day,15,10,0) 
-            # 从第二个时间段进入
-            if event.event_type == EVENT.BAR and (now<=first_time):
+            # 忽略开盘时刻的分钟
+            if event.event_type == EVENT.BAR and ((now.hour==21 and now.minute in [0,1]) or (now.hour==9 and now.minute in [0,1])):
                 continue   
-            
+            minute_range = 1
             # 限定在3分钟的间隔频次  
-            if event.event_type == EVENT.BAR and (now.minute%3!=0):
+            if event.event_type == EVENT.BAR and (now.minute%minute_range!=0):
                 continue                  
             # 轮询各个事件并进行处理 
             if event.event_type == EVENT.TICK:
@@ -93,11 +93,11 @@ class Executor(object):
             
     def _ensure_before_trading(self, event):
         # return True if before_trading won't run this time
-        if self._last_before_trading == event.trading_dt.date() or self._env.config.extra.is_hold:
+        if self._last_before_trading == event.trade_date or self._env.config.extra.is_hold:
             return True
         if self._last_before_trading:
             # don't publish settlement on first day
-            previous_trading_date = self._env.data_proxy.get_previous_trading_date(event.trading_dt).date()
+            previous_trading_date = self._env.data_proxy.get_previous_trading_date(event.trade_date).date()
             if self._env.trading_dt.date() != previous_trading_date:
                 self._env.update_time(
                     datetime.combine(previous_trading_date, self._env.calendar_dt.time()),
@@ -107,8 +107,8 @@ class Executor(object):
                 self._env.calendar_dt, self._env.trading_dt
             ))
             self._split_and_publish(Event(EVENT.SETTLEMENT))
-        self._last_before_trading = event.trading_dt.date()
-        self._split_and_publish(Event(EVENT.BEFORE_TRADING, calendar_dt=event.calendar_dt, trading_dt=event.trading_dt))
+        self._last_before_trading = event.trade_date
+        self._split_and_publish(Event(EVENT.BEFORE_TRADING, calendar_dt=event.calendar_dt, trading_dt=event.trading_dt,trade_date=event.trade_date))
         return False
 
     EVENT_SPLIT_MAP = {
