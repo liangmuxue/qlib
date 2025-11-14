@@ -145,7 +145,7 @@ class ExtDataMod(AbstractMod):
         target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
         # 遍历开仓单，并匹配对应的平仓单，进行相关计算
         open_df = target_df[target_df["position_effect"]==POSITION_EFFECT.OPEN]
-        new_columns = TRADE_COLUMNS + FUTURE_TRADE_EXT_COLUMNS
+        new_columns = ['trade_date','order_book_id','quantity','price'] + FUTURE_TRADE_EXT_COLUMNS
         stat_data = []
         for index,row in open_df.iterrows():
             open_order_id = row['order_id']
@@ -171,13 +171,13 @@ class ExtDataMod(AbstractMod):
             close_day = row_close["trade_date"]
             close_day = date_string_transfer(close_day,direction=2)
             duration = tradedays(open_day,close_day)
-            new_row = row.values.tolist() + [open_price,differ_range,gain,open_day,duration]
+            new_row = [row_close['trade_date'],row_close['order_book_id'],row_close['quantity'],row_close['price'],open_price,differ_range,gain,open_day,duration]
             stat_data.append(new_row)
-        stat_df = pd.DataFrame(np.array(stat_data),columns = new_columns)
+        stat_df = pd.DataFrame(np.array(stat_data),columns=new_columns)
         # 按照盈亏排序
-        stat_df = stat_df.sort_values(by=["trade_datetime"],ascending=True)
+        stat_df = stat_df.sort_values(by=["trade_date"],ascending=True)
         # 计算汇总数据
-        total_gain = stat_df["gain"].sum()
+        total_gain = stat_df["gain"].astype(float).sum()
         logger.info("total_gain:{}".format(total_gain))
         stat_df.to_csv(save_path,index=False)
                 
