@@ -43,4 +43,9 @@ def open_auction(context, bar_dict):
         return      
     context.strategy_class.open_auction(context,bar_dict)
 
+def after_trading(context):
+    
+    if context.config.ignore_mode:
+        return     
+    context.strategy_class.after_trading(context)
     

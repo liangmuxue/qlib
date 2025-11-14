@@ -35,4 +35,12 @@ TODO:
 data_aug.py compare_dataset_consistence方法
 在expand_mock_df方法中，统一使用传参日期作为起始日期，避免品种序列日期缺失。
                       另外需要注意有些特殊品种，交易日期有缺失，需要延长推理日期范围:valid_range
+
+<训练和验证以及回测匹配>
+1 训练
+2 进行pred验证，倒序，生成coll_result结果
+3 回测，生成回测数据trade_data
+4 回测数据整合，生成stat_data
+5 整合验证和回测数据，生成backtest_analysys
+
      

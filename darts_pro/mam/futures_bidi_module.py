@@ -28,7 +28,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20250418,20250425]
-STAT_DATE = [20250304,20250304]
+STAT_DATE = [20240304,20260304]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
@@ -736,7 +736,7 @@ class FuturesBidiModule(MlpModule):
             if import_index is not None and import_index.shape[0]>0:
                 import_index = np.intersect1d(keep_index,import_index)  
                 result_list = result_list[result_list['top_index'].isin(import_index)]
-                
+              
             # 如果是预测模式，则只输出结果,不验证
             if predict_mode:
                 result_date_list = result_list

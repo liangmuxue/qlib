@@ -198,8 +198,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         time_column = dataset.get_time_column()   
         date_list = df_data[datetime_col].unique()      
         date_list = np.sort(date_list)
-        # 由于使用future_datetime方式对齐，因此从前面截取input序列长度
-        date_list = date_list[self.input_chunk_length:]        
+        # 由于使用future_datetime方式对齐，因此从前面截取序列长度
+        date_list = date_list[self.input_chunk_length+self.output_chunk_length:]        
         self.date_list = date_list
         # 生成对应的时间协变量映射数据
         date_conv_columns = dataset.get_future_columns()
@@ -632,8 +632,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
         
-        if future_start_datetime==20250304:
-            result_file_path = "custom/data/results/data_compare_val_20250304.pkl"
+        if future_start_datetime==20250313:
+            result_file_path = "custom/data/results/data_compare_val_20250313.pkl"
             results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
                        ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
             with open(result_file_path, "wb") as fout:
@@ -922,8 +922,8 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                         future_round_targets[k,:,i] = scale_data
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
-        if future_start_datetime==20250304:
-            result_file_path = "custom/data/results/data_compare_predresult_20250304.pkl"
+        if future_start_datetime==20250313:
+            result_file_path = "custom/data/results/data_compare_predresult_20250313.pkl"
             results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
                        ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
             with open(result_file_path, "wb") as fout:

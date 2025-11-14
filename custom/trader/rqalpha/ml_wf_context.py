@@ -49,7 +49,7 @@ class MlWorkflowIntergrate(MlIntergrate):
         self.task_store = WfTaskStore()
         self.dbaccess = DbAccessor({})
 
-    def prepare_data(self,pred_date):   
+    def prepare_data(self,pred_date=None):   
         """数据准备"""
         
         # 根据日期，累加当前上下文的预测数据
@@ -57,7 +57,10 @@ class MlWorkflowIntergrate(MlIntergrate):
         date_pred_df_file = "{}/{}".format(self.pred_data_path,self.pred_data_file)
         with open(date_pred_df_file, "rb") as fin:
             pred_df = pickle.load(fin)     
-            self.pred_df = pred_df[pred_df['date']==pred_date]
+            if pred_date is not None:
+                self.pred_df = pred_df[pred_df['date']==pred_date]
+            else:
+                self.pred_df = pred_df
         
     def filter_buy_candidate(self,pred_date):
         """根据预测计算，筛选可以买入的品种"""
@@ -68,7 +71,8 @@ class MlWorkflowIntergrate(MlIntergrate):
     def filter_futures_buy_candidate(self,pred_date):
         """根据预测计算，筛选可以买入的品种"""
         
-        inst_list = self.pred_df[["top_flag","instrument"]]  
+        pred_df = self.pred_df[self.pred_df['date']==pred_date]
+        inst_list = pred_df[["top_flag","instrument"]]  
         return inst_list.values
                        
     def filter_buy_candidate_old(self,pred_date):

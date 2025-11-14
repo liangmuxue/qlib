@@ -16,7 +16,7 @@ logger = AppLogger()
 class FuturesTradeEntity(TradeEntity):
     """期货交易对象处理类"""
 
-    LOCK_COLUMNS = ['date','order_book_id','instrument']
+    LOCK_COLUMNS = ['date','open_order_id','order_book_id','instrument']
     
     def __init__(
         self,
@@ -71,11 +71,15 @@ class FuturesTradeEntity(TradeEntity):
             close_reason = order.close_reason
         else:
             close_reason = 0
+        if hasattr(order.kwargs, "open_order_id"):
+            open_order_id = order.kwargs['open_order_id']
+        else:
+            open_order_id = 0            
         if context is not None:
             update_datetime = context.now
         else:
             update_datetime = datetime.datetime.now()
-        row_data = [trade_date,trade_datetime,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,close_reason,secondary_order_id]
+        row_data = [trade_date,trade_datetime,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,open_order_id,close_reason,secondary_order_id]
         # logger.debug("row_data is:{}".format(row_data))
         row_data_np = np.expand_dims(np.array(row_data),axis=0)
         # 生成DataFrame
@@ -114,15 +118,10 @@ class FuturesTradeEntity(TradeEntity):
             # 日志记录
             self.add_log(row_data)
                 
-    def add_trade(self,trade,multiplier=1,default_status=ORDER_STATUS.FILLED,context=None):
+    def add_trade(self,trade,multiplier=1,default_status=ORDER_STATUS.FILLED,order=None,context=None):
         """添加交易信息，需要先具备订单信息"""
         
-        order = self.get_order_by_id(trade.order_id)
-        if order is None or order.shape[0]==0:
-            logger.warning("order id not exists:{}".format(trade.order_id))
-            return
-        
-        trade_date = order.trade_date
+        trade_date = order.kwargs['trade_date']
         order_book_id = trade.order_book_id
         side = trade.side
         price = trade.last_price
@@ -133,22 +132,19 @@ class FuturesTradeEntity(TradeEntity):
         # 交易状态为已成交
         status = default_status
         order_id = trade.order_id
+        # 如果是平仓，需要有对应的开仓订单号
+        open_order_id = 0 if order.kwargs['open_order_id'] is None else order.kwargs['open_order_id']
         # 存储对于实际仿真或实盘系统的交易订单号
         secondary_order_id = order.secondary_order_id
         if secondary_order_id is None:
             secondary_order_id = 0       
-        if "close_reason" in order:
-            close_reason = order['close_reason'] 
-        elif "close_reason" in order.kwargs:
-            close_reason = order.kwargs['close_reason']             
-        else:
-            close_reason = None
-        trade_datetime = order['trade_datetime']
+        close_reason = order.kwargs['close_reason']             
+        trade_datetime = order.datetime
         if context is not None:
             update_datetime = context.now
         else:
             update_datetime = datetime.datetime.now()
-        row_data = [trade_date,trade_datetime,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,close_reason,secondary_order_id]
+        row_data = [trade_date,trade_datetime,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,open_order_id,close_reason,secondary_order_id]
         # 使用订单号查询并更新记录
         self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
         # 变更后保存数据
@@ -332,8 +328,10 @@ class FuturesTradeEntity(TradeEntity):
         """锁定品种保存到本地存储"""
         
         for item in lock_list:
-            instrument = item[:-4]
-            item_data = pd.DataFrame(np.array([[date,item,instrument]]),columns=self.LOCK_COLUMNS)
+            order_id = item
+            order_book_id = lock_list[item]
+            instrument = order_book_id[:-4]
+            item_data = pd.DataFrame(np.array([[date,order_id,order_book_id,instrument]]),columns=self.LOCK_COLUMNS)
             self.lock_data = pd.concat([self.lock_data,item_data])
         self.lock_data.to_csv(self.lock_save_path,index=False)
     

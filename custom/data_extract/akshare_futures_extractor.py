@@ -26,6 +26,7 @@ from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_mi
 from data_extract.akshare.futures_daily import get_futures_daily
 
 from cus_utils.log_util import AppLogger
+from pandas.core.indexes.datetimes import date_range
 logger = AppLogger()
 
 class AkFuturesExtractor(FutureExtractor):
@@ -159,14 +160,14 @@ class AkFuturesExtractor(FutureExtractor):
             # savepath = "{}/{}".format(self.item_savepath,get_period_name(period))
             # self.export_item_data(code,item_data,is_complete=True,savepath=savepath,period=period,institution=False)     
             # 保存到数据库表
-            item_data.to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)  
+            item_data.to_sql('dominant_continues_data_old', engine, index=False, if_exists='append',dtype=dtype)  
             print("code:{} ok".format(code))
         
         # 数据表关联字段挂接
-        upt_sql = "update dominant_continues_data d set d.var_id=(select id from trading_variety t where t.code=d.code)"
+        upt_sql = "update dominant_continues_data_old d set d.var_id=(select id from trading_variety t where t.code=d.code)"
         self.dbaccessor.do_updateto(upt_sql)
         # 结算价为0并且收盘价不为0的，把收盘价赋给结算价
-        upt_sql = "update dominant_continues_data set settle=close where settle=0 and close>0 "
+        upt_sql = "update dominant_continues_data_old set settle=close where settle=0 and close>0 "
         self.dbaccessor.do_updateto(upt_sql)
 
     def import_continius_his_data_local(self,date_range=[2201,2412]):
@@ -472,7 +473,7 @@ class AkFuturesExtractor(FutureExtractor):
             'settle': sqlalchemy.FLOAT, 
         }  
         tar_cols = list(dtype.keys())                
-        date_sql = "select max(date) from dominant_continues_data"
+        date_sql = "select max(date) from dominant_continues_data_old"
         result_rows = self.dbaccessor.do_query(date_sql) 
         max_date = int(result_rows[0][0].strftime("%Y%m%d"))      
         # 如果日期范围内包含了记录中的日期，则修改起始日期
@@ -506,10 +507,65 @@ class AkFuturesExtractor(FutureExtractor):
                 if futures_hist_df is None:
                     continue
             futures_hist_df['code'] = var_code
-            futures_hist_df[tar_cols].to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
+            futures_hist_df[tar_cols].to_sql('dominant_continues_data_old', engine, index=False, if_exists='append',dtype=dtype)
             print("import_day_range_continues_data {}  ok".format(var_code))
             time.sleep(15)
 
+    def combine_continues_data(self,data_range=None):
+        """合并指定日期范围的主连数据"""
+        
+        begin_date,end_date = data_range
+        engine = self.create_engine()
+        dtype = {
+            'code': sqlalchemy.String(10),
+            "date": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
+        }  
+        columns = list(dtype.keys())          
+        # 先删后增     
+        begin_date_str = date_string_transfer(str(begin_date))
+        end_date_str = date_string_transfer(str(end_date))
+        del_sql = "delete from dominant_continues_data where date>='{}' and date<='{}'". \
+            format(begin_date_str,end_date_str)   
+        self.dbaccessor.do_updateto(del_sql)
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        result_rows = self.dbaccessor.do_query(variety_sql)   
+        
+        def _apply_combine(group_data,columns=None,symbol=None):
+            if group_data.shape[0]==0:
+                return pd.DataFrame(np.array([]))
+            date = group_data.iloc[0]['date']
+            total_vol = group_data['volume'].sum()
+            # 通过成交量占比，计算相关价格
+            ratio = group_data['volume'].values/total_vol
+            open_price = np.sum(group_data['open'].values * ratio)
+            close = np.sum(group_data['close'].values * ratio)
+            settle = np.sum(group_data['settle'].values * ratio)
+            high = np.sum(group_data['high'].values * ratio)
+            low = np.sum(group_data['low'].values * ratio)
+            hold = 0
+            rtn_data = pd.DataFrame(np.array([[symbol,date,open_price,close,high,low,total_vol,hold,settle]]),columns=columns)
+            return rtn_data
+                
+        # 依次轮询各个品种，取得对应数据并插入数据库  
+        for row in result_rows:
+            var_code = row[0]
+            # if var_code!="AP":
+            #     continue
+            # 取得所有品种数据，并按照成交量加权计算价格
+            sql = "select code,date,open,close,high,low,volume,settle from dominant_real_data where code like '{}____' and date>='{}' and date<='{}'".format(var_code,begin_date_str,end_date_str)
+            agg_df = pd.read_sql(sql,engine.connect(),parse_dates=['date'])              
+            gp = agg_df.groupby("date")
+            agg_data = gp.apply(_apply_combine,columns=columns,symbol=var_code).reset_index(drop=True, inplace=False)  
+            agg_data.to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)
+            print("combine_continues_data {}  ok".format(var_code))
+    
     def import_continues_from_em(self,begin_date,end_date,symbol=None,e_symbol_mkt=None):
         
         futures_hist_df = futures_hist_em(symbol=symbol,start_date=str(begin_date),end_date=str(end_date),e_symbol_mkt=e_symbol_mkt)
@@ -584,7 +640,7 @@ class AkFuturesExtractor(FutureExtractor):
                 futures_zh_minute_sina_df['code'] = contract_name
                 futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
                 time.sleep(5)
-            print("code:{} ok".format(code))
+            print("import_day_range_contract_data code:{} ok".format(code))
 
     def import_day_range_1min_data_cross(self,data_range=None):
         """导入分钟历史数据,交错模式"""
@@ -670,7 +726,7 @@ class AkFuturesExtractor(FutureExtractor):
         
         cur_date = datetime.datetime.now().date()
         # 筛选合适的数据
-        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0 order by code asc"
         result_rows = self.dbaccessor.do_query(variety_sql)       
         # 遍历所有品种，并分别取得历史数据,只需要取得下一天上午的数据
         for result in result_rows:
@@ -816,6 +872,9 @@ if __name__ == "__main__":
     # print(contract_df)
     # hist_em = ak.futures_hist_table_em() 
     # print(hist_em)
+    # 连续合约一览表
+    # main_info = ak.futures_display_main_sina()
+    # print(main_info)
     
     # 实时行情
     # futures_zh_spot_df = ak.futures_zh_spot(symbol='RB2510', market="CF", adjust='0')
@@ -828,9 +887,11 @@ if __name__ == "__main__":
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2509", period="1")
     # print(futures_zh_minute_sina_df)
     # 历史行情
-    # futures_hist_em_df = futures_hist_em(symbol="BB", period="daily")
+    # futures_hist_em_df = futures_hist_em(symbol="LH", period="daily")
     # futures_hist_em_df['date'] = futures_hist_em_df['时间']
     # print(futures_hist_em_df)    
+    # futures_hist_df = ak.futures_zh_daily_sina(symbol="LH88")
+    # print(futures_hist_df)   
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="RB0", period="1")
     # print(futures_zh_minute_sina_df)
     # get_futures_daily_df = ak.get_futures_daily(start_date="20250501", end_date="20250516", market="SHFE")
@@ -885,6 +946,8 @@ if __name__ == "__main__":
     # extractor.import_variety_trade_schedule()    
     # 导入主力连续历史数据
     # extractor.import_his_data()
+    # 合并生成主力连续历史数据
+    extractor.combine_continues_data(data_range=[20251015,20251107])
     # 导入历史拓展数据
     # extractor.import_extension_data()
     # 生成行业板块历史行情数据
@@ -896,7 +959,7 @@ if __name__ == "__main__":
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     # extractor.build_cleandata_table()
     # qlib品种名单列表生成
-    extractor.build_qlib_instrument()
+    # extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################

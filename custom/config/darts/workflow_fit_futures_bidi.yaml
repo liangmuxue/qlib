@@ -5,9 +5,9 @@ market: &market clean_data
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2023-01-01
+    start_time: 2024-01-01
     end_time: 2025-12-31
-    fit_start_time: 2023-01-01
+    fit_start_time: 2024-01-01
     fit_end_time: 2025-12-31
     instruments: *market
     infer_processors:
@@ -82,7 +82,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataStep3_rsvRankWithoutGrad_202406"
+               model_name: "Futures_cleanDataStep3_rsvRankWithoutGrad_202503"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -106,8 +106,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2023-01-01, 2024-06-28]
-                valid: [2024-06-01, 2024-08-30]
+                train: [2024-01-01, 2025-03-28]
+                valid: [2025-03-01, 2025-05-30]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

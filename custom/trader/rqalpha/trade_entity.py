@@ -13,9 +13,9 @@ logger = AppLogger()
 class TradeEntity():
     """交易对象处理类"""
 
-    # 交易信息表字段，分别为交易日期，品种代码，买卖类型，成交价格，成交量,总价格，成交状态，订单编号,平仓原因,附加订单编号
+    # 交易信息表字段，分别为交易日期，品种代码，买卖类型，成交价格，成交量,总价格，成交状态，订单编号,对应开仓订单编号,平仓原因,附加订单编号
     TRADE_COLUMNS = ["trade_date","trade_datetime","update_datetime","order_book_id","side","position_effect","price",
-                     "quantity","multiplier","total_price","status","order_id","close_reason","secondary_order_id"]
+                     "quantity","multiplier","total_price","status","order_id","open_order_id","close_reason","secondary_order_id"]
     TRADE_LOG_COLUMNS = TRADE_COLUMNS + ["create_time"]
    
     def __init__(
@@ -42,8 +42,6 @@ class TradeEntity():
     def clear_his_data(self):
         self.trade_data_df = pd.DataFrame(columns=self.TRADE_COLUMNS)
         self.exp_trade_data(self.save_path)
-           
-        
         
     def get_sys_order(self,order_book_id):   
         if order_book_id in self.sys_orders:

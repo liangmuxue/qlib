@@ -7,11 +7,11 @@ from rqalpha.interface import AbstractMod
 from rqalpha.const import ORDER_STATUS
 from rqalpha.const import SIDE
 
+from trader.utils.date_util import date_string_transfer
 from trader.emulator.futures_sql_ds import FuturesDataSourceSql
-from data_extract.rqalpha.futures_ds import FuturesDataSource
-from trader.rqalpha.futures_trade_entity import FuturesTradeEntity
 from trader.utils.date_util import tradedays
 from trader.data_viewer import DataViewer
+from rqalpha.const import SIDE,ORDER_STATUS,POSITION_EFFECT,POSITION_DIRECTION
 from trader.rqalpha.trade_entity import TradeEntity
 from trader.rqalpha.dict_mapping import transfer_order_book_id,transfer_instrument
 from cus_utils.log_util import AppLogger
@@ -143,44 +143,36 @@ class ExtDataMod(AbstractMod):
         trade_data_df = trade_data_df.sort_values(by=["trade_datetime","order_book_id"])
         # 只统计已完成订单
         target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
-        # 以品种为维度聚合，进行分析
-        group_df = target_df.groupby("order_book_id")
+        # 遍历开仓单，并匹配对应的平仓单，进行相关计算
+        open_df = target_df[target_df["position_effect"]==POSITION_EFFECT.OPEN]
         new_columns = TRADE_COLUMNS + FUTURE_TRADE_EXT_COLUMNS
         stat_data = []
-        for name,instrument_df in group_df:
-            instrument_df = instrument_df.sort_values(by=["trade_datetime"]).reset_index(drop=True)
-            last_item = None
-            for index,row in instrument_df.iterrows():
-                # 买卖分别配对，进行额度计算
-                if last_item is None:
-                    last_item = row
-                    continue
-                # 如果相邻的记录都是同一买卖方向，则不计算
-                if row["side"]==last_item['side']:
-                    logger.warning("same side for:{}".format(row))
-                    continue
-                # 取得开仓时记录，并计算差价
-                prev_open_row = last_item
-                open_price = prev_open_row["price"]
-                differ = (row["price"] - open_price)
-                # 根据买卖方向计算实际盈亏差价
-                if row["side"]==SIDE.BUY:
-                    differ = -differ
-                differ_range = differ/open_price
-                # 计算手续费
-                commission = (row["price"] + open_price) * row["quantity"] * row['multiplier'] * 0.03/100
-                # 此次盈亏金额
-                gain = differ * row["quantity"] * row['multiplier'] - commission
-                # 统计买卖周期
-                open_day = last_item["trade_datetime"].strftime('%Y%m%d')
-                close_day = row["trade_datetime"].strftime('%Y%m%d')
-                if close_day=='20241101' and row['order_book_id']=='AP2412':
-                    print("ggg")
-                duration = tradedays(open_day,close_day)
-                new_row = row.values.tolist() + [open_price,differ_range,gain,open_day,duration]
-                stat_data.append(new_row)
-                # 清空配对项
-                last_item = None
+        for index,row in open_df.iterrows():
+            open_order_id = row['order_id']
+            row_close = target_df[target_df["open_order_id"]==open_order_id]
+            if row_close.shape[0]==0:
+                logger.info("no close order:{},{}".format(row['order_book_id'],row['trade_date']))
+                continue
+            row_close = row_close.iloc[0]
+            # 取得开仓时记录，并计算差价
+            open_price = row["price"]
+            differ = (row_close["price"] - open_price)
+            # 根据买卖方向计算实际盈亏差价
+            if row["side"]==SIDE.SELL:
+                differ = -differ
+            differ_range = differ/open_price
+            # 计算手续费
+            commission = (row_close["price"] + open_price) * row_close["quantity"] * row_close['multiplier'] * 0.03/100
+            # 此次盈亏金额
+            gain = differ * row_close["quantity"] * row_close['multiplier'] - commission
+            # 统计买卖周期
+            open_day = row["trade_date"]
+            open_day = date_string_transfer(open_day,direction=2)
+            close_day = row_close["trade_date"]
+            close_day = date_string_transfer(close_day,direction=2)
+            duration = tradedays(open_day,close_day)
+            new_row = row.values.tolist() + [open_price,differ_range,gain,open_day,duration]
+            stat_data.append(new_row)
         stat_df = pd.DataFrame(np.array(stat_data),columns = new_columns)
         # 按照盈亏排序
         stat_df = stat_df.sort_values(by=["trade_datetime"],ascending=True)

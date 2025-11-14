@@ -53,8 +53,18 @@ class DataStats(object):
         col_data_types = {"top_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_value":int,"date":int}   
         instrument_result_data = pd.read_csv(val_data_file,dtype=col_data_types)
         results = self.compute_val_result(instrument_result_data, date_range)
+        # 拆分为单数行和双数行
+        dates = results['date'].sort_values().unique()
+        results_2_date = dates[1::2]
+        results_1_date = dates[::2]
+        results_1 = results[results['date'].isin(results_1_date)]
+        results_2 = results[results['date'].isin(results_2_date)]
         combine_data_file = os.path.join(self.work_dir,self.combine_val_filepath)
+        combine_data1_file = os.path.join(self.work_dir,"val_combine_1.csv")
+        combine_data2_file = os.path.join(self.work_dir,"val_combine_2.csv")
         results.to_csv(combine_data_file,index=False)  
+        results_1.to_csv(combine_data1_file,index=False)  
+        results_2.to_csv(combine_data2_file,index=False)  
     
     def compute_val_result(self,val_data,date_range=None):
         
@@ -252,8 +262,9 @@ class DataStats(object):
         combine_result['val_diff'] = (combine_result['thirdday_open']-combine_result['firstday_open'])/combine_result['firstday_open']*combine_result['side_flag']
         val_diff = combine_result['val_diff'].sum()
         total_date = val_result_data['date'].unique().shape[0]
-        anno_yield = val_diff/8 * 240/total_date
-        gross_anno_yield = gross_profit/8 * 240/total_date
+        rate_section = 4
+        anno_yield = val_diff/rate_section * 240/total_date
+        gross_anno_yield = gross_profit/rate_section * 240/total_date
         val_win_rate = np.sum(combine_result['val_diff']>0)/combine_result.shape[0]
         # combine_result_with_lock['val_diff'] = (combine_result_with_lock['thirdday_open']-combine_result_with_lock['prev_close'])/combine_result_with_lock['prev_close']*combine_result_with_lock['side_flag']
         # val_diff_with_lock = combine_result_with_lock['val_diff'].sum()        
@@ -323,10 +334,10 @@ if __name__ == "__main__":
     # stats.check_pred_output()
     # stats.combine_pred_result(pred_dir="/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/")
     # stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
-    stats.combine_val_result(date_range=[20250301,20250531])
+    # stats.combine_val_result(date_range=[20250301,20250531])
     # stats.mock_pred_data()
-    # stats.combine_backtest_result()
-    # stats.analysis_backtest(date_range=[20250301,20250531])
+    stats.combine_backtest_result()
+    stats.analysis_backtest(date_range=[20250301,20250531])
     
     
     

@@ -873,11 +873,11 @@ def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1") -> pd.Data
         "symbol": symbol,
         "type": period,
     }
-    r = requests.get(url, params=params)
-    if r.status_code==456:
-        print("456 error!")
-        return -1,None
-    temp_df = pd.DataFrame(json.loads(r.text.split("=(")[1].split(");")[0]))
+    res_text = fetch_with_httpx(url, params,return_text=True)
+    try:
+        temp_df = pd.DataFrame(json.loads(res_text.split("=(")[1].split(");")[0]))
+    except Exception as e:
+        print("eee")
     if temp_df.shape[0]==0:
         return 0,None
     temp_df.columns = [
@@ -897,7 +897,7 @@ def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1") -> pd.Data
     temp_df["hold"] = pd.to_numeric(temp_df["hold"], errors="coerce")
     return 1,temp_df
 
-def fetch_with_httpx(url,params,):
+def fetch_with_httpx(url,params,return_text=False):
     headers = {
         "user-agent": UserAgent().random,
     }    
@@ -906,8 +906,10 @@ def fetch_with_httpx(url,params,):
     with httpx.Client(proxies=proxies) as client:
         response = client.get(url, params=params, headers=headers, cookies=None)
         # print(response.text)  
+        if return_text:
+            return response.text
         json_data = json.loads(response.text)      
-    return json_data    
+        return json_data    
 
 def fetch_with_request(url,params):
     r = requests.get(url, timeout=15, params=params, headers={'Connection':'close'})

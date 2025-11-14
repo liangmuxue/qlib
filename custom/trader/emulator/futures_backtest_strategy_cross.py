@@ -121,7 +121,7 @@ class FurBacktestStrategy(SimStrategy):
         self.data_source.load_recent_data(context.trade_date)        
         # 设置上一交易日，用于后续挂牌确认
         self.prev_day = self.get_previous_trading_date(self.trade_day)
-        if self.trade_day==20250305:
+        if self.trade_day==20250402:
             print("ggg")
         # 初始化当日合约对照表
         self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.trade_date)       
@@ -180,6 +180,23 @@ class FurBacktestStrategy(SimStrategy):
             # 加入到候选开仓订单,注意已锁仓的就不开仓了
             if not lock_flag:
                 candidate_order_list[order_book_id] = order
+        
+        # 查看上一个工作日的候选，以确定是否对持仓进行锁单
+        prev_pred_date = int(get_prev_working_day(datetime.datetime.strptime(str(pred_date),"%Y%m%d")).strftime("%Y%m%d"))
+        prev_candidate_list = self.get_candidate_list(prev_pred_date,context=context)
+        for item in prev_candidate_list:
+            trend = item[0]
+            instrument = item[1]
+            direction = POSITION_DIRECTION.LONG if trend==1 else POSITION_DIRECTION.SHORT
+            match_pos = self.match_positions(instrument,direction)
+            for index,row in match_pos.iterrows():
+                order_book_id = row['order_book_id']
+                trade_date = row['trade_date'].strftime("%Y%m%d")
+                now_date = context.trade_date.strftime("%Y%m%d")
+                dur_days = tradedays(trade_date,now_date)
+                # 超期有可能平仓的才锁
+                if dur_days>=keep_day_number:
+                    self.lock_list[row['order_id']] = order_book_id    
                   
         # 锁定品种保存到存储
         self.trade_entity.add_lock_candidate(self.lock_list,str(pred_date))
@@ -955,7 +972,7 @@ class FurBacktestStrategy(SimStrategy):
         account.get_positions()
         self.logger_debug("on_trade_handler in,order:{},trade:{}".format(order,trade))
         # 保存成单交易对象
-        self.trade_entity.add_trade(trade,multiplier=order.kwargs['multiplier'],order=order,context=context)
+        self.trade_entity.add_trade(trade,multiplier=order.kwargs['multiplier'],context=context)
         # 修改当日仓位列表中的状态为已成交
         self.update_order_status(order,ORDER_STATUS.FILLED,side=order.side, context=self.context)     
         # 维护仓位数据

@@ -99,8 +99,8 @@ def aug_data_process(file_path,train_path=None,test_path=None,sp_rate=0.7):
 def compare_dataset_consistence():
     """比较验证数据与推理数据的一致性"""
     
-    val_file_path = "custom/data/results/data_compare_val_20250304.pkl"
-    pred_file_path = "custom/data/results/data_compare_predresult_20250304.pkl"
+    val_file_path = "custom/data/results/data_compare_val_20250313.pkl"
+    pred_file_path = "custom/data/results/data_compare_predresult_20250313.pkl"
     with open(val_file_path, "rb") as fin:
         result_data_val = pickle.load(fin)           
     with open(pred_file_path, "rb") as fin:
