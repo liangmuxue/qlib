@@ -11,8 +11,7 @@ from trader.emulator.futures_sql_ds import FuturesDataSourceSql
 from backtrader.utils import date
 
 RESULT_FILE_PATH = "custom/data/results/stats"
-RESULT_FILE_STEP1 = "step1_rs.pkl"
-RESULT_FILE_STEP2 = "step2_rs.pkl"
+VAL_RESULT_FILE = "total_coll_results.csv"
 RESULT_FILE_VIEW = "coll_result.csv"
 INTER_RS_FILEPATH = "pred_step1_rs.pkl"
 
@@ -28,7 +27,9 @@ BACKTEST_RESULT_COLUMNS = ["date","instrument","order_book_id","trade_flag","ope
 
 PRED_RESULT_COLUMNS = ["date","instrument","pred_trend","prev_close",
                        "firstday_open","firstday_close","firstday_high","firstday_low",
+                       "secondday_open","secondday_close","secondday_high","secondday_low",
                        "thirdday_open","thirdday_close","thirdday_high","thirdday_low"]  
+
 
 class DataStats(object):
     """针对预测、回测、模拟、交易的综合统计"""
@@ -49,7 +50,7 @@ class DataStats(object):
     def combine_val_result(self,date_range=None):
         """验证数据中整合实际结果"""
 
-        val_data_file = os.path.join(self.work_dir,RESULT_FILE_VIEW) 
+        val_data_file = os.path.join(self.work_dir,VAL_RESULT_FILE) 
         col_data_types = {"top_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_value":int,"date":int}   
         instrument_result_data = pd.read_csv(val_data_file,dtype=col_data_types)
         results = self.compute_val_result(instrument_result_data, date_range)
@@ -90,14 +91,19 @@ class DataStats(object):
                     continue
                 first_bar = first_bar.iloc[0]
                 second_bar = self.ds.get_continue_data_by_day(instrument, second_day.strftime("%Y%m%d"))
+                if second_bar.shape[0]==0:
+                    print("{} second_bar has no data in {}".format(instrument,date))
+                    continue      
+                second_bar = second_bar.iloc[0]          
                 third_bar = self.ds.get_continue_data_by_day(instrument, third_day.strftime("%Y%m%d"))
                 if third_bar.shape[0]==0:
-                    print("{} second_bar has no data in {}".format(instrument,date))
+                    print("{} third_bar has no data in {}".format(instrument,date))
                     continue
                 third_bar = third_bar.iloc[0]
-                item = [date,instrument,pred_trend,prev_bar['settle'],
-                        first_bar['open'],first_bar['settle'],first_bar['high'],first_bar['low'],
-                        third_bar['open'],third_bar['settle'],third_bar['high'],third_bar['low']]
+                item = [date,instrument,pred_trend,prev_bar['close'],
+                        first_bar['open'],first_bar['close'],first_bar['high'],first_bar['low'],
+                        second_bar['open'],second_bar['close'],second_bar['high'],second_bar['low'],
+                        third_bar['open'],third_bar['close'],third_bar['high'],third_bar['low']]
                 results.append(item)
         results = pd.DataFrame(np.array(results),columns=PRED_RESULT_COLUMNS) 
         results['date'] = results['date'].astype(int).astype(int)
@@ -105,6 +111,7 @@ class DataStats(object):
         results['side_flag'] = np.where(results['pred_trend']==1,1,-1)
         results['diff'] = (results['thirdday_open'].astype(float) - results['firstday_open'].astype(float))/results['firstday_open'].astype(float)
         results['diff'] = results['diff'] * results['side_flag'] 
+        results = results.drop(columns=["firstday_close","firstday_high","firstday_low","secondday_open","secondday_close","secondday_high","secondday_low","thirdday_close","thirdday_high","thirdday_low"])
         if date_range is not None:
             results = results[(results['date']>=date_range[0])&(results['date']<=date_range[1])]
         
@@ -146,27 +153,28 @@ class DataStats(object):
         combine_data_file = os.path.join(self.work_dir,self.combine_pred_filepath)
         results.to_csv(combine_data_file,index=False)         
 
-    def match_val_and_pred(self,val_result_file,pred_result_file,date_range=[20241201,20241231]):
+    def match_val_and_pred(self,val_result_file,pred_result_file,date_range=[20241201,20251231]):
         """匹配验证结果和预测结果是否一致"""
 
-        step2_file = os.path.join(self.work_dir,val_result_file)
-        with open(step2_file, "rb") as fin:
-            instrument_result_data = pickle.load(fin)  
-
+        val_filepath = os.path.join(self.work_dir,val_result_file)
+        instrument_result_data = pd.read_csv(val_filepath)
         with open(pred_result_file, "rb") as fin:
             pred_result_data = pickle.load(fin)  
                                 
         date_list = instrument_result_data[(instrument_result_data['date']>=date_range[0])
-                                &(instrument_result_data['date']<=date_range[1])].sort_values().unique()
-        match_results = {}
+                                &(instrument_result_data['date']<=date_range[1])]['date'].sort_values().unique()
+        match_results = []
         for date in date_list:
             cur_day = datetime.strptime(str(date), "%Y%m%d")
             val_item = instrument_result_data[instrument_result_data['date']==date]
             pred_item = pred_result_data[pred_result_data['date']==date]
             mat_res = np.intersect1d(val_item['instrument'].values,pred_item['instrument'].values)
-            match_results[date] = mat_res
+            match_results.append([date,mat_res.shape[0]])
         
-        match_results
+        match_results = np.array(match_results)
+        match_results = pd.DataFrame(match_results,columns=['date','match_cnt'])
+        no_match_data = match_results[match_results['match_cnt']<4]
+        no_match_data
         
     def combine_backtest_result(self):
         """回测数据中整合实际结果"""
@@ -178,16 +186,13 @@ class DataStats(object):
     def combine_trade_result(self,trade_dir,output_file=None):
         """交易数据中整合实际结果"""
         
-        file_path = os.path.join(trade_dir,"trade_data.csv")
         lock_file_path = os.path.join(trade_dir,"lock.csv")
         val_path = os.path.join(self.work_dir,self.combine_val_filepath)
         val_result_data = pd.read_csv(val_path) 
         val_result_data = val_result_data.sort_values(by=["date","instrument"])
-        trade_data_df = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)   
-        trade_data_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
-        trade_data_df = trade_data_df.sort_values(by=["trade_date","order_book_id"])
         lock_data = pd.read_csv(lock_file_path) 
-        
+        stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"
+        stat_data = pd.read_csv(stat_path,parse_dates=['trade_date','open_date'],infer_datetime_format=True)   
         result_data = pd.DataFrame(columns=BACKTEST_RESULT_COLUMNS)
         # 遍历预测数据，并分别与实际回测数据结果匹配
         for index,row in val_result_data.iterrows():
@@ -195,9 +200,7 @@ class DataStats(object):
             date = row['date']
             instrument = row['instrument']
             # 匹配对应的当日主力合约的开仓交易数据
-            trade_date_row = trade_data_df[(trade_data_df['position_effect']=='OPEN')
-                                      &(trade_data_df['trade_date'].dt.strftime('%Y%m%d')==str(date))]
-            trade_row = trade_date_row[(trade_date_row['order_book_id'].str[:-4]==instrument)]
+            trade_row = stat_data[(stat_data['open_date'].dt.strftime('%Y%m%d')==str(date))&(stat_data['order_book_id'].str[:-4]==instrument)]
             item['date'] = date
             item['instrument'] = instrument
             item['trade_flag'] = 'trade'
@@ -217,24 +220,11 @@ class DataStats(object):
                 item_df = pd.DataFrame.from_dict(item,orient='index').T
                 result_data = pd.concat([result_data,item_df])
                 continue
-            # 向后查找到对应的平仓交易并记录
-            order_book_id = trade_row['order_book_id'].values[0]
-            item['order_book_id'] = order_book_id
-            item['open_price'] = trade_row['price'].values[0]
             item['side'] = trade_row['side'].values[0]
+            item['order_book_id'] = trade_row['order_book_id'].values[0]
+            item['open_price'] = trade_row['open_price'].values[0]
             item['quantity'] = trade_row['quantity'].values[0]
-            match_rows = trade_data_df[(trade_data_df['order_book_id']==order_book_id)
-                                      &(trade_data_df['position_effect']=='CLOSE')
-                                      &(pd.to_numeric(trade_data_df['trade_date'].dt.strftime('%Y%m%d'))>date)]
-            # 如果没有交易则设置标志
-            if match_rows.shape[0]==0:
-                item['trade_flag'] = 'noclose'
-                item_df = pd.DataFrame.from_dict(item,orient='index').T
-                result_data = pd.concat([result_data,item_df])
-                continue
-            # 通过排序取得最近的配对交易
-            match_row = match_rows.sort_values(by=["trade_date"],ascending=True).iloc[0]
-            item['close_price'] = match_row['price']
+            item['close_price'] = trade_row['price'].values[0]
             item_df = pd.DataFrame.from_dict(item,orient='index').T
             result_data = pd.concat([result_data,item_df])
         
@@ -253,6 +243,8 @@ class DataStats(object):
         combine_result_whole['side_flag'] = np.where(combine_result_whole['side']==SIDE.BUY,1,-1)
         # 关注具备交易的数据
         combine_result = combine_result_whole[combine_result_whole['trade_flag']=='trade']
+        if date_range is not None:
+            combine_result = combine_result[(combine_result['date']>=date_range[0])&(combine_result['date']<=date_range[1])]        
         combine_result_with_lock = combine_result_whole[combine_result_whole['trade_flag'].isin(['trade','lock'])]
         # 计算回测的涨跌幅度(毛利不计算手续费)
         combine_result['gross_profit'] = (combine_result['close_price']-combine_result['open_price'])/combine_result['open_price']*combine_result['side_flag']
@@ -262,7 +254,7 @@ class DataStats(object):
         combine_result['val_diff'] = (combine_result['thirdday_open']-combine_result['firstday_open'])/combine_result['firstday_open']*combine_result['side_flag']
         val_diff = combine_result['val_diff'].sum()
         total_date = val_result_data['date'].unique().shape[0]
-        rate_section = 4
+        rate_section = 8
         anno_yield = val_diff/rate_section * 240/total_date
         gross_anno_yield = gross_profit/rate_section * 240/total_date
         val_win_rate = np.sum(combine_result['val_diff']>0)/combine_result.shape[0]
@@ -272,8 +264,6 @@ class DataStats(object):
         exp_filepath = os.path.join(self.work_dir,self.backtest_analysys_filepath)
         combine_result = combine_result[["date","instrument","order_book_id","open_price",
                        "close_price","side_flag","firstday_open","thirdday_open","val_diff","gross_profit"]]
-        if date_range is not None:
-            combine_result = combine_result[(combine_result['date']>=date_range[0])&(combine_result['date']<=date_range[1])]
         combine_result.to_csv(exp_filepath,index=False)  
           
           
@@ -328,16 +318,16 @@ class DataStats(object):
 
      
 if __name__ == "__main__":
-    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/05")  
+    stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/07")  
     # stats.analysis_val_data()
     # stats.check_step_output()
     # stats.check_pred_output()
     # stats.combine_pred_result(pred_dir="/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/")
-    # stats.match_val_and_pred(val_result_file=RESULT_FILE_STEP2,pred_result_file="/home/qdata/workflow/fur_backtest_flow/trader_data/03/pred_result.pkl")
-    # stats.combine_val_result(date_range=[20250301,20250531])
+    # stats.match_val_and_pred(val_result_file=VAL_RESULT_FILE,pred_result_file="/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/pred_result.pkl")
+    # stats.combine_val_result(date_range=[20250201,20250731])
     # stats.mock_pred_data()
     stats.combine_backtest_result()
-    stats.analysis_backtest(date_range=[20250301,20250531])
+    stats.analysis_backtest(date_range=[20250201,20250731])
     
     
     

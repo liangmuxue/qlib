@@ -28,7 +28,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
 TRACK_DATE = [20250418,20250425]
-STAT_DATE = [20240304,20260304]
+STAT_DATE = [20240731,20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
@@ -460,7 +460,8 @@ class FuturesBidiModule(MlpModule):
                 if col!="total_cnt":
                     self.log(col, rate_total[col].values[0], prog_bar=True)  
             
-            anno_yield = rate_total['yield_rate'].values[0] * (240/date_total_num) / (4*2) 
+            dur_num = self.output_chunk_length - 1
+            anno_yield = rate_total['yield_rate'].values[0] * (240/date_total_num) / (4*dur_num) 
             self.log("anno_yield",anno_yield, prog_bar=True) 
         
         output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_total, \
@@ -499,48 +500,48 @@ class FuturesBidiModule(MlpModule):
             indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
             industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
                  
-            for index in range(target_class_3d.shape[0]):
-                
-                viz_total_size+=1
-                target_class_item = target_class_3d[index]
-                keep_index = np.where(target_class_item>=0)[0]
-                
-                round_targets = past_future_round_targets_total[index]
-                cls_output = output_3d[2]
-                ts_arr = target_info_3d[index]
-                
-                date = int(ts_arr[keep_index][0]["future_start_datetime"])
-                if index==0:
-                    self.log("first_date",date, prog_bar=True) 
-                if not date in TRACK_DATE:
-                    continue    
-                
-                coll_item = coll_result[coll_result['date']==date]
-                # trend_output_value = coll_item['trend_output_value'].values[0]
-                
-                for j in range(len(self.past_split)):
-                    inner_class_item = target_class_item[ins_all]
-                    inner_index = np.where(inner_class_item>=0)[0]           
-                    instruments,k_idx,_ = np.intersect1d(ins_all,keep_index,return_indices=True)
-                    ins_output = cls_output[j][index,:]
-                    ins_output = ins_output[inner_index]
-                    fur_round_target = round_targets[instruments,-1,j]
-                    # 品种比对图
-                    if j in DRAW_SEQ_DETAIL:
-                        price_array_range = np.array([self.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
-                        price_array_range = price_array_range/10
-                        name_arr = []
-                        for inner_index,item in enumerate(ts_arr[instruments]):
-                            match_item = coll_item[coll_item['instrument']==item['instrument']]
-                            if match_item.shape[0]>0:
-                                trend = match_item['trend_value'].values[0]
-                                name_arr.append(item["instrument"]+"_match_"+str(trend))
-                            else:
-                                name_arr.append(item["instrument"])
-                        view_data = np.stack([ins_output,fur_round_target,price_array_range]).transpose(1,0)
-                        win = "detail_target_{}_{}=".format(j,viz_total_size)
-                        target_title = "Detail ,date:{}".format(date)                            
-                        viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred","target","price"])   
+            # for index in range(target_class_3d.shape[0]):
+            #
+            #     viz_total_size+=1
+            #     target_class_item = target_class_3d[index]
+            #     keep_index = np.where(target_class_item>=0)[0]
+            #
+            #     round_targets = past_future_round_targets_total[index]
+            #     cls_output = output_3d[2]
+            #     ts_arr = target_info_3d[index]
+            #
+            #     date = int(ts_arr[keep_index][0]["future_start_datetime"])
+            #     if index==0:
+            #         self.log("first_date",date, prog_bar=True) 
+            #     if not date in TRACK_DATE:
+            #         continue    
+            #
+            #     coll_item = coll_result[coll_result['date']==date]
+            #     # trend_output_value = coll_item['trend_output_value'].values[0]
+            #
+            #     for j in range(len(self.past_split)):
+            #         inner_class_item = target_class_item[ins_all]
+            #         inner_index = np.where(inner_class_item>=0)[0]           
+            #         instruments,k_idx,_ = np.intersect1d(ins_all,keep_index,return_indices=True)
+            #         ins_output = cls_output[j][index,:]
+            #         ins_output = ins_output[inner_index]
+            #         fur_round_target = round_targets[instruments,-1,j]
+            #         # 品种比对图
+            #         if j in DRAW_SEQ_DETAIL:
+            #             price_array_range = np.array([self.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
+            #             price_array_range = price_array_range/10
+            #             name_arr = []
+            #             for inner_index,item in enumerate(ts_arr[instruments]):
+            #                 match_item = coll_item[coll_item['instrument']==item['instrument']]
+            #                 if match_item.shape[0]>0:
+            #                     trend = match_item['trend_value'].values[0]
+            #                     name_arr.append(item["instrument"]+"_match_"+str(trend))
+            #                 else:
+            #                     name_arr.append(item["instrument"])
+            #             view_data = np.stack([ins_output,fur_round_target,price_array_range]).transpose(1,0)
+            #             win = "detail_target_{}_{}=".format(j,viz_total_size)
+            #             target_title = "Detail ,date:{}".format(date)                            
+            #             viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred","target","price"])   
                                     
     def dump_val_data(self,val_batch,outputs,detail_loss):
     

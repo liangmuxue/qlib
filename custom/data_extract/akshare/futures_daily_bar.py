@@ -856,7 +856,7 @@ def futures_hist_em(
     return temp_df
 
 
-def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1") -> pd.DataFrame:
+def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1",httpx_client=None) -> pd.DataFrame:
     """
     中国各品种期货分钟频率数据
     https://vip.stock.finance.sina.com.cn/quotes_service/view/qihuohangqing.html#titlePos_3
@@ -873,7 +873,7 @@ def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1") -> pd.Data
         "symbol": symbol,
         "type": period,
     }
-    res_text = fetch_with_httpx(url, params,return_text=True)
+    res_text = fetch_with_httpx(url, params,return_text=True,httpx_client=httpx_client)
     try:
         temp_df = pd.DataFrame(json.loads(res_text.split("=(")[1].split(");")[0]))
     except Exception as e:
@@ -897,19 +897,16 @@ def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1") -> pd.Data
     temp_df["hold"] = pd.to_numeric(temp_df["hold"], errors="coerce")
     return 1,temp_df
 
-def fetch_with_httpx(url,params,return_text=False):
+def fetch_with_httpx(url,params,return_text=False,httpx_client=None):
     headers = {
         "user-agent": UserAgent().random,
     }    
-    proxies = {"http://":"http://amos:mrliang@8.140.193.104:7110",
-               "https://":"http://amos:mrliang@8.140.193.104:7110"}        
-    with httpx.Client(proxies=proxies) as client:
-        response = client.get(url, params=params, headers=headers, cookies=None)
-        # print(response.text)  
-        if return_text:
-            return response.text
-        json_data = json.loads(response.text)      
-        return json_data    
+    response = httpx_client.get(url, params=params, headers=headers, cookies=None)
+    # print(response.text)  
+    if return_text:
+        return response.text
+    json_data = json.loads(response.text)      
+    return json_data    
 
 def fetch_with_request(url,params):
     r = requests.get(url, timeout=15, params=params, headers={'Connection':'close'})

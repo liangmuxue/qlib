@@ -36,9 +36,7 @@ class ExtDataMod(AbstractMod):
         self.env = env
         ds = FuturesDataSourceSql(env.config.base.data_bundle_path,stock_data_path=env.config.extra.stock_data_path,
                             sim_path=env.config.extra.stock_data_path,frequency_sim=env.config.base.frequency_sim)
-        simdata_date = env.config.extra.simdata_date
         # 根据配置日期加载主力合约数据
-        # ds.load_sim_data(simdata_date)
         env.set_data_source(ds)
 
     def tear_down(self, code, exception=None):
@@ -145,7 +143,7 @@ class ExtDataMod(AbstractMod):
         target_df = trade_data_df[trade_data_df["status"]==ORDER_STATUS.FILLED]
         # 遍历开仓单，并匹配对应的平仓单，进行相关计算
         open_df = target_df[target_df["position_effect"]==POSITION_EFFECT.OPEN]
-        new_columns = ['trade_date','order_book_id','quantity','price'] + FUTURE_TRADE_EXT_COLUMNS
+        new_columns = ['trade_date','order_book_id','side','quantity','price'] + FUTURE_TRADE_EXT_COLUMNS
         stat_data = []
         for index,row in open_df.iterrows():
             open_order_id = row['order_id']
@@ -171,7 +169,7 @@ class ExtDataMod(AbstractMod):
             close_day = row_close["trade_date"]
             close_day = date_string_transfer(close_day,direction=2)
             duration = tradedays(open_day,close_day)
-            new_row = [row_close['trade_date'],row_close['order_book_id'],row_close['quantity'],row_close['price'],open_price,differ_range,gain,open_day,duration]
+            new_row = [row_close['trade_date'],row_close['order_book_id'],row["side"],row_close['quantity'],row_close['price'],open_price,differ_range,gain,open_day,duration]
             stat_data.append(new_row)
         stat_df = pd.DataFrame(np.array(stat_data),columns=new_columns)
         # 按照盈亏排序
@@ -296,8 +294,8 @@ if __name__ == "__main__":
     ext_mod = ExtDataMod()
     file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/trade_data.csv"
     stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/stat_data.csv"
-    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/05/trade_data.csv"
-    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/05/stat_data.csv"
+    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/trade_data.csv"
+    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"
     # file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/trade_data.csv"
     # stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"    
     # ext_mod.analysis_stat_offline(file_path,stat_path)

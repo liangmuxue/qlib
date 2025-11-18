@@ -82,7 +82,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataStep3_rsvRankWithoutGrad_202503"
+               model_name: "Futures_cleanDataStep2_rsvRankWithoutGrad_202503"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -90,7 +90,7 @@ task:
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
-               forecast_horizon: &forecast_horizon 3
+               forecast_horizon: &forecast_horizon 2
                cut_len: 27
                dropout: 0.5
                past_split: [[0,15]]

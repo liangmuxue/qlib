@@ -43,7 +43,7 @@ from darts_pro.tft_futures_dataset import TFTFuturesDataset
 from cus_utils.common_compute import compute_price_class
 import cus_utils.global_var as global_var
 from cus_utils.db_accessor import DbAccessor
-from trader.utils.date_util import get_tradedays_dur,get_tradedays
+from trader.utils.date_util import get_tradedays_dur,get_tradedays,get_next_month
 from .tft_process_dataframe import TftDataframeModel 
 from darts_pro.data_extension.series_data_utils import StatDataAssis
 from sklearn.preprocessing import MinMaxScaler
@@ -103,7 +103,10 @@ class FuturesProcessModel(TftDataframeModel):
             return       
         if self.type.startswith("build_val_result"):
             self.build_val_result(dataset)
-            return                               
+            return    
+        if self.type.startswith("batch_pred_bidi"):
+            self.batch_pred_bidi(dataset)
+            return                                      
         print("Do Nothing")
 
     def fit_futures_togather(
@@ -1012,4 +1015,58 @@ class FuturesProcessModel(TftDataframeModel):
         print("total yield:{}".format(import_price_result["yield_rate"].sum()))
         return import_price_result    
            
-                        
+    def batch_pred_bidi(self,dataset):   
+        """批量推理，并生成整合后结果"""
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        if not os.path.exists(self.batch_file_path):
+            os.mkdir(self.batch_file_path)
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        model_path = self.optargs["model_path"]
+        entries = os.listdir(model_path)
+        subdirectories = []
+        for entry in entries:
+            full_path = os.path.join(model_path, entry)
+            if os.path.isdir(full_path):
+                subdirectories.append(entry)
+        
+        total_results = []
+        for sub_path in subdirectories:
+            model_name = "step"
+            # 拼接对应的模型目录
+            work_dir = os.path.join(model_path,sub_path)
+            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+            global_var.set_value("load_ass_data",False)
+            global_var.set_value("save_ass_data",False)  
+            device = self._build_device()
+            best_weight = self.optargs["best_weight"]    
+            # 获取模型父路径，并遍历分别获得每个推理需要使用的模型
+            model = FuturesModel.load_from_checkpoint(model_name,work_dir=work_dir,device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(model,model_name=model_name)  
+            model.batch_size = self.batch_size     
+            model.mode = "pred_result"
+            model.model.mode = "pred_result"             
+            # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
+            trainer,model_real,train_loader,val_loader = model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)
+            model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            trainer.validate(model=model_real,dataloaders=val_loader)    
+            # 推理后保留当前子模型下一个月份的数据，作为实际结果数据
+            mode_month_date = datetime.datetime.strptime(str(sub_path), "%Y%m")  
+            next_month = get_next_month(mode_month_date).strftime("%Y%m")
+            result_view_file_path = model.model.result_view_file_path
+            coll_result = pd.read_csv(result_view_file_path)
+            coll_result = coll_result[coll_result['date'].astype(str).str[:6]==next_month]
+            total_results.append(coll_result)
+        total_results = pd.concat(total_results)
+        total_results = total_results[['date','pred_trend', 'top_index', 'instrument', 'diff_range']] 
+        save_path = os.path.join(self.optargs["work_dir"],"total_coll_results.csv")
+        total_results.to_csv(save_path,index=False)
+        
+                         

@@ -2,6 +2,7 @@ from data_extract.his_data_extractor import HisDataExtractor
 from cus_utils.http_capable import TimeoutHTTPAdapter
 from data_extract.his_data_extractor import HisDataExtractor,PeriodType,MarketType
 
+import httpx
 import copy
 import re
 import time
@@ -728,29 +729,37 @@ class AkFuturesExtractor(FutureExtractor):
         # 筛选合适的数据
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0 order by code asc"
         result_rows = self.dbaccessor.do_query(variety_sql)       
-        # 遍历所有品种，并分别取得历史数据,只需要取得下一天上午的数据
-        for result in result_rows:
-            code = result[0]
-            # 取得比较接近的合约
-            contract_names = self.get_likely_main_contract_names(code,cur_date)
-            for contract_name in contract_names:
-                status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=contract_name, period="1")
-                # 如果频繁调用限制，则等一会儿再试
-                if status_code==-1:
-                    print("try again later")
-                    time.sleep(60)
-                    status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=contract_name, period="1")
-                if status_code==0:
-                    print("contract {} has no data".format(contract_name))
-                    continue                    
-                if futures_zh_minute_sina_df.shape[0]>0:
-                    futures_zh_minute_sina_df['code'] = contract_name
-                    futures_zh_minute_sina_df = futures_zh_minute_sina_df.reset_index(drop=True)
-                    # 存储到文件
-                    item_save_path = os.path.join(self.get_1min_save_path(),"{}.csv".format(contract_name))
-                    futures_zh_minute_sina_df.to_csv(item_save_path,index=None)
-                time.sleep(5)
-            logger.info("store_1min_data,code:{} ok".format(code))        
+        proxies = {"http://":"http://amos:mrliang@8.140.193.104:7110",
+                   "https://":"http://amos:mrliang@8.140.193.104:7110"}   
+        # Using Httpx Client Outer  
+        limits=httpx.Limits(max_keepalive_connections=5, max_connections=5)   
+        client = httpx.Client(proxies=proxies,limits=limits)      
+        try: 
+            # 遍历所有品种，并分别取得历史数据,只需要取得下一天上午的数据
+            for result in result_rows:
+                code = result[0]
+                # 取得比较接近的合约
+                contract_names = self.get_likely_main_contract_names(code,cur_date)
+                for contract_name in contract_names:
+                    status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=contract_name, period="1",httpx_client=client)
+                    # 如果频繁调用限制，则等一会儿再试
+                    if status_code==-1:
+                        print("try again later")
+                        time.sleep(60)
+                        status_code,futures_zh_minute_sina_df = futures_zh_minute_sina(symbol=contract_name, period="1")
+                    if status_code==0:
+                        print("contract {} has no data".format(contract_name))
+                        continue                    
+                    if futures_zh_minute_sina_df.shape[0]>0:
+                        futures_zh_minute_sina_df['code'] = contract_name
+                        futures_zh_minute_sina_df = futures_zh_minute_sina_df.reset_index(drop=True)
+                        # 存储到文件
+                        item_save_path = os.path.join(self.get_1min_save_path(),"{}.csv".format(contract_name))
+                        futures_zh_minute_sina_df.to_csv(item_save_path,index=None)
+                    time.sleep(5)
+                logger.info("store_1min_data,code:{} ok".format(code))      
+        finally:
+            client.close()  
         
     def get_last_minutes_data(self,symbol):
         """取得指定品种最近一分钟数据"""
@@ -946,8 +955,10 @@ if __name__ == "__main__":
     # extractor.import_variety_trade_schedule()    
     # 导入主力连续历史数据
     # extractor.import_his_data()
+    # 导入1m历史数据
+    extractor.store_1min_data()
     # 合并生成主力连续历史数据
-    extractor.combine_continues_data(data_range=[20251015,20251107])
+    # extractor.combine_continues_data(data_range=[20251015,20251107])
     # 导入历史拓展数据
     # extractor.import_extension_data()
     # 生成行业板块历史行情数据

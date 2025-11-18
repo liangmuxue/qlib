@@ -498,6 +498,20 @@ class FuturesDataSource(BaseDataSource):
             return True
         return False
 
+    def is_spec_trading_time(self,trading_date):
+        """检查是否特殊交易日期时间，即节假日头一天的晚盘没有数据，和周末晚盘不一样"""
+        
+        has_night_variaties = ['CU','NI','C']
+        prev_date = get_prev_working_day(trading_date)
+        # 通过抽检几个具备晚盘的品种，如果晚盘没有数据，则说明为特殊交易日期
+        check_time = prev_date.strftime("%Y-%m-%d") + " 21:01:00"
+        for item in has_night_variaties:
+            sql = "select count(*) from dominant_real_data_1min where code like '{}____' and datetime='{}'".format(item,check_time)
+            cnt = self.dbaccessor.do_query(sql)[0][0]
+            if cnt>0:
+                return False
+        return True
+    
     def is_trade_opening_for_contract(self,order_book_id,trading_dt):
         
         symbol_obj = self.get_trading_variety_info(order_book_id)

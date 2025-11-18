@@ -52,8 +52,8 @@ class PredResultProcessor(BaseProcessor):
         model_template["kwargs"]["batch_file_path"] = os.path.join(asis_path,self.wf_task.get_matched_batchfile_name(working_day,
                                                                     task_type=CommonDictEnum.WORK_TYPE__PRED.value)) 
         record_template["kwargs"]["pred_data_path"] = self.wf_task.get_dumpdata_path()
-        # 设置模型路径,根据当前日期所在月份，向前倒推2个月
-        target_month = get_months_ago(cur_date,2)
+        # 设置模型路径,根据当前日期所在月份，向前倒推1个月
+        target_month = get_months_ago(cur_date,1)
         train_sub_path = target_month
         model_template["kwargs"]["optargs"]["work_dir"] = os.path.join(self.wf_task.get_model_path(),train_sub_path) 
         # 设置中间结果路径
