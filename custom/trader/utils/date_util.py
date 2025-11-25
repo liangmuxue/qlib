@@ -219,3 +219,19 @@ def get_trade_min_dur(trade_time,period_number=5):
     # day_item_number = 4 * 60 / period_number
     # dur_number = day_item_number - dur_number
     return int(dur_number)
+
+def get_nowtime_working_day():
+    """取得当前交易日期，注意从15点开始，就算作下一交易日"""
+    
+    now_time = datetime.now()
+    now_date = now_time.date()
+    # 如果当日为非工作日，则返回下一个工作日
+    if not is_working_day(now_time.strftime("%Y%m%d")):
+        return get_next_working_day(now_date)
+    
+    if (now_time.hour<15):
+        return now_date
+    next_day = get_next_working_day(now_date)
+    
+    return next_day
+

@@ -7,6 +7,7 @@ import numpy as np
 from rqalpha.environment import Environment
 from rqalpha.apis import cal_style
 
+from cus_utils.data_aug import DictToObject
 from trader.rqalpha.strategy_class.backtest_base import SellReason
 from trader.utils.constance import OrderStatusType
 from trader.emulator.portfolio import Portfolio,SimOrder
@@ -15,11 +16,13 @@ from rqalpha.core.events import Event
 from trader.rqalpha.core.event import EVENT
 from trader.emulator.futures_backtest_strategy import FurBacktestStrategy,POS_COLUMNS
 from trader.rqalpha.dict_mapping import transfer_futures_order_book_id,transfer_instrument
-from trader.utils.date_util import tradedays,get_tradedays_dur
+from trader.utils.date_util import tradedays,get_tradedays_dur,get_prev_working_day,get_next_working_day
 from rqalpha.const import ORDER_STATUS,SIDE,POSITION_EFFECT,POSITION_DIRECTION,DEFAULT_ACCOUNT_TYPE
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
+
+SIM_POS_COLUMNS = POS_COLUMNS + ['margin']
 
 class FurSimulationStrategy(FurBacktestStrategy):
     """仿真交易策略，分钟级别，继承回测基类"""
@@ -29,7 +32,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.proxy_name = proxy_name
         
         # 设置策略模拟仓位，用于策略逻辑判断
-        self.sim_position = pd.DataFrame(columns=POS_COLUMNS)   
+        self.sim_position = pd.DataFrame(columns=SIM_POS_COLUMNS)   
         self.contract_today = {}
         self.prev_side = SIDE.BUY
 
@@ -63,15 +66,17 @@ class FurSimulationStrategy(FurBacktestStrategy):
         
         self.logger_info("before_trading.now:{}".format(context.now))
         
-        cur_date = context.now.date()
-        self.trade_day = int(cur_date.strftime('%Y%m%d'))
+        keep_day_number = self.strategy.keep_day_number
+        cur_date = context.trade_date.strftime("%Y%m%d")
+        self.trade_day = int(cur_date)
+        # 检查是否特殊交易时间
+        self.spec_trading_time = self.data_source.is_spec_trading_time(context.trade_date)        
         env = Environment.get_instance()
-        
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
+        
         # 加载当日可以交易的合约品种
         self.data_source.load_all_contract(cache_mode=True)
-        # 根据开仓数量配置，设置开仓列表
-        position_max_number = self.strategy.position_max_number
+        # 设置开仓列表
         self.open_list = {} 
         self.close_list = {}  
                 
@@ -94,10 +99,13 @@ class FurSimulationStrategy(FurBacktestStrategy):
         # 初始化当日合约对照表
         self.date_trading_mappings = self.data_source.build_trading_contract_mapping(context.now)        
         # 根据当前日期，进行预测计算
-        context.ml_context.prepare_data(pred_date)        
+        context.ml_context.prepare_data(pred_date)   
+            
         # 根据预测计算，筛选可以买入的品种
         candidate_list = self.get_candidate_list(pred_date,context=context)
-        # candidate_list = [(0,"P"),(0,"FG"),(0,"FB")]
+        # candidate_list = [(0,"B"),(0,"M"),(1,"OI"),(1,"MA"),(0,"P"),(0,"FG"),(1,"FB"),(1,"A")]
+        # candidate_list = [(0,"SN"),(0,"SS"),(1,"FB"),(1,"RU")]
+        # candidate_list = []
         
         self.lock_list = {}        
         candidate_order_list = {}  
@@ -107,10 +115,10 @@ class FurSimulationStrategy(FurBacktestStrategy):
         positions = self.get_positions()
         pos_number = len(positions)
         # 由于当前可能已经进入交易时间了，因此首先查找当日订单，并维护相关数据
-        exists_orders = self.trade_entity.get_exits_order_list(context.now.date().strftime("%Y%m%d"))
+        exists_orders = self.trade_entity.get_exits_order_list(context.trade_date.strftime("%Y%m%d"))
         exists_order_ids = {}
         for index,row in exists_orders.iterrows():
-            pos = self.get_position(row['order_book_id'])
+            pos = self.get_position(row['order_book_id'],trade_date=context.trade_date)
             # 除了品种代码一致外，方向也需要一致
             if pos is None:
                 # 如果不在持仓中，才累加pos总数
@@ -134,14 +142,16 @@ class FurSimulationStrategy(FurBacktestStrategy):
             order_book_id = self.data_source.transfer_futures_order_book_id(instrument,datetime.datetime.strptime(str(pred_date), '%Y%m%d'))
             # 如果已在订单中，则忽略
             if order_book_id in exists_order_ids and trend==exists_order_ids[order_book_id]:
-                continue            
+                continue         
+            # 如果已在当日持仓中，则忽略  
+            if self.is_today_position(order_book_id):
+                continue
             # 以昨日收盘价格作为当前卖盘价格
-            h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="settle")
+            h_bar = self.data_source.history_bars(order_book_id,1,"1d",dt=context.now,fields="close")
             if h_bar is None:
                 logger.warning("history bar None:{},date:{}".format(order_book_id,context.now))
                 continue
             price = h_bar[0]
-            
             # 根据多空标志决定买卖方向
             if trend==1:
                 side = SIDE.BUY
@@ -149,23 +159,37 @@ class FurSimulationStrategy(FurBacktestStrategy):
                 side = SIDE.SELL
             # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）,仓位类型为开仓
             order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.OPEN)
+            # 如果正好是已有仓位的反向指标，则直接挂平仓单
+            inverse_direction = POSITION_DIRECTION.LONG if order.position_direction==POSITION_DIRECTION.SHORT else POSITION_DIRECTION.SHORT
+            match_pos = self.match_positions(instrument,inverse_direction)
+            for index,row in match_pos.iterrows():
+                amount = row['quantity']
+                # 开仓编号对照
+                open_order_id = row['order_id']
+                order = self.create_order(order_book_id, amount, side,price,position_effect=POSITION_EFFECT.CLOSE,open_order_id=open_order_id,
+                                    close_reason=SellReason.PRED.value,context=context)
+                self.append_to_close_list(order)      
+                continue              
             # 对于开仓候选品种，如果已持仓当前品种，则进行锁仓
-            if self.get_position(order_book_id) is not None:
-                self.lock_list[order_book_id] = order        
-                continue               
-            # 加入到候选开仓订单
-            candidate_order_list[order_book_id] = order
+            match_pos = self.match_positions(instrument,order.position_direction)
+            lock_flag = False
+            for index,row in match_pos.iterrows():
+                order_book_id = row['order_book_id']
+                trade_date = row['trade_date'].strftime("%Y%m%d")
+                now_date = context.trade_date.strftime("%Y%m%d")
+                dur_days = tradedays(trade_date,now_date)
+                # 在模拟中，锁仓锁的是合约号，不是开仓单号
+                if dur_days>=keep_day_number:
+                    self.lock_list[row['order_book_id']] = trade_date   
+                    # 更新本地仓位中的交易日期为当前日期，用于后续超期判断
+                    self.update_sim_positions_date(order_book_id, trade_date, context.trade_date)
+                    lock_flag = True 
+            # 加入到候选开仓订单,注意已锁仓的就不开仓了
+            if not lock_flag:
+                candidate_order_list[order.order_book_id] = order
             
         # 开仓候选的订单信息，保存到上下文
         self.candidate_list = candidate_order_list   
-                    
-        # 循环从候选中取数，直到取完或者超出开仓数量为止
-        while pos_number<position_max_number and len(self.candidate_list)>0:
-            order_book_id = order.order_book_id
-            # 依次从候选中选取对应品种并放入开仓列表
-            candidate_order = self.get_next_candidate()
-            if candidate_order is not None:
-                pos_number += 1
         
         # 生成热加载数据，提升查询性能
         if self.strategy.building_hot_data:
@@ -183,14 +207,11 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.order_process(context)
          
     def handle_bar(self,context, bar_dict):
-        """主要的算法逻辑入口"""
+        """主要的算法逻辑入口,首先进行撮合，然后进行策略"""
         
         self.logger_info("handle_bar.now:{}".format(context.now))
         
         self.query_position()
-        
-        # 首先进行撮合，然后进行策略
-        env = Environment.get_instance()
         
         # 已提交订单检查，包括开仓和平仓
         self.verify_order_closing(context)
@@ -211,13 +232,13 @@ class FurSimulationStrategy(FurBacktestStrategy):
         """挂单流程，先平仓后开仓"""
         
         self.close_order(context)
+        self.pick_to_open_list()
         self.open_order(context) 
 
-    def submit_order(self,amount,order_in=None):
+    def submit_order(self,amount,order_in=None,context=None):
         """代理api的订单提交方法"""
         
         order_book_id = order_in.order_book_id
-        env = Environment.get_instance()
         order_in._quantity = int(amount)
 
         if self.can_submit_order(order_book_id):
@@ -252,7 +273,27 @@ class FurSimulationStrategy(FurBacktestStrategy):
         self.context.get_trade_proxy().cancel_order(order)
                 
     ###############################数据逻辑处理部分########################################  
-    
+
+    def pick_to_open_list(self):
+        """从候选列表中挑选到开仓列表"""
+                        
+        position_max_number = self.strategy.position_max_number
+        position_number = len(self.get_sim_positions())
+        while True:
+            # 检查是否超出数量限制时，需要包含已提交订单数量
+            active_open_list_size = len(self.open_list)
+            # 同时计算提交的平仓数量，即允许暂时超出数量限制，先开仓后平仓，当日达到数量平衡即可
+            active_close_list_size = len(self.close_list)
+            # 已持仓订单数量，不能大于规定数量阈值 
+            if position_number+active_open_list_size-active_close_list_size>=position_max_number:
+                self.logger_info("full pos")
+                break
+            # 依次从候选中选取对应品种并放入开仓列表
+            candidate_order = self.pop_next_candidate()
+            if candidate_order is None:
+                self.logger_info("no candidate")
+                break   
+                
     def sync_portfolio(self,date,por_info):
         """ctp数据同步到投资组合"""
         
@@ -268,9 +309,44 @@ class FurSimulationStrategy(FurBacktestStrategy):
         balance = account['balance']
             
         portfolio = Portfolio(balance,frozen,margin,positions,financing_rate,trade_date=date,data_proxy=env.data_proxy,persis_path=persis_path)
+        # 同步到本地持仓存储
+        self.sync_to_sim_position(positions)
+        # Mock Position Data
+        if self.context.config.mod.ext_emulation_mod.mock_simulation:
+            self.mock_sim_position()            
         return portfolio
  
-    def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None,try_cnt=0):
+    def sync_to_sim_position(self,positions):
+        
+        sim_position = []
+        for pos in positions:
+            side = SIDE.BUY if pos.direction==POSITION_DIRECTION.LONG else SIDE.SELL
+            # 根据持仓数据，判断持仓日期,分为：当日，昨日，超出昨日就前推2天
+            if pos.TodayPosition==pos.Position:
+                trade_date = self.context.trade_date
+            elif pos.YdPosition==pos.Position:
+                trade_date = get_prev_working_day(self.context.trade_date)
+            else:
+                trade_date = get_prev_working_day(get_prev_working_day(self.context.trade_date))
+            item = pd.DataFrame(np.array([[pos.order_book_id,pos.quantity,side,
+                            pos.direction,pos.last_price,trade_date,datetime.datetime.now(),None,pos.margin]]),columns=SIM_POS_COLUMNS)
+            sim_position.append(item)
+        if len(sim_position)==0:
+            return 
+        # 直接时添加到仓位记录，不合并之前已有的
+        sim_position = pd.concat(sim_position)    
+        sim_position['trade_date'] = sim_position['trade_date'].astype('datetime64[ns]')
+        self.sim_position = sim_position
+        
+    def mock_sim_position(self):
+        self.sim_position = self.sim_position.sort_values(by='order_book_id')
+        # mid_book_id = self.sim_position.iloc[3]['order_book_id']
+        # self.sim_position.loc[self.sim_position['order_book_id']<=mid_book_id,'trade_date'] = datetime.datetime.strptime("20251121", "%Y%m%d")
+        # self.sim_position.loc[self.sim_position['order_book_id']>mid_book_id,'trade_date']  = datetime.datetime.strptime("20251124", "%Y%m%d")
+        self.sim_position.loc[self.sim_position['order_book_id'].isin(['A2601','B2601','M2601']),'trade_date'] = datetime.datetime.strptime("20251121", "%Y%m%d")
+        self.sim_position['trade_date'] = self.sim_position['trade_date'].astype('datetime64[ns]')
+    
+    def create_order(self,id_or_ins, amount, side,price, position_effect=None,close_reason=None,try_cnt=0,open_order_id=None,context=None):
         """代理api的订单创建方法"""
         
         order_book_id = id_or_ins
@@ -288,9 +364,11 @@ class FurSimulationStrategy(FurBacktestStrategy):
             position_effect=position_effect,
             # 自定义属性
             price=price,
+            trade_date=self.context.trade_date,
             multiplier=multiplier,
             try_cnt=try_cnt, 
             close_reason=close_reason,  
+            open_order_id=open_order_id,
             need_resub=False, 
             exchange_id=exchange_code      
         )   
@@ -328,7 +406,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
             if order.position_effect==POSITION_EFFECT.CLOSE and order.status!=ORDER_STATUS.CANCELLED:
                 trade_day = order.trading_datetime.strftime("%Y%m%d")
                 # 确认是否有持仓
-                if self.get_position(order.order_book_id) is None:
+                if self.get_position(order.order_book_id,trade_date=date) is None:
                     continue
                 # 忽略当天的平仓
                 if trade_day==date.strftime("%Y%m%d"):
@@ -362,7 +440,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
 
         env = Environment.get_instance()
         # 如果还没有开盘，取上一交易日数据，否则取上一交易时间段数据
-        if self.is_trade_opening(env.trading_dt):
+        if self.is_trade_opening(env.trading_dt,order_book_id):
             bar = self.data_source.get_last_bar(order_book_id,env.trading_dt)
         else:
             prev_day = get_tradedays_dur(env.trading_dt, -1)
@@ -384,38 +462,75 @@ class FurSimulationStrategy(FurBacktestStrategy):
         if pos.order_book_id==exists_order.order_book_id and pos.position_effect==exists_order.position_effect:
             return True
         return False
+
+    def is_in_lock(self,pos):
+        """判断是否锁仓，使用合约号加日期进行判断"""
         
-    def get_position(self,order_book_id):
-        """取得指定品种的持仓信息，使用当前策略维护的仓位数据"""
+        if not pos.order_book_id in self.lock_list:
+            return False
+        return True
+          
+    def is_today_position(self,order_book_id):  
         
-        for pos in self.get_positions():
-            if pos.order_book_id==order_book_id:
-                return pos
-        return None
-       
+        trade_date = self.context.trade_date
+        sim_position = self.sim_position
+        if sim_position.shape[0]==0:
+            return False
+        try:
+            pos = sim_position[(sim_position['order_book_id']==order_book_id)&(sim_position['trade_date'].dt.strftime("%Y%m%d")==trade_date.strftime("%Y%m%d"))]
+        except Exception:
+            print("eee")
+        if pos.shape[0]>0:
+            return True
+        return False
+
+    def get_position_by_order(self,order):
+        """取得指定合约的持仓信息"""
+        
+        keep_day_number = self.strategy.keep_day_number
+        # 使用订单对应的合约编号查询
+        order_book_id = order.order_book_id
+        sim_position = self.sim_position
+        # 根据当前日期前推到之前的日期，并查询
+        pos_date = self.context.trade_date
+        for _ in range(keep_day_number):
+            pos_date = get_prev_working_day(pos_date)
+        pos = sim_position[(sim_position['order_book_id']==order_book_id)&(sim_position['trade_date'].dt.strftime("%Y%m%d")==pos_date.strftime("%Y%m%d"))]
+        if pos.shape[0]==0:
+            return None
+        dict_data = pos.iloc[0].to_dict()
+        pos_obj = DictToObject(dict_data)          
+        return pos_obj
+      
     def get_positions(self):
         """取得持仓信息"""
+
+        # 使用本地记录仓位信息
+        sim_position = self.sim_position
+        positions = []
+        for index,pos in sim_position.iterrows():
+            dict_data = pos.to_dict()
+            pos_obj = DictToObject(dict_data)  
+            positions.append(pos_obj)
+       
+        return positions
+
+    def get_positions_real(self):
+        """取得远程实际持仓信息"""
     
         env = Environment.get_instance()
         return env.portfolio.get_positions()
-    
-    def get_ava_positions(self):
-        """取得当日可以买卖的持仓信息"""
         
-        # 直接使用所有品种
-        positions = self.get_positions()
-        return positions
+    def is_trade_opening(self,dt,order_book_id):
+        """检查当前是否已开盘"""
         
-        # env = Environment.get_instance()
-        # cur_date = self.trade_day
-        # positions = []
-        # for pos in self.get_positions():
-        #     # 如果当日无数据，则忽略
-        #     if self.has_current_data(cur_date,pos.order_book_id,mode="symbol"):
-        #         positions.append(pos)
-        # return positions 
+        # 强制模拟交易模式
+        if self.context.config.mod.ext_emulation_mod.force_trade_mode:
+            return True
+        
+        return self.data_source.is_trade_opening_for_contract(order_book_id,dt)
            
-    def has_current_data(self,date,code,mode="instrument"):
+    def has_current_data(self,date,code,mode="contract"):
         """当日是否开盘交易,使用懒加载缓存模式"""
 
         if mode=="instrument":
@@ -450,16 +565,29 @@ class FurSimulationStrategy(FurBacktestStrategy):
     ############################事件注册部分######################################
     
     def on_trade_handler(self,event):
-        
-        context = self.context
-        super().on_trade_handler(context, event)         
+        trade = event.trade
+        order = event.order
+        account = event.account
+        account.get_positions()
+        self.logger_debug("on_trade_handler in,order:{},trade:{}".format(order,trade))
+        # 保存成单交易对象
+        self.trade_entity.add_trade(trade,multiplier=order.kwargs['multiplier'],order=order,context=self.context)
+        # 修改当日仓位列表中的状态为已成交
+        self.update_order_status(order,ORDER_STATUS.FILLED,side=order.side, context=self.context)     
+        # 从开仓或平仓列表中删除
+        if order.position_effect==POSITION_EFFECT.OPEN:
+            self.remove_from_open_list(order.order_book_id)
+        else:
+            self.remove_from_close_list(order.order_book_id)
+        # 维护仓位数据
+        self.apply_trade_pos(trade,order)     
     
     def on_order_handler(self,event):
         
         context = self.context
         super().on_order_handler(context, event)    
                     
-    def apply_trade_pos(self,trade):
+    def apply_trade_pos(self,trade,order):
         """维护仓位数据，使用事件通知模式，以避免查询异步失败问题"""
         
         logger.info("apply_trade_pos in")
@@ -482,7 +610,7 @@ class FurSimulationStrategy(FurBacktestStrategy):
         """清空所有持仓"""
         
         # 遍历仓位，并执行平仓单
-        for pos in self.get_positions():
+        for pos in self.get_positions_real():
             order_book_id = pos.order_book_id
             side = SIDE.BUY if pos.direction==POSITION_DIRECTION.SHORT else SIDE.SELL
             # 取值需要低于当前行情，以保证成交

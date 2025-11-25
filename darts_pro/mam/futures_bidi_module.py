@@ -74,7 +74,7 @@ class FuturesBidiModule(MlpModule):
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
         self.train_step_mode = train_step_mode
         # 任务初始权重
-        self.task_weights = torch.tensor([0.8, 0.2])  
+        self.task_weights = torch.tensor([0.9, 0.1])  
                 
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,

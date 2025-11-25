@@ -93,7 +93,7 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["order_book_id"]==order_book_id)
                                   &(trade_data_df["side"]==trade_side)&
-                                  (trade_data_df["trade_datetime"]<=pd.to_datetime(before_date))]
+                                  (trade_data_df["trade_date"]<=pd.to_datetime(before_date))]
         if target_df.shape[0]==0:
             return None
         # 取得最后一个交易
@@ -105,7 +105,7 @@ class TradeEntity():
         if self.trade_data_df.shape[0]==0:
             return self.trade_data_df
         # 查询已报单的活动中状态的记录
-        target_df = self.trade_data_df[(self.trade_data_df["trade_datetime"].dt.strftime('%Y%m%d') ==trade_date)&
+        target_df = self.trade_data_df[(self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)&
                                        (self.trade_data_df["status"]==ORDER_STATUS.ACTIVE)]
         return target_df  
         
@@ -117,7 +117,7 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.SELL)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
-                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]      
+                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]      
         else:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.SELL)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]                  
         return target_df  
@@ -130,7 +130,7 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
-                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]       
+                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]       
         else:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]             
         return target_df  
@@ -143,7 +143,7 @@ class TradeEntity():
         trade_data_df = self.trade_data_df
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)&
-                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]       
+                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]       
         else:
             target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["status"]==ORDER_STATUS.REJECTED)]             
         return target_df  
@@ -155,7 +155,7 @@ class TradeEntity():
             return self.trade_data_df
         trade_data_df = self.trade_data_df
         target_df = trade_data_df[(trade_data_df["side"]==SIDE.BUY)&(trade_data_df["side"]==SIDE.BUY)&
-                                  (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)&
+                                  (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)&
                         ((trade_data_df["status"]==ORDER_STATUS.ACTIVE)|(trade_data_df["status"]==ORDER_STATUS.FILLED))]             
         return target_df    
     
@@ -168,7 +168,7 @@ class TradeEntity():
         
         if not os.path.exists(file_path):
             return None
-        trade_data = pd.read_csv(file_path,parse_dates=['trade_datetime'],infer_datetime_format=True)  
+        trade_data = pd.read_csv(file_path,parse_dates=['trade_date'],infer_datetime_format=True)  
         self.sys_orders = {}    
         # 追加到系统订单信息中
         for index,row in trade_data.iterrows():   

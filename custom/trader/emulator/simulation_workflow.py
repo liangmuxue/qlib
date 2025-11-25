@@ -12,7 +12,7 @@ from rqalpha.data.bar_dict_price_board import BarDictPriceBoard
 from data_extract.rqalpha.fur_ds_proxy import FurDataProxy
 from cus_utils.data_aug import DictToObject
 from qlib.utils import init_instance_by_config
-from trader.utils.date_util import tradedays
+from trader.utils.date_util import get_next_working_day,get_nowtime_working_day
 from trader.emulator.qidian.futures_proxy_ctp import CtpFuturesTrade
 from trader.emulator.futures_real_ds import FuturesRealDataSource
 
@@ -25,7 +25,7 @@ class Executor(threading.Thread):
     def __init__(self, trade_date,env=None,wait_time=3):
         threading.Thread.__init__(self)
         
-        self.trade_date = trade_date
+        self.trade_date = datetime.strptime(str(env.working_day), "%Y%m%d").date()
         self.env = env
         self.wait_time = wait_time
         # 预定义事件集合
@@ -54,14 +54,17 @@ class Executor(threading.Thread):
         if self.is_openning(now_time):
             self.event_Coll[EVENT.BAR] += 1
             return EVENT.BAR        
-        
+        # 交易结束事件
+        if now_time.hour>15 and self.event_Coll[EVENT.AFTER_TRADING]==0:
+            self.event_Coll[EVENT.AFTER_TRADING] = 1
+            return EVENT.AFTER_TRADING        
         return None
     
     def is_openning(self,cur_time):
         """判断是否开盘"""
         
         emu_channel = self.env.env.config.mod.ext_emulation_mod.emu_channel
-        # 24小时模拟韩静，则不区分是否开盘时间
+        # 24小时模拟环境，则不区分是否开盘时间
         if emu_channel=="futures_40001":
             return True
         # 9点-10点15，10:30--11:30,13:00--15:00
@@ -80,6 +83,10 @@ class Executor(threading.Thread):
         if cur_time>bar_time_begin and cur_time<bar_time_end:
             self.event_Coll[EVENT.BAR] += 1
             return True   
+        # 晚盘 21:00--2:30
+        if cur_time.hour>=21 or cur_time.hour<3:
+            self.event_Coll[EVENT.BAR] += 1
+            return True           
         return False
                             
     def run(self):
@@ -145,6 +152,7 @@ class SimulationWorkflow():
         
         logger.info("init in")
         self.sim_config = kwargs['simulation']
+        self.working_day = kwargs['working_day']
         # 使用qlib模式，动态类定义，以及传参
         self.strategy_class = init_instance_by_config(self.sim_config['strategy_class'])
         # 生成实际的策略类
@@ -213,6 +221,8 @@ class SimulationWorkflow():
             self.open_auction(bar_dict=None)
         elif event == EVENT.BEFORE_TRADING:
             self.before_trading()
+        elif event == EVENT.AFTER_TRADING:
+            self.after_trading()            
         else:
             # 其他的属于业务事件，异步响应模式
             env.event_bus.publish_event(event) 
@@ -220,11 +230,23 @@ class SimulationWorkflow():
     def before_trading(self):
         """交易前准备"""
         
-        context= self.context
+        context = self.context
+        
+        # 设置交易日期
+        context.trade_date = datetime.strptime(get_nowtime_working_day().strftime("%Y%m%d") + " 00:00:00","%Y%m%d %H:%M:%S")
+          
         if context.config.ignore_mode:
             return     
         self.strategy_class.before_trading(context)
-    
+
+    def after_trading(self):
+        """交易结束时的处理"""
+        
+        context= self.context
+        if context.config.ignore_mode:
+            return     
+        self.strategy_class.after_trading(context)
+            
     def handle_bar(self,bar_dict=None):
         """主要的算法逻辑入口"""
         
@@ -255,7 +277,7 @@ class SimulationWorkflow():
             # 开仓指定品种
             # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
-            # self.strategy_class.clear_position()
+            self.strategy_class.clear_position()
             self.strategy_class.clear_order()
             # self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
@@ -268,8 +290,5 @@ class SimulationWorkflow():
             # 检查持仓以及订单交易情况
             self.strategy_class.query_position()
             # self.strategy_class.query_trade()
-        
-        
-        
-        
+         
     

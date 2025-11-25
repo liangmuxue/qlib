@@ -70,6 +70,7 @@ class FurBacktestStrategy(SimStrategy):
         Environment.get_instance().set_data_proxy(data_proxy)    
         # 初始化交易代理对象
         emu_args = self.context.config.mod.ext_emulation_mod.emu_args
+        
         # 根据标志，决定是否清空目录下的历史交易记录
         if emu_args["clear_data"]:
             self.trade_entity.clear_his_data()
@@ -159,7 +160,7 @@ class FurBacktestStrategy(SimStrategy):
 
             # 复用rqalpha的Order类,注意默认状态为新报单（ORDER_STATUS.PENDING_NEW）,仓位类型为开仓
             order = self.create_order(order_book_id, 0, side,price,position_effect=POSITION_EFFECT.OPEN,context=context)
-            # 如果正好是已有仓位的反向指标，则直接挂平仓单(有可能有多条)
+            # 如果正好是已有仓位的反向指标，则直接挂平仓单
             inverse_direction = POSITION_DIRECTION.LONG if order.position_direction==POSITION_DIRECTION.SHORT else POSITION_DIRECTION.SHORT
             match_pos = self.match_positions(instrument,inverse_direction)
             for index,row in match_pos.iterrows():
@@ -193,15 +194,11 @@ class FurBacktestStrategy(SimStrategy):
         # 开仓候选的订单信息，保存到上下文
         self.candidate_list = candidate_order_list   
 
-        # 根据开仓数量配置，设置开仓列表
-        position_max_number = self.strategy.position_max_number
+        # 开仓列表
         self.open_list = {} 
         self.close_list = {}     
         # 撤单列表
         self.cancel_list = []        
-        # 综合候选品种以及当前已持仓品种，生成维护开仓和平仓列表
-        positions = self.get_sim_positions()
-        pos_number = len(positions)
         # 全局维护上一候选品种的买卖方向
         self.prev_side = SIDE.BUY
         
@@ -275,7 +272,8 @@ class FurBacktestStrategy(SimStrategy):
     def remove_from_close_list(self,order_book_id):
         """从平仓列表中删除指定品种"""
         
-        del self.close_list[order_book_id]
+        if order_book_id in self.close_list:
+            del self.close_list[order_book_id]
             
     def pick_to_open_list(self):
         """从候选列表中挑选到开仓列表"""
@@ -311,9 +309,13 @@ class FurBacktestStrategy(SimStrategy):
             self.logger_info("open order loop,order_book_id:{},status:{}".format(order.order_book_id,order.status))
             if order.status!=ORDER_STATUS.PENDING_NEW:
                 continue
-            # 以最近价格挂单买入
+            # 以开仓时的挂单价格买入,如果未设置则使用当前价格
             order_book_id = order.order_book_id
-            price = self.get_last_price(order_book_id)
+            if 'price' in order.kwargs:
+                price = order.kwargs['price']
+            else:
+                price = self.get_last_price(order_book_id)
+                order.kwargs['price'] = price
             # 由于节假日会导致前一交易日夜盘没有数据，在此规避
             if price is None:
                 continue
@@ -322,8 +324,6 @@ class FurBacktestStrategy(SimStrategy):
             # 实时计算单个品种购买的额度
             single_value = self.compute_build_quantity()
             quantity = int(single_value/price/multiplier)
-            # if price*quantity>30000:
-            #     print("nnn")
             # 资金不足时，不进行处理
             if quantity==0:
                 self.logger_info("volume exceed,order_book_id:{}".format(order_book_id))
@@ -346,7 +346,6 @@ class FurBacktestStrategy(SimStrategy):
         # 检查待卖出列表，匹配卖出
         for order in self.get_need_close_list():
             order_book_id = order.order_book_id
-            order_id = order.open_order_id
             # 如果是当日开仓的，则不处理
             if self.get_today_opened_order(order_book_id, context) is not None:
                 continue
@@ -354,12 +353,14 @@ class FurBacktestStrategy(SimStrategy):
             if not self.is_trade_opening(context.now, order_book_id):
                 self.logger_info("not in trading time:{},{}".format(order_book_id,context.now))
                 continue
-            pos_info = self.get_position(order_id)
+            pos_info = self.get_position_by_order(order)
             # 从待平仓列表中取得相关订单
             close_order = self.get_today_closed_order(order_book_id)
             # 只对待平仓状态进行挂单
             if close_order is not None and close_order.status==ORDER_STATUS.PENDING_NEW:
                 # 全部挂单
+                if pos_info is None:
+                    print("nnn")
                 amount = pos_info.quantity
                 # 挂单卖出
                 order = self.submit_order(amount,order_in=close_order)
@@ -608,13 +609,34 @@ class FurBacktestStrategy(SimStrategy):
                 
     def is_in_lock(self,pos):
         return pos.order_id in self.lock_list
-    
-    def get_position(self,order_id):
-        """取得指定合约的持仓信息，使用当前策略维护的仓位数据"""
+
+    def get_position_by_order(self,order):
+        """取得指定合约的持仓信息"""
         
-        # 通过代理类，取得仿真环境的数据
+        # 使用订单编号查询
+        return self.get_position_by_orderid(order.open_order_id)
+    
+    def get_position_by_orderid(self,order_id):
+        """取得指定合约的持仓信息，使用订单号查询"""
+        
+        # 使用本地记录仓位信息
         sim_position = self.sim_position
         pos = sim_position[sim_position['order_id']==order_id]
+        if pos.shape[0]!=1:
+            return None
+        dict_data = pos.iloc[0].to_dict()
+        pos_obj = DictToObject(dict_data)  
+        return pos_obj  
+       
+    def get_position(self,order_book_id,trade_date=None):
+        """取得指定合约的持仓信息，使用当前策略维护的仓位数据"""
+        
+        # 使用本地记录仓位信息
+        sim_position = self.sim_position
+        if trade_date is None:
+            pos = sim_position[sim_position['order_book_id']==order_book_id]
+        else:
+            pos = sim_position[(sim_position['order_book_id']==order_book_id)&(sim_position['trade_date'].dt.strftime("%Y%m%d")==trade_date.strftime("%Y%m%d"))]
         if pos.shape[0]!=1:
             return None
         dict_data = pos.iloc[0].to_dict()
@@ -731,10 +753,13 @@ class FurBacktestStrategy(SimStrategy):
     def is_trade_opening(self,dt,order_book_id):
         """检查当前是否已开盘"""
         
+        # 强制模拟交易模式
+        if self.context.config.mod.ext_emulation_mod.force_trade_mode:
+            return True
+        
         # 如果是节假日特殊交易时段，则直接返回"未开盘"
         if self.spec_trading_time and (dt.hour>=21 or dt.hour<3):
             return False
-            
         return self.data_source.is_trade_opening_for_contract(order_book_id,dt)
         
     def is_approch_closing(self):
@@ -798,7 +823,6 @@ class FurBacktestStrategy(SimStrategy):
     def can_submit_order(self,order_book_id):
         """重载父类方法，检查是否可以提交订单"""
         
-        env = Environment.get_instance()
         bar = self.get_last_or_prevday_bar(order_book_id)
         if bar is not None and not np.isnan(bar['open']):
             return True
@@ -844,7 +868,7 @@ class FurBacktestStrategy(SimStrategy):
                 order_rtn = order
         # 如果不在当日开仓列表中，再从存储中取，并懒加载
         if order_rtn is None:
-            order = self.trade_entity.get_open_order_active(context.trade_date.date().strftime("%Y%m%d"),order_book_id)
+            order = self.trade_entity.get_open_order_active(context.trade_date.strftime("%Y%m%d"),order_book_id)
             if order is not None and order.shape[0]>0:
                 order_rtn = self.create_order(order_book_id, order['quantity'], order['side'], order['price'], order['position_effect'],context=context)
                 self.open_list[order_book_id] = order_rtn
@@ -860,7 +884,7 @@ class FurBacktestStrategy(SimStrategy):
                 order_rtn = order
         # 如果不在当日平仓列表中，再从存储中取，并懒加载
         if order_rtn is None:
-            order = self.trade_entity.get_close_order_active(context.now.date().strftime("%Y%m%d"),order_book_id)
+            order = self.trade_entity.get_close_order_active(context.trade_date.strftime("%Y%m%d"),order_book_id)
             if order is not None and order.shape[0]>0:
                 close_reason = order['close_reason']
                 order_rtn = self.create_order(order_book_id, order['quantity'], order['side'],

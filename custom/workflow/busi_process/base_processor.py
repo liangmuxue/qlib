@@ -56,9 +56,10 @@ class BaseProcessor(object):
                 break
         return status
 
-    def _exe_task(self,task_config: dict):
+    def _exe_task(self,task_config: dict,working_day):
         rec = R.get_recorder()
         # model & dataset initiation
+        task_config["model"]['kwargs']['working_day'] = working_day
         model = init_instance_by_config(task_config["model"])
         if "dataset" not in task_config:
             # 如要用于非训练任务，独立的实时任务包括模拟盘以及实盘
@@ -124,7 +125,7 @@ class BaseProcessor(object):
                     exp_manager["kwargs"]["uri"] = "file:" + str(Path(os.getcwd()).resolve() / uri_folder)  
                     self.before_run(working_day=working_day)  
                     # 执行任务    
-                    results,model = self._exe_task(config.get("task"))
+                    results,model = self._exe_task(config.get("task"),working_day)
                     if results is not None:
                         # 透传整体模型变量，后续统一使用
                         global_var.set_value("model",model)

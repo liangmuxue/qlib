@@ -538,21 +538,21 @@ def get_dce_daily(date: str = "20220308") -> pd.DataFrame:
     if day.strftime("%Y%m%d") not in calendar:
         # warnings.warn("%s非交易日" % day.strftime("%Y%m%d"))
         return pd.DataFrame()
-    url = "http://www.dce.com.cn/dcereport/publicweb/dailystat/dayQuotes?VoGRv6Ir=09yk6ZalqWhDKcU20tqDi92k4ConNHqbT0yoUYdKiZo139alJWVnLF8Og0Tb8HVV.srdbD8hHePqjMARlaw16TnpkPq1Az8EE_iF00anxUljDBe3AAnOIUA"
+    url = "http://www.dce.com.cn/dcereport/publicweb/dailystat/dayQuotes?VoGRv6Ir=09NQyHAlqWkyaK0RbG.RVq1QVMVAzfKNjvgczfoQJ1oFnTAzayF2xfFlD7WSLu9mMhd7X_DTn2Pr18USRlATdmjIDYYT1NQgAYVkc078.foSMXZwWTgJqVG"
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "access-control-allow-origin-type": "*",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
-        # "Content-Length": "86",
+        "Clientid": "web",
         "Content-Type": "application/json",
         "Host": "www.dce.com.cn",
         "Origin": "http://www.dce.com.cn",
         "Pragma": "no-cache",
         "Referer": "http://www.dce.com.cn/frontend/dcereport/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/84.0.4147.105 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
     }
     params = {
         "varietyId": "all",
@@ -560,11 +560,12 @@ def get_dce_daily(date: str = "20220308") -> pd.DataFrame:
         "tradeDate": date,
         "contractId": "",
         "optionSeries": "",
+        "lang": "zh",
         "statisticsType": 0,
     }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
-    }
+    # headers = {
+    #     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
+    # }
     r = requests.post(url, json=params, headers=headers)
     data_df = pd.DataFrame(r.json()['data'])
     data_df = data_df[~data_df["variety"].str.contains("小计")]
@@ -707,26 +708,28 @@ def requests_link(
             if i > 20:
                 return None
 
-if __name__ == "__main__":
-    get_futures_daily_df = get_futures_daily(
-        start_date="20250102", end_date="20250102", market="DCE"
-    )
-    print(get_futures_daily_df)
 
-    get_dce_daily_df = get_dce_daily(date="20241118")
+if __name__ == "__main__":
+    # get_futures_daily_df = get_futures_daily(
+    #     start_date="20250102", end_date="20250102", market="DCE"
+    # )
+    # print(get_futures_daily_df)
+    
+    import akshare as ak
+    get_dce_daily_df = get_dce_daily(date="20251107")
     print(get_dce_daily_df)
 
-    get_cffex_daily_df = get_cffex_daily(date="20230810")
-    print(get_cffex_daily_df)
-
-    get_ine_daily_df = get_ine_daily(date="20230818")
-    print(get_ine_daily_df)
-
-    get_czce_daily_df = get_czce_daily(date="20210513")
-    print(get_czce_daily_df)
-
-    get_shfe_daily_df = get_shfe_daily(date="20250630")
-    print(get_shfe_daily_df)
-
-    get_gfex_daily_df = get_gfex_daily(date="20221228")
-    print(get_gfex_daily_df)
+    # get_cffex_daily_df = get_cffex_daily(date="20230810")
+    # print(get_cffex_daily_df)
+    #
+    # get_ine_daily_df = get_ine_daily(date="20230818")
+    # print(get_ine_daily_df)
+    #
+    # get_czce_daily_df = get_czce_daily(date="20210513")
+    # print(get_czce_daily_df)
+    #
+    # get_shfe_daily_df = get_shfe_daily(date="20250630")
+    # print(get_shfe_daily_df)
+    #
+    # get_gfex_daily_df = get_gfex_daily(date="20221228")
+    # print(get_gfex_daily_df)

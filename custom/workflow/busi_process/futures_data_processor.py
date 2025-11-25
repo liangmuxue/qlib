@@ -68,9 +68,13 @@ class FuturesDataProcessor(BaseProcessor):
             # 动态调用导入数据对应的类方法 
             import_func_names = config["kwargs"]["data_import_func_names"]
             for import_func_name in import_func_names:
-                args = (start_date,end_date)
-                method = getattr(t,import_func_name)
-                method(args) 
+                if config["kwargs"]["data_params"]:
+                    args = (start_date,end_date)
+                    method = getattr(t,import_func_name)
+                    method(args) 
+                else:
+                    method = getattr(t,import_func_name)
+                    method()                    
             
         
     

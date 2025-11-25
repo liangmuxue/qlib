@@ -897,10 +897,68 @@ def futures_zh_minute_sina(symbol: str = "IF2008", period: str = "1",httpx_clien
     temp_df["hold"] = pd.to_numeric(temp_df["hold"], errors="coerce")
     return 1,temp_df
 
+def futures_zh_daily_sina(symbol: str = "RB0",httpx_client=None) -> pd.DataFrame:
+    """
+    中国各品种期货日频率数据
+    https://finance.sina.com.cn/futures/quotes/V2105.shtml
+    :param symbol: 可以通过 match_main_contract(symbol="cffex") 获取, 或者访问网页获取
+    :type symbol: str
+    :return: 指定 symbol 的数据
+    :rtype: pandas.DataFrame
+    """
+    date = "20210412"
+    url = (
+        "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_V21052021_4_12="
+        "/InnerFuturesNewService.getDailyKLine"
+    )
+    params = {
+        "symbol": symbol,
+        "type": "_".join([date[:4], date[4:6], date[6:]]),
+    }
+    res_text = fetch_with_httpx(url, params,return_text=True,httpx_client=httpx_client)
+    try:
+        json_data = json.loads(res_text.split("=(")[1].split(");")[0])
+    except Exception:
+        return None
+    if json_data is None:
+        return None
+    temp_df = pd.DataFrame(json_data).reset_index(drop=True)
+    columns = [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "hold",
+        "settle",
+    ]
+    temp_df = pd.DataFrame(temp_df.values,columns=columns)
+    temp_df["open"] = pd.to_numeric(temp_df["open"], errors="coerce")
+    temp_df["high"] = pd.to_numeric(temp_df["high"], errors="coerce")
+    temp_df["low"] = pd.to_numeric(temp_df["low"], errors="coerce")
+    temp_df["close"] = pd.to_numeric(temp_df["close"], errors="coerce")
+    temp_df["volume"] = pd.to_numeric(temp_df["volume"], errors="coerce")
+    temp_df["hold"] = pd.to_numeric(temp_df["hold"], errors="coerce")
+    temp_df["settle"] = pd.to_numeric(temp_df["settle"], errors="coerce")
+    return temp_df
+
+def build_httpx_client(proxy=True):
+    proxies = {"http://":"http://amos:mrliang@8.140.193.104:7110",
+               "https://":"http://amos:mrliang@8.140.193.104:7110"}           
+    limits = httpx.Limits(max_keepalive_connections=5, max_connections=5)   
+    if proxy:
+        client = httpx.Client(proxies=proxies,limits=limits)    
+    else:
+        client = httpx.Client(limits=limits)    
+    return client
+    
 def fetch_with_httpx(url,params,return_text=False,httpx_client=None):
     headers = {
         "user-agent": UserAgent().random,
     }    
+    if httpx_client is None:
+        httpx_client = build_httpx_client()
     response = httpx_client.get(url, params=params, headers=headers, cookies=None)
     # print(response.text)  
     if return_text:

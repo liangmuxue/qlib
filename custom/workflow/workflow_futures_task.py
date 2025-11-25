@@ -26,7 +26,7 @@ from workflow.busi_process.futures_data_processor import FuturesDataProcessor
 from workflow.busi_process.classify_processor import ClassifyProcessor
 from workflow.busi_process.simulation_processor import SimulationProcessor
 from workflow.busi_process.replay_processor import ReplayProcessor
-from trader.utils.date_util import get_tradedays_dur,get_tradedays,is_working_day
+from trader.utils.date_util import get_next_day,get_tradedays,is_working_day,get_nowtime_working_day
 from cus_utils.data_filter import list_split
 
 logger = AppLogger()
@@ -99,6 +99,10 @@ class WorkflowTask(object):
             self.clear_data()   
         # 以当前日期为基准，循环执行任务
         start_date = self.task_store.get_task_working_day(self.task_obj["task_batch"])
+        # 如果是模拟盘或实盘模式，直接调到当前工作日
+        if self.config["type"]==WorkflowType.simulation.value:
+            start_date = get_nowtime_working_day().strftime("%Y%m%d")
+            self.task_store.update_workflow_working_day(self.task_obj["task_batch"],start_date)          
         # 初始化子任务定义，只在开始的时候进行
         subtask_list = []
         for sub_config in detail_configs:
@@ -116,7 +120,8 @@ class WorkflowTask(object):
                 self.task_store.update_workflow_working_day(self.task_obj["task_batch"],working_day)                
             else:
                 # 开始的时候使用起始日期作为工作日
-                working_day = start_date
+                working_day = int(start_date)
+                
             logger.info("working today:{}".format(working_day))
             for sub_task in subtask_list:
                 if next_working_day>0:
@@ -143,7 +148,7 @@ class WorkflowTask(object):
                 break
             # 任务执行完毕后，进入下一天
             next_working_day = self.next_working_day(working_day)
-            # 如果还是同一天，则等待
+            # 如果还是同一天，则等待 
             if next_working_day<=working_day:
                 logger.debug("wait for next day:{}".format(datetime.now()))
                 time.sleep(60)
@@ -186,19 +191,13 @@ class WorkflowTask(object):
         """取得下一工作日"""
 
         working_day = datetime.strptime(str(working_day),'%Y%m%d').date()
-        next_day = working_day + dt.timedelta(days=1)  
-        next_day = int(next_day.strftime("%Y%m%d"))      
-        if self.config["type"]==WorkflowType.backtest.value:
-            # 回测模式，直接取下一天
-            return next_day
-        else:
-            # 实盘模式
-            now_day = int(datetime.now().strftime("%Y%m%d")) 
-            # 如果工作日等于当前日期，则还使用当前日期
-            if next_day>=now_day:
-                return now_day
-            return next_day
-
+        next_day = int(get_next_day(working_day).strftime('%Y%m%d'))
+        now_day = int(get_nowtime_working_day().strftime("%Y%m%d"))
+        # 如果下一日期大于当前实际日期，则仍返回当前实际日期
+        if next_day>=now_day:
+            return now_day
+        return next_day
+    
     def prepare_subtask_env(self,sub_task,sub_config,working_day):
         """准备子任务环境，使用开始日期作为工作日进行初始化设置"""
         
@@ -486,12 +485,6 @@ class WorkflowSubTask(object):
             self.task_ignore_handler(ignore_status=WorkflowSubStatus.freq_ignore.value)
             logger.info("ignore task cause not frequency not match")
             return WorkflowSubStatus.freq_ignore.value        
-
-        # 在模拟或实盘模式下,并且频次为实时,工作日期必须与当前日期保持一致
-        if self.main_task.config["type"]!=WorkflowType.backtest.value \
-            and self.config["frequency"]==FrequencyType.REAL.value and working_day!=int(datetime.now().strftime("%Y%m%d")):
-            logger.info("ignore task cause working day not match now ")
-            return WorkflowSubStatus.freq_ignore.value  
         
         # 在任务主表中设置当前子任务
         self.main_task.task_store.update_workflow_current_task(self.main_task.task_obj["task_batch"],self.task_entity["id"])           

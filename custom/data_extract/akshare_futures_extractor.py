@@ -23,7 +23,7 @@ import requests
 from trader.utils.date_util import get_prev_working_day,get_next_working_day,get_next_month,is_working_day,date_string_transfer
 from cus_utils.log_util import AppLogger
 from data_extract.his_data_extractor import FutureExtractor,get_period_name
-from data_extract.akshare.futures_daily_bar import futures_hist_em,futures_zh_minute_sina,get_exchange_symbol_map
+from data_extract.akshare.futures_daily_bar import build_httpx_client,futures_hist_em,futures_zh_minute_sina,futures_zh_daily_sina,get_exchange_symbol_map
 from data_extract.akshare.futures_daily import get_futures_daily
 
 from cus_utils.log_util import AppLogger
@@ -43,9 +43,8 @@ class AkFuturesExtractor(FutureExtractor):
             return "{}/item/{}/institution".format(self.savepath,period_name)
         return "{}/item/{}/csv_data".format(self.savepath,period_name)
       
-    #######################   数据加载 ######################################     
+    #######################   辅助工具 ######################################     
 
-          
     #######################   数据导入 ######################################      
     def import_trading_variety(self):
         """导入交易品种数据"""
@@ -69,14 +68,18 @@ class AkFuturesExtractor(FutureExtractor):
             # update_sql_real = update_sql.format(multiplier,limit_rate,price_range,row['代码']) 
             # self.dbaccessor.do_inserto(update_sql_real)  
 
-    def extract_item_data(self,code,start_date=None,end_date=None,period=PeriodType.DAY.value):  
+    def extract_item_data(self,code,start_date=None,end_date=None,period=PeriodType.DAY.value,httpx_client=None):  
         """取得单个品种的主力连续历史行情数据"""
         
         # AKSHARE目前只支持按照日导入
         if period!=PeriodType.DAY.value:
             raise NotImplementedError
         
-        item_data = ak.futures_zh_daily_sina(symbol=code)    
+        if httpx_client is None:
+            item_data = ak.futures_zh_daily_sina(symbol=code)    
+        else:
+            item_data = futures_zh_daily_sina(symbol=code,httpx_client=httpx_client) 
+        
         if item_data is None or item_data.shape[0]==0:
             return None
         
@@ -403,6 +406,54 @@ class AkFuturesExtractor(FutureExtractor):
             get_futures_daily_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
             print("market {} ok".format(market_code))
 
+    def import_day_range_contract_data_sina(self,data_range=None):
+        """导入指定日期范围的合约数据,新浪渠道"""
+        
+        begin_date,end_date = data_range
+        begin_date_str = date_string_transfer(str(begin_date))
+        end_date_str = date_string_transfer(str(end_date))        
+        begin_date = datetime.datetime.strptime(str(begin_date), '%Y%m%d').date()
+        end_date = datetime.datetime.strptime(str(end_date), '%Y%m%d').date()
+
+        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
+            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        pd.set_option('display.unicode.ambiguous_as_wide', True)
+        pd.set_option('display.unicode.east_asian_width', True)
+        dtype = {
+            'code': sqlalchemy.String,
+            "date": sqlalchemy.DateTime,
+            'open': sqlalchemy.FLOAT,
+            'close': sqlalchemy.FLOAT,
+            'high': sqlalchemy.FLOAT,
+            'low': sqlalchemy.FLOAT,
+            'volume': sqlalchemy.FLOAT,
+            'hold': sqlalchemy.FLOAT,  
+            'settle': sqlalchemy.FLOAT, 
+        }  
+        tar_cols = list(dtype.keys())          
+        # 先删除后增加      
+        del_sql = "delete from dominant_real_data where date>='{}' and date<='{}'".format(begin_date_str,end_date_str)  
+        self.dbaccessor.do_updateto(del_sql)
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0 order by code"
+        result_rows = self.dbaccessor.do_query(variety_sql)   
+        cur_date = datetime.date.today()
+        client = build_httpx_client(proxy=False)     
+        try:   
+            # 取得所有品种，并导入对应的所有合约
+            for row in result_rows:
+                var_code = row[0]
+                contract_names = self.get_likely_main_contract_names(var_code,cur_date)
+                for contract_name in contract_names:
+                    futures_hist_df = self.extract_item_data(contract_name,httpx_client=client) 
+                    if futures_hist_df is None:
+                        continue      
+                    futures_hist_df = futures_hist_df[(futures_hist_df['date']>=begin_date_str)&(futures_hist_df['date']<=end_date_str)]                
+                    futures_hist_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
+                    time.sleep(3)
+                print("import_day_range_contract_data_sina {} ok".format(var_code))
+        finally:
+            client.close()
+            
     def import_day_range_contract_data_em(self,data_range=None):
         """导入指定日期范围的合约数据,东方财富渠道"""
         
@@ -618,7 +669,7 @@ class AkFuturesExtractor(FutureExtractor):
         if max_date>begin_date:
             begin_date = max_date      
         # 不下载期权数据
-        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0 order by code asc"
         result_rows = self.dbaccessor.do_query(variety_sql)            
         # 遍历所有品种，并分别取得历史数据
         for result in result_rows:
@@ -641,7 +692,7 @@ class AkFuturesExtractor(FutureExtractor):
                 futures_zh_minute_sina_df['code'] = contract_name
                 futures_zh_minute_sina_df.to_sql('dominant_real_data_1min', engine, index=False, if_exists='append',dtype=dtype)  
                 time.sleep(5)
-            print("import_day_range_contract_data code:{} ok".format(code))
+            print("import_day_range_1min_data code:{} ok".format(code))
 
     def import_day_range_1min_data_cross(self,data_range=None):
         """导入分钟历史数据,交错模式"""
@@ -722,18 +773,14 @@ class AkFuturesExtractor(FutureExtractor):
         save_path = os.path.join(self.savepath,"item/min")
         return save_path
     
-    def store_1min_data(self,data_range=None):    
+    def store_1min_data(self):    
         """保存1分钟数据到本地文件""" 
         
         cur_date = datetime.datetime.now().date()
         # 筛选合适的数据
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0 order by code asc"
         result_rows = self.dbaccessor.do_query(variety_sql)       
-        proxies = {"http://":"http://amos:mrliang@8.140.193.104:7110",
-                   "https://":"http://amos:mrliang@8.140.193.104:7110"}   
-        # Using Httpx Client Outer  
-        limits=httpx.Limits(max_keepalive_connections=5, max_connections=5)   
-        client = httpx.Client(proxies=proxies,limits=limits)      
+        client = build_httpx_client()    
         try: 
             # 遍历所有品种，并分别取得历史数据,只需要取得下一天上午的数据
             for result in result_rows:
@@ -899,7 +946,7 @@ if __name__ == "__main__":
     # futures_hist_em_df = futures_hist_em(symbol="LH", period="daily")
     # futures_hist_em_df['date'] = futures_hist_em_df['时间']
     # print(futures_hist_em_df)    
-    # futures_hist_df = ak.futures_zh_daily_sina(symbol="LH88")
+    # futures_hist_df = ak.futures_zh_daily_sina(symbol="A2603")
     # print(futures_hist_df)   
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="RB0", period="1")
     # print(futures_zh_minute_sina_df)
@@ -956,9 +1003,9 @@ if __name__ == "__main__":
     # 导入主力连续历史数据
     # extractor.import_his_data()
     # 导入1m历史数据
-    extractor.store_1min_data()
+    # extractor.store_1min_data()
     # 合并生成主力连续历史数据
-    # extractor.combine_continues_data(data_range=[20251015,20251107])
+    # extractor.combine_continues_data(data_range=[20251106,20251117])
     # 导入历史拓展数据
     # extractor.import_extension_data()
     # 生成行业板块历史行情数据
@@ -974,8 +1021,9 @@ if __name__ == "__main__":
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
-    # extractor.import_day_range_contract_data(data_range=(20250924,20250925))
+    # extractor.import_day_range_contract_data(data_range=(20251107,20251117))
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250926,20250926))
     # extractor.import_day_range_1min_data(data_range=(20250924,20250925))
+    extractor.import_day_range_contract_data_sina(data_range=(20251121,20251121))
             

@@ -37,7 +37,9 @@ class SimPosition(object):
         "order_book_id", "direction", "quantity","multiplier", "today_pos", "margin", "frozen_margin", "use_margin", "pnl", "position_cost", "avg_price","last_price"
     )
 
-    def __init__(self, order_book_id, direction, init_quantity=0, init_price=None,use_margin=0,frozen_margin=0,position_cost=0,multiplier=0,today_pos=False):
+    def __init__(self, order_book_id, direction,position_date=None, init_quantity=0,init_price=None,
+                 TodayPosition=0,YdPosition=0,Position=0,
+                 use_margin=0,frozen_margin=0,position_cost=0,multiplier=0,today_pos=False):
         self._env = Environment.get_instance()
 
         self._order_book_id = order_book_id
@@ -53,10 +55,28 @@ class SimPosition(object):
         self._use_margin = use_margin
         self._frozen_margin = frozen_margin
         self._position_cost = position_cost
+        self._position_date = position_date
         self._last_price: Optional[float] = init_price
 
         self._direction_factor = 1 if direction == POSITION_DIRECTION.LONG else -1    
+        
+        self._Position = Position
+        self._TodayPosition = TodayPosition
+        self._YdPosition = YdPosition
 
+    @property
+    def Position(self):
+        # type: () -> int
+        return self._Position
+    @property
+    def TodayPosition(self):
+        # type: () -> int
+        return self._TodayPosition
+    @property
+    def YdPosition(self):
+        # type: () -> int
+        return self._YdPosition
+            
     @property
     def order_book_id(self):
         # type: () -> str
@@ -74,8 +94,11 @@ class SimPosition(object):
 
     @property
     def quantity(self):
-        # type: () -> int
         return self._quantity
+    
+    @property
+    def position_date(self):
+        return self._position_date  
 
     @property
     def transaction_cost(self):

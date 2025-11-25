@@ -264,7 +264,28 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
             return
         if pInvestorPosition is None:
             return
-        
+        print(f"OnRspInvestorPosition:{pInvestorPosition.InstrumentID} "
+              f"ExchangeID={pInvestorPosition.ExchangeID} "
+              f"InstrumentID={pInvestorPosition.InstrumentID} "
+              f"HedgeFlag={pInvestorPosition.HedgeFlag} "
+              f"PositionDate={pInvestorPosition.PositionDate} "
+              f"PosiDirection={pInvestorPosition.PosiDirection} "
+              f"Position={pInvestorPosition.Position} "
+              f"YdPosition={pInvestorPosition.YdPosition} "
+              f"TodayPosition={pInvestorPosition.TodayPosition} "
+              f"UseMargin={pInvestorPosition.UseMargin} "
+              f"PreMargin={pInvestorPosition.PreMargin} "
+              f"FrozenMargin={pInvestorPosition.FrozenMargin} "
+              f"Commission={pInvestorPosition.Commission} "
+              f"FrozenCommission={pInvestorPosition.FrozenCommission} "
+              f"CloseProfit={pInvestorPosition.CloseProfit} "
+              f"LongFrozen={pInvestorPosition.LongFrozen} "
+              f"ShortFrozen={pInvestorPosition.ShortFrozen} "
+              f"PositionCost={pInvestorPosition.PositionCost} "
+              f"OpenCost={pInvestorPosition.OpenCost} "
+              f"SettlementPrice={pInvestorPosition.SettlementPrice} "
+              )
+                
         data_source = self.listenner.context.env.data_source
         # swig对象转实际业务对象
         symbol = pInvestorPosition.InstrumentID.upper()
@@ -290,8 +311,9 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
         multiplier = data_source.get_contract_info(symbol)["multiplier"].astype(float).values[0]
         # 实时取得最近价格
         last_price = data_source.get_last_price(symbol,self.listenner.context.env.trading_dt)
-        position = SimPosition(symbol,direction,quantity,last_price,today_pos=today_pos,use_margin=use_margin,frozen_margin=frozen_margin,multiplier=multiplier,position_cost=position_cost)
-        
+        position = SimPosition(symbol,direction,init_quantity=quantity,init_price=last_price,Position=pInvestorPosition.Position,
+                               YdPosition=pInvestorPosition.YdPosition,TodayPosition=pInvestorPosition.TodayPosition,
+                               today_pos=today_pos,use_margin=use_margin,frozen_margin=frozen_margin,multiplier=multiplier,position_cost=position_cost)
         self.listenner.process_qry_result(CtpQueryType.QryPosition.value,position)
             
     def OnRspQryProduct(self, pProduct: "CThostFtdcProductField", pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int",

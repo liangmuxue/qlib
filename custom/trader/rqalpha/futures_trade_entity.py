@@ -82,41 +82,38 @@ class FuturesTradeEntity(TradeEntity):
         row_data = [trade_date,trade_datetime,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,0,status,order_id,open_order_id,close_reason,secondary_order_id]
         # logger.debug("row_data is:{}".format(row_data))
         row_data_np = np.expand_dims(np.array(row_data),axis=0)
+        row_data = pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)
+        row_data['trade_date'] = row_data['trade_date'].astype('datetime64[ns]')
         # 生成DataFrame
         if self.trade_data_df.shape[0]==0:
-            self.trade_data_df = pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)
-            logger.debug("after add,self.trade_data_df:{}".format(self.trade_data_df))
+            self.trade_data_df = row_data
         else:
-            item_df = self.trade_data_df.loc[(self.trade_data_df["order_book_id"]==order.order_book_id)&
-                                             (self.trade_data_df["side"]==order.side)&
-                                         (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)]
+            try:
+                item_df = self.trade_data_df.loc[(self.trade_data_df["order_id"]==order.order_id)]
+            except Exception as e:
+                print("eee")
             if item_df.shape[0]>0:
-                # 如果设置了只添加标志，则保持原有记录
-                if only_add:
-                    return                
                 # 有可能是之前撤单后新发起的订单，这类订单需要更新
                 prev_datetime = item_df['trade_datetime'].values[0]
                 # 保留之前的发起订单的时间
                 row_data_np[0,1] = prev_datetime
                 # 先删除再增加
-                self.trade_data_df = self.trade_data_df[~((self.trade_data_df["order_book_id"]==order.order_book_id)&
-                    (self.trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_day)&
-                    (self.trade_data_df["position_effect"]==position_effect))]
-                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)], axis=0)
+                self.trade_data_df = self.trade_data_df[~(self.trade_data_df["order_id"]==order.order_id)]
+                self.trade_data_df = pd.concat([self.trade_data_df,row_data], axis=0)
                 # logger.debug("update trade,data:{}".format(row_data_np))
             else:
                 if row_data_np.shape[0]==0:
                     logger.warning("row_data_np empty")
                     return
                 # logger.debug("concat trade,data:{}".format(row_data_np))
-                self.trade_data_df = pd.concat([self.trade_data_df,pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)], axis=0)
+                self.trade_data_df = pd.concat([self.trade_data_df,row_data], axis=0)
         # 映射系统订单
         self.sys_orders[order.order_book_id] = order
         # 变更后保存数据
         if self.save_path is not None:
             self.exp_trade_data(self.save_path)
             # 日志记录
-            self.add_log(row_data)
+            self.add_log(row_data.values[0].tolist())
                 
     def add_trade(self,trade,multiplier=1,default_status=ORDER_STATUS.FILLED,order=None,context=None):
         """添加交易信息，需要先具备订单信息"""
@@ -145,13 +142,16 @@ class FuturesTradeEntity(TradeEntity):
         else:
             update_datetime = datetime.datetime.now()
         row_data = [trade_date,trade_datetime,update_datetime,order_book_id,side,position_effect,price,quantity,multiplier,total_price,status,order_id,open_order_id,close_reason,secondary_order_id]
+        row_data_np = np.expand_dims(np.array(row_data),axis=0)
+        row_data = pd.DataFrame(row_data_np,columns=self.TRADE_COLUMNS)
+        row_data['trade_date'] = row_data['trade_date'].astype('datetime64[ns]')
         # 使用订单号查询并更新记录
-        self.trade_data_df[self.trade_data_df["order_id"]==order_id] = row_data
+        self.trade_data_df.loc[self.trade_data_df["order_id"]==order_id,:] = row_data
         # 变更后保存数据
         if self.save_path is not None:
             self.exp_trade_data(self.save_path)   
             # 日志记录
-            self.add_log(row_data)
+            self.add_log(row_data.values[0].tolist())
     
     def update_status(self,order,context=None):
         """修改订单状态"""
@@ -269,7 +269,7 @@ class FuturesTradeEntity(TradeEntity):
         if trade_date is not None:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)&
                                       (trade_data_df["order_book_id"]==order_book_id)&
-                                      (trade_data_df["trade_datetime"].dt.strftime('%Y%m%d')==trade_date)]      
+                                      (trade_data_df["trade_date"].dt.strftime('%Y%m%d')==trade_date)]      
         else:
             target_df = trade_data_df[(trade_data_df["position_effect"]==POSITION_EFFECT.CLOSE)&(trade_data_df["status"]==ORDER_STATUS.ACTIVE)]   
         if target_df.shape[0]==0:
