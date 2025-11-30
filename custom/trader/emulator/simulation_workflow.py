@@ -42,20 +42,20 @@ class Executor(threading.Thread):
             event = self.busi_event_queue.get(timeout=2)
             return event
         # 交易准备事件
-        if self.event_Coll[EVENT.BEFORE_TRADING]==0:
+        if self.event_Coll[EVENT.BEFORE_TRADING]==0 and self.is_openning(now_time):
             self.event_Coll[EVENT.BEFORE_TRADING] = 1
             return EVENT.BEFORE_TRADING
         # 8点半进行开盘竞价
-        auction_time = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,8,30,0) 
-        if now_time>auction_time and self.event_Coll[EVENT.OPEN_AUCTION]==0:
-            self.event_Coll[EVENT.OPEN_AUCTION] = 1
-            return EVENT.OPEN_AUCTION
+        # auction_time = datetime(self.trade_date.year,self.trade_date.month,self.trade_date.day,8,30,0) 
+        # if now_time>auction_time and self.event_Coll[EVENT.OPEN_AUCTION]==0:
+        #     self.event_Coll[EVENT.OPEN_AUCTION] = 1
+        #     return EVENT.OPEN_AUCTION
         # 如果是交易时间段，则推送BAR事件
         if self.is_openning(now_time):
             self.event_Coll[EVENT.BAR] += 1
             return EVENT.BAR        
         # 交易结束事件
-        if now_time.hour>15 and self.event_Coll[EVENT.AFTER_TRADING]==0:
+        if now_time.hour>15 and self.event_Coll[EVENT.AFTER_TRADING]==0 and self.event_Coll[EVENT.BEFORE_TRADING]>0:
             self.event_Coll[EVENT.AFTER_TRADING] = 1
             return EVENT.AFTER_TRADING        
         return None
@@ -92,6 +92,7 @@ class Executor(threading.Thread):
     def run(self):
         """模拟盘运行，循环并进行事件推送"""
         
+        loop_time = 0
         # 按照间隔时间一直循环，并进行相关事件调用
         while True:
             now_time = datetime.now()
@@ -100,6 +101,10 @@ class Executor(threading.Thread):
             event = self.pop_event(now_time)
             if event is not None:
                 self.env.publish_event(event)
+            else:
+                if loop_time%10==0:
+                    logger.info("wait for opening")
+            loop_time += 1
             # 间隔几秒再重复
             time.sleep(self.wait_time)
             
@@ -278,7 +283,7 @@ class SimulationWorkflow():
             # self.strategy_class.open_trade_order("HC2510")
             # 清空所有持仓
             self.strategy_class.clear_position()
-            self.strategy_class.clear_order()
+            # self.strategy_class.clear_order()
             # self.strategy_class.query_position()     
             # self.strategy_class.query_trade()   
             # orders = self.strategy_class.query_order_info("jd2510")

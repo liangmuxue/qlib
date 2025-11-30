@@ -357,7 +357,6 @@ class AkFuturesExtractor(FutureExtractor):
         begin_date,end_date = data_range
         begin_date = datetime.datetime.strptime(str(begin_date), '%Y%m%d').date()
         end_date = datetime.datetime.strptime(str(end_date), '%Y%m%d').date()
-
         engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
             self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
         pd.set_option('display.unicode.ambiguous_as_wide', True)
@@ -374,15 +373,11 @@ class AkFuturesExtractor(FutureExtractor):
             'settle': sqlalchemy.FLOAT, 
         }  
         tar_cols = list(dtype.keys())                
-        date_sql = "select max(date) from dominant_real_data"
-        result_rows = self.dbaccessor.do_query(date_sql) 
-        max_date = result_rows[0][0]          
-        # 如果日期范围内包含了记录中的日期，则修改起始日期
-        if max_date>=end_date:
-            print("exceed end date,max date:{}".format(max_date))
-            return        
-        if max_date>begin_date:
-            begin_date = max_date
+        # 先删除后增加   
+        begin_date_str = date_string_transfer(str(data_range[0]))
+        end_date_str = date_string_transfer(str(data_range[1]))             
+        del_sql = "delete from dominant_real_data where date>='{}' and date<='{}'".format(begin_date_str,end_date_str)  
+        self.dbaccessor.do_updateto(del_sql)
         
         market_sql = "select code from futures_exchange"
         result_rows = self.dbaccessor.do_query(market_sql) 
@@ -437,7 +432,7 @@ class AkFuturesExtractor(FutureExtractor):
         variety_sql = "select code from trading_variety where isnull(magin_radio)=0 order by code"
         result_rows = self.dbaccessor.do_query(variety_sql)   
         cur_date = datetime.date.today()
-        client = build_httpx_client(proxy=False)     
+        client = build_httpx_client(proxy=True)     
         try:   
             # 取得所有品种，并导入对应的所有合约
             for row in result_rows:
@@ -449,7 +444,7 @@ class AkFuturesExtractor(FutureExtractor):
                         continue      
                     futures_hist_df = futures_hist_df[(futures_hist_df['date']>=begin_date_str)&(futures_hist_df['date']<=end_date_str)]                
                     futures_hist_df[tar_cols].to_sql('dominant_real_data', engine, index=False, if_exists='append',dtype=dtype)
-                    time.sleep(3)
+                    time.sleep(5)
                 print("import_day_range_contract_data_sina {} ok".format(var_code))
         finally:
             client.close()
@@ -1005,7 +1000,7 @@ if __name__ == "__main__":
     # 导入1m历史数据
     # extractor.store_1min_data()
     # 合并生成主力连续历史数据
-    # extractor.combine_continues_data(data_range=[20251106,20251117])
+    # extractor.combine_continues_data(data_range=[20251125,20251125])
     # 导入历史拓展数据
     # extractor.import_extension_data()
     # 生成行业板块历史行情数据
@@ -1021,9 +1016,10 @@ if __name__ == "__main__":
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
-    # extractor.import_day_range_contract_data(data_range=(20251107,20251117))
+    # extractor.import_day_range_contract_data(data_range=(20251125,20251125))
+    extractor.extract_item_data('m2601') 
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250926,20250926))
     # extractor.import_day_range_1min_data(data_range=(20250924,20250925))
-    extractor.import_day_range_contract_data_sina(data_range=(20251121,20251121))
+    # extractor.import_day_range_contract_data_sina(data_range=(20251125,20251125))
             

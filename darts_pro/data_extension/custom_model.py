@@ -1,4 +1,4 @@
-from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel
+from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel,TorchForecastingModel
 from darts.utils.likelihood_models import Likelihood, QuantileRegression
 from darts.logging import get_logger, raise_if, raise_if_not, raise_log
 from darts.timeseries import TimeSeries
@@ -9,6 +9,7 @@ from darts.models.forecasting.tft_submodels import (
 )
 from darts.utils.utils import seq2series, series2seq
 
+import inspect
 from scipy.signal import find_peaks
 import numpy as np
 import pandas as pd
@@ -101,7 +102,6 @@ class TFTExtModel(MixedCovariatesTorchModel):
             # cudas = ",".join([str(x) for x in model_kwargs["pl_trainer_kwargs"]["devices"]])
             # cudas = "cuda:" + cudas
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            print("device in load:{}".format(device))
             self.device = device
         else:
             self.device = "cpu"
@@ -142,7 +142,15 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.model_type = model_type
         self.loss_number = loss_number
         self.kwargs = kwargs
-        
+
+    @classmethod
+    def _extract_torch_model_params(cls, **kwargs):
+        get_params = list(
+            inspect.signature(TorchForecastingModel.__init__).parameters.keys()
+        )
+        get_params.remove("self")
+        return {kwarg: kwargs.get(kwarg) for kwarg in get_params if kwarg in kwargs}
+    
     def _build_vriable_metas(self,tensors,static_covariates,seq=0):   
         
         type_names = [

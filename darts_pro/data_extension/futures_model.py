@@ -189,7 +189,8 @@ class FuturesModel(IndustryRollModel):
                 model_type=self.model_type,
                 train_sample=self.train_sample,
                 train_sw_ins_mappings=self.train_sw_ins_mappings,     
-                valid_sw_ins_mappings=self.valid_sw_ins_mappings,     
+                valid_sw_ins_mappings=self.valid_sw_ins_mappings,  
+                pred_top_num=self.ext_kwargs['pred_top_num'],  
                 **self.pl_module_params,
         )     
         return model         

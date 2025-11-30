@@ -294,8 +294,8 @@ if __name__ == "__main__":
     ext_mod = ExtDataMod()
     file_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/trade_data.csv"
     stat_path = "/home/qdata/workflow/wf_backtest_flow/trader_data/12/stat_data.csv"
-    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/trade_data.csv"
-    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"
+    file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07-top2/trade_data.csv"
+    stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07-top2/stat_data.csv"
     # file_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/trade_data.csv"
     # stat_path = "/home/qdata/workflow/fur_backtest_flow/trader_data/07/stat_data.csv"    
     # ext_mod.analysis_stat_offline(file_path,stat_path)

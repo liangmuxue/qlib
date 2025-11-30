@@ -490,6 +490,7 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
                     pl_trainer_kwargs=pl_trainer_kwargs,
+                    pred_top_num=self.optargs["pred_top_num"]
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==1:  
@@ -762,6 +763,11 @@ class FuturesProcessModel(TftDataframeModel):
                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                  max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=6)               
         
+        # 通过植入属性的方式，设置预测品种个数
+        if 'pred_top_num' in self.optargs:
+            model.model.pred_top_num = self.optargs['pred_top_num']
+        else:
+            model.model.pred_top_num = 2
         # 进行预测           
         pred_result = model.predict(series=val_series_transformed,past_covariates=past_convariates,future_covariates=future_convariates,
                                             batch_size=self.batch_size,num_loader_workers=0,pred_date_begin=int(pred_date))

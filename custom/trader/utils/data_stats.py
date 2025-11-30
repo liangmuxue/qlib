@@ -316,6 +316,13 @@ class DataStats(object):
         
         return lock_data[(lock_data['date']==date)&(lock_data['instrument']==instrument)]        
 
+    def show_gui(self,filepath):
+        # from pandasgui import show
+        df = pd.read_csv(filepath)
+        # show(df)
+        import dtale
+        d = dtale.show(df)
+        d.open_browser()
      
 if __name__ == "__main__":
     stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/07")  
@@ -326,8 +333,10 @@ if __name__ == "__main__":
     # stats.match_val_and_pred(val_result_file=VAL_RESULT_FILE,pred_result_file="/home/qdata/workflow/fur_backtest_flow/task/159/dump_data/pred_result.pkl")
     # stats.combine_val_result(date_range=[20250201,20250731])
     # stats.mock_pred_data()
-    stats.combine_backtest_result()
-    stats.analysis_backtest(date_range=[20250201,20250731])
+    # stats.combine_backtest_result()
+    # stats.analysis_backtest(date_range=[20250201,20250731])
     
+    
+    stats.show_gui("/home/qdata/workflow/fur_sim_flow_2025/trader_data/futures_30001/sim_position.csv")
     
     

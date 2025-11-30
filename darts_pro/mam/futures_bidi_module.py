@@ -63,6 +63,7 @@ class FuturesBidiModule(MlpModule):
         device="cpu",
         train_sw_ins_mappings=None,
         valid_sw_ins_mappings=None,
+        pred_top_num=3,
         **kwargs,
     ):
         self.mode = None
@@ -71,10 +72,11 @@ class FuturesBidiModule(MlpModule):
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
+        self.pred_top_num = pred_top_num
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
         self.train_step_mode = train_step_mode
         # 任务初始权重
-        self.task_weights = torch.tensor([0.9, 0.1])  
+        self.task_weights = torch.tensor([0.8, 0.2])  
                 
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
@@ -451,7 +453,7 @@ class FuturesBidiModule(MlpModule):
         """重载父类方法，修改指标计算部分"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        rate_total,coll_result = self.combine_result_data(self.output_result)
+        rate_total,coll_result = self.combine_result_data(self.output_result,pred_top_num=self.pred_top_num)
         date_total_num = float(coll_result['date'].unique().shape[0])
         
         # 打印相关指标
@@ -461,7 +463,7 @@ class FuturesBidiModule(MlpModule):
                     self.log(col, rate_total[col].values[0], prog_bar=True)  
             
             dur_num = self.output_chunk_length - 1
-            anno_yield = rate_total['yield_rate'].values[0] * (240/date_total_num) / (4*dur_num) 
+            anno_yield = rate_total['yield_rate'].values[0] * (240/date_total_num) / (2*self.pred_top_num*dur_num) 
             self.log("anno_yield",anno_yield, prog_bar=True) 
         
         output_3d,past_target_3d,future_target_3d,target_class_3d,price_targets_total, \
@@ -643,7 +645,7 @@ class FuturesBidiModule(MlpModule):
                     past_target_total,future_target_total,target_class_total,price_targets_total,past_future_round_targets_total, \
                     long_diff_index_targets_total,index_round_targets_total,target_info_total        
                            
-    def combine_result_data(self,output_result=None,predict_mode=False):
+    def combine_result_data(self,output_result=None,predict_mode=False,pred_top_num=2):
         """计算涨跌幅分类准确度以及相关数据"""
         
         # return None,None,None,None
@@ -729,7 +731,7 @@ class FuturesBidiModule(MlpModule):
                     target_info["pred_data"] = data.values[:,-1].astype(float)      
             
             # 生成目标索引
-            result_list = self.build_import_index(output_data=output_list,target_info=target_info_list,
+            result_list = self.build_import_index(output_data=output_list,target_info=target_info_list,pred_top_num=pred_top_num,
                             target=whole_target,price_target=price_target_list,index_round_targets=index_round_targets,date=date,
                             combine_instrument=combine_content)
             import_index = result_list['top_index'].values
@@ -776,13 +778,13 @@ class FuturesBidiModule(MlpModule):
         
         return rate_total,result_total_list
             
-    def build_import_index(self,date=None,output_data=None,target=None,price_target=None,target_info=None,
+    def build_import_index(self,date=None,pred_top_num=2,output_data=None,target=None,price_target=None,target_info=None,
                            combine_instrument=None,index_round_targets=None):  
         """生成涨幅达标的预测数据下标"""
         
         (cls_values,ce_values,choice,trend_value,combine_index) = output_data
         
-        import_index_list = self.strategy_top_bidi(ce_values,cls_values,target=target,target_info=target_info,
+        import_index_list = self.strategy_top_bidi(ce_values,cls_values,pred_top_num=pred_top_num,target=target,target_info=target_info,
                                             index_round_targets=index_round_targets,combine_instrument=combine_instrument)
  
         # 构建结果集
@@ -791,7 +793,7 @@ class FuturesBidiModule(MlpModule):
         result_list['date'] = date       
         return result_list
 
-    def strategy_top_bidi(self,ce,cls,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
+    def strategy_top_bidi(self,ce,cls,pred_top_num=2,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
         """筛选品种明细,使用双向模式"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -800,8 +802,7 @@ class FuturesBidiModule(MlpModule):
         # cls_ins = cls[1]
 
         # 接着计算具体品种             
-        top_num = 2
-        select_num = top_num
+        top_num = pred_top_num
         
         cancidate_list = []
         # 同时从正反2个方向选取品种
@@ -928,7 +929,7 @@ class FuturesBidiModule(MlpModule):
         
         sw_ins_mappings = self.valid_sw_ins_mappings
         combine_content = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)
-        result_date_list = self.combine_result_data(self.output_result,predict_mode=True)  
+        result_date_list = self.combine_result_data(self.output_result,predict_mode=True,pred_top_num=self.pred_top_num)  
         result_target = {}  
         # 根据原始数组，生成实际品种信息
         if result_date_list is None:

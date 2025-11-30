@@ -274,7 +274,10 @@ class FurBacktestStrategy(SimStrategy):
         
         if order_book_id in self.close_list:
             del self.close_list[order_book_id]
-            
+        # 有可能也在开仓列表中，一并删除
+        if order_book_id in self.open_list:
+            del self.open_list[order_book_id]
+                        
     def pick_to_open_list(self):
         """从候选列表中挑选到开仓列表"""
         
@@ -353,15 +356,11 @@ class FurBacktestStrategy(SimStrategy):
             if not self.is_trade_opening(context.now, order_book_id):
                 self.logger_info("not in trading time:{},{}".format(order_book_id,context.now))
                 continue
-            pos_info = self.get_position_by_order(order)
             # 从待平仓列表中取得相关订单
             close_order = self.get_today_closed_order(order_book_id)
             # 只对待平仓状态进行挂单
             if close_order is not None and close_order.status==ORDER_STATUS.PENDING_NEW:
-                # 全部挂单
-                if pos_info is None:
-                    print("nnn")
-                amount = pos_info.quantity
+                amount = close_order.quantity
                 # 挂单卖出
                 order = self.submit_order(amount,order_in=close_order)
                 if order is None:
@@ -633,6 +632,8 @@ class FurBacktestStrategy(SimStrategy):
         
         # 使用本地记录仓位信息
         sim_position = self.sim_position
+        if sim_position.shape[0]==0:
+            return None
         if trade_date is None:
             pos = sim_position[sim_position['order_book_id']==order_book_id]
         else:

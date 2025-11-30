@@ -35,10 +35,15 @@ class FuturesRealDataSource(FuturesDataSource):
         # 缓存最近价格信息
         self.last_bar_cache = {}
     
-    def load_all_contract(self,cache_mode=True):
+    def load_all_contract(self,trade_date_str=None):
         """预加载所有合约"""
         
         contract_data_file = "custom/data/results/all_contract.pkl"
+        
+        # 根据数据库存储的前一缓存日期决定是否进行线上查询
+        sql_str = "select value from running_status where code='sim_cache_data' "
+        prev_cache_date = self.dbaccessor.do_query(sql_str)[0][0]
+        cache_mode =  int(prev_cache_date)>=int(trade_date_str)
         
         if cache_mode and os.path.exists(contract_data_file):
             # 临时缓存模式
@@ -51,6 +56,7 @@ class FuturesRealDataSource(FuturesDataSource):
                 main_code = self.get_instrument_code_from_contract_code(symbol)
                 all_contracts.append([main_code,symbol])
             all_contracts = pd.DataFrame(np.array(all_contracts),columns=['code','main_contract_code'])
+            self.dbaccessor.do_updateto("update running_status set value='{}' where code='sim_cache_data'".format(trade_date_str))
             
         self.all_contracts = all_contracts
         self.check_instrument_match(all_contracts['code'].values)

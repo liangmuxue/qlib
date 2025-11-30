@@ -18,8 +18,8 @@ data_handler_config: &data_handler_config
               col_list: &col_list ['MACD','ATR5','RSI5','RSI20','OBV5','label_ori','price_norm','VOLUME_CLOSE','WVMA5','BETA5','RSQR5','RVI',
               'RESI5','CLOSE','REFCLOSE','HOLD','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','AOS','HIGH_QTLU5','REV5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
-              'SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
-              'IMXD5']                                      
+              'SKEW5','QTLU10','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
+              'IMXD5','open_range']                                      
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -66,7 +66,7 @@ task:
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
-               total_iters: 5e4
+               total_iters: 4e3
                # base_lr: 0.5e-4
                # max_lr: 1.5e-3
                # cycle_momentum: False
@@ -81,8 +81,8 @@ task:
                market: *market
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
-               work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataStep3_rsvRankWithoutGrad_202505"
+               work_dir: 'custom/data/workflow'
+               model_name: "Futures_cleanDataStep2_rsvRankWithoutGrad_workflow2508"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
@@ -90,7 +90,7 @@ task:
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
                hidden_size: 32
-               forecast_horizon: &forecast_horizon 3
+               forecast_horizon: &forecast_horizon 2
                cut_len: 27
                dropout: 0.5
                past_split: [[0,15]]
@@ -107,8 +107,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2024-01-01, 2025-04-28]
-                valid: [2025-05-01, 2025-07-30]
+                train: [2024-01-01, 2025-08-28]
+                valid: [2025-08-01, 2025-10-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
