@@ -270,7 +270,7 @@ class MultiTaskOptimizer(Adam):
         current_loss = loss.item() * self.accumulation_steps 
         return task_grads , current_loss   
                     
-    def step(self, task_losses,batch_idx=0):
+    def step(self, task_losses):
         """
         执行多任务学习的一步参数更新
         """
@@ -292,10 +292,15 @@ class MultiTaskOptimizer(Adam):
                 total_gradients = pc_grad(gradient_components, self.task_weights,direction=1)
         else:
             # 标准梯度计算
-            total_gradients = self.gradient_calculator.compute_gradients(task_losses)
+            total_gradients = self.gradient_calculator.compute_gradients(task_losses,return_components=False)
             gradient_components = None
             conflict_analysis = {}
         
+        if not self.use_gradient_surgery:
+            self._set_gradients(total_gradients)
+            super().step()
+            return
+            
         def combine_conflict_analysis(conflicts):
             
             conflict_count = 0
@@ -309,10 +314,10 @@ class MultiTaskOptimizer(Adam):
             
         conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
         conflict_count,similarity = combine_conflict_analysis(conflict_analysis_total)
-        # conflict_analysis_total_cls = analyze_gradient_conflicts([gradient_components[0],total_gradients])
-        # conflict_analysis_total_ce = analyze_gradient_conflicts([gradient_components[1],total_gradients])
-        # cls_conflict_count,cls_similarity= combine_conflict_analysis(conflict_analysis_total_cls)
-        # ce_conflict_count,ce_similarity= combine_conflict_analysis(conflict_analysis_total_ce)
+        conflict_analysis_total_cls = analyze_gradient_conflicts([gradient_components[0],total_gradients])
+        conflict_analysis_total_ce = analyze_gradient_conflicts([gradient_components[1],total_gradients])
+        cls_conflict_count,cls_similarity= combine_conflict_analysis(conflict_analysis_total_cls)
+        ce_conflict_count,ce_similarity= combine_conflict_analysis(conflict_analysis_total_ce)
         
         # 3. 手动设置梯度并更新参数
         self._set_gradients(total_gradients)

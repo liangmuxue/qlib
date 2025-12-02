@@ -265,21 +265,18 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         inner_index = ins_all_inner[torch.where(ins_class_item>=0)[0]]
                         round_targets_item = future_round_targets_factor[j,inner_index]   
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)
-                        target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
-                        price_diff_range = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
-                        price_diff_range = torch.Tensor(price_diff_range).to(time_diff_targets.device)                        
-                        # 使用top值计算损失
-                        select_number = 5
-                        top_raise_index = torch.argsort(-sv_out_item)[:select_number]
-                        top_fall_index = torch.argsort(sv_out_item)[:select_number]
-                        total_index = torch.cat([top_raise_index,top_fall_index])
-                        # # 使用排序后的间隔排名衡量损失
-                        # select_number = 10
-                        # idx_arr = torch.Tensor(np.linspace(0, sv_out_item.shape[0],select_number, endpoint=False).astype(int)).to(sv_out_item.device).long()
-                        # total_index = torch.sort(-sv_out_item)[1][idx_arr]
+                        # target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
+                        # price_diff_range = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
+                        # price_diff_range = torch.Tensor(price_diff_range).to(time_diff_targets.device)                        
+                        # # 使用top值计算损失
+                        # select_number = 5
+                        # top_raise_index = torch.argsort(-sv_out_item)[:select_number]
+                        # top_fall_index = torch.argsort(sv_out_item)[:select_number]
+                        # total_index = torch.cat([top_raise_index,top_fall_index])
                         # 相对排序损失
-                        # ce_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], round_targets_item[total_index])  
-                        ce_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], price_diff_range[total_index])                           
+                        # ce_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], price_diff_range[total_index])
+                                  
+                        # ce_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], round_targets_item[total_index])                   
                         # ce_loss[i] += self.ccc_loss_comp(sv_out_item[total_index],round_targets_item[total_index]) / 10           
                         # ce_loss[i] += self.mse_loss(sv_out_item[total_index].unsqueeze(-1),round_targets_item[total_index].unsqueeze(-1))   
                     elif target_mode==2:
@@ -313,11 +310,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]               
                 if target_mode in [3]:
-                    # for i, loss in enumerate([cls_loss[i],ce_loss[i]]):
-                    #     precision = torch.exp(-self.log_vars[i])
-                    #     loss_sum += precision * loss + 0.5 * self.log_vars[i]                    
-                    loss_sum = loss_sum + self.loss_weights[0] * cls_loss[i] + self.loss_weights[1] * ce_loss[i] 
-                    # loss_sum = loss_sum + cls_loss[i] + ce_loss[i] / (ce_loss[i] / cls_loss[i]).detach()
+                    # loss_sum = loss_sum + self.loss_weights[0] * cls_loss[i] + self.loss_weights[1] * ce_loss[i] 
+                    loss_sum = loss_sum + cls_loss[i]
                 if target_mode in [5]:
                     # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标,多行业指标模式
                     diff_target = long_diff_seq_targets[:,indus_data_index,-1,i]

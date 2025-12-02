@@ -137,10 +137,9 @@ class AkFuturesExtractor(FutureExtractor):
         
         period = PeriodType.DAY.value
         # 不下载期权数据
-        variety_sql = "select code from trading_variety where isnull(magin_radio)=0"
+        variety_sql = "select code from trading_variety where isnull(magin_radio)=0 order by code asc"
         result_rows = self.dbaccessor.do_query(variety_sql)        
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
 
         dtype = {
             'code': sqlalchemy.String,
@@ -153,25 +152,26 @@ class AkFuturesExtractor(FutureExtractor):
             'settle': sqlalchemy.FLOAT,          
             "date": sqlalchemy.DateTime
         }        
+        client = build_httpx_client(proxy=True) 
         # 遍历所有品种，并分别取得历史数据
         for result in result_rows:
             code = result[0]
             # 加0表示主力连续合约
             main_code = code + "0"
-            item_data = self.extract_item_data(main_code)
+            item_data = self.extract_item_data(main_code,httpx_client=client)
             item_data['code'] = item_data['code'].str[:-1]
             # 保存csv数据文件,全量
             # savepath = "{}/{}".format(self.item_savepath,get_period_name(period))
             # self.export_item_data(code,item_data,is_complete=True,savepath=savepath,period=period,institution=False)     
             # 保存到数据库表
-            item_data.to_sql('dominant_continues_data_old', engine, index=False, if_exists='append',dtype=dtype)  
-            print("code:{} ok".format(code))
+            item_data.to_sql('dominant_continues_data', engine, index=False, if_exists='append',dtype=dtype)  
+            print("import_his_data,code:{} ok".format(code))
         
         # 数据表关联字段挂接
-        upt_sql = "update dominant_continues_data_old d set d.var_id=(select id from trading_variety t where t.code=d.code)"
+        upt_sql = "update dominant_continues_data d set d.var_id=(select id from trading_variety t where t.code=d.code)"
         self.dbaccessor.do_updateto(upt_sql)
         # 结算价为0并且收盘价不为0的，把收盘价赋给结算价
-        upt_sql = "update dominant_continues_data_old set settle=close where settle=0 and close>0 "
+        upt_sql = "update dominant_continues_data set settle=close where settle=0 and close>0 "
         self.dbaccessor.do_updateto(upt_sql)
 
     def import_continius_his_data_local(self,date_range=[2201,2412]):
@@ -834,15 +834,17 @@ class AkFuturesExtractor(FutureExtractor):
             code = row['code']
             begin = int(date_string_transfer(row['begin'],2))
             end = int(date_string_transfer(row['end'],2))
-            # 日期太少的不要，没有近期数据的不要
-            if begin>20220101 or end<20250901:
-                continue
+            # # 日期太少的不要，没有近期数据的不要
+            # if begin>20100101 or end<20250901:
+            #     continue
             exchange_code = self.get_exchange_from_instrument(code)
             if exchange_code in ['CFFEX','INE']:
                 continue
             # 去掉一些不合适的品种
             if code in ['AU','AG','BB','ZS_JRQH','ZS_NMFI']:
                 continue
+            if code in ['JR', 'LR', 'PM', 'RI', 'WH', 'ZC']:
+                continue            
             keep_instruments.append(code)
         clean_data = all[all['code'].isin(keep_instruments)]
         clean_data.to_csv(clean_data_path, sep='\t', index=False,header=None)
@@ -1012,14 +1014,14 @@ if __name__ == "__main__":
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     # extractor.build_cleandata_table()
     # qlib品种名单列表生成
-    # extractor.build_qlib_instrument()
+    extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
-    # extractor.import_day_range_contract_data(data_range=(20251125,20251125))
-    extractor.extract_item_data('m2601') 
+    # extractor.import_day_range_contract_data(data_range=(20101125,20251125))
+    # extractor.extract_item_data('m2601') 
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250926,20250926))
     # extractor.import_day_range_1min_data(data_range=(20250924,20250925))
-    # extractor.import_day_range_contract_data_sina(data_range=(20251125,20251125))
+    # extractor.import_day_range_contract_data_sina(data_range=(20100101,20251125))
             

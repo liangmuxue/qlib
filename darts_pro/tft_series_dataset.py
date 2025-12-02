@@ -235,7 +235,7 @@ class TFTSeriesDataset(TFTDataset):
             range_mode = 0
         else:
             train_range = segments["train"]
-            train_end = val_range[1]              
+            train_end = train_range[1]              
             total_range = [train_range[0],valid_end]   
             range_mode = 1
 

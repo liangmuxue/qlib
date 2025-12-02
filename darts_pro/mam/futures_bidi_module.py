@@ -27,7 +27,7 @@ from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 TRACK_DATE = [20221010,20221011,20220518,20220718,20220811,20220810,20220923]
-TRACK_DATE = [20250418,20250425]
+TRACK_DATE = [20250812,20250815]
 STAT_DATE = [20240731,20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
@@ -76,7 +76,7 @@ class FuturesBidiModule(MlpModule):
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
         self.train_step_mode = train_step_mode
         # 任务初始权重
-        self.task_weights = torch.tensor([0.8, 0.2])  
+        self.task_weights = torch.tensor([1.0, 0.0])  
                 
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
                                     full_attention,feed_forward,hidden_continuous_size,
@@ -202,11 +202,13 @@ class FuturesBidiModule(MlpModule):
 
         optimizers = []
         optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}  
+        use_gradient_surgery_flag = (self.task_weights[1]>0)
         # 使用自定义优化器，用于调整多任务损失函数权重和梯度策略
         for i in range(len(self.past_split)):
             # base_lr = self.lr_scheduler_kwargs["base_lr"] 
+            
             mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(),optimizer_kws,
-                            model=self.sub_models[i],task_weights=self.task_weights,use_gradient_surgery=True, use_adaptive_clip=False)  
+                            model=self.sub_models[i],task_weights=self.task_weights,use_gradient_surgery=use_gradient_surgery_flag, use_adaptive_clip=False)  
             optimizers.append(mt_optimizer)
         # 对应优化器，生成多个学习率
         lr_schedulers = []
@@ -326,7 +328,10 @@ class FuturesBidiModule(MlpModule):
             self.loss_data.append((corr_loss_combine.detach(),ce_loss.detach(),fds_loss.detach(),cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
-            update_info = opt.step([cls_loss[i],ce_loss[i]],batch_idx=batch_idx)
+            if ce_loss[i]>0:
+                update_info = opt.step([cls_loss[i],ce_loss[i]])
+            else:
+                update_info = opt.step([cls_loss[i]])
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
             self.lr_schedulers()[i].step() 
             if update_info is not None:
@@ -502,48 +507,48 @@ class FuturesBidiModule(MlpModule):
             indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
             industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
                  
-            # for index in range(target_class_3d.shape[0]):
-            #
-            #     viz_total_size+=1
-            #     target_class_item = target_class_3d[index]
-            #     keep_index = np.where(target_class_item>=0)[0]
-            #
-            #     round_targets = past_future_round_targets_total[index]
-            #     cls_output = output_3d[2]
-            #     ts_arr = target_info_3d[index]
-            #
-            #     date = int(ts_arr[keep_index][0]["future_start_datetime"])
-            #     if index==0:
-            #         self.log("first_date",date, prog_bar=True) 
-            #     if not date in TRACK_DATE:
-            #         continue    
-            #
-            #     coll_item = coll_result[coll_result['date']==date]
-            #     # trend_output_value = coll_item['trend_output_value'].values[0]
-            #
-            #     for j in range(len(self.past_split)):
-            #         inner_class_item = target_class_item[ins_all]
-            #         inner_index = np.where(inner_class_item>=0)[0]           
-            #         instruments,k_idx,_ = np.intersect1d(ins_all,keep_index,return_indices=True)
-            #         ins_output = cls_output[j][index,:]
-            #         ins_output = ins_output[inner_index]
-            #         fur_round_target = round_targets[instruments,-1,j]
-            #         # 品种比对图
-            #         if j in DRAW_SEQ_DETAIL:
-            #             price_array_range = np.array([self.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
-            #             price_array_range = price_array_range/10
-            #             name_arr = []
-            #             for inner_index,item in enumerate(ts_arr[instruments]):
-            #                 match_item = coll_item[coll_item['instrument']==item['instrument']]
-            #                 if match_item.shape[0]>0:
-            #                     trend = match_item['trend_value'].values[0]
-            #                     name_arr.append(item["instrument"]+"_match_"+str(trend))
-            #                 else:
-            #                     name_arr.append(item["instrument"])
-            #             view_data = np.stack([ins_output,fur_round_target,price_array_range]).transpose(1,0)
-            #             win = "detail_target_{}_{}=".format(j,viz_total_size)
-            #             target_title = "Detail ,date:{}".format(date)                            
-            #             viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred","target","price"])   
+            for index in range(target_class_3d.shape[0]):
+            
+                viz_total_size+=1
+                target_class_item = target_class_3d[index]
+                keep_index = np.where(target_class_item>=0)[0]
+            
+                round_targets = past_future_round_targets_total[index]
+                cls_output = output_3d[2]
+                ts_arr = target_info_3d[index]
+            
+                date = int(ts_arr[keep_index][0]["future_start_datetime"])
+                if index==0:
+                    self.log("first_date",date, prog_bar=True) 
+                if not date in TRACK_DATE:
+                    continue    
+            
+                coll_item = coll_result[coll_result['date']==date]
+                # trend_output_value = coll_item['trend_output_value'].values[0]
+            
+                for j in range(len(self.past_split)):
+                    inner_class_item = target_class_item[ins_all]
+                    inner_index = np.where(inner_class_item>=0)[0]           
+                    instruments,k_idx,_ = np.intersect1d(ins_all,keep_index,return_indices=True)
+                    ins_output = cls_output[j][index,:]
+                    ins_output = ins_output[inner_index]
+                    fur_round_target = round_targets[instruments,-1,j]
+                    # 品种比对图
+                    if j in DRAW_SEQ_DETAIL:
+                        price_array_range = np.array([self.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
+                        price_array_range = price_array_range/10
+                        name_arr = []
+                        for inner_index,item in enumerate(ts_arr[instruments]):
+                            match_item = coll_item[coll_item['instrument']==item['instrument']]
+                            if match_item.shape[0]>0:
+                                trend = match_item['trend_value'].values[0]
+                                name_arr.append(item["instrument"]+"_match_"+str(trend))
+                            else:
+                                name_arr.append(item["instrument"])
+                        view_data = np.stack([ins_output,fur_round_target,price_array_range]).transpose(1,0)
+                        win = "detail_target_{}_{}=".format(j,viz_total_size)
+                        target_title = "Detail ,date:{}".format(date)                            
+                        viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred","target","price"])   
                                     
     def dump_val_data(self,val_batch,outputs,detail_loss):
     
