@@ -20,7 +20,7 @@ class FurIndustryMixer(nn.Module):
     
     def __init__(self, seq_len=25, round_skip_len=25,pred_len=5,past_cov_dim=12,target_mode=0,cut_len=0,
                   dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
-                 combine_nodes_num=None,instrument_index=None,index_num=1,device="cpu"):
+                 combine_nodes_num=None,instrument_index=None,index_num=1,num_mixtures=5,device="cpu"):
         """行业总体网络，分为子网络，以及整合网络2部分"""
         
         super().__init__()
@@ -32,6 +32,7 @@ class FurIndustryMixer(nn.Module):
         self.index_num = index_num
         self.target_mode = target_mode
         self.cut_len = cut_len
+        self.num_mixtures = num_mixtures
         
         # 循环取得不同行业板块的多个下级模型
         sub_model_list = []
@@ -44,6 +45,7 @@ class FurIndustryMixer(nn.Module):
                 cut_len=cut_len,
                 round_skip_len=round_skip_len,
                 past_cov_dim=past_cov_dim,
+                hidden_size=hidden_size,
                 dropout=dropout,
                 down_sampling_window=down_sampling_window,
                 device=device,
@@ -60,16 +62,18 @@ class FurIndustryMixer(nn.Module):
         if self.target_mode in [2]:
             self.cls_sub_models = nn.ModuleList(sub_cls_model_list)                 
         if self.target_mode in [3]:
-            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item())
+            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True)
+            # 高斯混合模型，预测序列长度->高斯数值(均值、标准差、权重)
+            self.gus_params = nn.Linear(1, 3 * num_mixtures)
         if self.target_mode in [6]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.shape[0],1)
-        
+
     def forward(self, x_in): 
         """多个行业板块子模型顺序输出，整合输出形成统一输出"""
         
         cls_out_combine = []
         index_data_combine = []
-        classify_out_combine = []
+        dec_out_out_combine = []
         # 不同行业分别输出
         for i in range(self.combine_nodes_num.shape[0]):
             m = self.sub_models[i]
@@ -78,18 +82,19 @@ class FurIndustryMixer(nn.Module):
             x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
-            classify_out,cls_out,sw_index_data = m(x_inner)
+            dec_out,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==3:
-                cls_out = self.ins_layer(cls_out[:,:,-1])
+                # 生成高斯模型参数
+                # dec_out = self.gus_params(cls_out)     
+                cls_out = self.ins_layer(cls_out.squeeze(-1))
             elif self.target_mode==2:
                 # 行业内品种整合输出
                 cls_out = self.cls_sub_models[i](cls_out[:,:,-1]) 
             # 叠加归一化输出
             cls_out_combine.append(cls_out)
             index_data_combine.append(sw_index_data)
-            classify_out_combine.append(classify_out)
-            
-        classify_out_combine = torch.cat(classify_out_combine,dim=1)
+            dec_out_out_combine.append(dec_out)
+        dec_out_out_combine = torch.cat(dec_out_out_combine,dim=1)
         if self.target_mode==0:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
             # 关联比较模式，叠加整合网络
@@ -107,7 +112,7 @@ class FurIndustryMixer(nn.Module):
         else:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
             
-        return classify_out_combine,cls_out_combine,index_data_combine
+        return dec_out_out_combine,cls_out_combine,index_data_combine
 
 class FurIndustryDRollMixer(nn.Module):
     """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络.

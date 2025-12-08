@@ -89,15 +89,10 @@ class TFTExtModel(MixedCovariatesTorchModel):
         del model_kwargs["scale_mode"]
         if "train_step_mode" in model_kwargs:
             del model_kwargs["train_step_mode"]
-        if "cut_len" in model_kwargs:
-            del model_kwargs["cut_len"]
-        if "step_mode" in model_kwargs:
-            self.step_mode = model_kwargs["step_mode"]
-            del model_kwargs["step_mode"]
-                    
-        if "rolling_size" in model_kwargs:
-            del model_kwargs["rolling_size"]
-        
+        ext_kwargs = ['cut_len','step_mode','rolling_size','task_weights','pred_weights']
+        for key in ext_kwargs:
+            if key in model_kwargs:
+                del model_kwargs[key]
         if "devices" in model_kwargs["pl_trainer_kwargs"]:
             # cudas = ",".join([str(x) for x in model_kwargs["pl_trainer_kwargs"]["devices"]])
             # cudas = "cuda:" + cudas
@@ -452,6 +447,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         epochs: int = 0,
         max_samples_per_ts: Optional[int] = None,
         num_loader_workers: int = 0,
+        seperate_mode = False,
     ):
         """重载原方法"""
         # guarantee that all inputs are either list of `TimeSeries` or `None`
@@ -577,11 +573,63 @@ class TFTExtModel(MixedCovariatesTorchModel):
             if self.model is None:
                 self.model = model
             return trainer,model,train_loader,val_loader
-        
         return self.fit_from_dataset(
-            train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers
+            train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers,seperate_mode=seperate_mode
         )
+        
+    def fit_from_dataset(
+        self,
+        train_dataset: TrainingDataset,
+        val_dataset: Optional[TrainingDataset] = None,
+        trainer: Optional[pl.Trainer] = None,
+        verbose: Optional[bool] = None,
+        epochs: int = 0,
+        num_loader_workers: int = 0,
+        seperate_mode=False
+    ):
+        if seperate_mode:
+            return self._setup_for_train(
+                train_dataset=train_dataset,
+                val_dataset=val_dataset,
+                trainer=trainer,
+                verbose=verbose,
+                epochs=epochs,
+                num_loader_workers=num_loader_workers,
+            )     
+        else:       
+            self.train(
+                *self._setup_for_train(
+                    train_dataset=train_dataset,
+                    val_dataset=val_dataset,
+                    trainer=trainer,
+                    verbose=verbose,
+                    epochs=epochs,
+                    num_loader_workers=num_loader_workers,
+                )
+            )
+        return self
 
+    def train(
+        self,
+        trainer: pl.Trainer,
+        model: PLForecastingModule,
+        train_loader: DataLoader,
+        val_loader: Optional[DataLoader],
+    ) -> None:
+        
+        self._fit_called = True
+        ckpt_path = self.load_ckpt_path
+        self.load_ckpt_path = None
+
+        trainer.fit(
+            model,
+            train_dataloaders=train_loader,
+            val_dataloaders=val_loader,
+            ckpt_path=ckpt_path,
+        )
+        self.model = model
+        self.trainer = trainer
+            
     def _setup_for_train(
         self,
         train_dataset: TrainingDataset,
@@ -628,6 +676,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             model.monitor = self.monitor
         else:
             model = self.model
+            model.monitor = self.monitor
             # Check existing model has input/output dims matching what's provided in the training set.
             raise_if_not(
                 len(train_sample) == len(self.train_sample),
@@ -680,9 +729,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 "`new_epochs` is the sum of (epochs already trained + some additional epochs)."
             )
         
-        # Train model
-        if epochs>0 and self.n_epochs>0:
-            self._train(trainer,model,train_loader, val_loader)
+        # # Train model
+        # if epochs>0 and self.n_epochs>0:
+        #     self._train(trainer,model,train_loader, val_loader)
             
         return trainer,model,train_loader,val_loader
     

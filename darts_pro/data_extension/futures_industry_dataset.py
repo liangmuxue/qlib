@@ -93,6 +93,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 重新生成编号
         df_data[g_col] = df_data[group_column].rank(method='dense',ascending=True).astype("int")  
         self.df_data = df_data
+        if mode=='valid':
+            self.check_data_intergraty()
         rank_num_max = df_data['instrument'].unique().shape[0]
         # 生成日期映射关系
         date_mappings,date_mappings_ext = self.build_date_mappings(df_data,dataset=dataset,instrument_number=rank_num_max)
@@ -162,7 +164,20 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         scaler = MinMaxScaler(feature_range=feature_range)
         # scaler = StandardScaler() 
         return scaler
-     
+    
+    def check_data_intergraty(self):
+        
+        dataset = global_var.get_value("dataset") 
+        df_data = self.df_data
+        df = df_data[~df_data['instrument'].str.startswith('ZS')]
+        columns = list(set(dataset.get_static_columns() + dataset.get_past_columns()))
+        for column in columns:
+            col_zeros_num = (df[column]==0).sum()
+            if col_zeros_num>df.shape[0]//20:
+                message = "too more outlier,column:{},col_zeros_num:{}".format(column,col_zeros_num)
+                print(message)
+                # raise ValueError(message)
+    
     def check_instrument_data(self,dump_file=False):
         """校验训练及验证的品种的一致性"""
         
@@ -632,8 +647,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
         
-        # if future_start_datetime==20250313:
-        #     result_file_path = "custom/data/results/data_compare_val_20250313.pkl"
+        # if future_start_datetime==20250812:
+        #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
         #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
         #     with open(result_file_path, "wb") as fout:

@@ -1,3 +1,4 @@
+import yaml
 import os
 import pickle
 import pandas as pd
@@ -336,7 +337,7 @@ if __name__ == "__main__":
     # stats.combine_backtest_result()
     # stats.analysis_backtest(date_range=[20250201,20250731])
     
-    
-    stats.show_gui("/home/qdata/workflow/fur_sim_flow_2025/trader_data/futures_30001/sim_position.csv")
+    stats.coll_res_analysis()
+    # stats.show_gui("/home/qdata/workflow/fur_sim_flow_2025/trader_data/futures_30001/sim_position.csv")
     
     

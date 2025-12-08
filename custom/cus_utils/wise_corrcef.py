@@ -1,5 +1,6 @@
-
-
+import pandas as pd
+from scipy.stats import rankdata
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import numpy as np
 
 ### Functions for correlating matrix to a column
@@ -136,6 +137,169 @@ def testCorrectnessBis():
     else:
         print("Test failed")
 
+def analyze_model_complexity(model, input_shape, threshold=1e6):
+    """
+    分析模型复杂度
+    """
+    import torch
+    from torchsummary import summary
+    
+    # 计算参数量
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    # 粗略估计计算量（FLOPs）
+    # 这里简化处理，实际可以使用thop等库
+    print(f"总参数量: {total_params:,}")
+    print(f"可训练参数量: {trainable_params:,}")
+    
+    issues = []
+    
+    # 检查参数量是否过多
+    if total_params > threshold:
+        issues.append(f"模型参数量过多: {total_params:,} > {threshold:,}")
+    
+    # 检查层数
+    num_layers = len(list(model.children()))
+    if num_layers > 50:  # 假设阈值
+        issues.append(f"模型层数过多: {num_layers}层")
+    
+    # 检查过大的层
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if param.numel() > 1e6:  # 单个参数超过100万
+                issues.append(f"层 {name} 参数过多: {param.numel():,}")
+    
+    return issues, total_params
+
+def calculate_comprehensive_rank_from_scores(
+    scores_df, 
+    weights=None, 
+    normalization_method='minmax',
+    direction=None,
+    handle_missing='mean'
+):
+    """
+    通过单项得分计算综合排名
+    
+    参数：
+    ----------
+    scores_df : pandas DataFrame
+        包含各单项得分的DataFrame，每行是一个样本，每列是一个指标
+    weights : list or dict, optional
+        权重列表或字典。如果是列表，长度必须与列数相同；
+        如果是字典，键必须是列名。默认为等权重
+    normalization_method : str, optional
+        标准化方法，可选：
+        - 'minmax': Min-Max归一化 (0-1)
+        - 'zscore': Z-Score标准化
+        - 'none': 不进行标准化
+    direction : dict, optional
+        指标方向字典，键为列名，值为'positive'或'negative'
+        正向指标：值越大越好
+        负向指标：值越小越好
+    handle_missing : str, optional
+        缺失值处理方法，可选：
+        - 'mean': 用列均值填充
+        - 'median': 用列中位数填充
+        - 'drop': 删除有缺失值的行
+    
+    返回：
+    -------
+    result_df : pandas DataFrame
+        包含综合得分和排名的DataFrame
+    normalized_scores : pandas DataFrame
+        标准化后的得分
+    """
+    
+    # 创建副本避免修改原始数据
+    df = scores_df.copy()
+    
+    # 1. 处理缺失值
+    if df.isnull().any().any():
+        if handle_missing == 'mean':
+            df = df.fillna(df.mean())
+        elif handle_missing == 'median':
+            df = df.fillna(df.median())
+        elif handle_missing == 'drop':
+            df = df.dropna()
+        else:
+            raise ValueError("handle_missing参数必须是'mean', 'median'或'drop'")
+    
+    # 2. 标准化处理
+    normalized_df = df.copy()
+    
+    if normalization_method == 'minmax':
+        scaler = MinMaxScaler()
+        normalized_values = scaler.fit_transform(df)
+        normalized_df = pd.DataFrame(normalized_values, 
+                                     index=df.index, 
+                                     columns=df.columns)
+        
+    elif normalization_method == 'zscore':
+        scaler = StandardScaler()
+        normalized_values = scaler.fit_transform(df)
+        normalized_df = pd.DataFrame(normalized_values, 
+                                     index=df.index, 
+                                     columns=df.columns)
+        
+    elif normalization_method == 'none':
+        # 不进行标准化，但确保所有指标为正向
+        pass
+    else:
+        raise ValueError("normalization_method必须是'minmax', 'zscore'或'none'")
+    
+    # 3. 处理指标方向
+    if direction is not None:
+        for col, dir_type in direction.items():
+            if col in normalized_df.columns:
+                if dir_type == 'negative':
+                    # 对于负向指标，反转标准化值
+                    normalized_df[col] = 1 - normalized_df[col] if normalization_method == 'minmax' else -normalized_df[col]
+    
+    # 4. 设置权重
+    if weights is None:
+        # 等权重
+        weights_array = np.ones(len(df.columns)) / len(df.columns)
+    elif isinstance(weights, dict):
+        # 字典权重
+        weights_array = np.array([weights.get(col, 0) for col in df.columns])
+        # 归一化权重
+        weights_array = weights_array / weights_array.sum()
+    elif isinstance(weights, list):
+        # 列表权重
+        if len(weights) != len(df.columns):
+            raise ValueError("权重列表长度必须与指标数相同")
+        weights_array = np.array(weights)
+        # 归一化权重
+        weights_array = weights_array / weights_array.sum()
+    else:
+        raise TypeError("权重必须是list、dict或None")
+    
+    # 5. 计算综合得分
+    # 确保数据类型一致
+    normalized_values = normalized_df.values.astype(float)
+    comprehensive_scores = np.dot(normalized_values, weights_array)
+    
+    # 6. 计算排名（得分越高，排名越靠前）
+    # rankdata默认是值越小排名越靠前，所以我们用负值
+    comprehensive_ranks = rankdata(-comprehensive_scores, method='min')
+    
+    # 7. 创建结果DataFrame
+    result_df = pd.DataFrame({
+        '样本名称': df.index.tolist(),
+        '综合得分': comprehensive_scores,
+        '综合排名': comprehensive_ranks
+    })
+    
+    # 添加权重信息
+    for i, col in enumerate(df.columns):
+        result_df[f'权重_{col}'] = weights_array[i]
+    
+    # 按排名排序
+    result_df = result_df.sort_values('综合排名').reset_index(drop=True)
+    
+    return result_df, normalized_df
 
 if __name__ == '__main__':
 

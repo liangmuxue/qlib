@@ -191,10 +191,18 @@ class FuturesModel(IndustryRollModel):
                 train_sw_ins_mappings=self.train_sw_ins_mappings,     
                 valid_sw_ins_mappings=self.valid_sw_ins_mappings,  
                 pred_top_num=self.ext_kwargs['pred_top_num'],  
+                task_weights=self.ext_kwargs['task_weights'],  
                 **self.pl_module_params,
         )     
+        self.after_create_model(model)
         return model         
-
+    
+    def set_outer_params(self,outer_params):
+        self.outer_params = outer_params
+    
+    def after_create_model(self,model):
+        model.set_outer_params(self.outer_params)
+    
     def _batch_collate_filter(self,batch):
         """批次整合,包含批次内数据归一化"""
         

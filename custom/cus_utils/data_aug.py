@@ -1,5 +1,5 @@
 import os
-import torch
+import yaml
 import numpy as np
 import pandas as pd
 import random
@@ -187,24 +187,68 @@ def compare_clean_data_and_1min_cross_data(match_date=None):
     print("lack data:{}".format(lack_data))
     # print("min date:{}".format(lack_data['date'].min()))
     return lack_data
-           
-def swig_object_to_dict(obj):
-    """Swig Object to Dict"""
-    
-    if not hasattr(obj, '__swig_getmethods__'):
-        return None
 
-    result = {}
-    for name, method in obj.__swig_getmethods__.items():
-        try:
-            if callable(method):
-                result[name] = method(obj)
-            else:
-                result[name] = method
-        except Exception:
-            pass
-    return result
+#######################  For Training #############################
+
+def coll_res_analysis():
+    """验证结果数据分析"""
+    
+    import qlib
+    from qlib.utils import  init_instance_by_config
+    from qlib.workflow import R
+    import cus_utils.global_var as global_var
+    
+    result_file_path = os.path.join("custom/data/results/stats","coll_record.csv") 
+    col_data_types = {"top_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_value":int,"date":int}   
+    coll_result_data = pd.read_csv(result_file_path,dtype=col_data_types)  
+    # 使用验证数据集的数据协助分析
+    yaml_file = "custom/config/darts/workflow_pred_futures_bidi.yaml"
+    with open(yaml_file) as fp:
+        config = yaml.safe_load(fp)    
+    experiment_name = "workflow"
+    qlib_init_config = config["qlib_init"]
+    qlib.init(provider_uri=qlib_init_config["provider_uri"], region=qlib_init_config["region"])  
+    with R.start(experiment_name=experiment_name, recorder_name=None):              
+        dataset = init_instance_by_config(config["task"]["dataset"])
+        train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+        process_model = init_instance_by_config(config["task"]["model"])
+        process_model.init_env(dataset)
+        output_chunk_length = process_model.optargs["forecast_horizon"]
+        emb_size = dataset.get_emb_size()
+        model = process_model._build_model(dataset,emb_size=emb_size,use_model_name=False,mode=0) 
+        model.set_outer_params({'pred_weights':process_model.optargs["pred_weights"],'mode':process_model.type,'candidate_inverse':process_model.optargs['candidate_inverse']}) 
+        model.mode = "predict"
+        _,_,train_loader,val_loader = model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
+                             val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+                             max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=True)
+        futures_dataset = val_loader.dataset
         
+    # 遍历并取得指定数据
+    dates = [20250812,20250815]
+    # 分别找出比较准的日期和不太准的日期
+    match_results = coll_result_data.groupby(by='date').apply(lambda x: (x['target_class'] >=2).sum())
+    match_dates = match_results[match_results.values>=3].index.values
+    no_match_dates = match_results[match_results.values<=2].index.values
+    for index,dates in enumerate([match_dates,no_match_dates]):
+        target_data = []
+        for i in range(len(futures_dataset)):
+            past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,\
+                index_round_targets,long_diff_seq_targets,target_info_total  = futures_dataset[i]
+            future_start_datetime = int(futures_dataset.date_list[i])
+            if future_start_datetime in dates:
+                for target_info in target_info_total:
+                    open_array = target_info['open_array']
+                    diff_range = (open_array[-1] - open_array[-output_chunk_length])/open_array[-output_chunk_length]*100
+                    target_data.append([future_start_datetime,target_info['instrument'],diff_range])
+        
+        target_data = pd.DataFrame(target_data,columns=['date','instrument','open_diff'])
+        target_data = target_data[~target_data['instrument'].str.startswith("ZS")]
+        target_data['date'] = target_data['date'].astype(int)
+        normal_info = target_data.groupby(by='date')['open_diff'].agg(['mean', 'std'])
+        title = "correct" if index==0 else "fail"
+        print("{} eva mean:{},std:{}".format(title,normal_info['mean'].describe(),normal_info['std'].describe()))
+      
 if __name__ == "__main__":
     file_path = "custom/data/aug/test_100.npy"
     pd_file_path = "custom/data/aug/test_100.pkl"
@@ -214,9 +258,10 @@ if __name__ == "__main__":
     # aug_data_view(file_path)
     # aug_data_to_pd(file_path,pd_file_path,['datetime','instrument','dayofweek','CORD5', 'VSTD5', 'WVMA5', 'label','ori_label'])\
     # aug_pd_data_view(pd_file_path)
-    compare_dataset_consistence()
+    # compare_dataset_consistence()
     # compare_clean_data_and_continus_data(match_date=20251009)
     # compare_clean_data_and_1min_cross_data(match_date=20251009)
+    coll_res_analysis()
     
        
     

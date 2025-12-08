@@ -156,10 +156,10 @@ class PcaCnn(nn.Module):
 class LinelessLayer(nn.Module):
     """全连接加非线性"""
 
-    def __init__(self,input_num,output_num,hidden_size=16,device=None):   
+    def __init__(self,input_num,output_num,hidden_size=16,device=None,layer_norm=True):   
         super(LinelessLayer, self).__init__()
         
-        if output_num>1:
+        if output_num>1 and layer_norm:
             self.combine_layer = nn.Sequential(
                     nn.Linear(input_num, hidden_size),
                     nn.ReLU(), 

@@ -60,20 +60,8 @@ class FuturesProcessModel(TftDataframeModel):
         self,
         dataset: TFTFuturesDataset,
     ):
-        self.dataset = dataset
-        dataset.provider_file = os.path.join(self.optargs["provider_uri"],"instruments",self.optargs["market"]+".txt")
-        global_var.set_value("dataset", dataset)
-        viz_data = TensorViz(env="viz_data")
-        viz_result = TensorViz(env="viz_result")
-        viz_result_detail = TensorViz(env="viz_result_detail")
-        viz_result_fail = TensorViz(env="train_result_fail")
-        global_var.set_value("viz_data",viz_data)
-        global_var.set_value("viz_result",viz_result)
-        global_var.set_value("viz_result_detail",viz_result_detail)
-        global_var.set_value("viz_result_fail",viz_result_fail)
-        global_var.set_value("load_ass_data",False)
-        global_var.set_value("save_ass_data",False)
-                
+        self.init_env(dataset)
+        
         if self.type.startswith("fit_futures_togather"):
             self.fit_futures_togather(dataset)
             return   
@@ -109,6 +97,22 @@ class FuturesProcessModel(TftDataframeModel):
             return                                      
         print("Do Nothing")
 
+    def init_env(self,dataset):
+        
+        self.dataset = dataset
+        dataset.provider_file = os.path.join(self.optargs["provider_uri"],"instruments",self.optargs["market"]+".txt")
+        global_var.set_value("dataset", dataset)
+        viz_data = TensorViz(env="viz_data")
+        viz_result = TensorViz(env="viz_result")
+        viz_result_detail = TensorViz(env="viz_result_detail")
+        viz_result_ext = TensorViz(env="viz_result_ext")
+        global_var.set_value("viz_data",viz_data)
+        global_var.set_value("viz_result",viz_result)
+        global_var.set_value("viz_result_detail",viz_result_detail)
+        global_var.set_value("viz_result_ext",viz_result_ext)
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)
+            
     def fit_futures_togather(
         self,
         dataset: TFTFuturesDataset,
@@ -289,7 +293,6 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.mode = self.type  
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            
             trainer.validate(model=model,dataloaders=val_loader)
                         
         else:
@@ -366,36 +369,25 @@ class FuturesProcessModel(TftDataframeModel):
             self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=0) 
-        
-        self.model.mode = self.type  
+        self.model.mode = self.type 
+        self.model.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type,'candidate_inverse':self.optargs['candidate_inverse']}) 
         
         if self.type=="pred_futures_bidi":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)
-            self.model.model.mode = self.type  
+                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=True)
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            self.model.model.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type,'candidate_inverse':self.optargs['candidate_inverse']}) 
             trainer.validate(model=model,dataloaders=val_loader)
-            
-            # stat_result = self.model.model.stat_result
-            # result_view_file_path = self.model.model.result_view_file_path
-            # # 累加保存到本地
-            # if os.path.exists(result_view_file_path):
-            #     stat_result_total = pd.read_csv(result_view_file_path)  
-            #     # 去重
-            #     date_min = stat_result["date"].min()
-            #     date_max = stat_result["date"].max()
-            #     stat_result_total = stat_result_total[(stat_result_total['date']<date_min)|(stat_result_total['date']>date_max)]
-            #     stat_result_total = pd.concat([stat_result_total,stat_result])
-            # else:        
-            #     stat_result_total = stat_result
-            # stat_result_total.to_csv(result_view_file_path)            
         else:
+            trainer,model_inner,train_loader,val_loader= \
             self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+            # model_inner.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type}) 
+            # self.model.train(trainer, model_inner, train_loader, val_loader)
     
     def rebuild_model_params(self,model,model_name=None):
         
@@ -490,7 +482,9 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
                     pl_trainer_kwargs=pl_trainer_kwargs,
-                    pred_top_num=self.optargs["pred_top_num"]
+                    pred_top_num=self.optargs["pred_top_num"],
+                    task_weights=self.optargs["task_weights"],
+                    pred_weights=self.optargs["pred_weights"],
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
         if mode==1:  
@@ -644,7 +638,7 @@ class FuturesProcessModel(TftDataframeModel):
                             "KLOW","KLOW2","KSFT","RSV5", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
             'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
         analysis_columns = ["RSV5","QTLU5","CNTN5","BULLS","CCI5"]
-        analysis_columns = ['RSV10','CCI10','CNTN10','QTLU10','QTLUMA10']
+        # analysis_columns = ['RSV10','CCI10','CNTN10','QTLU10','QTLUMA10']
         # analysis_columns = ["QTLUMA5",'QTLU5','IMXD5','SKEW5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
         # analysis_columns = ['rsv_diff','bulls_diff','cci_diff','diff_range','close_range']
         

@@ -9,7 +9,6 @@ import os
 import threading
 # from openctp_ctp import tdapi # pip install mode
 import CTPAPI.build.thosttraderapi as tdapi # manual mode
-from cus_utils.data_aug import swig_object_to_dict
 
 class TdImpl(tdapi.CThostFtdcTraderSpi):
     def __init__(self, host, broker, user, password, appid, authcode):
@@ -364,7 +363,6 @@ class TdImpl(tdapi.CThostFtdcTraderSpi):
                   f"OpenCost={pInvestorPosition.OpenCost} "
                   f"SettlementPrice={pInvestorPosition.SettlementPrice} "
                   )
-            # print("python_dict:{}".format(swig_object_to_dict(pInvestorPosition)))
 
         if bIsLast == True:
             semaphore.release()

@@ -2,8 +2,7 @@ from typing import Callable, Optional
 import torch
 from torch import nn
 from torch import Tensor
-import torch.nn.functional as F
-import numpy as np
+from .cov_cnn import LinelessLayer
 
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from .layers.Autoformer_EncDec import series_decomp
@@ -61,13 +60,10 @@ class FurTimeMixer(nn.Module):
         self.projection_layer = nn.Linear(d_model, 1, bias=True)   
         # 整体投影层，映射为1段
         self.comp_proj_layer = nn.Linear(pred_len, 1, bias=True)   
-        # 添加层归一
+        # 添加归一层
         predict_layers = []
         for i in range(down_sampling_layers + 1):
-            layer = nn.Sequential(
-                torch.nn.Linear(seq_len // (down_sampling_window ** i),pred_len),
-                nn.LayerNorm(pred_len)
-            ).to(device)
+            layer = LinelessLayer(seq_len // (down_sampling_window ** i),pred_len,layer_norm=False)           
             predict_layers.append(layer)
         self.predict_layers = nn.ModuleList(predict_layers)
         # 使用残差计算量化数值（整体走势）预测
@@ -78,18 +74,18 @@ class FurTimeMixer(nn.Module):
         # 全局参数矩阵,每周的工作日部分,注意嵌入维度需要与TimeMixer部分的特征维度（d_model）保持一致
         self.day_in_week_emb = nn.Parameter(
             torch.empty(day_of_week_size, temp_dim_diw))
-        nn.init.xavier_uniform_(self.day_in_week_emb)
+        nn.init.kaiming_normal_(self.day_in_week_emb,mode='fan_in', nonlinearity='relu')
         # 每年的月份部分
         self.month_in_year_emb = nn.Parameter(
             torch.empty(month_of_year_size, temp_dim_miy))
-        nn.init.xavier_uniform_(self.month_in_year_emb)    
+        nn.init.kaiming_normal_(self.month_in_year_emb,mode='fan_in', nonlinearity='relu')    
         # 每月的日期部分
         self.day_in_month_emb = nn.Parameter(
             torch.empty(day_of_month_size, temp_dim_dim))
-        nn.init.xavier_uniform_(self.day_in_month_emb)          
+        nn.init.kaiming_normal_(self.day_in_month_emb,mode='fan_in', nonlinearity='relu')          
         # 空间参数，对应不同的品种或行业分类
         self.node_emb = nn.Parameter(torch.empty(num_nodes, node_dim))
-        nn.init.xavier_uniform_(self.node_emb)     
+        nn.init.kaiming_normal_(self.node_emb,mode='fan_in', nonlinearity='relu')     
         # 空间及时间编码层   
         self.ti_sp_enc = nn.Linear(ti_sp_dim,d_model)
         # 未来时空投影层，整合投影到单通道
@@ -473,10 +469,6 @@ class FurStrategy(nn.Module):
         self.select_num = select_num
         self.trend_threhold = trend_threhold
         self.past_tar_dim = past_tar_dim
-        # 条件选取网络，输出形状为1，结合第一维度，形成一维的特征值，后续进行排序取值.
-        # 在此根据趋势分别设置多头和空头2个网络
-        self.l_net = nn.Sequential(nn.Linear(past_tar_dim*2+1, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 1))
-        self.s_net = nn.Sequential(nn.Linear(past_tar_dim*2+1, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 1))
         
     def forward(self, x1,x2,past_targets,ignore_next=False):
         """策略：1.判断趋势 2.根据排序进行一次筛选 3.使用网络实现二次筛选

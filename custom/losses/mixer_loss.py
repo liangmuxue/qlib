@@ -7,11 +7,12 @@ from losses.mtl_loss import UncertaintyLoss,EfficientLambdaRank
 from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normalization
 from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
-import geomloss
+from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
 from cus_utils.common_compute import tensor_intersect,normalization_axis,batch_normalization
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
+from audioop import minmax
 
 class FuturesCombineLoss(UncertaintyLoss):
     """基于期货品种和行业分类整合的损失函数，并以日期维度进行整合"""
@@ -189,7 +190,7 @@ class FuturesStrategyLoss(FuturesCombineLoss):
 class FuturesIndustryLoss(UncertaintyLoss):
     """整合不同行业板块，并基于策略选取的损失"""
 
-    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,tau=0.1,output_chunk_length=2,cut_len=2,loss_weights=None):
+    def __init__(self,ref_model=None,device=None,target_mode=None,lock_epoch_num=0,num_mixtures=5,output_chunk_length=2,cut_len=2,loss_weights=None):
         
         super(FuturesIndustryLoss, self).__init__(ref_model=ref_model,device=device)
         
@@ -202,6 +203,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         self.cut_len = cut_len
         self.log_vars = nn.Parameter(torch.zeros(len(loss_weights)))
         self.loss_weights = loss_weights
+        self.num_mixtures = num_mixtures
         
     def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
         """Multiple Loss Combine"""
@@ -209,7 +211,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
         (output,vr_class,_) = output_ori
         (target,target_class,future_round_targets,index_round_targets,long_diff_seq_targets,target_info) = target_ori
         future_index_round_target = index_round_targets[:,:,-self.output_chunk_length:,:]
-        diff_index_round_target = index_round_targets[:,:,-1:,:].repeat(1,1,self.cut_len,1) - index_round_targets[:,:,-self.cut_len-self.output_chunk_length:-self.output_chunk_length,:]
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.zeros([len(output)]).to(self.device)
         fds_loss = torch.zeros([len(output)]).to(self.device)
@@ -229,7 +230,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
         for i in range(len(output)):
             target_mode = self.target_mode[i]
             if optimizers_idx==i or optimizers_idx==-1:
-                target_item = target[:,indus_data_index,:,i]
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
                 dec_out,sv,sw_index_data = output_item  
@@ -237,7 +237,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 counter = 0
                 for j in range(target_class.shape[0]):
-                    time_diff_targets = long_diff_seq_targets[j,indus_data_index,:,i]
+                    target_info_inbatch = target_info[j]
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
@@ -259,26 +259,52 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                         if ins_rel_index.shape[0]<3:
                             continue
+                        target_item = target[j,ins_rel_index,:,i]
+                        dec_out_item = dec_out[j,ins_rel_index]
                         sv_out_item = sv_out_item[ins_rel_index]
                         ins_all_inner = torch.Tensor(ins_all).to(sv_out_item.device).long()
                         ins_class_item = target_class_item[ins_all_inner]
                         inner_index = ins_all_inner[torch.where(ins_class_item>=0)[0]]
                         round_targets_item = future_round_targets_factor[j,inner_index]   
-                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)
-                        # target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
-                        # price_diff_range = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
-                        # price_diff_range = torch.Tensor(price_diff_range).to(time_diff_targets.device)                        
-                        # # 使用top值计算损失
-                        # select_number = 5
+                        if round_targets_item.shape[0]<=3:
+                            continue
+                        # cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)
+                        # 计算绝对数值损失
+                        # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item, target_item)
+                        # 计算高斯分布损失
+                        # distribution = self._create_gmm_distribution(dec_out_item)    
+                        # ce_loss[i] += -distribution.log_prob(round_targets_item).mean()                    
+                        # 使用价格指标优化
+                        target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
+                        price_diff_range_ori = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
+                        price_diff_range = price_diff_range_ori
+                        # scaler = StandardScaler()
+                        # scaler = MinMaxScaler(feature_range=(1e-5, 1))
+                        # price_diff_range = scaler.fit_transform(np.expand_dims(price_diff_range_ori,-1)).squeeze()   
+                        price_diff_range = torch.Tensor(price_diff_range).to(sv_out_item.device)         
+                        price_diff_range_total = torch.Tensor(price_diff_range_ori).to(sv_out_item.device).squeeze().mean()
+                        
+                        # 板块整体损失计算
+                        # ce_loss[i] += torch.abs(sw_index_data[j,0]-price_diff_range_total)     
+                        price_diff_range_roll = []
+                        for m in range(1,self.output_chunk_length+1):
+                            price_diff_range_roll.append([(item['open_array'][-m] - item['open_array'][-m-1])/item['open_array'][-m-1]*100 for item in target_info_item])               
+                        price_diff_range_roll = torch.Tensor(np.stack(price_diff_range_roll)).to(sv_out_item.device)
+                        if torch.sum(price_diff_range_roll==0)>(price_diff_range_roll.shape[0]*price_diff_range_roll.shape[1]/2):
+                            continue
+                        # ce_loss[i] += self.ccc_loss_comp(dec_out_item.transpose(1,0), price_diff_range_roll)  
+                        # if torch.isnan(ce_loss[i]) or torch.isnan(cls_loss[i]) :
+                        #     print("nnn")
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)       
+                        ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)   
+                        # 使用top值计算损失
+                        # select_number = 3
                         # top_raise_index = torch.argsort(-sv_out_item)[:select_number]
                         # top_fall_index = torch.argsort(sv_out_item)[:select_number]
                         # total_index = torch.cat([top_raise_index,top_fall_index])
                         # 相对排序损失
                         # ce_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], price_diff_range[total_index])
-                                  
-                        # ce_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], round_targets_item[total_index])                   
-                        # ce_loss[i] += self.ccc_loss_comp(sv_out_item[total_index],round_targets_item[total_index]) / 10           
-                        # ce_loss[i] += self.mse_loss(sv_out_item[total_index].unsqueeze(-1),round_targets_item[total_index].unsqueeze(-1))   
+                        # fds_loss[i] += EfficientLambdaRank()(sv_out_item[total_index], round_targets_item[total_index])                   
                     elif target_mode==2:
                         # 在行业内进行品种比较    
                         inner_class_item = target_class_item[ins_all]
@@ -348,6 +374,34 @@ class FuturesIndustryLoss(UncertaintyLoss):
             
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
 
+    def _create_gmm_distribution(self, params):
+        """创建高斯混合分布"""
+        seq_len, _ = params.shape
+        
+        # 拆分参数
+        params = params.reshape(seq_len, self.num_mixtures, 3)
+        
+        # 提取均值、标准差和权重
+        means = params[..., 0]  # [batch, seq_len, num_mixtures]
+        stds_raw = params[..., 1]
+        weights_raw = params[..., 2]
+        
+        # 确保参数有效
+        stds = F.softplus(stds_raw) + 1e-6  # 标准差不为0
+        weights = F.softmax(weights_raw, dim=-1)  # 权重和为1
+        
+        # 创建混合分布
+        from torch.distributions import MixtureSameFamily, Categorical, Normal
+        
+        # 创建分量分布
+        component_dist = Normal(means, stds)
+        
+        # 合并创建混合分布
+        mix_dist = Categorical(weights)
+        mixture_dist = MixtureSameFamily(mix_dist, component_dist)
+        
+        return mixture_dist
+    
     def _compute_gradient_components(self, task_losses):
         """计算每个任务对共享参数的梯度贡献"""
         gradient_components = []

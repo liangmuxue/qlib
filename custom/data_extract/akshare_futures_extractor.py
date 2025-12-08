@@ -242,14 +242,15 @@ class AkFuturesExtractor(FutureExtractor):
         # combine_sql = "insert into dominant_continues_data(date,code,open,close,high,low,volume,hold,settle) ({})".format(combine_sql)
         # self.dbaccessor.do_inserto(combine_sql)   
                   
-    def import_extension_data(self,begin_date=None):
+    def import_extension_data(self,data_range=None):
         """导入历史行情辅助数据"""
         
-        engine = create_engine('mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8'.format(
-            self.dbaccessor.user,self.dbaccessor.password,self.dbaccessor.host,self.dbaccessor.port,self.dbaccessor.database))
+        engine = self.create_engine()
 
-        if begin_date is None:
-            begin_date = '2015-03-01'
+        if data_range is None:
+            begin_date = '2024-11-06'
+        else:
+            begin_date = date_string_transfer(str(data_range[0]))
     
         # 获取基差信息
         self.extract_basis_rate(begin_date,engine=engine)
@@ -834,16 +835,16 @@ class AkFuturesExtractor(FutureExtractor):
             code = row['code']
             begin = int(date_string_transfer(row['begin'],2))
             end = int(date_string_transfer(row['end'],2))
-            # # 日期太少的不要，没有近期数据的不要
-            # if begin>20100101 or end<20250901:
-            #     continue
+            # 日期太少的不要，没有近期数据的不要
+            if begin>20120101 or end<20250901:
+                continue
             exchange_code = self.get_exchange_from_instrument(code)
             if exchange_code in ['CFFEX','INE']:
                 continue
             # 去掉一些不合适的品种
             if code in ['AU','AG','BB','ZS_JRQH','ZS_NMFI']:
                 continue
-            if code in ['JR', 'LR', 'PM', 'RI', 'WH', 'ZC']:
+            if code in ['JR', 'LR', 'PM', 'RI', 'WH', 'WR', 'ZC']:
                 continue            
             keep_instruments.append(code)
         clean_data = all[all['code'].isin(keep_instruments)]
@@ -969,7 +970,7 @@ if __name__ == "__main__":
     # futures_contract_detail_df = ak.futures_contract_detail(symbol='V2001')
     # print(futures_contract_detail_df)    
     # 现货价格和基差 
-    # futures_spot_price_df = ak.futures_spot_price("20110105")
+    # futures_spot_price_df = ak.futures_spot_price("20250812")
     # print(futures_spot_price_df)       
     # 历史价格和基差 
     # futures_spot_price_previous_df = ak.futures_spot_price_previous('20240430')
@@ -1004,7 +1005,7 @@ if __name__ == "__main__":
     # 合并生成主力连续历史数据
     # extractor.combine_continues_data(data_range=[20251125,20251125])
     # 导入历史拓展数据
-    # extractor.import_extension_data()
+    # extractor.import_extension_data(data_range=[20251128,None])
     # 生成行业板块历史行情数据
     # extractor.build_industry_data()
     # 导入外盘数据
@@ -1018,10 +1019,10 @@ if __name__ == "__main__":
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################
-    # extractor.import_day_range_contract_data(data_range=(20101125,20251125))
+    # extractor.import_day_range_contract_data(data_range=(20251128,20251205))
     # extractor.extract_item_data('m2601') 
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250926,20250926))
     # extractor.import_day_range_1min_data(data_range=(20250924,20250925))
-    # extractor.import_day_range_contract_data_sina(data_range=(20100101,20251125))
+    # extractor.import_day_range_contract_data_sina(data_range=(20251128,20251205))
             
