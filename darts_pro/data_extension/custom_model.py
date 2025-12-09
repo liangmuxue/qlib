@@ -531,7 +531,9 @@ class TFTExtModel(MixedCovariatesTorchModel):
             )
         else:
             val_dataset = None
-
+        
+        self.check_dataset_range(train_dataset,val_dataset)
+        
         # Pro-actively catch length exceptions to display nicer messages
         length_ok = True
         try:
@@ -576,7 +578,10 @@ class TFTExtModel(MixedCovariatesTorchModel):
         return self.fit_from_dataset(
             train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers,seperate_mode=seperate_mode
         )
-        
+    
+    def check_dataset_range(self,train_dataset,val_dataset):
+        pass
+    
     def fit_from_dataset(
         self,
         train_dataset: TrainingDataset,

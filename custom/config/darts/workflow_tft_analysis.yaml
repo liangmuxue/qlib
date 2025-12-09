@@ -1,24 +1,25 @@
 qlib_init:
-    provider_uri: '/home/qdata/qlib_data/custom_cn_data'
+    provider_uri: &provider_uri '/home/qdata/qlib_data/futures_data'
     region: cn
-market: &market test_5
+market: &market clean_data
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2008-01-01
-    end_time: 2023-12-31
-    fit_start_time: 2008-01-01
-    fit_end_time: 2023-12-31
+    start_time: 2024-01-01
+    end_time: 2025-12-31
+    fit_start_time: 2024-01-01
+    fit_end_time: 2025-12-31
     instruments: *market
     infer_processors:
         - class: FilterCol
           kwargs:
               fields_group: feature
-              # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20','KSFT','KLOW']  
-              col_list: &col_list ['MACD','RSI5','RSI20','OBV5','label_ori','label_norm','VOLUME_CLOSE','WVMA5','BETA5','RSQR5',
-              'RESI5','CLOSE','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','ATR5','AOS','HIGH_QTLU5','RVI',
+              # col_list: &col_list ['STD5', 'TURNOVER_CLOSE', 'TMA5','TSUMP5', 'CORR5','RESI10','ROC60','CORR20',''KLOW']  
+              col_list: &col_list ['MACD','ATR5','RSI5','RSI20','OBV5','label_ori','price_norm','VOLUME_CLOSE','WVMA5','BETA5','RSQR5','RVI',
+              'RESI5','CLOSE','REFCLOSE','HOLD','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','AOS','HIGH_QTLU5','REV5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
-              'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5']                                   
+              'SKEW5','QTLU10','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
+              'IMXD5','open_range']                                      
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -48,19 +49,19 @@ port_analysis_config: &port_analysis_config
             min_cost: 5
 task:
     model:
-        class: TftDatafAnalysis
-        module_path: darts_pro.tft_process
+        class: FuturesProcessModel
+        module_path: darts_pro.futures_process
         kwargs:
-            GPU: 0
+            GPU: [0] 
             batch_size: 16
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
-            type: 'data_corr'
+            type: 'pred_futures_bidi'
             n_epochs : 180
             save_dataset_file: False
-            load_dataset_file: &load_dataset_file True
-            batch_file_path: 'custom/data/asis/Industry_ADDCORD_INDEX_202212'
+            load_dataset_file: &load_dataset_file False
+            batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
                start_factor: 1
@@ -76,32 +77,41 @@ task:
                lr: 1e-3
                weight_decay: 1e-4
             optargs:
+               provider_uri: *provider_uri
+               market: *market
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Industry_TimeMix_INDEXCORR_CORD_202212"
+               model_name: "Futures_cleanData2012Step2_openRangeAdj_2506"
                model_type: 'mlp'
-               load_weight: True
+               load_weight: True 
                best_weight: False
-               step_mode: 'complete'
+               task_weights: [0.8,0.2]
+               pred_weights: [1.0,0.0]
+               candidate_inverse: False
+               step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
-               hidden_size: 32
-               forecast_horizon: &forecast_horizon 5
-               dropout: 0.5 
-               past_split: [[0,12],[12,24],[24,36],[36,48]]
+               hidden_size: 16
+               forecast_horizon: &forecast_horizon 2
+               cut_len: 1
+               dropout: 0.5
+               past_split: [[0,15]]
+               target_mode: [3,3,2,1,3]
+               scale_mode: [2,2,0,2,0]
                filter_conv_index: -1
+               pred_top_num: 2
     dataset:
-        class: TFTSeriesDataset
-        module_path: darts_pro.tft_series_dataset
+        class: TFTFuturesDataset
+        module_path: darts_pro.tft_futures_dataset
         kwargs:
             handler:
-                class: TftDataHandler
+                class: FuturesDataHandler
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2010-01-01, 2022-05-31]
-                valid: [2022-05-01, 2022-08-31]
+                train: [2024-01-01, 2025-06-28]
+                valid: [2025-06-01, 2025-08-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -109,25 +119,28 @@ task:
             aug_type: 'no'
             data_type: 'date_range'
             transform_inner: True
-            scale_time_col: True
+            scale_time_col: False
             instrument_pick: [600520,600521,600522]
             scaler_type: 'norm'
             model_type: 'tft'
             step_len: *wave_period
             pred_len: *forecast_horizon
             over_time: 2          
-            low_threhold: -5
+            low_threhold: -51
             high_threhold: 5   
             col_def:
                 col_list: *col_list
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                target_column: ['QTLU5','RVI','CORD5','QTLUMA5']
+                ext_column: ['near_basis_rate','dom_basis_rate']
+                target_column: ['QTLUMA5','open_range','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
-                future_covariate_col: ['dayofweek','month']   
-                past_covariate_col: ['KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
-                                  ,'KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
-                                  ,'KMID','MACD','RSI5','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CCI5','ATR5','AOS'
+                future_covariate_col: ['dayofweek','month','dayofmonth']   
+                past_covariate_col: ['VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
                                   ] 
-                static_covariate_col: ['cons_num','static_pe','yield']    
+                static_covariate_col: ['industry','night_flag','exchange_id','price_range','limit_rate','magin_radio']    

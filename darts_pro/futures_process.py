@@ -367,6 +367,7 @@ class FuturesProcessModel(TftDataframeModel):
             self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
             self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
+            self.model.model.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type,'candidate_inverse':self.optargs['candidate_inverse']}) 
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=0) 
         self.model.mode = self.type 

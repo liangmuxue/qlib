@@ -83,7 +83,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2012Step2_openRangeAdj_2506"
+               model_name: "Futures_cleanData2012Step2_openRangeAdj_2503"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -111,8 +111,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2012-01-01, 2025-06-28]
-                valid: [2025-06-01, 2025-08-31]
+                train: [2012-01-01, 2025-03-28]
+                valid: [2025-03-01, 2025-05-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

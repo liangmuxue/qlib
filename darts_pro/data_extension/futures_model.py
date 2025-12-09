@@ -19,6 +19,7 @@ from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDat
 from darts_pro.mam.futures_industry_droll_module import FuturesIndustryDRollModule
 from darts_pro.mam.futures_bidi_module import FuturesBidiModule
 from darts_pro.mam.futures_industry_module import FuturesIndustryModule
+from darts.logging import raise_if_not,raise_if
 
 """把分阶段数据再次整合到一起"""
     
@@ -71,7 +72,17 @@ class FuturesModel(IndustryRollModel):
             # 透传行业分类和品种映射关系，后续使用
             self.valid_sw_ins_mappings = ds.sw_ins_mappings     
         return ds      
-
+    
+    def check_dataset_range(self,train_dataset,val_dataset):
+        """检验训练集和验证集数据是否重复"""
+        
+        train_date_end = train_dataset.date_list[-1]
+        val_date_end = val_dataset.date_list[-1]
+        raise_if(
+            (val_date_end-train_date_end)<100,
+            "Duplicate For Training And Validation Data,train_date_end:{},val_date_end:{}".format(train_date_end,val_date_end),
+        )        
+        
     def _build_inference_dataset(
         self,
         target: Sequence[TimeSeries],

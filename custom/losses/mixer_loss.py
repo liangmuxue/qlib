@@ -277,10 +277,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 使用价格指标优化
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         price_diff_range_ori = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
-                        price_diff_range = price_diff_range_ori
-                        # scaler = StandardScaler()
+                        # price_diff_range = price_diff_range_ori
+                        scaler = StandardScaler()
                         # scaler = MinMaxScaler(feature_range=(1e-5, 1))
-                        # price_diff_range = scaler.fit_transform(np.expand_dims(price_diff_range_ori,-1)).squeeze()   
+                        price_diff_range = scaler.fit_transform(np.expand_dims(price_diff_range_ori,-1)).squeeze()   
                         price_diff_range = torch.Tensor(price_diff_range).to(sv_out_item.device)         
                         price_diff_range_total = torch.Tensor(price_diff_range_ori).to(sv_out_item.device).squeeze().mean()
                         
@@ -295,7 +295,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # ce_loss[i] += self.ccc_loss_comp(dec_out_item.transpose(1,0), price_diff_range_roll)  
                         # if torch.isnan(ce_loss[i]) or torch.isnan(cls_loss[i]) :
                         #     print("nnn")
-                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)       
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
+                        # cls_loss[i] += self.mse_loss(sv_out_item.unsqueeze(-1),price_diff_range.unsqueeze(-1))       
                         ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)   
                         # 使用top值计算损失
                         # select_number = 3
