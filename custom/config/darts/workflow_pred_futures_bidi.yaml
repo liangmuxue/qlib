@@ -82,13 +82,13 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2012Step2_qtluRankCombine_2506"
+               model_name: "Futures_cleanData2012Step2_openRangeAdj_2506"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
                task_weights: [0.8,0.2]
                pred_weights: [1.0,0.0]
-               candidate_inverse: True
+               candidate_inverse: False
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
@@ -134,7 +134,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['QTLUMA5','open_range','CCI5','SUMPMA5','RSV5']
+                target_column: ['open_range','open_range','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
                 past_covariate_col: ['VOLUME_RANGE','CCI5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'

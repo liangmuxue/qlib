@@ -5,7 +5,7 @@ import pandas as pd
 import random
 import pickle
 from datetime import datetime
-
+from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from cus_utils.db_accessor import DbAccessor
 from pickle import TRUE
 
@@ -206,7 +206,7 @@ class CollResAna():
         col_data_types = {"top_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_value":int,"date":int}   
         self.coll_result_data = pd.read_csv(result_file_path,dtype=col_data_types)  
         # 使用验证数据集的数据协助分析
-        yaml_file = "custom/config/darts/workflow_tft_analysis.yaml"
+        yaml_file = "custom/config/darts/workflow_pred_futures_bidi.yaml"
         with open(yaml_file) as fp:
             config = yaml.safe_load(fp)    
         experiment_name = "workflow"
@@ -236,7 +236,8 @@ class CollResAna():
 
     def comprisive_stat(self):
         self.prepare_data()
-        self.relative_stat()
+        # self.relative_stat()
+        self.normal_stat()
 
     def relative_stat(self):   
         """目标数据与价格数据相关性检验"""
@@ -244,7 +245,7 @@ class CollResAna():
         # 遍历并取得指定数据
         futures_dataset = self.futures_dataset
         output_chunk_length = self.output_chunk_length
-        match_results, match_dates,  no_match_dates = self.build_match_results()
+        match_results, match_dates, no_match_dates = self.build_match_results()
         for index,dates in enumerate([match_dates,no_match_dates]):
             target_data = []
             for i in range(len(futures_dataset)):
@@ -275,7 +276,6 @@ class CollResAna():
                 
     def normal_stat(self):   
         # 遍历并取得指定数据
-        dates = [20250812,20250815]
         futures_dataset = self.futures_dataset
         output_chunk_length = self.output_chunk_length
         match_results, match_dates,  no_match_dates = self.build_match_results()
@@ -290,13 +290,14 @@ class CollResAna():
                     for target_info in target_info_total:
                         diff_range = self._compute_diff_range(target_info, output_chunk_length)
                         target_data.append([future_start_datetime,target_info['instrument'],diff_range])
-            
+                    
             target_data = pd.DataFrame(target_data,columns=['date','instrument','open_diff'])
             target_data = target_data[~target_data['instrument'].str.startswith("ZS")]
             target_data['date'] = target_data['date'].astype(int)
-            normal_info = target_data.groupby(by='date')['open_diff'].agg(['mean', 'std'])
+            normal_info = target_data.groupby(by='date')['open_diff'].agg(['mean', 'std']).reset_index()
             title = "correct" if index==0 else "fail"
-            print("{} eva mean:{},std:{}".format(title,normal_info['mean'].describe(),normal_info['std'].describe()))
+            print("{} eva info{}".format(title,normal_info))
+            # print("{} eva mean:{},std:{}".format(title,normal_info['mean'].describe(),normal_info['std'].describe()))
     
         
     

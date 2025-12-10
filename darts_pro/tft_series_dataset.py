@@ -253,7 +253,7 @@ class TFTSeriesDataset(TFTDataset):
             df_train = df_all[df_all["datetime"]<pd.to_datetime(str(train_end))]
         # 验证集直接根据配置进行截取
         df_val = df_all[(df_all["datetime"]>=pd.to_datetime(str(valid_start))) & (df_all["datetime"]<pd.to_datetime(str(valid_end)))]
-        # 在筛选的过程中，有可能产生股票个数不一致的情况，取交集
+        # 在筛选的过程中，有可能产生个数不一致的情况，取交集
         df_train = df_train[df_train[self.get_group_column()].isin(df_val[self.get_group_column()])]
         df_val = df_val[df_val[self.get_group_column()].isin(df_train[self.get_group_column()])]
         # 针对训练接和验证集，分别生成价格归一化数据

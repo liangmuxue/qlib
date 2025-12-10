@@ -209,7 +209,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         """Multiple Loss Combine"""
 
         (output,vr_class,_) = output_ori
-        (target,target_class,future_round_targets,index_round_targets,long_diff_seq_targets,target_info) = target_ori
+        (target,target_class,future_round_targets,index_round_targets,price_targets,long_diff_seq_targets,target_info) = target_ori
         future_index_round_target = index_round_targets[:,:,-self.output_chunk_length:,:]
         corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
         cls_loss = torch.zeros([len(output)]).to(self.device)
@@ -269,32 +269,21 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         if round_targets_item.shape[0]<=3:
                             continue
                         # cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)
-                        # 计算绝对数值损失
-                        # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item, target_item)
                         # 计算高斯分布损失
                         # distribution = self._create_gmm_distribution(dec_out_item)    
                         # ce_loss[i] += -distribution.log_prob(round_targets_item).mean()                    
-                        # 使用价格指标优化
-                        target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
-                        price_diff_range_ori = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
-                        # price_diff_range = price_diff_range_ori
-                        scaler = StandardScaler()
-                        # scaler = MinMaxScaler(feature_range=(1e-5, 1))
-                        price_diff_range = scaler.fit_transform(np.expand_dims(price_diff_range_ori,-1)).squeeze()   
-                        price_diff_range = torch.Tensor(price_diff_range).to(sv_out_item.device)         
-                        price_diff_range_total = torch.Tensor(price_diff_range_ori).to(sv_out_item.device).squeeze().mean()
-                        
-                        # 板块整体损失计算
-                        # ce_loss[i] += torch.abs(sw_index_data[j,0]-price_diff_range_total)     
-                        price_diff_range_roll = []
-                        for m in range(1,self.output_chunk_length+1):
-                            price_diff_range_roll.append([(item['open_array'][-m] - item['open_array'][-m-1])/item['open_array'][-m-1]*100 for item in target_info_item])               
-                        price_diff_range_roll = torch.Tensor(np.stack(price_diff_range_roll)).to(sv_out_item.device)
-                        if torch.sum(price_diff_range_roll==0)>(price_diff_range_roll.shape[0]*price_diff_range_roll.shape[1]/2):
-                            continue
-                        # ce_loss[i] += self.ccc_loss_comp(dec_out_item.transpose(1,0), price_diff_range_roll)  
-                        # if torch.isnan(ce_loss[i]) or torch.isnan(cls_loss[i]) :
-                        #     print("nnn")
+                        # 使用价格指标计算损失
+                        price_diff_range= price_targets[j,ins_rel_index]  
+                        price_diff_range_total = long_diff_seq_targets[j,0]
+                        # target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
+                        # price_diff_range_ori = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
+                        # price_diff_range = price_diff_range_ori                        
+                        # scaler = StandardScaler()
+                        # price_diff_range = scaler.fit_transform(np.expand_dims(price_diff_range_ori,-1)).squeeze()   
+                        # price_diff_range = torch.Tensor(price_diff_range).to(sv_out_item.device)       
+                        # price_diff_range_total = torch.Tensor(price_diff_range_ori).to(sv_out_item.device).squeeze().mean()                         
+                        # if torch.sum((price_diff_range_new-price_diff_range)>1e-3)>1:
+                        #     print("ggg")
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
                         # cls_loss[i] += self.mse_loss(sv_out_item.unsqueeze(-1),price_diff_range.unsqueeze(-1))       
                         ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)   
@@ -328,22 +317,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 continue
                             cls_loss[i] += self.ccc_loss_comp(sv_out_item[ins_rel_index],round_targets_item)    
                 if target_mode in [0]:
-                    loss_sum = loss_sum + ce_loss[i]
-                if target_mode==1: 
-                    # 衡量目标与前面各段已知结果的差值，作为优化目标
-                    ce_loss[i] = self.mse_loss(sw_index_data,long_diff_seq_targets[:,indus_data_index,:,i])        
-                    loss_sum = loss_sum + ce_loss[i]             
+                    loss_sum = loss_sum + ce_loss[i]           
                 if target_mode in [2]:
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]               
                 if target_mode in [3]:
                     # loss_sum = loss_sum + self.loss_weights[0] * cls_loss[i] + self.loss_weights[1] * ce_loss[i] 
                     loss_sum = loss_sum + cls_loss[i]
-                if target_mode in [5]:
-                    # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标,多行业指标模式
-                    diff_target = long_diff_seq_targets[:,indus_data_index,-1,i]
-                    ce_loss[i] = self.mse_loss(sw_index_data,diff_target)        
-                    loss_sum = loss_sum + ce_loss[i]   
                 if target_mode in [6]:
                     # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标，整体指标模式
                     diff_target = long_diff_seq_targets[:,main_index,-1,i]

@@ -7,7 +7,6 @@ from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
 from trader.utils.date_util import tradedays,get_tradedays_dur,get_tradedays
-
 import pandas as pd
 import numpy as np
 import pickle
@@ -111,7 +110,11 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("SUMPMA5","sumpma_diff",div=False)
         compute_diff("OPEN","open_range")
         compute_diff("CLOSE","close_range",open_mode=True)
-        
+        # 做标准化的时候，只针对训练集生成缩放对象
+        df_train = df[df["datetime"]<pd.to_datetime(str(val_range[1].strftime("%Y-%m-%d")))]
+        scaler_train = StandardScaler()
+        scaler_train.fit(df_train[['open_range', 'close_range']])
+        df[['open_range_norm', 'close_range_norm']] = scaler_train.transform(df[['open_range', 'close_range']])
         # 生成行业均值数据
         df = self.build_industry_mean(df,indus_info=indus_info)     
         df['industry'] = df['industry'].astype(int)          

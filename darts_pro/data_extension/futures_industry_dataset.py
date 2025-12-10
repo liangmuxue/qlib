@@ -160,9 +160,11 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     pickle.dump(self.ass_data, fout) 
         self.check_instrument_data()
     
-    def create_scaler(self,feature_range):
-        scaler = MinMaxScaler(feature_range=feature_range)
-        # scaler = StandardScaler() 
+    def create_scaler(self,mode="min_max",feature_range=(0,1)):
+        if mode=="standard":
+            scaler = StandardScaler() 
+        else:
+            scaler = MinMaxScaler(feature_range=feature_range)
         return scaler
     
     def check_data_intergraty(self):
@@ -422,8 +424,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_class_total = target_class_total.astype(np.int8)
         round_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
         long_diff_targets = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
-        price_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
-        price_targets_ori = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
+        price_targets = np.zeros([self.total_instrument_num])
         
         ########### 生成行业数据 #########
         sw_date_mapping = self.date_mappings_ext[idx]
@@ -486,16 +487,16 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
             open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
-            scaler = self.create_scaler(feature_range=(1e-5, 1))
+            scaler = self.create_scaler(mode="standard")
             scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
-            price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
-            price_targets_ori[keep_index] = price_array    
             datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
+            # 计算开盘价目标差值范围
+            open_diff = (open_array[-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
                                "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"open_array":open_array,
-                               "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
+                               "open_diff":open_diff,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
             # 过去协变量序列数据
             covariate_series = self.covariates[ori_index] 
             raise_if_not(
@@ -539,14 +540,14 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             covariate_future_total[keep_index] = covariate_future
             historic_future_covariates_total[keep_index] = historic_future_covariate
 
-            # 缩短未来计算周期，使用倒数第1天计算涨跌幅
-            raise_range = (price_array[-1] - price_array[-self.output_chunk_length-1])/price_array[-self.output_chunk_length-1]*100
-            p_target_class = get_simple_class(raise_range)
+            # 生成涨跌幅分类
+            p_target_class = get_simple_class(open_diff)
             target_class_total[keep_index] = p_target_class
-            
+
         ######### 分别对目标值和协变量，在个体范围层面进行归一化 #########
         
         real_index = np.where(target_class_total>=0)[0]
+        # 品种索引
         real_past_target = past_target_total[real_index]
         real_future_target = future_target_total[real_index]
         # 目标值逐个进行归一化,过去和未来值需要共用scaler   
@@ -566,7 +567,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             real_past_conv = real_covariate_total[i]
             past_conv_scale = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
             past_covariate_total[real_index[i]] = past_conv_scale
-            
+        
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
         
         # 整体目标数据拆分为过去值和目标值
@@ -576,9 +577,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 行业板块数据归一化
         past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
         future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
-        # long_diff_seq_targets = long_diff_targets[:,-self.cut_len:,:]
-        # 衡量目标值与前面各段已知结果比较的相对位置
-        long_diff_seq_targets = np.concatenate([past_round_targets[:,-self.cut_len:,:],future_round_targets[:,-1:,:]],axis=1)
         
         for i in range(self.ins_in_indus_index.shape[0]):
             # 取得对应的行业序列数据，作为目标数据
@@ -594,7 +592,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
                 future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
-                long_diff_seq_targets[:,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
                 
         # 统合归一化所有行业板块的整体预测数值
         for i in range(self.past_target_shape[-1]):
@@ -646,7 +643,16 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 如果当天没有交易，则保留空值
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
-        
+        ins_index = self.ins_in_indus_index[self.main_index_rel]
+        real_ins_index = ins_index[target_class_total[ins_index]>=0]
+        # 价格数据的归一化
+        target_info_ins = np.array(target_info_total)[real_ins_index]
+        open_diff_arr = np.array([item['open_diff'] for item in target_info_ins])
+        open_diff_norm = self.create_scaler('standard').fit_transform(np.expand_dims(open_diff_arr,-1)).squeeze(-1)
+        price_targets[real_ins_index] = open_diff_norm
+        # 使用均值作为整体指数参考
+        long_diff_seq_targets = np.array([open_diff_arr.mean()])  
+                
         # if future_start_datetime==20250812:
         #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
@@ -791,7 +797,6 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
             scaler = self.create_scaler(feature_range=(1e-5, 1))
             scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
             price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
-            price_targets_ori[keep_index] = price_array    
             datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
@@ -891,7 +896,6 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
                 scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
                 future_index_round_targets[...,i] = scaler.transform(future_index_round_targets[...,i].transpose(1,0)).transpose(1,0)               
-                long_diff_seq_targets[:,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(long_diff_seq_targets[:,:,i].transpose(1,0)).transpose(1,0)
                 
         # 单独归一化未来行业板块整体预测数值
         for i in range(self.past_target_shape[-1]):

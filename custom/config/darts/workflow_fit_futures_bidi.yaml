@@ -19,7 +19,7 @@ data_handler_config: &data_handler_config
               'RESI5','CLOSE','REFCLOSE','HOLD','OPEN','HIGH', 'LOW','RSI10','KDJ_K','KDJ_D','KDJ_J','CCI5','AOS','HIGH_QTLU5','REV5',
               "KMID","KLEN","KMID2","KUP","KUP2","KLOW","KLOW2","KSFT","KSFT2", 'STD5','MA5','QTLU5','CORD5','CNTD5','VSTD5','IMAX5','IMIN5','QTLUMA5',
               'SKEW5','QTLU10','CNTP5','CNTN5','SUMP5','CORR5','RANK5','RANKMA5','DIFF','DEA','SUMPMA5','RSV5','BULLS',
-              'IMXD5','open_range']                                      
+              'IMXD5','open_range','open_range_norm']                                      
     learn_processors:
         - class: DropnaLabel
     # label: ['Ref($close, -1)'] 
@@ -83,7 +83,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2012Step2_openRangeAdj_2503"
+               model_name: "Futures_cleanData2012Step2_openRangeAdj_2506"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -111,8 +111,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2012-01-01, 2025-03-28]
-                valid: [2025-03-01, 2025-05-31]
+                train: [2012-01-01, 2025-06-28]
+                valid: [2025-06-01, 2025-08-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

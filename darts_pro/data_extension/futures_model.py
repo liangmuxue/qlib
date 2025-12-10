@@ -76,12 +76,13 @@ class FuturesModel(IndustryRollModel):
     def check_dataset_range(self,train_dataset,val_dataset):
         """检验训练集和验证集数据是否重复"""
         
-        train_date_end = train_dataset.date_list[-1]
-        val_date_end = val_dataset.date_list[-1]
-        raise_if(
-            (val_date_end-train_date_end)<100,
-            "Duplicate For Training And Validation Data,train_date_end:{},val_date_end:{}".format(train_date_end,val_date_end),
-        )        
+        if self.mode=="train":
+            train_date_end = train_dataset.date_list[-1]
+            val_date_end = val_dataset.date_list[-1]
+            raise_if(
+                (val_date_end-train_date_end)<100,
+                "Duplicate For Training And Validation Data,train_date_end:{},val_date_end:{}".format(train_date_end,val_date_end),
+            )        
         
     def _build_inference_dataset(
         self,
