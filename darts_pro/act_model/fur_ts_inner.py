@@ -63,7 +63,7 @@ class FurTimeMixer(nn.Module):
         # 添加归一层
         predict_layers = []
         for i in range(down_sampling_layers + 1):
-            layer = LinelessLayer(seq_len // (down_sampling_window ** i),pred_len,layer_norm=False)           
+            layer = LinelessLayer(seq_len // (down_sampling_window ** i),pred_len,layer_norm=False,batch_norm=False)           
             predict_layers.append(layer)
         self.predict_layers = nn.ModuleList(predict_layers)
         # 使用残差计算量化数值（整体走势）预测
@@ -93,9 +93,8 @@ class FurTimeMixer(nn.Module):
         
         self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到板块指数数据，按照不同分类板块分别投影
-        self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
-        self.index_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
+        self.index_skip_layer = LinelessLayer(round_skip_len, cut_len,shutcut_num=num_nodes)   
         self.round_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
         self.transfer_layer = nn.Linear(pred_len, cut_len, bias=True)   
                            
@@ -199,10 +198,8 @@ class FurTimeMixer(nn.Module):
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1)
         # 叠加整体数值残差计算
         comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).permute(0,2,1)).permute(0,2,1) + self.round_skip_layer(past_round_targets)
-        # 按照不同分类板块分别投影
-        industry_decoded_data = self.index_projection_layer(comp_out.permute(0,2,1)).squeeze(-1)
-        # 使用整体走势过去值
-        sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
+        # 按照不同分类板块分别投影,使用整体走势过去值
+        sw_index_data = self.index_skip_layer(past_index_round_targets,comp_out.squeeze(-1))
         
         return dec_out,comp_out,sw_index_data
 
