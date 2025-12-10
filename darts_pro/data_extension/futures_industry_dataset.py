@@ -160,9 +160,11 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     pickle.dump(self.ass_data, fout) 
         self.check_instrument_data()
     
-    def create_scaler(self,feature_range):
-        scaler = MinMaxScaler(feature_range=feature_range)
-        # scaler = StandardScaler() 
+    def create_scaler(self,mode="min_max",feature_range=(0,1)):
+        if mode=="standard":
+            scaler = StandardScaler() 
+        else:
+            scaler = MinMaxScaler(feature_range=feature_range)
         return scaler
     
     def check_data_intergraty(self):
@@ -422,7 +424,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_class_total = target_class_total.astype(np.int8)
         round_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
         long_diff_targets = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
-        price_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
+        price_targets = np.zeros([self.total_instrument_num])
         price_targets_ori = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length])
         
         ########### 生成行业数据 #########
@@ -486,16 +488,13 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
             open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
-            scaler = self.create_scaler(feature_range=(1e-5, 1))
-            scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
-            price_targets[keep_index] = scaler.transform(np.expand_dims(price_array,-1)).squeeze()       
-            price_targets_ori[keep_index] = price_array    
             datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
+            open_diff = (open_array[-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
                                "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"open_array":open_array,
-                               "total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
+                               "open_diff":open_diff,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
             # 过去协变量序列数据
             covariate_series = self.covariates[ori_index] 
             raise_if_not(
@@ -646,6 +645,15 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 如果当天没有交易，则保留空值
         ser_lack_idx = np.where(self.date_mappings[idx]==-1)[0]
         target_class_total[ser_lack_idx] = -1
+        ins_index = self.ins_in_indus_index[self.main_index_rel]
+        real_ins_index = ins_index[target_class_total[ins_index]>=0]
+        # 价格数据的归一化
+        target_info_ins = np.array(target_info_total)[real_ins_index]
+        open_diff_arr = np.array([item['open_diff'] for item in target_info_ins])
+        open_diff_norm = self.create_scaler('standard').fit_transform(np.expand_dims(open_diff_arr,-1)).squeeze(-1)
+        price_targets[real_ins_index] = open_diff_norm
+        # 使用均值作为整体指数参考
+        long_diff_seq_targets = np.array([open_diff_arr.mean()])  
         
         # if future_start_datetime==20250812:
         #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
