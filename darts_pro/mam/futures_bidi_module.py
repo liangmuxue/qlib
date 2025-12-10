@@ -344,9 +344,9 @@ class FuturesBidiModule(MlpModule):
             self.lr_schedulers()[i].step() 
             if update_info is not None:
                 total_loss = total_loss + update_info["total_loss"]
+                self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
                 # 当前总梯度和分量梯度
                 if "conflict_cnt" in update_info:
-                    self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
                     # self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
                     # self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
                     self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=True)

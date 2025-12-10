@@ -156,32 +156,41 @@ class PcaCnn(nn.Module):
 class LinelessLayer(nn.Module):
     """全连接加非线性"""
 
-    def __init__(self,input_num,output_num,hidden_size=16,device=None,layer_norm=True):   
+    def __init__(self,input_num,output_num,shutcut_num=0,hidden_size=16,device=None,layer_norm=True,batch_norm=False):   
         super(LinelessLayer, self).__init__()
         
-        if output_num>1 and layer_norm:
-            self.combine_layer = nn.Sequential(
-                    nn.Linear(input_num, hidden_size),
-                    nn.ReLU(), 
-                    nn.Linear(hidden_size,output_num),
-                    nn.LayerNorm(output_num)
-                ).to(device)
-        else:
-            self.combine_layer = nn.Sequential(
-                    nn.Linear(input_num, hidden_size),
-                    nn.ReLU(), 
-                    nn.Linear(hidden_size,output_num)
-                ).to(device)  
+        self.linear_hidden = nn.Linear(input_num, hidden_size)
+        self.linear_output = nn.Linear(hidden_size, output_num)
+        self.relu = nn.ReLU() 
+        self.batch_norm = batch_norm
+        self.output_num = output_num
         
-        self.residual_layer = nn.Linear(input_num,output_num).to(device)
+        if batch_norm:
+            self.bn = nn.BatchNorm1d(input_num)        
+        if output_num>1 and layer_norm:
+            self.layer_norm = True
+            self.ln = nn.LayerNorm(output_num)      
+        else:
+            self.layer_norm = False
+        
+        if shutcut_num>0:
+            self.residual_layer = nn.Linear(shutcut_num,output_num).to(device)       
+
             
     def forward(self, input_data,res_data=None): 
         
-        output_data = self.combine_layer(input_data)
+        if self.batch_norm:
+            input_data = self.bn(input_data)
+            input_data = self.relu(input_data)
+        input_data = self.linear_hidden(input_data)
+        input_data = self.relu(input_data)
+        input_data = self.linear_output(input_data)
+        if self.layer_norm:
+            input_data = self.ln(input_data)
         if res_data is not None:
-            output_data = output_data + self.residual_layer(res_data)
+            input_data = input_data + self.residual_layer(res_data)
         
-        return output_data
+        return input_data
         
         
         

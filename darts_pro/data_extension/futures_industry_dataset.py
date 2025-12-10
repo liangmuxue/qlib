@@ -652,7 +652,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         price_targets[real_ins_index] = open_diff_norm
         # 使用均值作为整体指数参考
         long_diff_seq_targets = np.array([open_diff_arr.mean()])  
-                
         # if future_start_datetime==20250812:
         #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total

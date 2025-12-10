@@ -336,6 +336,7 @@ class MultiTaskOptimizer(Adam):
             gradient_components = None
             conflict_analysis = {}
             return {
+                'total_grad_norm': self._compute_total_grad_norm(total_gradients),
                 'total_loss': task_losses[0].item()
             }    
                   
