@@ -56,26 +56,34 @@ def pc_grad(gradient_components, task_weights,direction=0):
     
     return processed_grads
 
-def grad_combine(gradient_components, task_weights):
+def grad_combine(gradient_components,task_grad_norms, task_weights,grad_limits):
     """不进行梯度手术，直接合并"""
 
     processed_grads = {}
     param_names = interact_grad_names(gradient_components,interact=False)
     
+    # 通过原来的分任务梯度范数，倒推需要剪裁的比例
+    grad_rate = [grad_limits[i]/task_grad_norms[i] if task_grad_norms[i]>grad_limits[i] else 1 for i in range(len(gradient_components))]
+    
+    gradient_components_after = gradient_components.copy()
     for param_name in param_names:   
         final_grad = None 
         for i in range(len(gradient_components)):
             # 不同子模型，梯度有可能不一致
             if param_name in gradient_components[i]:
+                item_grad = gradient_components[i][param_name]
+                # 不同任务不同梯度剪裁
+                item_grad = item_grad * grad_rate[i] * task_weights[i]  
+                gradient_components_after[i][param_name] = item_grad
                 # 加权合并处理后的梯度
                 if final_grad is None:
-                    final_grad = gradient_components[i][param_name] * task_weights[i]
+                    final_grad = item_grad                   
                 else:
-                    final_grad = final_grad + gradient_components[i][param_name] * task_weights[i]
+                    final_grad = final_grad + item_grad
 
         processed_grads[param_name] = final_grad
         
-    return processed_grads
+    return processed_grads,gradient_components_after
    
 def adaptive_gradient_processing(gradients, conflict_analysis):
     """
@@ -154,9 +162,10 @@ def analyze_gradient_conflicts(gradient_components):
     return conflict_analysis
 
 class MultiTaskGradientCalculator():
-    def __init__(self, model, task_weights):
+    def __init__(self, model, task_weights=None,grad_limits=None):
         self.model = model
         self.task_weights = task_weights
+        self.grad_limits = grad_limits
         
     def compute_gradients(self, task_losses: List[torch.Tensor],return_components: bool = True):
         """
@@ -184,6 +193,7 @@ class MultiTaskGradientCalculator():
             self.model.zero_grad()           
             loss_total = 0
             for i, loss in enumerate(task_losses):
+                
                 loss = self.task_weights[i] * loss   
                 loss_total = loss_total + loss        
             loss_total.backward()          
@@ -219,14 +229,15 @@ class MultiTaskGradientCalculator():
         return gradients
 
 class MultiTaskOptimizer(Adam):
-    def __init__(self, params, defaults_dict,model=None,task_weights=None,use_gradient_surgery=True,use_adaptive_clip=False,use_pcgrad=False):
+    def __init__(self, params, defaults_dict,model=None,task_weights=None,grad_limits=None,use_gradient_surgery=True,use_adaptive_clip=False,use_pcgrad=False):
         super().__init__(params, **defaults_dict)
         self.model = model
         self.task_weights = task_weights
+        self.grad_limits = grad_limits
         self.use_gradient_surgery = use_gradient_surgery
         self.use_adaptive_clip = use_adaptive_clip
         self.use_pcgrad = use_pcgrad
-        self.gradient_calculator = MultiTaskGradientCalculator(model, task_weights)
+        self.gradient_calculator = MultiTaskGradientCalculator(model, task_weights,grad_limits)
         self.accumulation_steps = 4
         self.gradients_recorder = []
         self.loss_recorder = []
@@ -329,7 +340,10 @@ class MultiTaskOptimizer(Adam):
                 total_gradients = pc_grad(gradient_components, self.task_weights,direction=0)
             else:
                 # 标准多任务梯度计算
-                total_gradients = grad_combine(gradient_components, self.task_weights)
+                # grad_norm_arr = [self._compute_total_grad_norm(grad) for grad in gradient_components]
+                # 取得每个分任务的梯度范数，用于后续梯度剪裁
+                task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
+                total_gradients,gradient_components = grad_combine(gradient_components,task_grad_norms, self.task_weights,self.grad_limits)
         else:
             # 标准梯度计算
             total_gradients = self.gradient_calculator.compute_gradients(task_losses,return_components=False)
@@ -365,8 +379,6 @@ class MultiTaskOptimizer(Adam):
         
         # 3. 手动设置梯度并更新参数
         self._set_gradients(total_gradients)
-        # Grad Cut
-        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=30, norm_type=2)        
         super().step()
         
         show_loss = 0

@@ -235,7 +235,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 dec_out,sv,sw_index_data = output_item  
                 future_round_targets_factor = future_round_targets[...,i]
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
-                counter = 0
+                price_index_total = []
+                sw_index_total = []
                 for j in range(target_class.shape[0]):
                     target_info_inbatch = target_info[j]
                     # 如果存在缺失值，则忽略，不比较
@@ -282,12 +283,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # price_diff_range_total = torch.Tensor(price_diff_range_ori).to(sv_out_item.device).squeeze().mean()
                         price_diff_range = price_targets[j,ins_rel_index]  
                         price_diff_range_total = long_diff_seq_targets[j,0]
-                        ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
-                        # if torch.isnan(ce_loss[i]) or torch.isnan(cls_loss[i]) :
-                        #     print("nnn")
+                        # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
-                        # 板块整体损失计算
-                        # ce_loss[i] += nn.HuberLoss(delta=1.0)(sw_index_data[j,0],price_diff_range_total)                                   
+                        price_index_total.append(price_diff_range_total)
+                        sw_index_total.append(sw_index_data[j,0])
+                                                   
                         # 使用top值计算损失
                         # select_number = 3
                         # top_raise_index = torch.argsort(-sv_out_item)[:select_number]
@@ -323,6 +323,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]               
                 if target_mode in [3]:
+                    # 板块整体损失计算
+                    ce_loss[i] += self.ccc_loss_comp(torch.stack(sw_index_total),torch.stack(price_index_total))                            
                     # loss_sum = loss_sum + self.loss_weights[0] * cls_loss[i] + self.loss_weights[1] * ce_loss[i] 
                     loss_sum = loss_sum + cls_loss[i]
                 if target_mode in [6]:

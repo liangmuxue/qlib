@@ -62,7 +62,7 @@ class FurIndustryMixer(nn.Module):
         if self.target_mode in [2]:
             self.cls_sub_models = nn.ModuleList(sub_cls_model_list)                 
         if self.target_mode in [3]:
-            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=True)
+            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
             # 高斯混合模型，预测序列长度->高斯数值(均值、标准差、权重)
             self.gus_params = nn.Linear(1, 3 * num_mixtures)
         if self.target_mode in [6]:

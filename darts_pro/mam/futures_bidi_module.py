@@ -66,6 +66,7 @@ class FuturesBidiModule(MlpModule):
         valid_sw_ins_mappings=None,
         pred_top_num=3,
         task_weights=None,
+        grad_limits=None,
         **kwargs,
     ):
         self.mode = None
@@ -79,6 +80,7 @@ class FuturesBidiModule(MlpModule):
         self.train_step_mode = train_step_mode
         # 任务初始权重
         self.task_weights = torch.tensor(task_weights)  
+        self.grad_limits = torch.tensor(grad_limits)  
         self.pred_weights = [1.0,0.0]
               
         super().__init__(output_dim,variables_meta_array,num_static_components,hidden_size,lstm_layers,num_attention_heads,
@@ -218,7 +220,8 @@ class FuturesBidiModule(MlpModule):
             # base_lr = self.lr_scheduler_kwargs["base_lr"] 
             
             mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(),optimizer_kws,
-                            model=self.sub_models[i],task_weights=self.task_weights,use_gradient_surgery=use_gradient_surgery_flag, 
+                            model=self.sub_models[i],task_weights=self.task_weights,grad_limits=self.grad_limits,
+                            use_gradient_surgery=use_gradient_surgery_flag, 
                             use_adaptive_clip=False,use_pcgrad=False)  
             optimizers.append(mt_optimizer)
         # 对应优化器，生成多个学习率
@@ -343,14 +346,14 @@ class FuturesBidiModule(MlpModule):
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
             self.lr_schedulers()[i].step() 
             if update_info is not None:
-                total_loss = total_loss + update_info["total_loss"]
-                self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                # total_loss = total_loss + update_info["total_loss"]
+                # self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
                 # 当前总梯度和分量梯度
-                if "conflict_cnt" in update_info:
-                    # self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
-                    # self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
-                    self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=True)
-                    self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                if "conflict_analysis" in update_info:
+                    self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=True)
+                    self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=True)
+                    self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
+                    self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
                 # self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
                 # self.log("ce_similarity", update_info["conflict_analysis"]["ce_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=True)            
                                
@@ -567,7 +570,7 @@ class FuturesBidiModule(MlpModule):
                         view_data = np.stack([ins_output,price_targets,price_array_range]).transpose(1,0)
                         # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
                         win = "detail_target_{}_{}=".format(j,viz_total_size)
-                        target_title = "Detail_{}_{},date:{}".format(round(index_mean,3),round(dec_output_mean,3),date)                            
+                        target_title = "Detail_{}_{},date:{}".format(round(index_mean,3),round(index_output,3),date)                            
                         viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred_cls","target","price"])
                     # 品种走势图,所有候选的目标走势和价格走势
                     if j in DRAW_SEQ_ITEM:

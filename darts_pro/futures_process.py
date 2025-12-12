@@ -485,6 +485,7 @@ class FuturesProcessModel(TftDataframeModel):
                     pl_trainer_kwargs=pl_trainer_kwargs,
                     pred_top_num=self.optargs["pred_top_num"],
                     task_weights=self.optargs["task_weights"],
+                    grad_limits=self.optargs["grad_limits"],
                     pred_weights=self.optargs["pred_weights"],
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )

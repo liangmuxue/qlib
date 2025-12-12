@@ -92,10 +92,10 @@ class FurTimeMixer(nn.Module):
         self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, cut_len, bias=True)      
         
         self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
-        # 品种数据投影到板块指数数据，按照不同分类板块分别投影
-        self.index_projection_layer = nn.Linear(num_nodes, 1, bias=True)        
+        # 品种数据投影到整体指数
+        # self.index_projection_layer = LinelessLayer(num_nodes*pred_len,1)
+        self.index_projection_layer = nn.Linear(num_nodes*pred_len,1)
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
-        self.index_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
         self.round_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
         self.transfer_layer = nn.Linear(pred_len, cut_len, bias=True)   
                            
@@ -199,10 +199,8 @@ class FurTimeMixer(nn.Module):
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1)
         # 叠加整体数值残差计算
         comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).permute(0,2,1)).permute(0,2,1) + self.round_skip_layer(past_round_targets)
-        # 按照不同分类板块分别投影
-        industry_decoded_data = self.index_projection_layer(comp_out.permute(0,2,1)).squeeze(-1)
         # 使用整体走势过去值
-        sw_index_data = industry_decoded_data + self.index_skip_layer(past_index_round_targets)
+        sw_index_data = self.index_projection_layer(dec_out.reshape([batch_size,-1]))
         
         return dec_out,comp_out,sw_index_data
 

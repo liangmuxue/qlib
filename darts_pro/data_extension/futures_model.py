@@ -204,6 +204,7 @@ class FuturesModel(IndustryRollModel):
                 valid_sw_ins_mappings=self.valid_sw_ins_mappings,  
                 pred_top_num=self.ext_kwargs['pred_top_num'],  
                 task_weights=self.ext_kwargs['task_weights'],  
+                grad_limits=self.ext_kwargs['grad_limits'], 
                 **self.pl_module_params,
         )     
         self.after_create_model(model)

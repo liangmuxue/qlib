@@ -93,7 +93,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 重新生成编号
         df_data[g_col] = df_data[group_column].rank(method='dense',ascending=True).astype("int")  
         self.df_data = df_data
-        if mode=='valid':
+        if mode=='valid' or True:
             self.check_data_intergraty()
         rank_num_max = df_data['instrument'].unique().shape[0]
         # 生成日期映射关系
