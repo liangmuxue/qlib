@@ -867,8 +867,9 @@ class FuturesBidiModule(MlpModule):
             flag = 1
         else:
             flag = -1
-        if mode=='single':
+        if self.pred_mode=='single':
             can_ins = flag * cls[0]
+            # can_ins = flag * dec_out[:,-1,0]
             if trend==1:
                 pre_index = np.argsort(can_ins)[:top_num]
             else:
@@ -882,7 +883,11 @@ class FuturesBidiModule(MlpModule):
         
     def compute_comprehensive_info(self,cls,dec_out):
         
-        data = pd.DataFrame(np.stack([cls[0],dec_out[:,-1,0]]).transpose(1,0),columns=['cls','dec'])
+        if self.candidate_inverse:
+            second_can = -dec_out[:,-1,0]
+        else:
+            second_can = dec_out[:,-1,0]
+        data = pd.DataFrame(np.stack([cls[0],second_can]).transpose(1,0),columns=['cls','dec'])
         from cus_utils.wise_corrcef import calculate_comprehensive_rank_from_scores
         return calculate_comprehensive_rank_from_scores(data,weights=self.pred_weights,normalization_method='minmax')
 

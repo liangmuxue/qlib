@@ -83,14 +83,15 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2012Step2_openRangeWithSwindex_2506"
+               model_name: "Futures_cleanData2012Step2_openRangeWithSwindex_2503"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               task_weights: [0.2,0.8]
-               grad_limits: [10.0,3.0]
+               task_weights: [0.8,0.2]
+               grad_limits: [3.0,2.0]
                pred_weights: [1.0,0.0]
                candidate_inverse: False
+               pred_mode: 'single'
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
                wave_period : &wave_period 30
@@ -112,8 +113,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2012-01-01, 2025-06-28]
-                valid: [2025-06-01, 2025-08-31]
+                train: [2012-01-01, 2025-03-28]
+                valid: [2025-03-01, 2025-05-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -135,14 +136,14 @@ task:
                 group_column: 'instrument'
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
-                ext_column: ['near_basis_rate']
-                target_column: ['open_range','open_range','CCI5','SUMPMA5','RSV5']
+                ext_column: ['near_basis_rate','dom_basis_rate']
+                target_column: ['QTLUMA5','open_range','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
-                past_covariate_col: ['VOLUME_RANGE','RSV5','OBV5','WVMA5','QTLUMA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','OBV5','WVMA5','QTLUMA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','OBV5','WVMA5','QTLUMA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','OBV5','WVMA5','QTLUMA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','OBV5','WVMA5','QTLUMA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','CORR5'
+                past_covariate_col: ['VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','price_range','limit_rate','magin_radio']    

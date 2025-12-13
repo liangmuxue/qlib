@@ -13,7 +13,7 @@ def calculate_gradient_norm(gradient):
     total_norm = total_norm ** (1. / 2)
     return total_norm
 
-def pc_grad(gradient_components, task_weights,direction=0):
+def pc_grad(gradient_components, task_weights):
     """
     PCGrad: 通过投影消除梯度冲突
     """
@@ -22,37 +22,32 @@ def pc_grad(gradient_components, task_weights,direction=0):
     param_names = interact_grad_names(gradient_components,interact=False)
     #TODO param name conflict
     for param_name in param_names:
-        # 收集所有任务在该参数上的梯度
-        task_grads = [comp[param_name] for comp in gradient_components]
         # 对每对任务进行冲突消除
-        for i in range(len(task_grads)):
+        for i in range(len(gradient_components)):
             if param_name not in gradient_components[i]:
                 continue
-            for j in range(len(task_grads)):
+            for j in range(len(gradient_components)):
                 if param_name not in gradient_components[j]:
                     continue
-                
+                grads_i = gradient_components[i][param_name]
+                grads_j = gradient_components[j][param_name]
                 if i != j:
                     # 计算两个梯度的点积
                     dot_product = torch.dot(
-                        task_grads[i].flatten(), 
-                        task_grads[j].flatten()
+                        grads_i.flatten(), 
+                        grads_j.flatten()
                     )
                     
                     # 如果梯度方向冲突（点积为负）
-                    if dot_product < 0 and direction>=0:
-                        if direction==0:
-                            # 将梯度j投影到梯度i的正交补空间
-                            projection = (dot_product / 
-                                        (torch.norm(task_grads[i]) ** 2 + 1e-8)) * task_grads[i]
-                            task_grads[j] = task_grads[j] - projection
-                        else:
-                            # 将梯度i投影到梯度j的正交补空间
-                            projection = (dot_product / 
-                                        (torch.norm(task_grads[j]) ** 2 + 1e-8)) * task_grads[j]
-                            task_grads[i] = task_grads[i] - projection                            
-        # 只需要使用被投影的梯度  
-        processed_grads[param_name] = task_grads[direction]
+                    if dot_product < 0:
+                        # 将梯度j投影到梯度i的正交补空间
+                        projection = (dot_product / 
+                                    (torch.norm(grads_i) ** 2 + 1e-8)) * grads_i
+                        gradient_components[j][param_name] = grads_j - projection
+                        # 将梯度i投影到梯度j的正交补空间
+                        projection = (dot_product / 
+                                    (torch.norm(grads_j) ** 2 + 1e-8)) * grads_j
+                        gradient_components[i][param_name] = grads_i - projection                            
     
     return processed_grads
 
@@ -275,7 +270,7 @@ class MultiTaskOptimizer(Adam):
         show_loss = show_loss + loss.item()
         gradients_ce = self.gradient_calculator._get_parameter_gradients()
         # pc grad
-        total_gradients = pc_grad([gradients_cls,gradients_ce], self.task_weights,direction=0)
+        total_gradients = pc_grad([gradients_cls,gradients_ce], self.task_weights)
         # Store Grad
         self.gradients_recorder.append(total_gradients)
         self.loss_recorder.append(show_loss)
@@ -337,7 +332,10 @@ class MultiTaskOptimizer(Adam):
                 total_gradients = adaptive_gradient_processing(total_gradients, conflict_analysis)     
             elif self.use_pcgrad:
                 # 应用梯度手术
-                total_gradients = pc_grad(gradient_components, self.task_weights,direction=0)
+                pc_grad(gradient_components, self.task_weights)
+                task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
+                # 多个任务的梯度相加（带权重）
+                total_gradients,gradient_components = grad_combine(gradient_components,task_grad_norms, self.task_weights,self.grad_limits)
             else:
                 # 标准多任务梯度计算
                 # grad_norm_arr = [self._compute_total_grad_norm(grad) for grad in gradient_components]

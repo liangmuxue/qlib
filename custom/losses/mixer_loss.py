@@ -284,6 +284,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         price_diff_range = price_targets[j,ins_rel_index]  
                         price_diff_range_total = long_diff_seq_targets[j,0]
                         # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
+                        ce_loss[i] += self.ccc_loss_comp(dec_out_item[:,-1], round_targets_item)  
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
                         price_index_total.append(price_diff_range_total)
                         sw_index_total.append(sw_index_data[j,0])
@@ -323,10 +324,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cls_loss[i] = cls_loss[i]/10
                     loss_sum = loss_sum + cls_loss[i]               
                 if target_mode in [3]:
+                    cls_loss[i] = cls_loss[i]/target_class.shape[0]
+                    ce_loss[i] = ce_loss[i]/target_class.shape[0]
                     # 板块整体损失计算
-                    ce_loss[i] += self.ccc_loss_comp(torch.stack(sw_index_total),torch.stack(price_index_total))                            
+                    # ce_loss[i] += self.ccc_loss_comp(torch.stack(sw_index_total),torch.stack(price_index_total))                            
                     # loss_sum = loss_sum + self.loss_weights[0] * cls_loss[i] + self.loss_weights[1] * ce_loss[i] 
-                    loss_sum = loss_sum + cls_loss[i]
+                    loss_sum = loss_sum + cls_loss[i] + ce_loss[i]
                 if target_mode in [6]:
                     # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标，整体指标模式
                     diff_target = long_diff_seq_targets[:,main_index,-1,i]
