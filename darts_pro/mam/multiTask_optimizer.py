@@ -2,7 +2,7 @@ import numpy as np
 from  torch.optim import Adam
 import torch
 import torch.nn as nn
-from typing import List, Tuple
+from typing import List, Dict
 from rqalpha import interface
 
 def calculate_gradient_norm(gradient):
@@ -15,39 +15,33 @@ def calculate_gradient_norm(gradient):
 
 def pc_grad(gradient_components, task_weights):
     """
-    PCGrad: 通过投影消除梯度冲突
+    PCGrad: 通过投影消除梯度冲突，主辅任务模式
     """
     
     processed_grads = {}
     param_names = interact_grad_names(gradient_components,interact=False)
-    #TODO param name conflict
     for param_name in param_names:
+        if param_name not in gradient_components[0]:
+            continue        
+        # 主任务在第一个
+        grads_main = gradient_components[0][param_name]
         # 对每对任务进行冲突消除
-        for i in range(len(gradient_components)):
-            if param_name not in gradient_components[i]:
+        for j in range(1,len(gradient_components)-1):
+            if param_name not in gradient_components[j]:
                 continue
-            for j in range(len(gradient_components)):
-                if param_name not in gradient_components[j]:
-                    continue
-                grads_i = gradient_components[i][param_name]
-                grads_j = gradient_components[j][param_name]
-                if i != j:
-                    # 计算两个梯度的点积
-                    dot_product = torch.dot(
-                        grads_i.flatten(), 
-                        grads_j.flatten()
-                    )
-                    
-                    # 如果梯度方向冲突（点积为负）
-                    if dot_product < 0:
-                        # 将梯度j投影到梯度i的正交补空间
-                        projection = (dot_product / 
-                                    (torch.norm(grads_i) ** 2 + 1e-8)) * grads_i
-                        gradient_components[j][param_name] = grads_j - projection
-                        # 将梯度i投影到梯度j的正交补空间
-                        projection = (dot_product / 
-                                    (torch.norm(grads_j) ** 2 + 1e-8)) * grads_j
-                        gradient_components[i][param_name] = grads_i - projection                            
+            grads_j = gradient_components[j][param_name]
+            # 计算两个梯度的点积
+            dot_product = torch.dot(
+                grads_main.flatten(), 
+                grads_j.flatten()
+            )
+            
+            # 如果梯度方向冲突（点积为负）
+            if dot_product < 0:
+                # 将梯度i投影到梯度j的正交补空间
+                projection = (dot_product / 
+                            (torch.norm(grads_main) ** 2 + 1e-8)) * grads_main
+                gradient_components[j][param_name] = grads_j - projection      
     
     return processed_grads
 
@@ -180,8 +174,6 @@ class MultiTaskGradientCalculator():
             # 单独计算损失和梯度
             gradient_components,loss_total = self._compute_gradient_components(task_losses)
             main_grads = self._get_parameter_gradients()
-            # 执行此步骤是为了清空计算图，由此计算出的参数梯度没有实际意义，后续需要用实际梯度替换--cancel
-            # task_losses[-1].backward()            
             return main_grads, gradient_components,loss_total
         else:
             # 直接计算总损失
@@ -196,6 +188,7 @@ class MultiTaskGradientCalculator():
     
     def _compute_gradient_components(self, task_losses):
         """计算每个任务对共享参数的梯度贡献"""
+        
         gradient_components = []
         loss_total = []
         for i, task_loss in enumerate(task_losses):
@@ -224,7 +217,8 @@ class MultiTaskGradientCalculator():
         return gradients
 
 class MultiTaskOptimizer(Adam):
-    def __init__(self, params, defaults_dict,model=None,task_weights=None,grad_limits=None,use_gradient_surgery=True,use_adaptive_clip=False,use_pcgrad=False):
+    
+    def __init__(self, params, defaults_dict,model=None,task_weights=None,grad_limits=None,use_gradient_surgery=True,use_adaptive_clip=False,use_pcgrad=False,device=None):
         super().__init__(params, **defaults_dict)
         self.model = model
         self.task_weights = task_weights
@@ -236,21 +230,156 @@ class MultiTaskOptimizer(Adam):
         self.accumulation_steps = 4
         self.gradients_recorder = []
         self.loss_recorder = []
-
-    def step_with_batch(self, task_losses,batch_idx=0,total_batch_number=0):
-        """
-        执行多任务学习的一步参数更新,Batch Keep Mode
-        """
+        self.device = device
         
-        update_info = None
-        # accumulate gradients first
-        self.acc_grad(task_losses)
-        # apply gradients interval
-        if ((batch_idx+1) % self.accumulation_steps==0) or ((total_batch_number-batch_idx)==1):
-            update_info = self.apply_grad()
-            self.clear_record()
-        return update_info
+        self.primary_tasks = [0]
+        self.auxiliary_tasks = [i for i in range(len(task_weights)) if i not in self.primary_tasks]
+        # 辅助任务权重（可学习）
+        self.auxiliary_weights = nn.ParameterDict()
+        self._init_weights()  
+              
+        # 记录历史损失信息
+        self.history_losses = {task_idx: [] for task_idx in range(len(task_weights))}
+        # 日志记录
+        self.info = {
+            'auxiliary_weights': [],
+            'helpfulness_scores': []
+        }
+        
+    def _init_weights(self):
+        """初始化辅助任务权重"""
+        
+        for task_idx in self.auxiliary_tasks:
+            weight = nn.Parameter(torch.ones(1, device=self.device) * 0.5)  # 初始权重0.5
+            self.auxiliary_weights[f'w_{task_idx}'] = weight
+            
+    def step_with_auto_weights(self, task_losses):
+        """辅助任务自适应权重"""
+        
+        # 记录历史损失数据
+        for task_idx, loss in enumerate(task_losses):
+            self.history_losses[task_idx].append(loss.item())
+        # 计算辅助任务对主任务的帮助程度
+        helpfulness = self._compute_helpfulness()
+        
+        # 计算所有任务梯度
+        total_gradients, gradient_components,loss_total = self.gradient_calculator.compute_gradients(
+            task_losses, return_components=True
+        )
+        # 统计梯度冲突情况
+        conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
+        conflict_count,similarity = self.combine_conflict_analysis(conflict_analysis_total)    
+            
+        all_gradients = [self._compute_grad_norm(comp) for comp in gradient_components] 
+        # 自适应调整辅助任务梯度
+        adjusted_gradients = self._compute_auto_weights(task_losses, helpfulness, all_gradients)
+        # 应用梯度手术,合并梯度
+        pc_grad(gradient_components, adjusted_gradients)
+        # 多个任务的梯度相加（带权重）
+        total_gradients,gradient_components = self.grad_combine(gradient_components, adjusted_gradients)
+        # 统计梯度范数
+        task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
+        # 更新辅助任务权重
+        self._update_weights(helpfulness)
+                
+        # 手动设置梯度并更新参数
+        self._set_gradients(total_gradients)
+        super().step()
+        
+        show_loss = 0
+        for loss in loss_total:
+            show_loss = show_loss + loss
+        adjusted_gradients_show = [adjusted_gradients[0]] + [adjusted_gradients[task_idx].item() for task_idx in self.auxiliary_tasks]
+        return {
+            'total_loss': show_loss,
+            'total_grad_norm': self._compute_total_grad_norm(total_gradients),
+            'helpfulness': list(helpfulness.values()),
+            'adjusted_gradients': adjusted_gradients_show,
+            'conflict_analysis': {'conflict_count':conflict_count,'similarity':similarity},
+            'task_grad_norms': task_grad_norms
+                if gradient_components else None
+        }
+
+    def grad_combine(self,gradient_components, adjusted_gradients):
+        """合并多个任务梯度"""
     
+        processed_grads = {}
+        param_names = interact_grad_names(gradient_components,interact=False)
+        
+        gradient_components_after = gradient_components.copy()
+        for param_name in param_names:   
+            final_grad = None 
+            for i in range(len(gradient_components)):
+                # 不同子模型，梯度有可能不一致
+                if param_name in gradient_components[i]:
+                    item_grad = gradient_components[i][param_name]
+                    if i==0:
+                        adj_grad = adjusted_gradients[i]
+                    else:
+                        adj_grad = adjusted_gradients[i][0]
+                    # 不同任务不同梯度剪裁
+                    item_grad = item_grad * adj_grad * self.task_weights[i]  
+                    gradient_components_after[i][param_name] = item_grad
+                    # 加权合并处理后的梯度
+                    if final_grad is None:
+                        final_grad = item_grad                   
+                    else:
+                        final_grad = final_grad + item_grad
+    
+            processed_grads[param_name] = final_grad
+            
+        return processed_grads,gradient_components_after
+
+    def _compute_auto_weights(self,task_losses,helpfulness,all_gradients):
+        
+        adjusted_gradients = {}
+        for task_idx in range(len(task_losses)):
+            if task_idx in self.auxiliary_tasks:
+                # 获取当前辅助任务权重
+                weight = torch.sigmoid(self.auxiliary_weights[f'w_{task_idx}'])
+                
+                # 根据帮助程度调整权重
+                if task_idx in helpfulness:
+                    helpfulness_score = helpfulness[task_idx]
+                    # 帮助程度越高，权重越大
+                    adjusted_weight = weight * (1.0 + helpfulness_score * 0.5)
+                else:
+                    adjusted_weight = weight
+                
+                adjusted_gradients[task_idx] = all_gradients[task_idx] * adjusted_weight
+                
+                # 记录帮助程度和权重
+                if task_idx in helpfulness:
+                    self.info['helpfulness_scores'].append(helpfulness[task_idx])
+            else:
+                # 主任务梯度保持不变
+                adjusted_gradients[task_idx] = all_gradients[task_idx]
+        
+        return adjusted_gradients
+                
+    def _update_weights(self, helpfulness: Dict[int, float]):
+        """更新辅助任务权重"""
+        with torch.no_grad():
+            for task_idx in self.auxiliary_tasks:
+                weight_param = self.auxiliary_weights[f'w_{task_idx}']
+                
+                if task_idx in helpfulness:
+                    helpful_score = helpfulness[task_idx]
+                    # 根据帮助程度调整权重
+                    if helpful_score > 0:
+                        # 正向帮助，增加权重
+                        adjustment = helpful_score * 0.01
+                    else:
+                        # 负向影响，减少权重
+                        adjustment = helpful_score * 0.02
+                else:
+                    # 默认小幅随机调整
+                    adjustment = torch.randn(1, device=self.device).item() * 0.005
+                
+                weight_param.data += adjustment
+                # 限制在合理范围
+                weight_param.data = torch.clamp(weight_param.data, -3, 3)
+                    
     def clear_record(self):
         self.gradients_recorder = []
         self.loss_recorder = []
@@ -312,11 +441,23 @@ class MultiTaskOptimizer(Adam):
                 task_grads[name] = param.grad.clone()
         current_loss = loss.item() * self.accumulation_steps 
         return task_grads , current_loss   
+
+    def combine_conflict_analysis(self,conflicts):
+        
+        conflict_count = 0
+        avg_similarity_total = 0
+        for name in conflicts.keys():
+            count = conflicts[name]['conflict_count']
+            conflict_count += count
+            avg_similarity = conflicts[name]['avg_similarity']
+            avg_similarity_total += avg_similarity
+        return conflict_count/len(conflicts.keys()),avg_similarity_total/len(conflicts.keys())  
                     
     def step(self, task_losses):
         """
         执行多任务学习的一步参数更新
         """
+                            
         # 1. 计算梯度
         if self.use_gradient_surgery:
             # 需要梯度分量进行梯度手术
@@ -357,23 +498,9 @@ class MultiTaskOptimizer(Adam):
             super().step()
             return
             
-        def combine_conflict_analysis(conflicts):
-            
-            conflict_count = 0
-            avg_similarity_total = 0
-            for name in conflicts.keys():
-                count = conflicts[name]['conflict_count']
-                conflict_count += count
-                avg_similarity = conflicts[name]['avg_similarity']
-                avg_similarity_total += avg_similarity
-            return conflict_count/len(conflicts.keys()),avg_similarity_total/len(conflicts.keys())
             
         conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
-        conflict_count,similarity = combine_conflict_analysis(conflict_analysis_total)
-        conflict_analysis_total_cls = analyze_gradient_conflicts([gradient_components[0],total_gradients])
-        conflict_analysis_total_ce = analyze_gradient_conflicts([gradient_components[1],total_gradients])
-        cls_conflict_count,cls_similarity= combine_conflict_analysis(conflict_analysis_total_cls)
-        ce_conflict_count,ce_similarity= combine_conflict_analysis(conflict_analysis_total_ce)
+        conflict_count,similarity = self.combine_conflict_analysis(conflict_analysis_total)
         
         # 3. 手动设置梯度并更新参数
         self._set_gradients(total_gradients)
@@ -389,6 +516,47 @@ class MultiTaskOptimizer(Adam):
             'task_grad_norms': [self._compute_grad_norm(comp) for comp in gradient_components] 
                 if gradient_components else None
         }
+
+    def _compute_helpfulness(self) -> Dict[int, float]:
+        """计算辅助任务对主任务的帮助程度"""
+        
+        if len(self.history_losses[0]) < 2:
+            return {}
+        
+        helpfulness = {}
+        
+        # 计算主任务损失变化
+        primary_losses = []
+        for task_idx in self.primary_tasks:
+            if len(self.history_losses[task_idx]) >= 2:
+                recent_loss = np.mean(self.history_losses[task_idx][-5:])  # 最近5步平均
+                prev_loss = np.mean(self.history_losses[task_idx][-10:-5]) if len(self.history_losses[task_idx]) >= 10 else recent_loss
+                loss_change = prev_loss - recent_loss  # 正数表示损失下降
+                primary_losses.append(loss_change)
+        
+        if not primary_losses:
+            return {}
+        
+        avg_primary_change = np.mean(primary_losses)
+        
+        step_range = 10
+        
+        # 计算每个辅助任务的帮助程度
+        for task_idx in self.auxiliary_tasks:
+            if len(self.history_losses[task_idx]) >= 2:
+                recent_loss = np.mean(self.history_losses[task_idx][-step_range:])
+                prev_loss = np.mean(self.history_losses[task_idx][-2*step_range:-step_range]) if len(self.history_losses[task_idx]) >= 2*step_range else recent_loss
+                aux_loss_change = prev_loss - recent_loss
+                
+                # 帮助程度定义：辅助任务损失下降且主任务损失也下降
+                if avg_primary_change > 0 and aux_loss_change > 0:
+                    helpfulness[task_idx] = min(aux_loss_change, avg_primary_change)
+                elif avg_primary_change > 0:
+                    helpfulness[task_idx] = avg_primary_change * 0.1  # 小幅正影响
+                else:
+                    helpfulness[task_idx] = -0.02  # 负影响
+        
+        return helpfulness
     
     def _set_gradients(self, gradients_dict):
         

@@ -27,8 +27,8 @@ from trader.utils.data_stats import DataStats,RESULT_FILE_PATH,RESULT_FILE_VIEW,
 from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
-TRACK_DATE = [20250728,20250815,20250731]
-# TRACK_DATE = [20250512,20250425,20250422]
+# TRACK_DATE = [20250728,20250815,20250731]
+TRACK_DATE = [20250512,20250425,20250422]
 STAT_DATE = [20240731,20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
@@ -222,7 +222,7 @@ class FuturesBidiModule(MlpModule):
             mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(),optimizer_kws,
                             model=self.sub_models[i],task_weights=self.task_weights,grad_limits=self.grad_limits,
                             use_gradient_surgery=use_gradient_surgery_flag, 
-                            use_adaptive_clip=False,use_pcgrad=False)  
+                            use_adaptive_clip=False,use_pcgrad=True)  
             optimizers.append(mt_optimizer)
         # 对应优化器，生成多个学习率
         lr_schedulers = []
@@ -299,7 +299,7 @@ class FuturesBidiModule(MlpModule):
         self.total_imp_cnt = 0
     
     def get_optimizer_size(self):
-        return len(self.past_split) + 1
+        return len(self.past_split) - 1
        
     def training_step_real(self, train_batch, batch_idx): 
         """重载父类方法，重点关注多优化器配合"""
@@ -327,7 +327,7 @@ class FuturesBidiModule(MlpModule):
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained   
         total_loss = torch.tensor(0.0).to(self.device)
-        for i in range(self.get_optimizer_size()-1):
+        for i in range(self.get_optimizer_size()):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), 
                             (future_target,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),optimizers_idx=i)
@@ -336,22 +336,27 @@ class FuturesBidiModule(MlpModule):
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             if ce_loss[i]!=0:
                 self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
+            if fds_loss[i]!=0:
+                self.log("train_fds_loss_{}".format(i), fds_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)               
             self.loss_data.append((corr_loss_combine.detach(),ce_loss.detach(),fds_loss.detach(),cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
             if self.task_weights[1]>0:
-                update_info = opt.step([cls_loss[i],ce_loss[i]])
+                update_info = opt.step_with_auto_weights([cls_loss[i],ce_loss[i],fds_loss[i]])
             else:
                 update_info = opt.step([cls_loss[i]])
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
             self.lr_schedulers()[i].step() 
             if update_info is not None:
                 # total_loss = total_loss + update_info["total_loss"]
-                # self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                for idx in range(len(self.task_weights)):
+                    self.log("adjusted_gradients_{}".format(idx), update_info["adjusted_gradients"][idx], batch_size=train_batch[0].shape[0], prog_bar=False)
+                for idx in range(len(update_info["helpfulness"])):
+                    self.log("helpfulness_{}".format(idx), update_info["helpfulness"][idx], batch_size=train_batch[0].shape[0], prog_bar=False)
                 # 当前总梯度和分量梯度
                 if "conflict_analysis" in update_info:
-                    self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=True)
-                    self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=True)
+                    self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
+                    self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
                     self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
                     self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
                 # self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
@@ -396,7 +401,7 @@ class FuturesBidiModule(MlpModule):
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
         preds_combine = []
-        for i in range(len(self.past_split)):
+        for i in range(1):
             if ce_loss[i]!=0:
                 self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             if cls_loss[i]!=0:
@@ -551,7 +556,8 @@ class FuturesBidiModule(MlpModule):
                     instruments,k_idx,_ = np.intersect1d(ins_all,keep_index,return_indices=True)
                     ins_output = cls_output[j][index,:]
                     ins_output = ins_output[inner_index]
-                    ins_output = MinMaxScaler().fit_transform(np.expand_dims(ins_output,-1)).squeeze(-1)
+                    ins_output_mean = ins_output.mean()
+                    ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output,-1)).squeeze(-1)
                     dec_output_item = dec_output[index,inner_index,-1,j] 
                     fur_round_target = round_targets[instruments,-1,j]
                     price_targets = price_targets_total[index,instruments]
@@ -567,10 +573,10 @@ class FuturesBidiModule(MlpModule):
                                 name_arr.append(item["instrument"]+"_match_"+str(trend))
                             else:
                                 name_arr.append(item["instrument"])
-                        view_data = np.stack([ins_output,price_targets,price_array_range]).transpose(1,0)
+                        view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
                         # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
                         win = "detail_target_{}_{}=".format(j,viz_total_size)
-                        target_title = "Detail_{}_{},date:{}".format(round(index_mean,3),round(index_output,3),date)                            
+                        target_title = "Detail_{}_{},date:{}".format(round(index_mean,3),round(ins_output_mean,3),date)                            
                         viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred_cls","target","price"])
                     # 品种走势图,所有候选的目标走势和价格走势
                     if j in DRAW_SEQ_ITEM:
@@ -584,8 +590,8 @@ class FuturesBidiModule(MlpModule):
                             ts_arr_tar = ts_arr[top_index]
                             open_price_target = np.array([item["diff_range"] for item in ts_arr_tar])
                             open_price_target = MinMaxScaler().fit_transform(open_price_target.transpose(1,0)).transpose(1,0)
-                            sv_target = round_targets[top_index].squeeze(-1)
-                            view_data = np.concatenate([open_price_target,sv_target]).transpose(1,0)
+                            sv_target = round_targets[top_index][1]
+                            view_data = np.concatenate([open_price_target,sv_target.transpose(1,0)]).transpose(1,0)
                             names = []
                             for name in coll_item_trend['instrument'].values.tolist():
                                 names.append(name+"_price")
@@ -863,13 +869,15 @@ class FuturesBidiModule(MlpModule):
     
     def compute_arg_sort(self,cls, dec_out,mode='single',trend=1,top_num=2):
         
-        if self.candidate_inverse:
-            flag = 1
-        else:
-            flag = -1
         if self.pred_mode=='single':
-            can_ins = flag * cls[0]
-            # can_ins = flag * dec_out[:,-1,0]
+            if self.candidate_inverse:
+                flag = 1
+            else:
+                flag = -1        
+            if self.pred_weights[0] > self.pred_weights[1] :  
+                can_ins = flag * cls[0]
+            else:
+                can_ins = flag * dec_out[:,-1,0]
             if trend==1:
                 pre_index = np.argsort(can_ins)[:top_num]
             else:

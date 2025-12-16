@@ -1003,7 +1003,7 @@ if __name__ == "__main__":
     # 导入1m历史数据
     # extractor.store_1min_data()
     # 合并生成主力连续历史数据
-    extractor.combine_continues_data(data_range=[20251128,20251205])
+    # extractor.combine_continues_data(data_range=[20251128,20251205])
     # 导入历史拓展数据
     # extractor.import_extension_data(data_range=[20251128,None])
     # 生成行业板块历史行情数据
@@ -1015,7 +1015,7 @@ if __name__ == "__main__":
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     # extractor.build_cleandata_table()
     # qlib品种名单列表生成
-    # extractor.build_qlib_instrument()
+    extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################

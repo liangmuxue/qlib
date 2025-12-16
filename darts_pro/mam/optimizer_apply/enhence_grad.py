@@ -7,427 +7,276 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
-class PCGrad:
+class AdaptiveAuxiliaryAllocator:
     """
-    PCGrad: 通过梯度投影解决多任务学习的梯度冲突
-    论文: "Gradient Surgery for Multi-Task Learning" (ICLR 2020)
-    """
-    
-    def __init__(self, 
-                 reduction: str = 'mean',
-                 normalize: bool = False,
-                 eps: float = 1e-8):
-        """
-        Args:
-            reduction: 梯度聚合方式 ('mean', 'sum', 'weighted')
-            normalize: 是否在投影前归一化梯度
-            eps: 数值稳定性常数
-        """
-        assert reduction in ['mean', 'sum', 'weighted']
-        self.reduction = reduction
-        self.normalize = normalize
-        self.eps = eps
-        
-        # 记录统计信息
-        self.stats = {
-            'conflict_rate': [],
-            'cosine_similarities': [],
-            'gradient_norms': [],
-            'projection_count': [],
-        }
-    
-    def apply(self, task_gradients: List[List[torch.Tensor]]) -> List[torch.Tensor]:
-        """
-        应用PCGrad算法
-        
-        Args:
-            task_gradients: 各任务的梯度列表
-                [
-                    [param1_grad, param2_grad, ...],  # 任务1
-                    [param1_grad, param2_grad, ...],  # 任务2
-                    ...
-                ]
-        
-        Returns:
-            处理后的聚合梯度列表 [param1_grad, param2_grad, ...]
-        """
-        num_tasks = len(task_gradients)
-        
-        if num_tasks == 1:
-            return task_gradients[0]
-        
-        # 将每个任务的梯度展平为向量
-        flat_gradients = []
-        original_shapes = []
-        
-        for task_grad in task_gradients:
-            flat_grad = []
-            shapes = []
-            
-            for grad in task_grad:
-                if grad is not None:
-                    shapes.append(grad.shape)
-                    flat_grad.append(grad.flatten())
-                else:
-                    shapes.append(None)
-                    flat_grad.append(torch.tensor([], device=task_grad[0].device))
-            
-            flat_gradients.append(torch.cat(flat_grad))
-            original_shapes.append(shapes)
-        
-        # 应用PCGrad投影
-        processed_grads = self._pcgrad_projection(flat_gradients)
-        
-        # 将处理后的梯度恢复为原始形状
-        return self._unflatten_gradients(processed_grads, original_shapes[0])
-    
-    def _pcgrad_projection(self, flat_gradients: List[torch.Tensor]) -> torch.Tensor:
-        """PCGrad核心投影算法"""
-        num_tasks = len(flat_gradients)
-        processed_grads = [grad.clone() for grad in flat_gradients]
-        
-        conflict_count = 0
-        total_pairs = 0
-        cosine_sims = []
-        
-        # 对每对任务应用PCGrad
-        for i in range(num_tasks):
-            for j in range(num_tasks):
-                if i == j:
-                    continue
-                
-                total_pairs += 1
-                g_i = processed_grads[i]
-                g_j = flat_gradients[j]
-                
-                # 计算梯度点积
-                dot_product = torch.dot(g_i, g_j)
-                
-                # 计算余弦相似度
-                norm_i = torch.norm(g_i) + self.eps
-                norm_j = torch.norm(g_j) + self.eps
-                cos_sim = dot_product / (norm_i * norm_j)
-                cosine_sims.append(cos_sim.item())
-                
-                # 如果梯度冲突（点积 < 0）
-                if dot_product < 0:
-                    conflict_count += 1
-                    
-                    # 投影：g_i = g_i - (g_i·g_j / ||g_j||²) * g_j
-                    g_j_norm_sq = torch.dot(g_j, g_j) + self.eps
-                    proj_coef = dot_product / g_j_norm_sq
-                    
-                    # 应用投影
-                    processed_grads[i] = g_i - proj_coef * g_j
-        
-        # 记录统计信息
-        conflict_rate = conflict_count / max(total_pairs, 1)
-        self.stats['conflict_rate'].append(conflict_rate)
-        self.stats['cosine_similarities'].append(cosine_sims)
-        self.stats['projection_count'].append(conflict_count)
-        
-        # 聚合处理后的梯度
-        if self.reduction == 'mean':
-            aggregated = torch.stack(processed_grads).mean(dim=0)
-        elif self.reduction == 'sum':
-            aggregated = torch.stack(processed_grads).sum(dim=0)
-        else:  # 'weighted'
-            # 根据梯度范数加权
-            weights = []
-            for grad in processed_grads:
-                norm = torch.norm(grad) + self.eps
-                weights.append(1.0 / norm)
-            
-            weights = torch.tensor(weights, device=processed_grads[0].device)
-            weights = weights / weights.sum()
-            
-            aggregated = torch.stack([w * g for w, g in zip(weights, processed_grads)]).sum(dim=0)
-        
-        return aggregated
-    
-    def _unflatten_gradients(self, 
-                           flat_gradient: torch.Tensor, 
-                           original_shapes: List[Optional[torch.Size]]) -> List[torch.Tensor]:
-        """将展平的梯度恢复为原始形状"""
-        unflattened = []
-        idx = 0
-        
-        for shape in original_shapes:
-            if shape is None:
-                unflattened.append(None)
-            else:
-                size = np.prod(shape).item()
-                grad = flat_gradient[idx:idx+size].view(shape)
-                unflattened.append(grad)
-                idx += size
-        
-        return unflattened
-    
-    def get_statistics(self) -> Dict:
-        """获取PCGrad统计信息"""
-        if not self.stats['conflict_rate']:
-            return {}
-        
-        return {
-            'avg_conflict_rate': np.mean(self.stats['conflict_rate']),
-            'max_conflict_rate': np.max(self.stats['conflict_rate']),
-            'min_conflict_rate': np.min(self.stats['conflict_rate']),
-            'avg_cosine_similarity': np.mean([np.mean(sims) for sims in self.stats['cosine_similarities']]),
-            'total_projections': sum(self.stats['projection_count']),
-            'conflict_rate_history': self.stats['conflict_rate'],
-        }
-    
-    def reset_statistics(self):
-        """重置统计信息"""
-        self.stats = {
-            'conflict_rate': [],
-            'cosine_similarities': [],
-            'gradient_norms': [],
-            'projection_count': [],
-        }
-
-class EnhancedPCGrad(PCGrad):
-    """
-    增强版PCGrad：支持多种投影策略和优化
+    自适应辅助任务分配器
+    根据辅助任务对主任务的帮助程度动态调整
     """
     
     def __init__(self,
-                 projection_type: str = 'pcgrad',
-                 reduction: str = 'mean',
-                 soft_threshold: float = 0.0,
-                 momentum: float = 0.0,
-                 **kwargs):
-        """
-        Args:
-            projection_type: 投影策略
-                'pcgrad': 原始PCGrad
-                'pcgrad_sym': 对称PCGrad（双向投影）
-                'mgda': 多梯度下降算法
-                'cagrad': 冲突避免梯度下降
-            soft_threshold: 软阈值（当余弦相似度低于此值时进行投影）
-            momentum: 动量项，平滑梯度变化
-        """
-        super().__init__(reduction, **kwargs)
+                 primary_tasks: List[int],
+                 auxiliary_tasks: List[int],
+                 device: torch.device):
         
-        assert projection_type in ['pcgrad', 'pcgrad_sym', 'mgda', 'cagrad']
-        self.projection_type = projection_type
-        self.soft_threshold = soft_threshold
-        self.momentum = momentum
+        self.primary_tasks = primary_tasks
+        self.auxiliary_tasks = auxiliary_tasks
+        self.device = device
         
-        # 动量缓冲区
-        self.momentum_buffer = None
+        # 辅助任务权重（可学习）
+        self.auxiliary_weights = nn.ParameterDict()
+        self._init_weights()
         
-    def _pcgrad_projection(self, flat_gradients: List[torch.Tensor]) -> torch.Tensor:
-        """增强的投影算法，支持多种策略"""
-        num_tasks = len(flat_gradients)
+        # 历史信息
+        self.history_losses = {task_idx: [] for task_idx in range(len(primary_tasks) + len(auxiliary_tasks))}
         
-        if self.projection_type == 'pcgrad':
-            return self._original_pcgrad(flat_gradients)
-        elif self.projection_type == 'pcgrad_sym':
-            return self._symmetric_pcgrad(flat_gradients)
-        elif self.projection_type == 'mgda':
-            return self._mgda_projection(flat_gradients)
-        elif self.projection_type == 'cagrad':
-            return self._cagrad_projection(flat_gradients)
-        else:
-            raise ValueError(f"Unknown projection type: {self.projection_type}")
+        self.info = {
+            'auxiliary_weights': [],
+            'helpfulness_scores': []
+        }
     
-    def _original_pcgrad(self, flat_gradients: List[torch.Tensor]) -> torch.Tensor:
-        """原始PCGrad算法"""
-        num_tasks = len(flat_gradients)
-        processed_grads = [grad.clone() for grad in flat_gradients]
+    def _init_weights(self):
+        """初始化辅助任务权重"""
+        for task_idx in self.auxiliary_tasks:
+            weight = nn.Parameter(torch.ones(1, device=self.device) * 0.5)  # 初始权重0.5
+            self.auxiliary_weights[f'w_{task_idx}'] = weight
+    
+    def allocate(self,
+                model: nn.Module,
+                task_losses: List[torch.Tensor],
+                optimizer: torch.optim.Optimizer) -> torch.Tensor:
         
-        for i in range(num_tasks):
-            for j in range(num_tasks):
-                if i == j:
-                    continue
+        if optimizer is None:
+            raise ValueError("需要优化器")
+        
+        # 记录损失
+        for task_idx, loss in enumerate(task_losses):
+            self.history_losses[task_idx].append(loss.item())
+        
+        # 计算辅助任务对主任务的帮助程度
+        helpfulness = self._compute_helpfulness()
+        
+        # 计算所有任务梯度
+        all_gradients = {}
+        for task_idx in range(len(task_losses)):
+            optimizer.zero_grad()
+            task_losses[task_idx].backward(retain_graph=(task_idx != len(task_losses)-1))
+            
+            all_gradients[task_idx] = []
+            for param in model.parameters():
+                if param.grad is not None:
+                    all_gradients[task_idx].append(param.grad.clone())
+            
+            if task_idx != len(task_losses)-1:
+                for param in model.parameters():
+                    if param.grad is not None:
+                        param.grad.zero_()
+        
+        # 自适应调整辅助任务梯度
+        adjusted_gradients = {}
+        
+        for task_idx in range(len(task_losses)):
+            if task_idx in self.auxiliary_tasks:
+                # 获取当前辅助任务权重
+                weight = torch.sigmoid(self.auxiliary_weights[f'w_{task_idx}'])
                 
-                g_i = processed_grads[i]
-                g_j = flat_gradients[j]
-                
-                # 计算点积和余弦相似度
-                dot_product = torch.dot(g_i, g_j)
-                
-                if self.normalize:
-                    norm_i = torch.norm(g_i) + self.eps
-                    norm_j = torch.norm(g_j) + self.eps
-                    cos_sim = dot_product / (norm_i * norm_j)
+                # 根据帮助程度调整权重
+                if task_idx in helpfulness:
+                    helpfulness_score = helpfulness[task_idx]
+                    # 帮助程度越高，权重越大
+                    adjusted_weight = weight * (1.0 + helpfulness_score * 0.5)
                 else:
-                    cos_sim = dot_product / (torch.norm(g_j) ** 2 + self.eps)
+                    adjusted_weight = weight
                 
-                # 判断是否进行投影（可配置软阈值）
-                if dot_product < self.soft_threshold:
-                    g_j_norm_sq = torch.dot(g_j, g_j) + self.eps
-                    proj_coef = dot_product / g_j_norm_sq
-                    processed_grads[i] = g_i - proj_coef * g_j
-        
-        # 应用动量（如果启用）
-        if self.momentum > 0:
-            aggregated = self._apply_momentum(processed_grads)
-        else:
-            aggregated = self._aggregate_gradients(processed_grads)
-        
-        return aggregated
-    
-    def _symmetric_pcgrad(self, flat_gradients: List[torch.Tradient]) -> torch.Tensor:
-        """对称PCGrad：对两个任务同时进行投影"""
-        num_tasks = len(flat_gradients)
-        processed_grads = [grad.clone() for grad in flat_gradients]
-        
-        for i in range(num_tasks):
-            for j in range(i+1, num_tasks):
-                g_i = processed_grads[i]
-                g_j = processed_grads[j]
+                # 应用权重
+                weighted_grads = []
+                for grad in all_gradients[task_idx]:
+                    weighted_grads.append(grad * adjusted_weight)
                 
-                dot_product = torch.dot(g_i, g_j)
+                adjusted_gradients[task_idx] = weighted_grads
                 
-                if dot_product < self.soft_threshold:
-                    g_i_norm_sq = torch.dot(g_i, g_i) + self.eps
-                    g_j_norm_sq = torch.dot(g_j, g_j) + self.eps
-                    
-                    # 对称投影：两个梯度都投影
-                    proj_coef_ij = dot_product / g_j_norm_sq
-                    proj_coef_ji = dot_product / g_i_norm_sq
-                    
-                    processed_grads[i] = g_i - proj_coef_ij * g_j
-                    processed_grads[j] = g_j - proj_coef_ji * g_i
-        
-        return self._aggregate_gradients(processed_grads)
-    
-    def _mgda_projection(self, flat_gradients: List[torch.Tensor]) -> torch.Tensor:
-        """
-        MGDA（Multiple Gradient Descent Algorithm）投影
-        寻找帕累托最优解
-        """
-        num_tasks = len(flat_gradients)
-        
-        # 构建梯度矩阵 G ∈ R^{num_tasks × dim}
-        G = torch.stack(flat_gradients)  # [num_tasks, dim]
-        
-        # 使用Frank-Wolfe算法寻找最优凸组合系数
-        # 目标：min_α ||Σ α_i g_i||^2, s.t. Σ α_i = 1, α_i ≥ 0
-        
-        # 初始化均匀权重
-        alpha = torch.ones(num_tasks, device=G.device) / num_tasks
-        
-        # Frank-Wolfe迭代
-        for t in range(10):  # 通常10次迭代足够
-            # 计算当前聚合梯度
-            aggregated = torch.matmul(alpha, G)
-            
-            # 找到最小点积的任务（最冲突的任务）
-            dot_products = torch.matmul(G, aggregated)
-            min_idx = torch.argmin(dot_products)
-            
-            # 计算步长
-            gamma = 2.0 / (t + 2.0)
-            
-            # 更新alpha
-            new_alpha = alpha * (1 - gamma)
-            new_alpha[min_idx] += gamma
-            
-            # 投影到单纯形（确保非负且和为1）
-            new_alpha = torch.clamp(new_alpha, min=0)
-            new_alpha = new_alpha / new_alpha.sum()
-            
-            alpha = new_alpha
-        
-        # 计算最终聚合梯度
-        aggregated = torch.matmul(alpha, G)
-        
-        # 记录alpha权重
-        if 'mgda_weights' not in self.stats:
-            self.stats['mgda_weights'] = []
-        self.stats['mgda_weights'].append(alpha.cpu().numpy())
-        
-        return aggregated
-    
-    def _cagrad_projection(self, 
-                          flat_gradients: List[torch.Tensor], 
-                          c: float = 0.5) -> torch.Tensor:
-        """
-        CAGrad（Conflict-Averse Gradient Descent）投影
-        """
-        num_tasks = len(flat_gradients)
-        
-        # 计算平均梯度
-        avg_grad = torch.stack(flat_gradients).mean(dim=0)
-        
-        # 归一化梯度方向
-        grad_directions = []
-        for g in flat_gradients:
-            norm = torch.norm(g)
-            if norm > self.eps:
-                grad_directions.append(g / norm)
+                # 记录帮助程度和权重
+                if task_idx in helpfulness:
+                    self.info['helpfulness_scores'].append(helpfulness[task_idx])
             else:
-                grad_directions.append(g)
+                # 主任务梯度保持不变
+                adjusted_gradients[task_idx] = all_gradients[task_idx]
         
-        # 构建方向矩阵
-        D = torch.stack(grad_directions)  # [num_tasks, dim]
+        # 合并梯度
+        optimizer.zero_grad()
+        for task_idx in range(len(task_losses)):
+            param_idx = 0
+            for param in model.parameters():
+                if param.requires_grad:
+                    if param.grad is None:
+                        param.grad = adjusted_gradients[task_idx][param_idx]
+                    else:
+                        param.grad += adjusted_gradients[task_idx][param_idx]
+                    param_idx += 1
         
-        # 计算与平均方向最冲突的任务
-        u = avg_grad / (torch.norm(avg_grad) + self.eps)
-        conflicts = torch.matmul(D, u)
-        min_conflict_idx = torch.argmin(conflicts)
+        # 更新辅助任务权重
+        self._update_weights(helpfulness)
         
-        # 如果冲突超过阈值c，进行调整
-        d_min = grad_directions[min_conflict_idx]
-        if torch.dot(u, d_min) < c:
-            # 调整方向：u_new = u + (c - u·d_min) * d_min
-            u_new = u + (c - torch.dot(u, d_min)) * d_min
-            u_new = u_new / (torch.norm(u_new) + self.eps)
-            
-            # 缩放回原始大小
-            aggregated = torch.norm(avg_grad) * u_new
-        else:
-            aggregated = avg_grad
+        # 记录权重
+        aux_weights = []
+        for task_idx in self.auxiliary_tasks:
+            aux_weights.append(torch.sigmoid(self.auxiliary_weights[f'w_{task_idx}']).item())
         
-        return aggregated
+        self.info['auxiliary_weights'].append(aux_weights)
+        
+        total_loss = torch.stack(task_losses).sum()
+        return total_loss
     
-    def _apply_momentum(self, processed_grads: List[torch.Tensor]) -> torch.Tensor:
-        """应用动量到聚合梯度"""
-        current_aggregated = self._aggregate_gradients(processed_grads)
+    def _compute_helpfulness(self) -> Dict[int, float]:
+        """计算辅助任务对主任务的帮助程度"""
+        if len(self.history_losses[0]) < 2:
+            return {}
         
-        if self.momentum_buffer is None:
-            self.momentum_buffer = current_aggregated
-        else:
-            self.momentum_buffer = self.momentum * self.momentum_buffer + \
-                                 (1 - self.momentum) * current_aggregated
+        helpfulness = {}
         
-        return self.momentum_buffer
+        # 计算主任务损失变化
+        primary_losses = []
+        for task_idx in self.primary_tasks:
+            if len(self.history_losses[task_idx]) >= 2:
+                recent_loss = np.mean(self.history_losses[task_idx][-5:])  # 最近5步平均
+                prev_loss = np.mean(self.history_losses[task_idx][-10:-5]) if len(self.history_losses[task_idx]) >= 10 else recent_loss
+                loss_change = prev_loss - recent_loss  # 正数表示损失下降
+                primary_losses.append(loss_change)
+        
+        if not primary_losses:
+            return {}
+        
+        avg_primary_change = np.mean(primary_losses)
+        
+        # 计算每个辅助任务的帮助程度
+        for task_idx in self.auxiliary_tasks:
+            if len(self.history_losses[task_idx]) >= 2:
+                recent_loss = np.mean(self.history_losses[task_idx][-5:])
+                prev_loss = np.mean(self.history_losses[task_idx][-10:-5]) if len(self.history_losses[task_idx]) >= 10 else recent_loss
+                aux_loss_change = prev_loss - recent_loss
+                
+                # 帮助程度定义：辅助任务损失下降且主任务损失也下降
+                if avg_primary_change > 0 and aux_loss_change > 0:
+                    helpfulness[task_idx] = min(aux_loss_change, avg_primary_change)
+                elif avg_primary_change > 0:
+                    helpfulness[task_idx] = avg_primary_change * 0.1  # 小幅正影响
+                else:
+                    helpfulness[task_idx] = -0.1  # 负影响
+        
+        return helpfulness
     
-    def _aggregate_gradients(self, gradients: List[torch.Tensor]) -> torch.Tensor:
-        """根据reduction策略聚合梯度"""
-        if self.reduction == 'mean':
-            return torch.stack(gradients).mean(dim=0)
-        elif self.reduction == 'sum':
-            return torch.stack(gradients).sum(dim=0)
-        elif self.reduction == 'weighted':
-            weights = []
-            for grad in gradients:
-                norm = torch.norm(grad) + self.eps
-                weights.append(1.0 / norm)
-            
-            weights = torch.tensor(weights, device=gradients[0].device)
-            weights = weights / weights.sum()
-            
-            return torch.stack([w * g for w, g in zip(weights, gradients)]).sum(dim=0)
-        else:
-            raise ValueError(f"Unknown reduction: {self.reduction}")
+    def _update_weights(self, helpfulness: Dict[int, float]):
+        """更新辅助任务权重"""
+        with torch.no_grad():
+            for task_idx in self.auxiliary_tasks:
+                weight_param = self.auxiliary_weights[f'w_{task_idx}']
+                
+                if task_idx in helpfulness:
+                    helpful_score = helpfulness[task_idx]
+                    # 根据帮助程度调整权重
+                    if helpful_score > 0:
+                        # 正向帮助，增加权重
+                        adjustment = helpful_score * 0.01
+                    else:
+                        # 负向影响，减少权重
+                        adjustment = helpful_score * 0.02
+                else:
+                    # 默认小幅随机调整
+                    adjustment = torch.randn(1, device=self.device).item() * 0.005
+                
+                weight_param.data += adjustment
+                # 限制在合理范围
+                weight_param.data = torch.clamp(weight_param.data, -3, 3)
     
-    def get_enhanced_statistics(self) -> Dict:
-        """获取增强统计信息"""
-        base_stats = super().get_statistics()
+    def get_info(self):
+        return self.info
+    
+class PrimaryTaskGradientManager:
+    """
+    主任务优先的梯度管理器
+    专门处理主任务与辅助任务的梯度分配
+    
+    Args:
+        num_tasks (int): 总任务数
+        primary_task_idx (int or list): 主任务的索引（可以多个）
+        grad_method (str): 梯度分配方法
+        device (torch.device): 设备
+    """
+    def __init__(self,
+                 num_tasks: int,
+                 primary_task_idx: Union[int, List[int]] = 0,
+                 grad_method: str = 'primary_first',
+                 device: torch.device = None):
         
-        if 'mgda_weights' in self.stats and self.stats['mgda_weights']:
-            mgda_weights = np.array(self.stats['mgda_weights'])
-            base_stats['mgda_weight_mean'] = mgda_weights.mean(axis=0).tolist()
-            base_stats['mgda_weight_std'] = mgda_weights.std(axis=0).tolist()
+        self.num_tasks = num_tasks
+        self.grad_method = grad_method
         
-        base_stats.update({
-            'projection_type': self.projection_type,
-            'soft_threshold': self.soft_threshold,
-            'momentum': self.momentum,
-        })
+        if isinstance(primary_task_idx, int):
+            self.primary_tasks = [primary_task_idx]
+        else:
+            self.primary_tasks = primary_task_idx
         
-        return base_stats
+        self.auxiliary_tasks = [i for i in range(num_tasks) if i not in self.primary_tasks]
+        
+        if device is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
+        
+        # 初始化
+        self._init_method()
+        
+    def _init_method(self):
+        """初始化特定方法"""
+        if self.grad_method == 'primary_first':
+            self.allocator = PrimaryFirstAllocator(
+                primary_tasks=self.primary_tasks,
+                auxiliary_tasks=self.auxiliary_tasks,
+                device=self.device
+            )
+        elif self.grad_method == 'auxiliary_project':
+            self.allocator = AuxiliaryProjectAllocator(
+                primary_tasks=self.primary_tasks,
+                auxiliary_tasks=self.auxiliary_tasks,
+                device=self.device
+            )
+        elif self.grad_method == 'gradient_masking':
+            self.allocator = GradientMaskingAllocator(
+                primary_tasks=self.primary_tasks,
+                auxiliary_tasks=self.auxiliary_tasks,
+                device=self.device
+            )
+        elif self.grad_method == 'adaptive_auxiliary':
+            self.allocator = AdaptiveAuxiliaryAllocator(
+                primary_tasks=self.primary_tasks,
+                auxiliary_tasks=self.auxiliary_tasks,
+                device=self.device
+            )
+        elif self.grad_method == 'hierarchical_grad':
+            self.allocator = HierarchicalGradientAllocator(
+                primary_tasks=self.primary_tasks,
+                auxiliary_tasks=self.auxiliary_tasks,
+                device=self.device
+            )
+        else:
+            raise ValueError(f"未知的梯度分配方法: {self.grad_method}")
+    
+    def allocate_gradients(self,
+                          model: nn.Module,
+                          task_losses: List[torch.Tensor],
+                          optimizer: Optional[torch.optim.Optimizer] = None) -> torch.Tensor:
+        """
+        分配梯度并返回总损失
+        
+        Args:
+            model: 模型
+            task_losses: 各任务损失列表
+            optimizer: 优化器
+            
+        Returns:
+            total_loss: 总损失
+        """
+        return self.allocator.allocate(model, task_losses, optimizer)
+    
+    def get_allocation_info(self) -> Dict:
+        """获取当前梯度分配信息"""
+        return self.allocator.get_info()    
+    

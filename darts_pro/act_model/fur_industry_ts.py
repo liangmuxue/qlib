@@ -86,14 +86,14 @@ class FurIndustryMixer(nn.Module):
             if self.target_mode==3:
                 # 生成高斯模型参数
                 # dec_out = self.gus_params(cls_out)     
-                cls_out = self.ins_layer(cls_out.squeeze(-1))
+                cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
             elif self.target_mode==2:
                 # 行业内品种整合输出
-                cls_out = self.cls_sub_models[i](cls_out[:,:,-1]) 
+                cls_out_ins = self.cls_sub_models[i](cls_out[:,:,-1]) 
             # 叠加归一化输出
-            cls_out_combine.append(cls_out)
+            cls_out_combine.append(cls_out_ins)
             index_data_combine.append(sw_index_data)
-            dec_out_out_combine.append(dec_out)
+            dec_out_out_combine.append(cls_out)
         dec_out_out_combine = torch.cat(dec_out_out_combine,dim=1)
         if self.target_mode==0:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
