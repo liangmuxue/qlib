@@ -83,7 +83,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2012Step2_openRangeCombineIndex_2503"
+               model_name: "Futures_cleanData2012Step2_openRangeCombineIndex_2506"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
@@ -113,8 +113,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2012-01-01, 2025-03-28]
-                valid: [2025-03-01, 2025-05-31]
+                train: [2012-01-01, 2025-06-28]
+                valid: [2025-06-01, 2025-08-31]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -140,10 +140,10 @@ task:
                 target_column: ['RESI5','RSV5','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
-                past_covariate_col: ['VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                past_covariate_col: ['VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','price_range','limit_rate','magin_radio']    

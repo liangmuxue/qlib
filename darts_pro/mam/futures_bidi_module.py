@@ -27,8 +27,8 @@ from trader.utils.data_stats import DataStats,RESULT_FILE_PATH,RESULT_FILE_VIEW,
 from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
-# TRACK_DATE = [20250728,20250815,20250731]
-TRACK_DATE = [20250512,20250425,20250422]
+TRACK_DATE = [20250728,20250815,20250731]
+# TRACK_DATE = [20250512,20250425,20250422]
 STAT_DATE = [20240731,20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
@@ -576,7 +576,9 @@ class FuturesBidiModule(MlpModule):
                         view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
                         # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
                         win = "detail_target_{}_{}=".format(j,viz_total_size)
-                        target_title = "Detail_{}_{},date:{}".format(round(index_mean,3),round(ins_output_mean,3),date)                            
+                        index_target = round_targets[index,-1,1]
+                        target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(index_output,3),date)  
+                        # target_title = "Detail_{}_{},date:{}".format(round(index_mean,3),round(ins_output_mean,3),date)                            
                         viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred_cls","target","price"])
                     # 品种走势图,所有候选的目标走势和价格走势
                     if j in DRAW_SEQ_ITEM:

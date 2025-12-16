@@ -287,6 +287,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         price_diff_range_total = long_diff_seq_targets[j,0]
                         # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
                         ce_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1), round_targets_item)  
+                        # ce_loss[i] += self.mse_loss(dec_out_item, target_item)  
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
                         # 衡量整体走势，借用1号目标
                         index_target_total.append(future_index_round_target[j,main_index,-1,1])

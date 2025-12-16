@@ -140,10 +140,10 @@ task:
                 target_column: ['RESI5','RSV5','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
-                past_covariate_col: ['VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','near_basis_rate','OBV5','WVMA5','BETA5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                past_covariate_col: ['VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','price_range','limit_rate','magin_radio']    

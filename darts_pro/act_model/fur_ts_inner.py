@@ -93,8 +93,8 @@ class FurTimeMixer(nn.Module):
         
         self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到整体指数
-        # self.index_projection_layer = LinelessLayer(num_nodes*pred_len,1)
-        self.index_projection_layer = nn.Linear(num_nodes*pred_len,1)
+        self.index_projection_layer = LinelessLayer(num_nodes*pred_len,1)
+        # self.index_projection_layer = nn.Linear(num_nodes*pred_len,1)
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
         self.round_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
         self.transfer_layer = nn.Linear(pred_len, cut_len, bias=True)   

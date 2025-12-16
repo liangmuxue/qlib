@@ -94,6 +94,7 @@ class FurIndustryMixer(nn.Module):
             cls_out_combine.append(cls_out_ins)
             index_data_combine.append(sw_index_data)
             dec_out_out_combine.append(cls_out)
+            # dec_out_out_combine.append(dec_out)
         dec_out_out_combine = torch.cat(dec_out_out_combine,dim=1)
         if self.target_mode==0:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
