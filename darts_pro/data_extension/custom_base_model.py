@@ -14,7 +14,6 @@ from torchmetrics import MeanSquaredError
 from darts.models.forecasting.tft_model import _TFTModule
 from darts.models.forecasting.tide_model import _TideModule
 from losses.mtl_loss import TripletLoss,UncertaintyLoss
-from losses.clustering_loss import ClusteringLoss
 from .series_data_utils import StatDataAssis
 from tft.class_define import CLASS_SIMPLE_VALUES
 from darts_pro.act_model.cov_cnn import CovCnn
@@ -98,8 +97,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         self.freeze_mode = torch.ones(len(past_split)+2).to(device)
      
     def create_loss(self,model,device="cpu"):
-        return ClusteringLoss(device=device,ref_model=model) 
-        # return UncertaintyLoss(device=device,ref_model=model) 
+        return UncertaintyLoss(device=device,ref_model=model) 
     
     def create_real_model(self,
         output_dim: Tuple[int, int],

@@ -20,7 +20,7 @@ from cus_utils.tensor_viz import TensorViz
 import cus_utils.global_var as global_var
 from darts_pro.act_model.indus3d_ts import Indus3D
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_weight_with_target
-from losses.clustering_loss import Indus3DLoss
+from losses.contrastive_regression_loss import Indus3DLoss
 from cus_utils.common_compute import compute_average_precision
 from darts_pro.data_extension.industry_mapping_util import IndustryMappingUtil
 from gunicorn import instrument

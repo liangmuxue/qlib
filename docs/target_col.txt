@@ -9,6 +9,9 @@
 
 [indicator]
 
+SCALE_MODE:2 round数据批次内归一化，并且品种内再次归一化
+SCALE_MODE:3 round数据在多批次内进行归一化
+
 行业指标 复用整体计算中的各行业数据 'CCI5' SCALE_MODE:0 , TARGET_MODE:0
 
 整体指标 'RSV5' SCALE_MODE:5 , TARGET_MODE:6

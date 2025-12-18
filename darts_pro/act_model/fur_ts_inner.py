@@ -35,6 +35,7 @@ class FurTimeMixer(nn.Module):
         
         
         self.pred_len = pred_len
+        self.feature_dim = past_cov_dim
         self.cut_len = cut_len
         self.temp_dim_diw = temp_dim_diw
         self.temp_dim_miy = temp_dim_miy
@@ -55,9 +56,9 @@ class FurTimeMixer(nn.Module):
         configs = (seq_len,pred_len,d_model,dropout,down_sampling_window,down_sampling_layers,decomp_method,d_ff,moving_avg)
         self.pdm_blocks = nn.ModuleList([PastDecomposableMixing(configs) for _ in range(e_layers)]) 
         # 向量编码，只考虑数值向量，输入维度为过去协变量维度     
-        self.enc_embedding = DataEmbedding_wo_pos(past_cov_dim, d_model, dropout=dropout)    
-        # 投影层，单通道模式
-        self.projection_layer = nn.Linear(d_model, 1, bias=True)   
+        self.enc_embedding = DataEmbedding_wo_pos(self.feature_dim, d_model, dropout=dropout)    
+        # 投影层，使用输入特征维度作为投影输出特征维度
+        self.projection_layer = nn.Linear(d_model, self.feature_dim, bias=True)   
         # 整体投影层，映射为1段
         self.comp_proj_layer = nn.Linear(pred_len, 1, bias=True)   
         # 添加归一层
@@ -93,11 +94,11 @@ class FurTimeMixer(nn.Module):
         
         self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到整体指数
-        self.index_projection_layer = LinelessLayer(num_nodes*pred_len,1)
+        self.index_projection_layer = LinelessLayer(num_nodes*pred_len*self.feature_dim,self.feature_dim)
         # self.index_projection_layer = nn.Linear(num_nodes*pred_len,1)
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
         self.round_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
-        self.transfer_layer = nn.Linear(pred_len, cut_len, bias=True)   
+        self.transfer_layer = nn.Linear(pred_len*self.feature_dim, cut_len, bias=True)   
                            
     def forward(self, x_in): 
         
@@ -289,7 +290,7 @@ class FurTimeMixer(nn.Module):
             dec_out = self.predict_layers[i](enc_out.permute(0, 2, 1)).permute(0, 2, 1)
             # 预测未来变量投影
             dec_out = self.projection_layer(dec_out)
-            dec_out = dec_out.reshape(batch_size,node_num, self.pred_len)
+            dec_out = dec_out.reshape(batch_size,node_num,-1)
             dec_out_list.append(dec_out)
         return dec_out_list,x_mark_dec
     

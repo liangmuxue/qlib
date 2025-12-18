@@ -12,9 +12,10 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from torch.utils.data import DataLoader
 
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
 from .industry_model import IndustryRollModel
+from cus_utils.common_compute import normalization_axis
 from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset,FuturesInferenceDataset
 from darts_pro.mam.futures_industry_droll_module import FuturesIndustryDRollModule
 from darts_pro.mam.futures_bidi_module import FuturesBidiModule
@@ -225,24 +226,25 @@ class FuturesModel(IndustryRollModel):
         for i in range(sample_len):
             elem = first_sample[i]
             # 针对round数据，根据标志决定是否在批次内进行归一化
-            if i==sample_len-2:
+            if i==sample_len-4:
                 sample_list = [sample[i] for sample in batch]
                 round_data = np.stack(sample_list, axis=0)
                 for j in range(len(self.past_split)):
-                    if self.scale_mode[j]==5:
+                    if self.scale_mode[j] in [5]:
                         round_data_item = round_data[...,j]   
                         # round_past_data_item = round_data_item[:,:,:-1]
                         # round_past_data_item_trans = round_past_data_item.transpose(0,2,1)
-                        # round_past_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(
+                        # round_past_data_item = StandardScaler().fit_transform(
                         #     round_past_data_item_trans.reshape(-1,round_past_data_item_trans.shape[-1])).reshape(round_past_data_item_trans.shape).transpose(0,2,1)
                         round_future_data_item = round_data_item[:,:,-1]
-                        round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)        
+                        round_future_data_item = normalization_axis(round_future_data_item,axis=0)
+                        # round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)     
                         round_data[:,:,-1,j] = round_future_data_item  
                         # round_data[:,:,:-1,j] = round_past_data_item                   
                 aggregated.append(
                     torch.from_numpy(round_data)
                 )                               
-            elif isinstance(elem, np.ndarray) and i!=(sample_len-2):
+            elif isinstance(elem, np.ndarray) and i!=(sample_len-4):
                 sample_list = [sample[i] for sample in batch]
                 aggregated.append(
                     torch.from_numpy(np.stack(sample_list, axis=0))

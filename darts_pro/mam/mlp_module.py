@@ -32,7 +32,7 @@ from cus_utils.process import create_from_cls_and_kwargs
 from cus_utils.encoder_cus import StockNormalizer
 from cus_utils.common_compute import build_symmetric_adj,batch_cov,pairwise_distances,corr_compute,ccc_distance_torch,find_nearest
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_weight_with_target
-from losses.clustering_loss import MlpLoss
+from losses.mtl_loss import MlpLoss
 from cus_utils.common_compute import target_distribution,normalization_axis,intersect2d
 from cus_utils.visualization import clu_coords_viz
 from cus_utils.clustering import get_cluster_center

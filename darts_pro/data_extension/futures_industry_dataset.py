@@ -565,8 +565,11 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         real_covariate_total= past_covariate_total[real_index]
         for i in range(real_covariate_total.shape[0]):
             real_past_conv = real_covariate_total[i]
-            past_conv_scale = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(real_past_conv)
+            scaler = self.create_scaler(feature_range=(1e-5, 1))
+            past_conv_scale = scaler.fit_transform(real_past_conv)
             past_covariate_total[real_index[i]] = past_conv_scale
+            covariate_future_scale = scaler.transform(covariate_future_total[real_index][i])
+            covariate_future_total[real_index[i]] = covariate_future_scale
         
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
         
@@ -587,7 +590,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             future_index_round_targets[i] = indus_future_round
             
         for i in range(self.past_target_shape[-1]):
-            if self.scale_mode[i] in [0,1,5]:
+            if self.scale_mode[i] in [0,5]:
                 # 分行业归一化
                 scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
@@ -609,8 +612,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             if keep_index.shape[0]==0:
                 continue         
             index_real = ins_indus_index[keep_index]
-            past_data = past_round_targets[index_real,:,:]
-            future_data = future_round_targets[index_real,:,:]        
                    
             for i in range(self.past_target_shape[-1]):
                 # 在全品种缩放模式下，对整体指数下的品种进行归一化，忽略行业内部的归一化。在行业品种缩放模式下，针对每个行业内部的品种进行归一化
@@ -627,8 +628,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                         future_round_targets[k,:,i] = scale_data
                     # 针对目标值，再次归一化以加速收敛                    
                     future_round_targets[index_real,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
-                # 对于数值模式，只进行一次过去未来的归一化，区分全品种和行业内部的归一化操作
-                if (self.scale_mode[i]==1 and inner_idx!=self.main_index_rel) or (self.scale_mode[i]==3 and inner_idx==self.main_index_rel):
+                # 对于数值模式，只进行一次过去未来的归一化，只进行行业内部的归一化操作
+                if (self.scale_mode[i]==1 and inner_idx!=self.main_index_rel):
                     for k in index_real:
                         past_data_item = past_round_targets[k,:,i:i+1]
                         # 过滤全部趋近于0的数据

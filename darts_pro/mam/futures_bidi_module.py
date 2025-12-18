@@ -252,7 +252,7 @@ class FuturesBidiModule(MlpModule):
         
         out_total = []
         out_class_total = []
-        batch_size = x_in[1].shape[0]
+        batch_size = x_in[2].shape[0]
         
         sub_model_length = len(self.sub_models) 
         vr_class = (torch.ones([batch_size,self.select_num]).to(self.device),
@@ -265,11 +265,12 @@ class FuturesBidiModule(MlpModule):
             past_convs_item = x_in[0][i]  
             # 使用指标整体数据作为输入部分  
             past_index_round_targets = past_index_targets[...,i]
-            past_round_targets = x_in[5][...,i]
-            futures_convs = x_in[2]
+            past_round_targets = x_in[6][...,i]
+            futures_convs = x_in[3]
+            his_future_covs = x_in[2]
             # 根据优化器编号匹配计算,当编号超出模型数量时，也需要全部进行向前传播，此时没有梯度回传，主要用于生成二次模型输入数据
             if optimizer_idx==i or optimizer_idx>=sub_model_length or optimizer_idx==-1:
-                x_in_item = (past_convs_item,x_in[1],futures_convs,past_round_targets,past_index_round_targets)
+                x_in_item = (past_convs_item,his_future_covs,futures_convs,past_round_targets,past_index_round_targets)
                 out = m(x_in_item)
                 out_class = torch.ones([batch_size,self.output_chunk_length,1]).to(self.device)
             else:
@@ -320,9 +321,10 @@ class FuturesBidiModule(MlpModule):
             target_info
         ) = train_batch
                 
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,past_future_round_targets,index_round_targets)     
+        inp = (past_target,future_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,past_future_covariates,price_targets,past_future_round_targets,index_round_targets)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
+        future_covs = input_batch[1]
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained   
@@ -330,7 +332,7 @@ class FuturesBidiModule(MlpModule):
         for i in range(self.get_optimizer_size()):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), 
-                            (future_target,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),optimizers_idx=i)
+                            (future_target,future_covs,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),optimizers_idx=i)
             (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
             if cls_loss[i]!=0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
@@ -341,8 +343,10 @@ class FuturesBidiModule(MlpModule):
             self.loss_data.append((corr_loss_combine.detach(),ce_loss.detach(),fds_loss.detach(),cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
-            if self.task_weights[1]>0:
+            if len(self.task_weights)==3:
                 update_info = opt.step_with_auto_weights([cls_loss[i],ce_loss[i],fds_loss[i]])
+            elif len(self.task_weights)==2:
+                update_info = opt.step_with_auto_weights([cls_loss[i],ce_loss[i]])
             else:
                 update_info = opt.step([cls_loss[i]])
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
@@ -391,13 +395,14 @@ class FuturesBidiModule(MlpModule):
             target_info
         ) = val_batch
               
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,past_future_round_targets,index_round_targets) 
+        inp = (past_target,future_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,past_future_covariates,price_targets,past_future_round_targets,index_round_targets) 
         input_batch = self._process_input_batch(inp)
+        future_covs = input_batch[1]
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
-                    (future_target,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),optimizers_idx=-1)
+                    (future_target,future_covs,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),optimizers_idx=-1)
         (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
         preds_combine = []
@@ -419,35 +424,43 @@ class FuturesBidiModule(MlpModule):
         """重载方法，以适应数据结构变化"""
         (
             past_target,
+            future_target,
             past_covariates,
             historic_future_covariates,
             future_covariates,
             static_covariates,
+            past_future_covariates,
             price_targets,
             past_future_round_targets,
             index_round_targets
         ) = input_batch
         dim_variable = -1
 
+        def rebuild_covariates(covariates,targets):
+            x_cov_array = []
+            for i,p_index in enumerate(self.past_split):
+                conv_index = self.past_split[i]
+                covariates_item = covariates[...,conv_index[0]:conv_index[1]]
+                # 修改协变量生成模式，只取自相关目标作为协变量，不使用时间协变量（时间协变量不进行归一化，只用于EMB嵌入）
+                conv_defs = [
+                            targets[...,i:i+1],
+                            covariates_item,
+                    ]            
+                x_past = torch.cat(
+                    [
+                        tensor
+                        for tensor in conv_defs if tensor is not None
+                    ],
+                    dim=dim_variable,
+                )
+                x_cov_array.append(x_past)
+            return x_cov_array
+        
         # 生成多组过去协变量，用于不同子模型匹配
-        x_past_array = []
-        for i,p_index in enumerate(self.past_split):
-            past_conv_index = self.past_split[i]
-            past_covariates_item = past_covariates[...,past_conv_index[0]:past_conv_index[1]]
-            # 修改协变量生成模式，只取自相关目标作为协变量，不使用时间协变量（时间协变量不进行归一化，只用于EMB嵌入）
-            conv_defs = [
-                        past_target[...,i:i+1],
-                        past_covariates_item,
-                ]            
-            x_past = torch.cat(
-                [
-                    tensor
-                    for tensor in conv_defs if tensor is not None
-                ],
-                dim=dim_variable,
-            )
-            x_past_array.append(x_past)
-            
+        x_past_array = rebuild_covariates(past_covariates,past_target)
+        # 生成未来协变量，用于特征比对模式
+        x_future_array = rebuild_covariates(past_future_covariates,future_target)
+          
         # 忽略静态协变量第一列(索引列),后边的都是经过归一化的
         static_covariates = static_covariates[...,1:]
         # 切分出过去整体round数值,规则为全部过去数值-冗余值(预测长度)-1l
@@ -459,17 +472,17 @@ class FuturesBidiModule(MlpModule):
         # 切分单独的过去round数值
         past_round_targets = past_future_round_targets[:,:,:self.input_chunk_length,:]
         # 整合相关数据，分为输入值和目标值两组
-        return (x_past_array, historic_future_covariates,future_covariates, static_covariates,price_targets,past_round_targets,past_index_targets)
+        return (x_past_array, x_future_array,historic_future_covariates,future_covariates, static_covariates,price_targets,past_round_targets,past_index_targets)
     
     def _compute_loss(self, output, target,optimizers_idx=0):
         """重载父类方法"""
 
-        (future_target,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info) = target 
+        (future_target,future_covs,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info) = target 
         # 只保留最后一天的数值，作为损失目标
         future_round_targets = past_future_round_targets[:,:,-1,:]  
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage==RunningStage.TRAINING else self.valid_sw_ins_mappings
-        return self.criterion(output,(future_target,target_class,future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),
+        return self.criterion(output,(future_target,future_covs,target_class,future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),
                     sw_ins_mappings=sw_ins_mappings,optimizers_idx=optimizers_idx,top_num=self.top_num,epoch_num=self.current_epoch)        
 
 
@@ -535,9 +548,8 @@ class FuturesBidiModule(MlpModule):
                 keep_index = np.where(target_class_item>=0)[0]
                 round_targets = past_future_round_targets_total[index]
                 dec_output = output_3d[-3]
-                dec_output_mean = dec_output[index].mean()
                 cls_output = output_3d[2]
-                index_output = output_3d[3][0][index,0]
+                index_output = output_3d[3][0][index,:-1].mean()
                 ts_arr = target_info_3d[index]
                 index_mean = long_diff_index_targets_total[index,0]
             
@@ -558,7 +570,9 @@ class FuturesBidiModule(MlpModule):
                     ins_output = ins_output[inner_index]
                     ins_output_mean = ins_output.mean()
                     ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output,-1)).squeeze(-1)
-                    dec_output_item = dec_output[index,inner_index,-1,j] 
+                    dec_output_item = dec_output[index,:,0,j]
+                    dec_output_mean = dec_output_item.mean()
+                    # dec_output_item = dec_output[index,inner_index,-1,j] 
                     fur_round_target = round_targets[instruments,-1,j]
                     price_targets = price_targets_total[index,instruments]
                     # 品种比对图
@@ -573,12 +587,13 @@ class FuturesBidiModule(MlpModule):
                                 name_arr.append(item["instrument"]+"_match_"+str(trend))
                             else:
                                 name_arr.append(item["instrument"])
-                        view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
+                        # view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
+                        view_data = np.stack([dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
                         # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
                         win = "detail_target_{}_{}=".format(j,viz_total_size)
                         index_target = round_targets[index,-1,1]
                         target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(index_output,3),date)  
-                        # target_title = "Detail_{}_{},date:{}".format(round(index_mean,3),round(ins_output_mean,3),date)                            
+                        # target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(dec_output_mean,3),date)  
                         viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred_cls","target","price"])
                     # 品种走势图,所有候选的目标走势和价格走势
                     if j in DRAW_SEQ_ITEM:
@@ -842,6 +857,8 @@ class FuturesBidiModule(MlpModule):
         
         import_index_list = self.strategy_top_bidi(ce_values,cls_values,dec_out,pred_top_num=pred_top_num,target=target,target_info=target_info,
                                             index_round_targets=index_round_targets,combine_instrument=combine_instrument)
+        self.strategy_main_index(ce_values,cls_values,dec_out,pred_top_num=pred_top_num,target=target,target_info=target_info,
+                                            index_round_targets=index_round_targets,combine_instrument=combine_instrument)
  
         # 构建结果集
         result_list = pd.DataFrame(np.array(import_index_list),columns=['top_index','top_flag'])
@@ -849,6 +866,11 @@ class FuturesBidiModule(MlpModule):
         result_list['date'] = date       
         return result_list
 
+    def strategy_main_index(self,ce,cls,dec_out,pred_top_num=2,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
+        """衡量指数数据"""
+        
+        main_index_feature = dec_out[...,-1]                        
+    
     def strategy_top_bidi(self,ce,cls,dec_out,pred_top_num=2,target=None,target_info=None,index_round_targets=None,combine_instrument=None):
         """筛选品种明细,使用双向模式"""
         
@@ -993,7 +1015,7 @@ class FuturesBidiModule(MlpModule):
             target_info
         ) = batch
                
-        inp = (past_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,price_targets,past_future_round_targets,index_round_targets)     
+        inp = (past_target,future_target,past_covariates, historic_future_covariates,future_covariates,static_covariates,past_future_covariates,price_targets,past_future_round_targets,index_round_targets)     
         input_batch = self._process_input_batch(inp)
         (output,vr_class,vr_class_list) = self(input_batch,optimizer_idx=-1)
         choice_out,trend_value,combine_index = vr_class

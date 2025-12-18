@@ -1023,6 +1023,6 @@ if __name__ == "__main__":
     # extractor.extract_item_data('m2601') 
     # extractor.import_day_range_contract_data_em(data_range=(20250630,20250630))
     # extractor.import_day_range_continues_data(data_range=(20250926,20250926))
-    # extractor.import_day_range_1min_data(data_range=(20250924,20250925))
+    # extractor.import_day_range_1min_data(data_range=(20251205,20251215))
     # extractor.import_day_range_contract_data_sina(data_range=(20251128,20251205))
             

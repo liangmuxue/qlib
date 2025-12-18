@@ -18,6 +18,7 @@ from numba.cuda.cudadrv import ndarray
 from losses.triplet_loss import TripletTargetLoss
 from losses.triplet_miner import TripletTargetMiner
 from losses.hsan_metirc_util import HsanLoss
+from .quanlity_loss import QuanlityLoss
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
@@ -473,42 +474,50 @@ class UncertaintyLoss(nn.Module):
         loss = torch.mean(loss)
         return loss   
     
-class EfficientLambdaRank(nn.Module):
-    """LambdaRank损失，逐对比较相对损失"""
+class MlpLoss(UncertaintyLoss):
+    """基于MLP的损失函数"""
     
-    def __init__(self, sigma=1.0, top_k=100,margin_threhold=0.2):
-        super().__init__()
-        self.sigma = sigma
-        self.top_k = top_k
-        self.margin_threhold = margin_threhold
+    def __init__(self,ref_model=None,device=None):
+        super(MlpLoss, self).__init__(ref_model=ref_model,device=device)
+        self.ref_model = ref_model
+        self.device = device  
         
-    def forward(self, scores, gains):
-        """
-        scores: 模型预测得分 [batch_size]
-        gains: 真实收益 [batch_size]
-        """
-        n = scores.shape[0]
-        loss = 0.0
-        pair_count = 0
+        reducer = reducers.ThresholdReducer(low=0)
+        self.triplet_loss = losses.TripletMarginLoss(margin=0.03, reducer=reducer)
+        self.mining_func = miners.TripletMarginMiner(
+            margin=0.03,type_of_triplets="semihard"
+        )     
+        self.quan_loss = QuanlityLoss(device=device)   
         
-        # 只计算收益差加大的品种对
-        for i in range(n):
-            for j in range(i+1, n):
-                if gains[i] > gains[j] + self.margin_threhold:
-                    # 简化的delta_ndcg近似
-                    pos_i = torch.sum(scores > scores[i]).float()
-                    pos_j = torch.sum(scores > scores[j]).float()
-                    
-                    # 计算位置权重（高位更重要）
-                    weight_i = 1.0 / torch.log2(2.0 + pos_i)
-                    weight_j = 1.0 / torch.log2(2.0 + pos_j)
-                    delta_ndcg = torch.abs(weight_i - weight_j)
-                    
-                    # 计算pairwise概率
-                    p_ij = 1.0 / (1.0 + torch.exp(self.sigma * (scores[j] - scores[i])))
-                    
-                    # 累计损失
-                    loss += -torch.log(p_ij) * delta_ndcg
-                    pair_count += 1
-                    
-        return loss / (pair_count + 1e-8) if pair_count > 0 else torch.tensor(0.0)
+    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
+        """Multiple Loss Combine"""
+
+        (output,vr_combine_class,vr_classes) = output_ori
+        (target,target_class,last_target,price_target) = target_ori
+        corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
+        cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        fds_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        tar_cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
+        ce_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
+        # 指标分类
+        loss_sum = torch.tensor(0.0).to(self.device) 
+        # 相关系数损失,多个目标R
+        label_class = target_class[:,0].long()
+        for i in range(len(output)):
+            if optimizers_idx==i or optimizers_idx==-1:
+                real_target = target[...,i]
+                last_target_item = last_target[...,i:i+1]
+                # pca_target_item = normalization(pca_target_item, mode="torch")
+                output_item = output[i] 
+                x_bar,z,cls,tar_cls,x_smo = output_item  
+                # 预测值的一致性损失
+                corr_loss[i] = self.ccc_loss_comp(x_bar, real_target)
+                # 计算价格区间损失
+                # cls_loss[i] = 100 * self.mse_loss(cls, price_target)
+                             
+                # 降维目标之间的欧氏距离         
+                ce_loss[i] = 10 * self.mse_loss(x_smo, last_target_item)
+                # ce_loss[i] = self.quan_loss.compute_loss(x_smo.unsqueeze(1).unsqueeze(1), last_target_item)
+                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
+        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
+

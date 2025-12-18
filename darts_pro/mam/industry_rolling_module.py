@@ -16,7 +16,6 @@ from sklearn.preprocessing import MinMaxScaler
 import cus_utils.global_var as global_var
 from darts_pro.act_model.mixer_ts import TimeMixer
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_MAX,get_weight_with_target
-from losses.clustering_loss import IndusAloneLoss
 from cus_utils.common_compute import compute_average_precision,normalization
 from darts_pro.data_extension.industry_mapping_util import IndustryMappingUtil
 from tft.class_define import OVERROLL_TREND_UNKNOWN,OVERROLL_TREND_RAISE,OVERROLL_TREND_FALL2RAISE,OVERROLL_TREND_RAISE2FALL,OVERROLL_TREND_FALL
@@ -126,7 +125,7 @@ class IndustryRollingModule(MlpModule):
             return model
 
     def create_loss(self,model,device="cpu"):
-        return IndusAloneLoss(self.indus_dim,device=device,ref_model=model) 
+        pass
 
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],

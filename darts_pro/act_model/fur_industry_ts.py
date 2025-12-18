@@ -56,6 +56,9 @@ class FurIndustryMixer(nn.Module):
         self.sub_models = nn.ModuleList(sub_model_list)
         # 整合输出网络
         self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
+        # 指数特征转指数数值
+        self.index_combine_layer = LinelessLayer(past_cov_dim,1)
+        
         if self.target_mode in [1]:
             # 多段时间比对模式
             self.seq_layer = LinelessLayer(cut_len,cut_len)        
@@ -82,7 +85,7 @@ class FurIndustryMixer(nn.Module):
             x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
-            dec_out,cls_out,sw_index_data = m(x_inner)
+            dec_out,cls_out,sw_index_future = m(x_inner)
             if self.target_mode==3:
                 # 生成高斯模型参数
                 # dec_out = self.gus_params(cls_out)     
@@ -92,9 +95,12 @@ class FurIndustryMixer(nn.Module):
                 cls_out_ins = self.cls_sub_models[i](cls_out[:,:,-1]) 
             # 叠加归一化输出
             cls_out_combine.append(cls_out_ins)
-            index_data_combine.append(sw_index_data)
-            dec_out_out_combine.append(cls_out)
-            # dec_out_out_combine.append(dec_out)
+            # 从指数特征值整合到指数数据，并合并输出
+            sw_index_output = self.index_combine_layer(sw_index_future)
+            sw_index_future = torch.cat([sw_index_future,sw_index_output],dim=-1)
+            index_data_combine.append(sw_index_future)
+            # dec_out_out_combine.append(cls_out)
+            dec_out_out_combine.append(dec_out)
         dec_out_out_combine = torch.cat(dec_out_out_combine,dim=1)
         if self.target_mode==0:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
@@ -111,7 +117,7 @@ class FurIndustryMixer(nn.Module):
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)
             index_data_combine = self.seq_layer(index_data_combine)
         else:
-            index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]
+            index_data_combine = torch.stack(index_data_combine)[0]
             
         return dec_out_out_combine,cls_out_combine,index_data_combine
 
