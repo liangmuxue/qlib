@@ -408,3 +408,5 @@ class AdaptiveSingleFeatureLoss(nn.Module):
         # 计算偏度
         skewness = np.sum((data - mean) ** 3) / (n * std ** 3)
         return skewness
+    
+    

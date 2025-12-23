@@ -15,9 +15,6 @@ from cus_utils.common_compute import normalization,batch_normalization,adjude_se
 from cus_utils.encoder_cus import transform_slope_value
 from tft.class_define import CLASS_SIMPLE_VALUES,CLASS_SIMPLE_VALUE_SEC,CLASS_SIMPLE_VALUE_MAX,get_simple_class_weight
 from numba.cuda.cudadrv import ndarray
-from losses.triplet_loss import TripletTargetLoss
-from losses.triplet_miner import TripletTargetMiner
-from losses.hsan_metirc_util import HsanLoss
 from .quanlity_loss import QuanlityLoss
 
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
@@ -262,11 +259,6 @@ class UncertaintyLoss(nn.Module):
         self.miner_loss_combine = [MinerLoss(pos_margin=0.1,neg_margin=0.3,dis_func=self.ccc_distance_torch),
                                    MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch),
                                    MinerLoss(pos_margin=0.2,neg_margin=0.4,dis_func=self.ccc_distance_torch)]
-        # HSAN聚类损失对象
-        args={}
-        # self.hsan_loss_combine = [HsanLoss(args=args,ref_model=ref_model,device=device),
-        #                            HsanLoss(args=args,ref_model=ref_model,device=device),
-        #                            HsanLoss(args=args,ref_model=ref_model,device=device)]        
         self.dtw_loss = SoftDTWLossPyTorch(gamma=0.1,normalize=True)
         self.rankloss = TripletLoss(reduction='mean',dis_func=self.mse_dis,anchor_target=True,device=device)
         # 设置损失函数的组合模式
@@ -430,6 +422,29 @@ class UncertaintyLoss(nn.Module):
         ccc_loss = 1 - ccc
         return ccc_loss     
     
+    def ccc_distance_noinverse(self,input_ori,target_ori):
+        if len(input_ori.shape)==1:
+            input_with_dims = input_ori.unsqueeze(0)
+        else:
+            input_with_dims = input_ori
+        if len(target_ori.shape)==1:
+            target_with_dims = target_ori.unsqueeze(0)    
+        else:
+            target_with_dims = target_ori                    
+        input = input_with_dims.flatten()
+        target = target_with_dims.flatten()
+        corr_tensor = torch.stack([input,target],dim=0)
+        cor = torch.corrcoef(corr_tensor)[0][1]
+        var_true = torch.var(target)
+        var_pred = torch.var(input)
+        sd_true = torch.std(target)
+        sd_pred = torch.std(input)
+        numerator = 2*cor*sd_true*sd_pred
+        mse_part = self.mse_dis(input_with_dims,target_with_dims)
+        denominator = var_true + var_pred + mse_part
+        ccc = numerator/denominator
+        return ccc  
+        
     def compute_dtw_loss(self,input,target):
         input_real = torch.unsqueeze(input,-1)
         target_real = torch.unsqueeze(target,-1)

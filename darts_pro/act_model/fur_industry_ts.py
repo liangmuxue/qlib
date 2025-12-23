@@ -10,6 +10,7 @@ from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from .layers.Autoformer_EncDec import series_decomp
 from .layers.Embed import DataEmbedding_wo_pos
 from .cov_cnn import LinelessLayer
+from .arc_cnn import ContinuousArcFace
 
 from .fur_ts_inner import FurTimeMixer
 
@@ -58,13 +59,13 @@ class FurIndustryMixer(nn.Module):
         self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
         # 指数特征转指数数值
         self.index_combine_layer = LinelessLayer(past_cov_dim,1)
+        # ArcFace部分
+        # self.arc_layer = ContinuousArcFace(past_cov_dim,num_proxies=past_cov_dim)
         
         if self.target_mode in [1]:
             # 多段时间比对模式
             self.seq_layer = LinelessLayer(cut_len,cut_len)        
-        if self.target_mode in [2]:
-            self.cls_sub_models = nn.ModuleList(sub_cls_model_list)                 
-        if self.target_mode in [3]:
+        if self.target_mode in [2,3]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
             # 高斯混合模型，预测序列长度->高斯数值(均值、标准差、权重)
             self.gus_params = nn.Linear(1, 3 * num_mixtures)
@@ -86,21 +87,23 @@ class FurIndustryMixer(nn.Module):
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             dec_out,cls_out,sw_index_future = m(x_inner)
-            if self.target_mode==3:
+            if self.target_mode in [2,3]:
                 # 生成高斯模型参数
                 # dec_out = self.gus_params(cls_out)     
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
-            elif self.target_mode==2:
+            elif self.target_mode==5:
                 # 行业内品种整合输出
                 cls_out_ins = self.cls_sub_models[i](cls_out[:,:,-1]) 
             # 叠加归一化输出
             cls_out_combine.append(cls_out_ins)
             # 从指数特征值整合到指数数据，并合并输出
             sw_index_output = self.index_combine_layer(sw_index_future)
-            sw_index_future = torch.cat([sw_index_future,sw_index_output],dim=-1)
-            index_data_combine.append(sw_index_future)
-            # dec_out_out_combine.append(cls_out)
-            dec_out_out_combine.append(dec_out)
+            sw_index_future_combine = torch.cat([sw_index_future,sw_index_output],dim=-1)
+            index_data_combine.append(sw_index_future_combine)
+            # arc_feature = self.arc_layer(sw_index_future).unsqueeze(-1)
+            # dec_out_out_combine.append(arc_feature)
+            dec_out_out_combine.append(cls_out)
+            # dec_out_out_combine.append(dec_out)
         dec_out_out_combine = torch.cat(dec_out_out_combine,dim=1)
         if self.target_mode==0:
             index_data_combine = torch.stack(index_data_combine).permute(1,0,2)[:,:,-1]

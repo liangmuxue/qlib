@@ -13,20 +13,23 @@ def calculate_gradient_norm(gradient):
     total_norm = total_norm ** (1. / 2)
     return total_norm
 
-def pc_grad(gradient_components, task_weights):
+def pc_grad(gradient_components, main_task_seq=0):
     """
     PCGrad: 通过投影消除梯度冲突，主辅任务模式
     """
     
     processed_grads = {}
     param_names = interact_grad_names(gradient_components,interact=False)
+    asis_task_seq = [i for i in range(len(gradient_components))]
+    asis_task_seq.remove(main_task_seq)
+    
     for param_name in param_names:
-        if param_name not in gradient_components[0]:
+        if param_name not in gradient_components[main_task_seq]:
             continue        
-        # 主任务在第一个
-        grads_main = gradient_components[0][param_name]
+        # 主任务投影到其他子任务
+        grads_main = gradient_components[main_task_seq][param_name]
         # 对每对任务进行冲突消除
-        for j in range(1,len(gradient_components)-1):
+        for j in asis_task_seq:
             if param_name not in gradient_components[j]:
                 continue
             grads_j = gradient_components[j][param_name]
@@ -46,7 +49,7 @@ def pc_grad(gradient_components, task_weights):
     return processed_grads
 
 def grad_combine(gradient_components,task_grad_norms, task_weights,grad_limits):
-    """不进行梯度手术，直接合并"""
+    """合并梯度"""
 
     processed_grads = {}
     param_names = interact_grad_names(gradient_components,interact=False)
@@ -196,7 +199,10 @@ class MultiTaskGradientCalculator():
             self.model.zero_grad()              
             # 计算单个任务的梯度，保留计算图，后续统一处理
             weighted_loss = task_loss
-            weighted_loss.backward(retain_graph=True)     
+            if i==len(task_losses)-1:
+                weighted_loss.backward()     
+            else:
+                weighted_loss.backward(retain_graph=True)     
             loss_total.append(weighted_loss)
             # 获取该任务的梯度贡献
             task_grads = {}
@@ -274,7 +280,8 @@ class MultiTaskOptimizer(Adam):
         # 自适应调整辅助任务梯度
         adjusted_gradients = self._compute_auto_weights(task_losses, helpfulness, all_gradients)
         # 应用梯度手术,合并梯度
-        pc_grad(gradient_components, adjusted_gradients)
+        if self.use_pcgrad:
+            pc_grad(gradient_components, main_task_seq=1)
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components, adjusted_gradients)
         # 统计梯度范数
@@ -487,17 +494,15 @@ class MultiTaskOptimizer(Adam):
             # 标准梯度计算
             total_gradients = self.gradient_calculator.compute_gradients(task_losses,return_components=False)
             gradient_components = None
-            conflict_analysis = {}
-            return {
-                'total_grad_norm': self._compute_total_grad_norm(total_gradients),
-                'total_loss': task_losses[0].item()
-            }    
                   
         if not self.use_gradient_surgery:
             self._set_gradients(total_gradients)
             super().step()
-            return
-            
+            conflict_analysis = {}
+            return {
+                'total_grad_norm': self._compute_total_grad_norm(total_gradients),
+                'total_loss': task_losses[0].item()
+            }              
             
         conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
         conflict_count,similarity = self.combine_conflict_analysis(conflict_analysis_total)
@@ -572,7 +577,8 @@ class MultiTaskOptimizer(Adam):
         total_norm = 0
         for grad in gradients.values():
             total_norm += torch.norm(grad) ** 2
-        return torch.sqrt(total_norm).item()
+        rtn = torch.sqrt(total_norm).item()
+        return rtn
     
     def _compute_grad_norm(self, gradient_dict):
         """计算梯度字典的范数"""

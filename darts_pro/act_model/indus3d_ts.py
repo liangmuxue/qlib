@@ -11,7 +11,7 @@ from custom_model.embedding import embed
 from cus_utils.common_compute import eps_rebuild,corr_compute,batch_cov
 from torchmetrics.regression import ConcordanceCorrCoef
 from darts.models.forecasting.tide_model import _ResidualBlock,Dense
-from .fds import FDS
+from darts_pro.act_model.arc_cnn import FDS
 from darts_pro.data_extension.industry_mapping_util import IndustryMappingUtil
 
 class _Residual3DBlock(nn.Module):

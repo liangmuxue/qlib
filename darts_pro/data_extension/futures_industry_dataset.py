@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from numba.core.types import none
 import torch
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Dict
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
 from trader.utils.date_util import get_tradedays_dur,get_tradedays
@@ -18,7 +18,7 @@ from darts.utils.data.shifted_dataset import GenericShiftedDataset,MixedCovariat
 from darts.utils.data.utils import CovariateType
 from darts.logging import raise_if_not,raise_if
 from darts import TimeSeries
-from cus_utils.common_compute import normalization_except_outlier,interquartile_range
+from cus_utils.common_compute import normalization_axis,interquartile_range
 from tft.class_define import CLASS_VALUES,get_simple_class,get_complex_class
 
 from trader.utils.date_util import get_tradedays
@@ -405,9 +405,63 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             return self.date_list.shape[0] 
         else:
             return self.date_list.shape[0] - self.output_chunk_length
-
-
-    def __getitem__(
+        
+    def batch_collate_filter(self,batch):
+        """批次整合,包含批次内数据归一化"""
+        
+        aggregated = []
+        first_sample = batch[0]
+        sample_len = len(first_sample)
+        for i in range(sample_len):
+            elem = first_sample[i]
+            # 针对round数据，根据标志决定是否在批次内进行归一化
+            if i==sample_len-4:
+                sample_list = [sample[i] for sample in batch]
+                round_data = np.stack(sample_list, axis=0)
+                for j in range(self.target_num):
+                    if self.scale_mode[j] in [5]:
+                        round_data_item = round_data[...,j]   
+                        # round_past_data_item = round_data_item[:,:,:-1]
+                        # round_past_data_item_trans = round_past_data_item.transpose(0,2,1)
+                        # round_past_data_item = StandardScaler().fit_transform(
+                        #     round_past_data_item_trans.reshape(-1,round_past_data_item_trans.shape[-1])).reshape(round_past_data_item_trans.shape).transpose(0,2,1)
+                        round_future_data_item = round_data_item[:,:,-1]
+                        round_future_data_item = normalization_axis(round_future_data_item,axis=0)
+                        # round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)     
+                        round_data[:,:,-1,j] = round_future_data_item  
+                        # round_data[:,:,:-1,j] = round_past_data_item                   
+                aggregated.append(
+                    torch.from_numpy(round_data)
+                )                               
+            elif isinstance(elem, np.ndarray) and i!=(sample_len-4):
+                sample_list = [sample[i] for sample in batch]
+                aggregated.append(
+                    torch.from_numpy(np.stack(sample_list, axis=0))
+                )
+            elif isinstance(elem, tuple):
+                aggregated.append([sample[i] for sample in batch])                
+            elif isinstance(elem, Dict):
+                aggregated.append([sample[i] for sample in batch])                
+            elif elem is None:
+                aggregated.append(None)                
+            elif isinstance(elem, List):
+                aggregated.append([sample[i] for sample in batch])
+            else:
+                print("no match for:",elem.dtype)
+                
+        return tuple(aggregated) 
+         
+    def __getitem__(self, idx):
+        """兼容Sampler模式"""
+        
+        if isinstance(idx, List):
+            batch = [self.getitem_real(i) for i in idx]
+            data = self.batch_collate_filter(batch)
+            return data
+        else:
+            return self.getitem_real(idx)
+           
+    def getitem_real(
         self, idx
     ):
         """以日期为单位,整合行业分类数据"""
@@ -493,7 +547,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # 计算开盘价目标差值范围
             open_diff = (open_array[-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
-            target_info = {"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
+            target_info = {"total_idx":idx,"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
                                "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"open_array":open_array,
                                "open_diff":open_diff,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}

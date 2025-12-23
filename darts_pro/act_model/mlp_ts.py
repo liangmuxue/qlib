@@ -11,7 +11,6 @@ from custom_model.embedding import embed
 from cus_utils.common_compute import eps_rebuild,corr_compute,batch_cov
 from torchmetrics.regression import ConcordanceCorrCoef
 from darts.models.forecasting.tide_model import _ResidualBlock
-from .fds import FDS
 
 class LineClassify(nn.Module):
     """线性分类器，用于对预测结果指标进行分类"""

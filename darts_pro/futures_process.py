@@ -362,18 +362,18 @@ class FuturesProcessModel(TftDataframeModel):
         # map_location = torch.device("cpu")
         device = self._build_device()
         
+        outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
+                        'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}
         if load_weight:
             best_weight = self.optargs["best_weight"]    
             self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
                                                              best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
             self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
-            self.model.model.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type,
-                        'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}) 
+            self.model.model.set_outer_params(outer_params) 
         else:
             self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=0) 
         self.model.mode = self.type 
-        self.model.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type,
-                            'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}) 
+        self.model.set_outer_params(outer_params) 
         
         if self.type=="pred_futures_bidi":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
@@ -382,8 +382,7 @@ class FuturesProcessModel(TftDataframeModel):
                      max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=True)
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            self.model.model.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type,
-                        'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}) 
+            self.model.model.set_outer_params(outer_params) 
             trainer.validate(model=model,dataloaders=val_loader)
         else:
             trainer,model_inner,train_loader,val_loader= \
@@ -446,8 +445,9 @@ class FuturesProcessModel(TftDataframeModel):
                 )   
                 lightning_callbacks.append(callback)          
                    
-        pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}    
-           
+        pl_trainer_kwargs = {"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}    
+        pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": 
+                             gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}               
         if mode==0:  
             my_model = FuturesModel(
                     input_chunk_length=input_chunk_length,

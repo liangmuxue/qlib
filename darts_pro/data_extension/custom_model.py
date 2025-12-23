@@ -137,7 +137,11 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self.model_type = model_type
         self.loss_number = loss_number
         self.kwargs = kwargs
-
+    
+    def create_sampler(self,dataset,batch_size=None,shuffle=True):
+        self.sampler_mode = False
+        return None
+    
     @classmethod
     def _extract_torch_model_params(cls, **kwargs):
         get_params = list(
@@ -690,30 +694,44 @@ class TFTExtModel(MixedCovariatesTorchModel):
                     len(self.train_sample), len(train_sample)
                 ),
             )          
-
+        # Using custom sampler
+        train_sampler = self.create_sampler(train_dataset,batch_size=self.batch_size,shuffle=True)
         # Setting drop_last to False makes the model see each sample at least once, and guarantee the presence of at
         # least one batch no matter the chosen batch size
+        if train_sampler is not None:
+            batch_size = None
+            shuffle = False
+        else:
+            batch_size = self.batch_size
+            shuffle = True
         train_loader = DataLoader(
             train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
+            batch_size=batch_size,
+            shuffle=shuffle,
             num_workers=num_loader_workers,
             pin_memory=True,
             drop_last=False,
+            sampler=train_sampler,
             collate_fn=self._batch_collate_filter,
         )
-
+        
+        val_sampler = self.create_sampler(val_dataset,batch_size=self.batch_size,shuffle=False)
+        if val_sampler is not None:
+            batch_size = None
+        else:
+            batch_size = self.batch_size        
         # Prepare validation data
         val_loader = (
             None
             if val_dataset is None
             else DataLoader(
                 val_dataset,
-                batch_size=self.batch_size,
+                batch_size=batch_size,
                 shuffle=False,
                 num_workers=num_loader_workers,
                 pin_memory=True,
                 drop_last=False,
+                sampler=val_sampler,
                 collate_fn=self._batch_collate_filter,
             )
         )

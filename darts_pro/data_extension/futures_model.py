@@ -2,13 +2,14 @@ from darts.timeseries import TimeSeries
 from darts.utils.timeseries_generation import _generate_new_dates
 from darts.models.forecasting.torch_forecasting_model import _get_checkpoint_folder,_get_runs_folder,INIT_MODEL_NAME,_get_checkpoint_fname
 
+from torch.utils.data import Dataset, DataLoader, Sampler
 import os
 from glob import glob
 import numpy as np
 import pandas as pd
 import torch
-import pickle
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+import random
+from typing import Dict, List, Optional, Sequence, Iterator, Union
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -26,6 +27,10 @@ from darts.logging import raise_if_not,raise_if
     
 class FuturesModel(IndustryRollModel):    
 
+    def create_sampler(self,dataset,batch_size=None,shuffle=True):
+        self.sampler_mode = True
+        return TemporalBatchSampler(dataset,batch_size=batch_size,shuffle=shuffle)
+    
     def _build_train_dataset(
         self,
         target: Sequence[TimeSeries],
@@ -220,6 +225,10 @@ class FuturesModel(IndustryRollModel):
     def _batch_collate_filter(self,batch):
         """批次整合,包含批次内数据归一化"""
         
+        if self.sampler_mode:
+            # 如果自定义采样器，则直接返回当前数据
+            return batch
+        
         aggregated = []
         first_sample = batch[0]
         sample_len = len(first_sample)
@@ -286,6 +295,104 @@ class FuturesModel(IndustryRollModel):
         predictions = self.model.result_target
         
         return predictions
+
+class TemporalBatchSampler(Sampler):
+    """
+    时序感知的批采样器
+    在批次内保持一定的时序关系
+    """
+    
+    def __init__(self,dataset, batch_size=32,shuffle=True,temporal_strategy='block',block_size=16):
+        """
+        Args:
+            dataset: 时序数据集
+            batch_size: 批次大小
+            shuffle: 是否打乱
+            temporal_strategy: 时序策略 ('block', 'overlap', 'random')
+            block_size: 块大小（用于block策略）
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.temporal_strategy = temporal_strategy
+        self.block_size = block_size
+        
+        # 构建批次索引
+        self.batches = self._create_batches()
+        
+    def _create_batches(self) -> List[List[int]]:
+        """根据策略创建批次"""
+        if self.temporal_strategy == 'block':
+            return self._create_block_batches()
+        elif self.temporal_strategy == 'overlap':
+            return self._create_overlap_batches()
+        else:  # 'random'
+            return self._create_random_batches()
+    
+    def _create_block_batches(self) -> List[List[int]]:
+        """创建块批次：每个批次包含连续的block_size个样本"""
+        all_indices = list(range(len(self.dataset)))
+        
+        # 将索引分成块
+        blocks = []
+        for i in range(0, len(all_indices), self.block_size):
+            block = all_indices[i:i + self.block_size]
+            if len(block) == self.block_size:
+                blocks.append(block)
+        
+        # 将块组合成批次
+        batches = []
+        for i in range(0, len(blocks), self.batch_size // self.block_size):
+            batch_indices = []
+            for j in range(i, min(i + self.batch_size // self.block_size, len(blocks))):
+                batch_indices.extend(blocks[j])
+            
+            if len(batch_indices) == self.batch_size:
+                batches.append(batch_indices)
+        
+        return batches
+    
+    def _create_overlap_batches(self) -> List[List[int]]:
+        """创建重叠批次：相邻批次有重叠"""
+        all_indices = list(range(len(self.dataset)))
+        
+        batches = []
+        stride = self.batch_size // 2  # 50%重叠
+        
+        for i in range(0, len(all_indices) - self.batch_size + 1, stride):
+            batch = all_indices[i:i + self.batch_size]
+            batches.append(batch)
+        
+        return batches
+    
+    def _create_random_batches(self) -> List[List[int]]:
+        """创建随机批次：完全打乱"""
+        all_indices = list(range(len(self.dataset)))
+        
+        if self.shuffle:
+            random.shuffle(all_indices)
+        
+        batches = []
+        for i in range(0, len(all_indices), self.batch_size):
+            batch = all_indices[i:i + self.batch_size]
+            if len(batch) == self.batch_size:
+                batches.append(batch)
+        
+        return batches
+    
+    def __iter__(self) -> Iterator[List[int]]:
+        """迭代器"""
+        batches = self.batches.copy()
+        
+        if self.shuffle:
+            random.shuffle(batches)  # 打乱批次顺序，但批次内保持时序
+        
+        for batch in batches:
+            yield batch
+    
+    def __len__(self) -> int:
+        return len(self.batches)
+
 class FuturesIndustryModel(FuturesModel):    
 
     def _build_train_dataset(
