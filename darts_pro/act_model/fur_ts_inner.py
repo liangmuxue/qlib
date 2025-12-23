@@ -58,7 +58,7 @@ class FurTimeMixer(nn.Module):
         # 向量编码，只考虑数值向量，输入维度为过去协变量维度     
         self.enc_embedding = DataEmbedding_wo_pos(self.feature_dim, d_model, dropout=dropout)    
         # 投影层，使用输入特征维度作为投影输出特征维度
-        self.projection_layer = nn.Linear(d_model, self.feature_dim, bias=True)   
+        self.projection_layer = nn.Linear(d_model, 1, bias=True)   
         # 整体投影层，映射为1段
         self.comp_proj_layer = nn.Linear(pred_len, 1, bias=True)   
         # 添加归一层
@@ -290,7 +290,7 @@ class FurTimeMixer(nn.Module):
             dec_out = self.predict_layers[i](enc_out.permute(0, 2, 1)).permute(0, 2, 1)
             # 预测未来变量投影
             dec_out = self.projection_layer(dec_out)
-            dec_out = dec_out.reshape(batch_size,node_num,-1)
+            dec_out = dec_out.reshape(batch_size,node_num, self.pred_len)
             dec_out_list.append(dec_out)
         return dec_out_list,x_mark_dec
     

@@ -77,11 +77,14 @@ class ContinuousArcFaceLoss(nn.Module):
 class RobustArcFaceRegression(nn.Module):
     """具有多重防坍塌机制的ArcFace回归模型"""
     
-    def __init__(self, in_features, num_proxies=36, 
+    def __init__(self, in_features, num_proxies=36, out_dim=16,
                  use_uniformity_reg=True,
                  use_contrastive=True,
-                 use_spectral_reg=False):
+                 use_spectral_reg=False,
+                 device=None):
         super().__init__()
+        self.device = device
+        self.out_dim = out_dim
         
         # 特征提取器
         self.feature_extractor = nn.Sequential(
@@ -91,12 +94,12 @@ class RobustArcFaceRegression(nn.Module):
             nn.Linear(256, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Linear(128, 64)  # 嵌入维度
+            nn.Linear(128, out_dim)  # 嵌入维度
         )
         
         # 代理向量（均匀初始化）
-        self.proxies = nn.Parameter(torch.randn(num_proxies, 64))
-        self.proxy_angles = torch.linspace(0, 2*torch.pi, num_proxies)
+        self.proxies = nn.Parameter(torch.randn(num_proxies, out_dim)).to(device).double()
+        self.proxy_angles = torch.linspace(0, 2*torch.pi, num_proxies).to(device).double()
         
         # 正则化器
         self.use_uniformity_reg = use_uniformity_reg
@@ -125,13 +128,13 @@ class RobustArcFaceRegression(nn.Module):
             self.monitor.monitor_step(features, epoch, batch_idx)
             
             # 动态调整边际
-            margin = self.adaptive_margin.update_margin_based_on_diversity(features)
+            margin = torch.tensor(self.adaptive_margin.update_margin_based_on_diversity(features)).to(self.device)
         else:
-            margin = 0.1
+            margin = torch.tensor(0.1).to(self.device)
         
         # 归一化
         features_norm = F.normalize(features, p=2, dim=1)
-        proxies_norm = F.normalize(self.proxies, p=2, dim=1)
+        proxies_norm = F.normalize(self.proxies, p=2, dim=1).to(self.device)
         
         # 计算相似度
         cos_theta = F.linear(features_norm, proxies_norm)  # [batch, num_proxies]

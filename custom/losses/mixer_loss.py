@@ -218,7 +218,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         # self.contrast_loss = TripletContrastiveRegressionLoss(distance_func=self.ccc_distance,margin=1.0,device=self.device)
         # self.contrast_loss = ContinuousSemiHardTripletLoss(pairwise_distance=self.ccc_distance,device=self.device)
-        self.contrast_loss = RobustArcFaceRegression(embedding_size,num_proxies=embedding_size,device=self.device)
+        self.contrast_loss = RobustArcFaceRegression(embedding_size,out_dim=embedding_size,num_proxies=embedding_size,device=self.device)
         # config = ContinuousTripletConfig(
         #     memory_size=1024,
         #     embedding_dim=embedding_size,
@@ -255,6 +255,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
         main_index_abs = FuturesMappingUtil.get_main_index(sw_ins_mappings)
         ins_index_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        predictions = None
         
         for i in range(len(output)):
             target_mode = self.target_mode[i]
@@ -278,8 +279,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     index_target_item = future_index_round_target[j,indus_rel_index,:,i]
                     indus_index = tensor_intersect(keep_index,indus_data_index).to(keep_index.device)
                     inner_class_item = target_class_item[indus_data_index]                            
-                    # 对应预测数据中的有效索引
-                    inner_index = torch.where(inner_class_item>=0)[0]     
                     sv_out_item = sv[0][j]
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     if ins_rel_index.shape[0]<3:
@@ -296,14 +295,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     features_out_main = sw_index_data[j,:-1]
                     output_main = sw_index_data[j,-1]
                     sv_out_item = sv_out_item[ins_rel_index]
-                    ins_all_inner = torch.Tensor(ins_all).to(sv_out_item.device).long()
-                    ins_class_item = target_class_item[ins_all_inner]
-                    inner_index = ins_all_inner[torch.where(ins_class_item>=0)[0]]
-                      
                     price_diff_range = price_targets[j,ins_rel_index]  
                     price_diff_range_total = long_diff_seq_targets[j,0]     
                     price_index_total.append(price_diff_range_total)   
                     features_out_main_total.append(features_out_main)
+                    dec_out_item = dec_out[j,ins_rel_index,i]
                     
                     # 不同模式的损失计算                          
                     if target_mode==0:
@@ -318,8 +314,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         price_diff_range_ori = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
                         # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
-                        dec_out_item = dec_out[j,ins_rel_index]
-                        ce_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1), round_targets_item)  
+                        ce_loss[i] += self.ccc_loss_comp(dec_out_item, round_targets_item)  
                         # ce_loss[i] += self.mse_loss(dec_out_item, target_item)  
                         # 使用价格指标作为主要指标
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
@@ -333,7 +328,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         index_target_total.append(index_target)
                         sw_index_total.append(output_main)
                         # 每个品种的输出，和协变量未来数据作为特征，进行比较
-                        # ce_loss[i] += self.ccc_loss_comp(dec_out_item,future_covs_ins.reshape(future_covs_ins.shape[0],-1))
+                        ce_loss[i] += self.ccc_loss_comp(dec_out_item,round_targets_item)
                         # ce_loss[i] += self.contrast_loss(future_covs_ins,dec_out_item,round_targets_item.unsqueeze(-1))
                         # 计算标量特征损失
                         # cls_loss[i] += self.index_feature_loss(sw_index_data.squeeze(-1)[j],index_target)
@@ -341,6 +336,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # ce_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
                         # index_target_total.append(future_round_targets[j,main_index_abs,i])
                         # sw_index_total.append(sw_index_data[j,0])    
+                batch_size = len(sw_index_total)
+                
                 if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]           
                 if target_mode in [2]:
@@ -352,12 +349,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     index_target_total = normalization_axis(index_target_total)
                     dec_out_item = dec_out[j]
                     features_out_main_total = torch.stack(features_out_main_total)
-                    fds_loss[i] += self.compute_batch_last_distance(features_out_main_total,index_target_total)             
+                    predictions, arc_loss, loss_dict = self.contrast_loss(features_out_main_total,index_target_total)
+                    fds_loss[i] += arc_loss/batch_size         
                     # fds_loss[i] += self.ccc_loss_comp(torch.stack(sw_index_total),index_target_total)    
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]           
                 if target_mode in [3]:
                     # 板块整体损失计算,批次内样本比较
-                    batch_size = len(sw_index_total)
                     sw_index_total = torch.stack(sw_index_total)
                     main_price_index_total = torch.stack(price_index_total)  
                     index_target_total = torch.stack(index_target_total)
@@ -371,9 +368,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 如果批次内数据过少，则使用标准损失
                         cls_loss[i] += self.ccc_loss_comp(sw_index_total,index_target_total)
                     else:
-                        predictions, arc_loss, loss_dict = self.contrast_loss(features_out_main_total,future_covs_main_total)
-                        cls_loss[i] += arc_loss
-                        # ce_loss[i] += self.compute_batch_last_distance(features_out_main_total,index_target_total)
+                        predictions, arc_loss, loss_dict = self.contrast_loss(features_out_main_total,index_target_total)
+                        # eva_loss = self.ccc_loss_comp(predictions, index_target_total)
+                        cls_loss[i] += arc_loss/batch_size 
+                    ce_loss[i] = ce_loss[i]/batch_size
                     # ce_loss[i] += self.ccc_loss_comp(features_out_main_total,future_covs_main_total)
                     # cls_loss[i] += self.contrast_loss(features_out_main_total,index_target_total)
                     # 主任务为排序学习损失
@@ -387,7 +385,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     ce_loss[i] = torch.abs(sw_index_data.squeeze()-diff_target).mean()        
                     loss_sum = loss_sum + ce_loss[i]      
                            
-        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
+        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss,predictions]    
 
     def compute_batch_last_distance(self,features,targets):
         """计算批次内最后一条数据与前面数据的特征距离和实际目标距离的匹配度"""

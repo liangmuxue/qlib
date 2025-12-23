@@ -27,7 +27,8 @@ from trader.utils.data_stats import DataStats,RESULT_FILE_PATH,RESULT_FILE_VIEW,
 from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
-TRACK_DATE = [20250728,20250815,20250731]
+TRACK_DATE = [20250728,20250715,20250731]
+# TRACK_DATE = [20250812,20250811,20250825]
 # TRACK_DATE = [20250512,20250425,20250422]
 STAT_DATE = [20240731,20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
@@ -333,7 +334,7 @@ class FuturesBidiModule(MlpModule):
             (output,vr_class,tar_class) = self(input_batch,optimizer_idx=i)
             loss,detail_loss = self._compute_loss((output,vr_class,tar_class), 
                             (future_target,future_covs,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),optimizers_idx=i)
-            (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss 
+            (corr_loss_combine,ce_loss,fds_loss,cls_loss,_) = detail_loss 
             if cls_loss[i]!=0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             if ce_loss[i]!=0:
@@ -387,6 +388,7 @@ class FuturesBidiModule(MlpModule):
         """训练验证部分"""
         
         loss,detail_loss,output = self.validation_step_real(val_batch, batch_idx)
+        (corr_loss_combine,ce_loss,fds_loss,cls_loss,predictions) = detail_loss
         # 补充计算批次内指数数据评估
         sw_ins_mappings = self.valid_sw_ins_mappings
         indicator_idx = 0
@@ -396,10 +398,8 @@ class FuturesBidiModule(MlpModule):
         main_targets = val_batch[-4][:,main_idx,-1,indicator_idx]
         # 计算指标数据中最后一条特征数据与前面特征数据的距离，并与实际目标值距离数据比较相关性
         corr_dis = self.compute_feature_target_trend_corr(main_index_feature,main_targets)
-        main_price_targets = val_batch[-4][:,main_idx,-1,indicator_idx]
-        # 计算指数数据,进行批次内匹配相关价格
-        trend_price = self.compute_total_trend(main_index_feature,main_price_targets)
-        batch_data = np.array([trend_price.cpu().item()])
+        self.log("corr_dis", corr_dis, batch_size=val_batch[0].shape[0], prog_bar=True)
+        batch_data = predictions.cpu().numpy()
         
         self.dump_val_data(val_batch,output,batch_data)
         return loss
@@ -432,7 +432,7 @@ class FuturesBidiModule(MlpModule):
         # 全部损失
         loss,detail_loss = self._compute_loss((output,vr_class,vr_class_list), 
                     (future_target,future_covs,target_class,past_future_round_targets,index_round_targets,price_targets,long_diff_index_targets,target_info),optimizers_idx=-1)
-        (corr_loss_combine,ce_loss,fds_loss,cls_loss) = detail_loss
+        (corr_loss_combine,ce_loss,fds_loss,cls_loss,predictions) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
         preds_combine = []
         for i in range(1):
@@ -569,23 +569,22 @@ class FuturesBidiModule(MlpModule):
             indus_names = indus_names_all[indus_rel_index]
             indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
             industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-                 
+            dec_output = output_3d[-3]
+            cls_output = output_3d[2]            
+            batch_trend_data = output_3d[5]
+            predictions = batch_trend_data
+            price_targets_main = long_diff_index_targets_total.squeeze(-1)
+            
             for index in range(target_class_3d.shape[0]):
             
                 viz_total_size+=1
                 target_class_item = target_class_3d[index]
                 keep_index = np.where(target_class_item>=0)[0]
                 round_targets = past_future_round_targets_total[index]
-                batch_trend_data = output_3d[5]
-                dec_output = output_3d[-3]
-                cls_output = output_3d[2]
                 index_output = output_3d[3][0][index,:-1].mean()
                 ts_arr = target_info_3d[index]
-                index_mean = long_diff_index_targets_total[index,0]
-            
+                index_price = long_diff_index_targets_total[index,0]
                 date = int(ts_arr[keep_index][0]["future_start_datetime"])
-                if index==0:
-                    self.log("first_date",date, prog_bar=True) 
                 if not date in TRACK_DATE:
                     continue    
             
@@ -621,9 +620,9 @@ class FuturesBidiModule(MlpModule):
                         view_data = np.stack([dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
                         # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
                         win = "detail_target_{}_{}=".format(j,viz_total_size)
-                        index_target = round_targets[index,-1,1]
-                        index_output = batch_trend_data[j]
-                        target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(index_output,3),date)  
+                        index_target = round_targets[main_index,-1,j]
+                        index_output = predictions[index]
+                        target_title = "Detail_{}_{}_{},date:{}".format(round(index_price,3),round(index_target,3),round(index_output,3),date)  
                         # target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(dec_output_mean,3),date)  
                         viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred_cls","target","price"])
                     # 品种走势图,所有候选的目标走势和价格走势
