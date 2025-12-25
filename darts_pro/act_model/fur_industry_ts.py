@@ -57,18 +57,19 @@ class FurIndustryMixer(nn.Module):
         self.sub_models = nn.ModuleList(sub_model_list)
         # 整合输出网络
         self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
-        # 指数特征转指数数值
-        self.index_combine_layer = LinelessLayer(past_cov_dim,1)
+        # 多品种预测时间序列数据转单指数预测时间序列数据
+        self.index_combine_layer = LinelessLayer(self.combine_nodes_num,1)
         # ArcFace部分
         # self.arc_layer = ContinuousArcFace(past_cov_dim,num_proxies=past_cov_dim)
         
         if self.target_mode in [1]:
             # 多段时间比对模式
             self.seq_layer = LinelessLayer(cut_len,cut_len)        
-        if self.target_mode in [2,3]:
+        if self.target_mode==2:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
-            # 高斯混合模型，预测序列长度->高斯数值(均值、标准差、权重)
-            self.gus_params = nn.Linear(1, 3 * num_mixtures)
+            self.dec_layer = nn.Linear(pred_len, 1)  
+        if self.target_mode==3:
+            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
         if self.target_mode in [6]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.shape[0],1)
 
@@ -86,20 +87,22 @@ class FurIndustryMixer(nn.Module):
             x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
-            dec_out,cls_out,sw_index_future = m(x_inner)
-            if self.target_mode in [2,3]:
-                # 生成高斯模型参数
-                # dec_out = self.gus_params(cls_out)     
+            dec_out,cls_out,sw_index_data = m(x_inner)
+            if self.target_mode==2:
+                # 品种比对round值模式，把多预测步长转化为1个结果
+                dec_out = self.dec_layer(dec_out)     
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
+            if self.target_mode==3:
+                # 生成单指数预测时间序列数据
+                dec_out = self.index_combine_layer(dec_out.permute(0,2,1))
+                cls_out_ins = self.ins_layer(cls_out.squeeze(-1))                
             elif self.target_mode==5:
                 # 行业内品种整合输出
                 cls_out_ins = self.cls_sub_models[i](cls_out[:,:,-1]) 
             # 叠加归一化输出
             cls_out_combine.append(cls_out_ins)
             # 从指数特征值整合到指数数据，并合并输出
-            sw_index_output = self.index_combine_layer(sw_index_future)
-            sw_index_future_combine = torch.cat([sw_index_future,sw_index_output],dim=-1)
-            index_data_combine.append(sw_index_future_combine)
+            index_data_combine.append(sw_index_data)
             # arc_feature = self.arc_layer(sw_index_future).unsqueeze(-1)
             # dec_out_out_combine.append(arc_feature)
             # dec_out_out_combine.append(cls_out)

@@ -90,15 +90,15 @@ class FurTimeMixer(nn.Module):
         # 空间及时间编码层   
         self.ti_sp_enc = nn.Linear(ti_sp_dim,d_model)
         # 未来时空投影层，整合投影到单通道
-        self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, cut_len, bias=True)      
+        self.tisp_projection_layer = nn.Linear(ti_sp_dim*pred_len, 1, bias=True)      
         
         self.indus_projection_layer = nn.Linear(num_nodes, num_nodes, bias=True)    
         # 品种数据投影到整体指数
-        self.index_projection_layer = LinelessLayer(num_nodes*pred_len*self.feature_dim,self.feature_dim)
+        self.index_projection_layer = LinelessLayer(num_nodes,1)
         # self.index_projection_layer = nn.Linear(num_nodes*pred_len,1)
         # 整合指数过去数据的残差,注意使用的不是过去数值长度，而是再次拆分的长度,以避免未来数值泄露
-        self.round_skip_layer = nn.Linear(round_skip_len, cut_len, bias=True)   
-        self.transfer_layer = nn.Linear(pred_len*self.feature_dim, cut_len, bias=True)   
+        self.round_skip_layer = nn.Linear(round_skip_len, 1, bias=True)   
+        self.transfer_layer = nn.Linear(pred_len, 1, bias=True)   
                            
     def forward(self, x_in): 
         
@@ -192,16 +192,16 @@ class FurTimeMixer(nn.Module):
         comp_out_list = []
         for dec_out in dec_out_list:
             # 整体走势预估对应的投影
-            comp_out = self.transfer_layer(dec_out).reshape(batch_size,node_num,self.cut_len)
+            comp_out = self.transfer_layer(dec_out).reshape(batch_size,node_num,-1)
             comp_out_list.append(comp_out)        
         dec_out = torch.stack(dec_out_list, dim=-1).sum(-1)
         # 叠加未来时空变量投影
-        x_mar_dec_out = self.tisp_projection_layer(x_mark_dec).reshape([batch_size,node_num,self.cut_len])   
+        x_mar_dec_out = self.tisp_projection_layer(x_mark_dec).reshape([batch_size,node_num,-1])   
         comp_out = torch.stack(comp_out_list, dim=-1).sum(-1)
         # 叠加整体数值残差计算
         comp_out = self.indus_projection_layer((comp_out+x_mar_dec_out).permute(0,2,1)).permute(0,2,1) + self.round_skip_layer(past_round_targets)
         # 使用整体走势过去值
-        sw_index_data = self.index_projection_layer(dec_out.reshape([batch_size,-1]))
+        sw_index_data = self.index_projection_layer(dec_out.permute(0,2,1)).squeeze(-1)
         
         return dec_out,comp_out,sw_index_data
 

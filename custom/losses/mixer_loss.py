@@ -256,8 +256,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
         main_index_abs = FuturesMappingUtil.get_main_index(sw_ins_mappings)
         ins_index_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         predictions = None
+        loop_size = len(output)
+        loop_size = 1
         
-        for i in range(len(output)):
+        for i in range(loop_size):
             target_mode = self.target_mode[i]
             if optimizers_idx==i or optimizers_idx==-1:
                 output_item = output[i] 
@@ -269,8 +271,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 sw_index_total = []
                 index_target_total = []
                 future_covs_main_total = []
-                features_out_main_total = []
-                
+                dec_combine_total = []
+                target_total = []
                 for j in range(target_class.shape[0]):
                     target_info_inbatch = target_info[j]
                     # 如果存在缺失值，则忽略，不比较
@@ -291,15 +293,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     future_covs_main = future_covs[i][j,main_index_abs,-1,:]
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
-                    target_item = target[j,ins_rel_index,:,i]
-                    features_out_main = sw_index_data[j,:-1]
-                    output_main = sw_index_data[j,-1]
+                    # 借用1号目标作为整体走势衡量
+                    target_item = target[j,main_index_abs,:,1]
+                    target_total.append(target_item)
+                    output_main = sw_index_data[j]
                     sv_out_item = sv_out_item[ins_rel_index]
-                    price_diff_range = price_targets[j,ins_rel_index]  
-                    price_diff_range_total = long_diff_seq_targets[j,0]     
-                    price_index_total.append(price_diff_range_total)   
-                    features_out_main_total.append(features_out_main)
-                    dec_out_item = dec_out[j,ins_rel_index,i]
+                    # price_diff_range = price_targets[j,ins_rel_index]  
+                    # price_diff_range = long_diff_seq_targets[j,0]  
+                    price_diff_range = target_info_inbatch[main_index_abs]['diff_range'][-self.output_chunk_length:]
+                    price_index_total.append(torch.Tensor(price_diff_range).to(self.device))   
                     
                     # 不同模式的损失计算                          
                     if target_mode==0:
@@ -311,24 +313,28 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         #     ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),time_diff_targets.unsqueeze(-1))  
                     elif target_mode==2:
                         # 比较全部品种，辅助整体指数比较
+                        dec_out_item = dec_out[j,ins_rel_index].squeeze(-1)
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
-                        price_diff_range_ori = [(item['open_array'][-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
+                        # 所有品种的目标阶段涨跌幅
+                        price_diff_range_ins = [(item['open_array'][-1] - item['open_array'][-self.cut_len])/item['open_array'][-self.cut_len]*100 for item in target_info_item]
+                        price_diff_range_ins = torch.Tensor(price_diff_range_ins).to(self.device)
+                        price_diff_range = price_targets[j,ins_rel_index] 
                         # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
                         ce_loss[i] += self.ccc_loss_comp(dec_out_item, round_targets_item)  
                         # ce_loss[i] += self.mse_loss(dec_out_item, target_item)  
                         # 使用价格指标作为主要指标
-                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range_ins)  
                         # 衡量整体走势，借用1号目标
-                        ref_indicator = 0
+                        ref_indicator = i
                         index_target_total.append(future_index_round_target[j,main_index,-1,ref_indicator])
-                        sw_index_total.append(sw_index_data[j,0])
+                        sw_index_total.append(sw_index_data[j])
                     elif target_mode==3:
                         # 整体指数比较，辅助品种比较 
-                        index_target = future_round_targets[j,main_index_abs,i]
-                        index_target_total.append(index_target)
+                        dec_out_item = dec_out[j].squeeze(-1)
+                        index_target_total.append(future_index_round_target[j,main_index,:,i])
+                        # index_target_total.append(future_round_targets[j,main_index_abs,i])
                         sw_index_total.append(output_main)
-                        # 每个品种的输出，和协变量未来数据作为特征，进行比较
-                        ce_loss[i] += self.ccc_loss_comp(dec_out_item,round_targets_item)
+                        dec_combine_total.append(dec_out_item)
                         # ce_loss[i] += self.contrast_loss(future_covs_ins,dec_out_item,round_targets_item.unsqueeze(-1))
                         # 计算标量特征损失
                         # cls_loss[i] += self.index_feature_loss(sw_index_data.squeeze(-1)[j],index_target)
@@ -337,41 +343,30 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # index_target_total.append(future_round_targets[j,main_index_abs,i])
                         # sw_index_total.append(sw_index_data[j,0])    
                 batch_size = len(sw_index_total)
-                
+                price_index_total = torch.stack(price_index_total)
+                sw_index_total = torch.stack(sw_index_total)
                 if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]           
                 if target_mode in [2]:
-                    cls_loss[i] = cls_loss[i]/target_class.shape[0]
-                    ce_loss[i] = ce_loss[i]/target_class.shape[0]
+                    cls_loss[i] = cls_loss[i]/batch_size
+                    ce_loss[i] = ce_loss[i]/batch_size
                     # 板块整体损失计算,批次内样本比较
                     index_target_total = torch.stack(index_target_total)
+                    target_total = torch.stack(target_total)
                     # 对目标值在批次内进行归一化
                     index_target_total = normalization_axis(index_target_total)
                     dec_out_item = dec_out[j]
-                    features_out_main_total = torch.stack(features_out_main_total)
-                    predictions, arc_loss, loss_dict = self.contrast_loss(features_out_main_total,index_target_total)
-                    fds_loss[i] += arc_loss/batch_size         
-                    # fds_loss[i] += self.ccc_loss_comp(torch.stack(sw_index_total),index_target_total)    
+                    fds_loss[i] += self.ccc_loss_comp(sw_index_total,target_total)    
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]           
                 if target_mode in [3]:
                     # 板块整体损失计算,批次内样本比较
+                    dec_combine_total = torch.stack(dec_combine_total)
                     sw_index_total = torch.stack(sw_index_total)
-                    main_price_index_total = torch.stack(price_index_total)  
                     index_target_total = torch.stack(index_target_total)
-                    future_covs_main_total = torch.stack(future_covs_main_total)  
-                    future_covs_main_total = normalization_axis(future_covs_main_total)
-                    features_out_main_total = torch.stack(features_out_main_total).squeeze(-1)
                     # 对目标值在批次内进行归一化
-                    index_target_total = normalization_axis(index_target_total)
-                    # 辅助任务为对比损失
-                    if batch_size<3:
-                        # 如果批次内数据过少，则使用标准损失
-                        cls_loss[i] += self.ccc_loss_comp(sw_index_total,index_target_total)
-                    else:
-                        predictions, arc_loss, loss_dict = self.contrast_loss(features_out_main_total,index_target_total)
-                        # eva_loss = self.ccc_loss_comp(predictions, index_target_total)
-                        cls_loss[i] += arc_loss/batch_size 
-                    ce_loss[i] = ce_loss[i]/batch_size
+                    # index_target_total = normalization_axis(index_target_total)
+                    cls_loss[i] += self.ccc_loss_comp(sw_index_total,price_index_total)
+                    ce_loss[i] = self.ccc_loss_comp(dec_combine_total,index_target_total)
                     # ce_loss[i] += self.ccc_loss_comp(features_out_main_total,future_covs_main_total)
                     # cls_loss[i] += self.contrast_loss(features_out_main_total,index_target_total)
                     # 主任务为排序学习损失

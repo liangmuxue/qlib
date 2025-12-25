@@ -28,8 +28,10 @@ from darts.logging import raise_if_not,raise_if
 class FuturesModel(IndustryRollModel):    
 
     def create_sampler(self,dataset,batch_size=None,shuffle=True):
-        self.sampler_mode = True
-        return TemporalBatchSampler(dataset,batch_size=batch_size,shuffle=shuffle)
+        self.sampler_mode = False
+        return None
+        # self.sampler_mode = True
+        # return TemporalBatchSampler(dataset,batch_size=batch_size,shuffle=shuffle)
     
     def _build_train_dataset(
         self,

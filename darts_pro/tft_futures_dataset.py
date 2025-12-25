@@ -92,13 +92,17 @@ class TFTFuturesDataset(TFTSeriesDataset):
             if div:
                 if begin==0:
                     begin += 1e-3
-                diff_range = (values[-1] - begin)/begin
+                diff_range = (values[-1] - begin)/begin*100
             else:
                 diff_range = (values[-1] - begin)
             # df_target['diff_range'] = diff_range
             return diff_range     
         def compute_diff(source_col,target_col,div=True,open_mode=False):
-            diff_range = df.groupby(group_column)[source_col].rolling(window=self.pred_len+1).apply(rl_apply,args=(div,open_mode,)).values
+            if open_mode:
+                rolling_size = 2
+            else:
+                rolling_size = self.pred_len+1
+            diff_range = df.groupby(group_column)[source_col].rolling(window=rolling_size).apply(rl_apply,args=(div,open_mode,)).values
             df[target_col] = diff_range  
         compute_diff("label_ori","diff_range")
         compute_diff("VOLUME_CLOSE","VOLUME_RANGE")
@@ -108,7 +112,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("CCI5","cci_diff",div=False)
         compute_diff("BULLS","bulls_diff",div=False,open_mode=True)
         compute_diff("SUMPMA5","sumpma_diff",div=False)
-        compute_diff("OPEN","open_range")
+        compute_diff("OPEN","open_range",open_mode=True)
         compute_diff("CLOSE","close_range",open_mode=True)
         # 做标准化的时候，只针对训练集生成缩放对象
         df_train = df[df["datetime"]<pd.to_datetime(str(val_range[1].strftime("%Y-%m-%d")))]

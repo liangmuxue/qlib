@@ -559,6 +559,18 @@ def round_to_tick(value, tick_size):
     
     return round(value / tick_size) * tick_size
 
+def scale_multiple_series(data):
+    
+    result = []
+    for ser in data:
+        ser_scale = MinMaxScaler().fit_transform(np.expand_dims(ser,-1)).squeeze(-1)
+        result.append(ser_scale)
+        
+    result = np.stack(result)
+    result_main = np.mean(result,0)
+    result_main = MinMaxScaler().fit_transform(np.expand_dims(result_main,-1)).squeeze(-1)
+    return result,result_main
+
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)

@@ -142,7 +142,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 datetime_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["datetime_number"].values                                
                 diff_range = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["diff_range"].values        
+                                    &(df_data["instrument_rank"]==code)]["open_range"].values        
                 open_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["OPEN"].values      
                 # 对于行业或者总体指标，需要计算下属所有品种的差值的平均
@@ -598,6 +598,11 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             p_target_class = get_simple_class(open_diff)
             target_class_total[keep_index] = p_target_class
 
+        # 重新计算指数价格幅度，取平均值
+        target_info_total_effect = np.array(target_info_total)[target_class_total>=0].tolist()
+        target_info_total[self.main_index]['diff_range'] = \
+            np.mean(np.array([t['diff_range'] for t in target_info_total_effect])[self.ins_in_indus_index[self.main_index_rel]],0)
+        
         ######### 分别对目标值和协变量，在个体范围层面进行归一化 #########
         
         real_index = np.where(target_class_total>=0)[0]

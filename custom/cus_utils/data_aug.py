@@ -192,8 +192,9 @@ def compare_clean_data_and_1min_cross_data(match_date=None):
 
 class CollResAna():
     
-    def __init__(self,file_path):
+    def __init__(self,file_path,yaml_file):
         self.file_path = file_path
+        self.yaml_file = yaml_file
 
     def prepare_data(self):
         """验证结果数据分析"""
@@ -206,7 +207,7 @@ class CollResAna():
         col_data_types = {"top_index":int,"instrument":str,"yield_rate":float,"result":int,"trend_value":int,"date":int}   
         self.coll_result_data = pd.read_csv(result_file_path,dtype=col_data_types)  
         # 使用验证数据集的数据协助分析
-        yaml_file = "custom/config/darts/workflow_pred_futures_bidi.yaml"
+        yaml_file = self.yaml_file 
         with open(yaml_file) as fp:
             config = yaml.safe_load(fp)    
         experiment_name = "workflow"
@@ -225,10 +226,12 @@ class CollResAna():
             _,_,train_loader,val_loader = model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
                                  val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                                  max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=True)
-            self.futures_dataset = val_loader.dataset
-    
+            self.val_dataset = val_loader.dataset
+            self.train_dataset = train_loader.dataset
+                
     def build_match_results(self):
-        # 分别找出比较准的日期和不太准的日期
+        """分别找出比较准的日期和不太准的日期"""
+        
         match_results = self.coll_result_data.groupby(by='date').apply(lambda x: (x['target_class'] >=2).sum())   
         match_dates = match_results[match_results.values>=3].index.values
         no_match_dates = match_results[match_results.values<=2].index.values
@@ -237,13 +240,34 @@ class CollResAna():
     def comprisive_stat(self):
         self.prepare_data()
         # self.relative_stat()
-        self.normal_stat()
+        # self.normal_stat()
+        self.price_range_stat()
 
+    def price_range_stat(self):
+        """统计价格涨跌幅度以及指标的分布情况"""
+        
+        futures_dataset = self.train_dataset
+        futures_dataset = self.val_dataset
+        main_index = futures_dataset.main_index
+        output_chunk_length = self.output_chunk_length
+        data_total = []
+        for i in range(len(futures_dataset)):
+            past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,\
+                index_round_targets,long_diff_seq_targets,target_info_total  = futures_dataset[i]
+            future_start_datetime = int(futures_dataset.date_list[i])    
+            price_diff = long_diff_seq_targets[0]    
+            target = past_future_round_targets[main_index,-1,0]
+            data_total.append([future_start_datetime,price_diff,target])   
+        data_total = pd.DataFrame(np.array(data_total),columns=['date','price_diff','target'])
+        data_total['date'] = data_total['date'].astype(int)
+        data_total['price_diff'].describe()
+    
     def relative_stat(self):   
         """目标数据与价格数据相关性检验"""
         
         # 遍历并取得指定数据
-        futures_dataset = self.futures_dataset
+        futures_dataset = self.val_dataset
         output_chunk_length = self.output_chunk_length
         match_results, match_dates, no_match_dates = self.build_match_results()
         for index,dates in enumerate([match_dates,no_match_dates]):
@@ -275,10 +299,11 @@ class CollResAna():
         return diff_range
                 
     def normal_stat(self):   
-        # 遍历并取得指定数据
-        futures_dataset = self.futures_dataset
+        """统计基础信息"""
+        
+        futures_dataset = self.val_dataset
         output_chunk_length = self.output_chunk_length
-        match_results, match_dates,  no_match_dates = self.build_match_results()
+        match_results, match_dates, no_match_dates = self.build_match_results()
         for index,dates in enumerate([match_dates,no_match_dates]):
             target_data = []
             for i in range(len(futures_dataset)):
@@ -299,8 +324,6 @@ class CollResAna():
             print("{} eva info{}".format(title,normal_info))
             # print("{} eva mean:{},std:{}".format(title,normal_info['mean'].describe(),normal_info['std'].describe()))
     
-        
-    
     
 if __name__ == "__main__":
     file_path = "custom/data/aug/test_100.npy"
@@ -314,7 +337,7 @@ if __name__ == "__main__":
     # compare_dataset_consistence()
     # compare_clean_data_and_continus_data(match_date=20251009)
     # compare_clean_data_and_1min_cross_data(match_date=20251009)
-    coll_ana = CollResAna("custom/data/results/stats")
+    coll_ana = CollResAna("custom/data/results/stats",yaml_file="custom/config/darts/workflow_pred_futures_bidi.yaml")
     coll_ana.comprisive_stat()
        
     
