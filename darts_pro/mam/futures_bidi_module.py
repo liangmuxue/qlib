@@ -531,7 +531,7 @@ class FuturesBidiModule(MlpModule):
                 if col!="total_cnt":
                     self.log(col, rate_total[col].values[0], prog_bar=True)  
             
-            dur_num = self.output_chunk_length - 1
+            dur_num = self.cut_len - 1
             anno_yield = rate_total['yield_rate'].values[0] * (240/date_total_num) / (2*self.pred_top_num*dur_num) 
             self.log("anno_yield",anno_yield, prog_bar=True) 
         
@@ -584,20 +584,22 @@ class FuturesBidiModule(MlpModule):
                 target_class_item = target_class_3d[index]
                 keep_index = np.where(target_class_item>=0)[0]
                 round_targets = past_future_round_targets_total[index]
-                index_output = output_3d[3][0][index,-1].mean()
+                index_output = output_3d[3][0][index,-1]
                 ts_arr = target_info_3d[index]
-                index_price = long_diff_index_targets_total[index,0]
                 date = int(ts_arr[keep_index][0]["future_start_datetime"])
                 if not date in TRACK_DATE:
                     continue    
-            
                 coll_item = coll_result[coll_result['date']==date]
-                # trend_output_value = coll_item['trend_output_value'].values[0]
-            
+                instruments,k_idx,_ = np.intersect1d(ins_all,keep_index,return_indices=True)
+                ts_arr_ins = ts_arr[instruments]
+                price_diff_range_ins = np.array([(item['open_array'][-self.output_chunk_length+self.cut_len-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in ts_arr_ins])
+                # index_price = long_diff_index_targets_total[index,0]
+                index_price = price_diff_range_ins.mean()        
+                price_diff = self.compute_diff_range_class(ts_arr[main_index],target_info_arr=ts_arr[instruments],is_main=True)[2]    
+                
                 for j in range(len(self.past_split)):
                     inner_class_item = target_class_item[ins_all]
                     inner_index = np.where(inner_class_item>=0)[0]           
-                    instruments,k_idx,_ = np.intersect1d(ins_all,keep_index,return_indices=True)
                     ins_output = cls_output[j][index,:]
                     ins_output = ins_output[inner_index]
                     ins_output_mean = ins_output.mean()
@@ -629,16 +631,14 @@ class FuturesBidiModule(MlpModule):
                         viz_result_detail.viz_bar_compare(view_data,win=win,title=target_title,rownames=name_arr,legends=["pred_cls","target","price"])
                     # 品种走势图,所有候选的目标走势和价格走势
                     if j in DRAW_SEQ_ITEM:
-                        price_arr = np.stack([item['price_array'] for item in ts_arr[ins_all]])
-                        price_diff = self.compute_diff_range_class(ts_arr[main_index])[2]
+                        # price_diff = self.compute_diff_range_class(ts_arr[main_index])[2]
                         price_diff = np.pad(price_diff,(1,0),'constant',constant_values=(0,0))
-                        price_arr_scale,main_price = scale_multiple_series(price_arr)
                         win = "trend_line_{}_{}_{}".format(j,viz_total_size,date)
-                        target_title = "trend_line_{},date_{}".format(trend,date)
+                        target_title = "trend_line_{},date_{}".format(round(index_price,3),date)
                         output = sw_index[index]
                         output_value = np.pad(output,(self.input_chunk_length,0),'constant',constant_values=(0,0))
                         past_target_values = past_target_3d[index,main_index,:,j]
-                        futures_round_targets = round_targets[main_index].squeeze(-1)
+                        futures_round_targets = round_targets[main_index,:,j]
                         target_values = np.concatenate([past_target_values,futures_round_targets[-self.output_chunk_length:]])
                         view_data = np.stack([output_value,target_values,main_price,price_diff]).transpose(1,0)
                         names = ['pred','target','price','price_diff']                              
@@ -982,24 +982,27 @@ class FuturesBidiModule(MlpModule):
         
         return coll_results        
         
-    def compute_diff_range_class(self,target_info,is_main=False,target_info_arr=None):
+    def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):
         """根据实际涨跌数据计算类别"""
         
-        open_array = target_info["open_array"]
-        price_array = target_info["price_array"] 
-        # 收盘与前收盘价差作为衡量指标
-        diff_range = (price_array[-1] - price_array[-self.output_chunk_length-1])/price_array[-self.output_chunk_length-1]*100
-        # 预测l结束日期的开盘与预测开始日期的开盘价差作为衡量指标
-        diff_range = (open_array[-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
-        # 价差展示，从过去一直延续到预测当日，未包含最后一条记录
-        diff_range_arr = np.array((open_array[1:] - open_array[:-1])/open_array[:-1]*100)
         # 对于整体指标，不能使用开盘和收盘价格直接计算，使用原数据（所有品种收盘价差的均值,之前的dataset中已经设置好了）
         if is_main:
             # 使用所有品种的均值进行计算
-            diff_range_total = np.array([(pr['open_array'][-1] - pr['open_array'][self.input_chunk_length-1])
-                                          /pr['open_array'][self.input_chunk_length-1]*100 for pr in target_info_arr])
+            diff_range_total = np.array([(pr['open_array'][-self.output_chunk_length+self.cut_len-1] - pr['open_array'][-self.output_chunk_length])
+                                          /pr['open_array'][-self.output_chunk_length]*100 for pr in target_info_arr])
             diff_range = diff_range_total.mean()
-            diff_range_arr = diff_range_arr[self.input_chunk_length-self.cut_len+1:self.input_chunk_length+1]
+            open_array = np.stack([pr["open_array"] for pr in target_info_arr])
+            diff_range_arr = np.array((open_array[:,1:] - open_array[:,:-1])/open_array[:,:-1]*100)
+            diff_range_arr = np.mean(diff_range_arr,0)
+        else:
+            open_array = target_info["open_array"]
+            # price_array = target_info["price_array"] 
+            # 收盘与前收盘价差作为衡量指标
+            # diff_range = (price_array[-self.output_chunk_length+self.cut_len-1] - price_array[-self.output_chunk_length])/price_array[-self.output_chunk_length]*100
+            # 预测l结束日期的开盘与预测开始日期的开盘价差作为衡量指标
+            diff_range = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
+            # 价差展示，从过去一直延续到预测当日，未包含最后一条记录
+            diff_range_arr = np.array((open_array[1:] - open_array[:-1])/open_array[:-1]*100)            
         range_class = get_simple_class(diff_range)
         
         return diff_range,range_class,diff_range_arr

@@ -294,7 +294,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
                     # 借用1号目标作为整体走势衡量
-                    target_item = target[j,main_index_abs,:,1]
+                    target_item = target[j,main_index_abs,:,i]
                     target_total.append(target_item)
                     output_main = sw_index_data[j]
                     sv_out_item = sv_out_item[ins_rel_index]
@@ -316,7 +316,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         dec_out_item = dec_out[j,ins_rel_index].squeeze(-1)
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         # 所有品种的目标阶段涨跌幅
-                        price_diff_range_ins = [(item['open_array'][-1] - item['open_array'][-self.cut_len])/item['open_array'][-self.cut_len]*100 for item in target_info_item]
+                        price_diff_range_ins = [(item['open_array'][-self.output_chunk_length+self.cut_len-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
                         price_diff_range_ins = torch.Tensor(price_diff_range_ins).to(self.device)
                         price_diff_range = price_targets[j,ins_rel_index] 
                         # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
