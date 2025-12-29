@@ -13,7 +13,7 @@ def calculate_gradient_norm(gradient):
     total_norm = total_norm ** (1. / 2)
     return total_norm
 
-def pc_grad(gradient_components, main_task_seq=0):
+def pc_grad(gradient_components, main_task_seq_arr=[0]):
     """
     PCGrad: 通过投影消除梯度冲突，主辅任务模式
     """
@@ -21,30 +21,32 @@ def pc_grad(gradient_components, main_task_seq=0):
     processed_grads = {}
     param_names = interact_grad_names(gradient_components,interact=False)
     asis_task_seq = [i for i in range(len(gradient_components))]
-    asis_task_seq.remove(main_task_seq)
-    
-    for param_name in param_names:
-        if param_name not in gradient_components[main_task_seq]:
-            continue        
-        # 主任务投影到其他子任务
-        grads_main = gradient_components[main_task_seq][param_name]
-        # 对每对任务进行冲突消除
-        for j in asis_task_seq:
-            if param_name not in gradient_components[j]:
-                continue
-            grads_j = gradient_components[j][param_name]
-            # 计算两个梯度的点积
-            dot_product = torch.dot(
-                grads_main.flatten(), 
-                grads_j.flatten()
-            )
-            
-            # 如果梯度方向冲突（点积为负）
-            if dot_product < 0:
-                # 将梯度i投影到梯度j的正交补空间
-                projection = (dot_product / 
-                            (torch.norm(grads_main) ** 2 + 1e-8)) * grads_main
-                gradient_components[j][param_name] = grads_j - projection      
+    for main_task_seq in main_task_seq_arr:
+        asis_task_seq.remove(main_task_seq)
+        
+    for main_task_seq in main_task_seq_arr:   
+        for param_name in param_names:
+            if param_name not in gradient_components[main_task_seq]:
+                continue        
+            # 主任务投影到其他子任务
+            grads_main = gradient_components[main_task_seq][param_name]
+            # 对每对任务进行冲突消除
+            for j in asis_task_seq:
+                if param_name not in gradient_components[j]:
+                    continue
+                grads_j = gradient_components[j][param_name]
+                # 计算两个梯度的点积
+                dot_product = torch.dot(
+                    grads_main.flatten(), 
+                    grads_j.flatten()
+                )
+                
+                # 如果梯度方向冲突（点积为负）
+                if dot_product < 0:
+                    # 将梯度i投影到梯度j的正交补空间
+                    projection = (dot_product / 
+                                (torch.norm(grads_main) ** 2 + 1e-8)) * grads_main
+                    gradient_components[j][param_name] = grads_j - projection      
     
     return processed_grads
 
@@ -278,12 +280,12 @@ class MultiTaskOptimizer(Adam):
             
         all_gradients = [self._compute_grad_norm(comp) for comp in gradient_components] 
         # 自适应调整辅助任务梯度
-        adjusted_gradients = self._compute_auto_weights(task_losses, helpfulness, all_gradients)
+        # adjusted_gradients = self._compute_auto_weights(task_losses, helpfulness, all_gradients)
         # 应用梯度手术,合并梯度
         if self.use_pcgrad:
-            pc_grad(gradient_components, main_task_seq=1)
+            pc_grad(gradient_components, main_task_seq_arr=[1])
         # 多个任务的梯度相加（带权重）
-        total_gradients,gradient_components = self.grad_combine(gradient_components, adjusted_gradients)
+        total_gradients,gradient_components = self.grad_combine(gradient_components,)
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
         # 更新辅助任务权重
@@ -296,18 +298,15 @@ class MultiTaskOptimizer(Adam):
         show_loss = 0
         for loss in loss_total:
             show_loss = show_loss + loss
-        adjusted_gradients_show = [adjusted_gradients[0]] + [adjusted_gradients[task_idx].item() for task_idx in self.auxiliary_tasks]
         return {
             'total_loss': show_loss,
             'total_grad_norm': self._compute_total_grad_norm(total_gradients),
-            'helpfulness': list(helpfulness.values()),
-            'adjusted_gradients': adjusted_gradients_show,
             'conflict_analysis': {'conflict_count':conflict_count,'similarity':similarity},
             'task_grad_norms': task_grad_norms
                 if gradient_components else None
         }
 
-    def grad_combine(self,gradient_components, adjusted_gradients):
+    def grad_combine(self,gradient_components):
         """合并多个任务梯度"""
     
         processed_grads = {}
@@ -320,12 +319,8 @@ class MultiTaskOptimizer(Adam):
                 # 不同子模型，梯度有可能不一致
                 if param_name in gradient_components[i]:
                     item_grad = gradient_components[i][param_name]
-                    if i==0:
-                        adj_grad = adjusted_gradients[i]
-                    else:
-                        adj_grad = adjusted_gradients[i][0]
                     # 不同任务不同梯度剪裁
-                    item_grad = item_grad * adj_grad * self.task_weights[i]  
+                    item_grad = item_grad  * self.task_weights[i]  
                     gradient_components_after[i][param_name] = item_grad
                     # 加权合并处理后的梯度
                     if final_grad is None:

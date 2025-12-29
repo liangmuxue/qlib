@@ -23,13 +23,14 @@ class TFTDataset(DatasetH):
 
     DEFAULT_STEP_LEN = 30
 
-    def __init__(self, col_def={},step_len=30,pred_len=5,load_dataset_file=False,**kwargs):
+    def __init__(self, col_def={},step_len=30,pred_len=5,cut_len=2,load_dataset_file=False,**kwargs):
         # 基层数据处理器
         self.data_extractor = StockDataExtractor() 
         
         self.col_def = col_def
         self.step_len = step_len
         self.pred_len = pred_len
+        self.cut_len = cut_len
         self.scaler_type = kwargs['scaler_type']
         self.load_dataset_file = load_dataset_file
         

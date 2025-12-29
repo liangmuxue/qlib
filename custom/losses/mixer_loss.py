@@ -5,7 +5,7 @@ from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss
 from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normalization
-from tft.class_define import CLASS_SIMPLE_VALUES
+from tft.class_define import get_simple_class
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
@@ -232,7 +232,32 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # self.contrast_loss = PairwiseContrastiveRegressionLoss(device=self.device)
         # self.rank_loss = GlobalLambdaRankLoss(reduction='none')
         self.rank_loss = LambdaRankLoss()
+
+    def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):
+        """根据实际涨跌数据计算类别"""
         
+        # 对于整体指标，不能使用开盘和收盘价格直接计算，使用原数据（所有品种收盘价差的均值,之前的dataset中已经设置好了）
+        if is_main:
+            # 使用所有品种的均值进行计算
+            diff_range_total = np.array([(pr['open_array'][-self.output_chunk_length+self.cut_len-1] - pr['open_array'][-self.output_chunk_length])
+                                          /pr['open_array'][-self.output_chunk_length]*100 for pr in target_info_arr])
+            diff_range = diff_range_total.mean()
+            open_array = np.stack([pr["open_array"] for pr in target_info_arr])
+            diff_range_arr = np.array((open_array[:,1:] - open_array[:,:-1])/open_array[:,:-1]*100)
+            diff_range_arr = np.mean(diff_range_arr,0)
+        else:
+            open_array = target_info["open_array"]
+            # price_array = target_info["price_array"] 
+            # 收盘与前收盘价差作为衡量指标
+            # diff_range = (price_array[-self.output_chunk_length+self.cut_len-1] - price_array[-self.output_chunk_length])/price_array[-self.output_chunk_length]*100
+            # 预测l结束日期的开盘与预测开始日期的开盘价差作为衡量指标
+            diff_range = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
+            # 价差展示，从过去一直延续到预测当日，未包含最后一条记录
+            diff_range_arr = np.array((open_array[1:] - open_array[:-1])/open_array[:-1]*100)            
+        range_class = get_simple_class(diff_range)
+        
+        return diff_range,range_class,diff_range_arr
+            
     def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,epoch_num=0):
         """Multiple Loss Combine"""
 
@@ -294,14 +319,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
                     # 借用1号目标作为整体走势衡量
-                    target_item = target[j,main_index_abs,:,i]
+                    ref_indicator = 1                    
+                    target_item = target[j,main_index_abs,:,ref_indicator]
+                    target_item_ins = target[j,ins_rel_index,:,ref_indicator]
                     target_total.append(target_item)
                     output_main = sw_index_data[j]
                     sv_out_item = sv_out_item[ins_rel_index]
-                    # price_diff_range = price_targets[j,ins_rel_index]  
+                    price_diff_range = price_targets[j,ins_rel_index]  
                     # price_diff_range = long_diff_seq_targets[j,0]  
-                    price_diff_range = target_info_inbatch[main_index_abs]['diff_range'][-self.output_chunk_length:]
-                    price_index_total.append(torch.Tensor(price_diff_range).to(self.device))   
+                    # price_diff_range = target_info_inbatch[main_index_abs]['diff_range'][-self.output_chunk_length:]
                     
                     # 不同模式的损失计算                          
                     if target_mode==0:
@@ -316,17 +342,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         dec_out_item = dec_out[j,ins_rel_index].squeeze(-1)
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         # 所有品种的目标阶段涨跌幅
-                        price_diff_range_ins = [(item['open_array'][-self.output_chunk_length+self.cut_len-1] - item['open_array'][-self.output_chunk_length])/item['open_array'][-self.output_chunk_length]*100 for item in target_info_item]
-                        price_diff_range_ins = torch.Tensor(price_diff_range_ins).to(self.device)
-                        price_diff_range = price_targets[j,ins_rel_index] 
-                        # ce_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item.mean(), price_diff_range_total)  
-                        ce_loss[i] += self.ccc_loss_comp(dec_out_item, round_targets_item)  
+                        price_diff_range_ins = np.array([self.compute_diff_range_class(item)[0] for item in target_info_item])
+                        price_diff_range_ins = torch.Tensor(price_diff_range_ins).to(self.device) 
+                        price_diff_range_ins = normalization_axis(price_diff_range_ins)
+                        round_targets_item_att = future_round_targets[j,ins_rel_index,ref_indicator]
+                        # ce_loss[i] += self.ccc_loss_comp(dec_out_item, round_targets_item_att)  
                         # ce_loss[i] += self.mse_loss(dec_out_item, target_item)  
                         # 使用价格指标作为主要指标
-                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range_ins)  
-                        # 衡量整体走势，借用1号目标
-                        ref_indicator = i
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
+                        ce_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)
+                        
+                        # fds_loss[i] += self.ccc_loss_comp(sv_out_item,target_item_ins)
                         index_target_total.append(future_index_round_target[j,main_index,-1,ref_indicator])
+                        # index_target_total.append(price_diff_arr_mean)
                         sw_index_total.append(sw_index_data[j])
                     elif target_mode==3:
                         # 整体指数比较，辅助品种比较 
@@ -343,20 +371,20 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # index_target_total.append(future_round_targets[j,main_index_abs,i])
                         # sw_index_total.append(sw_index_data[j,0])    
                 batch_size = len(sw_index_total)
-                price_index_total = torch.stack(price_index_total)
                 sw_index_total = torch.stack(sw_index_total)
                 if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]           
                 if target_mode in [2]:
                     cls_loss[i] = cls_loss[i]/batch_size
                     ce_loss[i] = ce_loss[i]/batch_size
+                    # fds_loss[i] = fds_loss[i]/batch_size
                     # 板块整体损失计算,批次内样本比较
                     index_target_total = torch.stack(index_target_total)
                     target_total = torch.stack(target_total)
                     # 对目标值在批次内进行归一化
                     index_target_total = normalization_axis(index_target_total)
                     dec_out_item = dec_out[j]
-                    fds_loss[i] += self.ccc_loss_comp(sw_index_total,target_total)    
+                    # fds_loss[i] += self.ccc_loss_comp(sw_index_total,target_total)    
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]           
                 if target_mode in [3]:
                     # 板块整体损失计算,批次内样本比较

@@ -160,7 +160,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     pickle.dump(self.ass_data, fout) 
         self.check_instrument_data()
     
-    def create_scaler(self,mode="min_max",feature_range=(0,1)):
+    def create_scaler(self,mode="standard",feature_range=(0,1)):
         if mode=="standard":
             scaler = StandardScaler() 
         else:
@@ -541,11 +541,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
             open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
-            scaler = self.create_scaler(mode="standard")
-            scaler.fit(np.expand_dims(price_array[:self.input_chunk_length],-1))
             datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
             # 计算开盘价目标差值范围
-            open_diff = (open_array[-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
+            open_diff = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"total_idx":idx,"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
@@ -599,9 +597,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             target_class_total[keep_index] = p_target_class
 
         # 重新计算指数价格幅度，取平均值
-        target_info_total_effect = np.array(target_info_total)[target_class_total>=0].tolist()
-        target_info_total[self.main_index]['diff_range'] = \
-            np.mean(np.array([t['diff_range'] for t in target_info_total_effect])[self.ins_in_indus_index[self.main_index_rel]],0)
+        target_info_total_effect = np.array(target_info_total)[target_class_total>=0][self.instrument_index]
+        diff_range_all = np.stack([t['diff_range'] for t in target_info_total_effect])
+        target_info_total[self.main_index]['diff_range'] = np.mean(diff_range_all,0)
         
         ######### 分别对目标值和协变量，在个体范围层面进行归一化 #########
         

@@ -487,7 +487,7 @@ class FuturesMappingUtil:
     @staticmethod
     def get_instrument_index(sw_ins_mappings):
         instrument_index = FuturesMappingUtil.get_combine_industry_instrument(sw_ins_mappings)[:,0] 
-        return instrument_index.astype(np.int)
+        return np.sort(instrument_index.astype(np.int))
     
     @staticmethod
     def get_main_index(sw_ins_mappings):

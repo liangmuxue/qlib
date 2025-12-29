@@ -66,7 +66,7 @@ task:
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
-               total_iters: 2e4
+               total_iters: 1.5e4
                # base_lr: 0.5e-4
                # max_lr: 1.5e-3
                # cycle_momentum: False
@@ -83,25 +83,25 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2012Step5_openRangeAndIndex_2505"
+               model_name: "Futures_cleanData2012Step5_openRangeAndIndex_2503"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               task_weights: [1.0,1.0,1.0]
+               task_weights: [0.5,0.5,0.5]
                grad_limits: [5.0,3.0]
-               pred_weights: [1.0,0.0]
+               pred_weights: [0.0,1.0]
                use_pcgrad: True
-               candidate_inverse: False
+               candidate_inverse: True
                pred_mode: 'single'
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
-               wave_period : &wave_period 35
+               wave_period : &wave_period 30
                hidden_size: 16
-               forecast_horizon: &forecast_horizon 5
-               cut_len: 2
+               forecast_horizon: &forecast_horizon 2
+               cut_len: &cut_len 2
                dropout: 0.5
-               past_split: [[0,15],[15,30]]
                opt_size: 1
+               past_split: [[0,15],[15,30]]
                target_mode: [2,2,2,1,3]
                scale_mode: [2,2,0,2,0]
                filter_conv_index: -1
@@ -115,8 +115,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2024-01-01, 2025-05-28]
-                valid: [2025-05-01, 2025-10-15]
+                train: [2024-01-01, 2025-03-28]
+                valid: [2025-03-01, 2025-06-15]
                 test: [2021-01-01, 2021-03-01]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -130,6 +130,7 @@ task:
             model_type: 'tft'
             step_len: *wave_period
             pred_len: *forecast_horizon
+            cut_len: *cut_len
             over_time: 2          
             low_threhold: -51
             high_threhold: 5   
@@ -139,13 +140,13 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['SKEW5','RSV5','CCI5','SUMPMA5','RSV5']
+                target_column: ['QTLUMA5','RSV5','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
-                past_covariate_col: ['VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
-                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','CORR5'
+                past_covariate_col: ['VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','RSQR5','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','price_range','limit_rate','magin_radio']    
