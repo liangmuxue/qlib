@@ -511,9 +511,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             past_end = past_start + self.input_chunk_length
             future_start = past_end
             future_end = future_start + self.output_chunk_length
-            # 对于series序列，需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量。（注意对于协变量序列，仍然沿用原始编号）
+            # 对于series序列，需要从整体偏移量中减去起始偏移量，以得到并使用相对偏移量
             past_start_ser = past_start - target_series.time_index[0]
-            # 后续索引计算都以past_start为基准
+            # 后续索引计算都以past_start_ser为基准
             past_end_ser = past_start_ser + self.input_chunk_length
             future_start_ser = past_end_ser
             future_end_ser = future_start_ser + self.output_chunk_length
@@ -552,16 +552,17 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # 过去协变量序列数据
             covariate_series = self.covariates[ori_index] 
             raise_if_not(
-                past_end <= len(covariate_series),
+                past_end_ser <= len(covariate_series),
                 f"The dataset contains covariates "
                 f"that don't extend far enough into the future. ({idx}-th sample)",
             )
             covariate_total = covariate_series.random_component_values(copy=False)[
-                past_start:future_end
+                past_start_ser:future_end_ser
             ]
             # 过去协变量的过去数值以及未来数值
             covariate = covariate_total[:self.input_chunk_length]
             covariate_future = covariate_total[self.input_chunk_length:]
+
             raise_if_not(
                 len(covariate)
                 == (
@@ -577,8 +578,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             static_covariate = target_series.static_covariates_values(copy=False)
             # 未来协变量的过去值和未来值
             f_conv_values = self.future_covariates[ori_index].random_component_values(copy=False)
-            future_covariate = f_conv_values[future_start:future_end]
-            historic_future_covariate = f_conv_values[past_start:past_end]
+            future_covariate = f_conv_values[future_start_ser:future_end_ser]
+            historic_future_covariate = f_conv_values[past_start_ser:past_end_ser]
             # 直接从映射数据中取得当前日期对应的未来协变量
             date_covs = self.date_covs_list.iloc[idx:idx+self.output_chunk_length]
             future_covariate = date_covs[self.date_conv_columns].values

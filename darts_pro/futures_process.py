@@ -310,50 +310,13 @@ class FuturesProcessModel(TftDataframeModel):
         self.save_dataset_file = self.kwargs["save_dataset_file"]      
         if not os.path.exists(self.batch_file_path):
             os.mkdir(self.batch_file_path)
-            
-        df_data_path = os.path.join(self.batch_file_path,"main_data.pkl")
-        df_train_path = os.path.join(self.batch_file_path,"df_train.pkl")
-        df_valid_path = os.path.join(self.batch_file_path,"df_valid.pkl")
-        ass_train_path = os.path.join(self.batch_file_path,"ass_data_train.pkl")
-        ass_valid_path = os.path.join(self.batch_file_path,"ass_data_valid.pkl")
-            
-        if self.load_dataset_file:
-            # 加载主要序列数据和辅助数据
-            with open(df_data_path, "rb") as fin:
-                train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
-                    pickle.load(fin)   
-            with open(ass_train_path, "rb") as fin:
-                ass_data_train = pickle.load(fin)  
-            with open(ass_valid_path, "rb") as fin:
-                ass_data_valid = pickle.load(fin) 
-            with open(df_train_path, "rb") as fin:
-                dataset.df_train = pickle.load(fin)  
-                dataset.prepare_inner_data(dataset.df_train)      
-            with open(df_valid_path, "rb") as fin:
-                dataset.df_val = pickle.load(fin)     
-                dataset.prepare_inner_data(dataset.df_val)           
-            global_var.set_value("ass_data_train",ass_data_train)
-            global_var.set_value("ass_data_valid",ass_data_valid)
-            global_var.set_value("load_ass_data",True)
-        else:
-            # 生成tft时间序列数据集,包括目标数据、协变量等
-            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
-            # 保存序列数据
-            if self.save_dataset_file:
-                dump_data = (train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates)
-                with open(df_data_path, "wb") as fout:
-                    pickle.dump(dump_data, fout)   
-                # 还需要保存原始的DataFrame数据
-                with open(df_train_path, "wb") as fout:
-                    pickle.dump(dataset.df_train, fout)       
-                with open(df_valid_path, "wb") as fout:
-                    pickle.dump(dataset.df_val, fout)                                       
-                global_var.set_value("ass_data_path",self.batch_file_path)
-                global_var.set_value("load_ass_data",False)
-                global_var.set_value("save_ass_data",True)
-            else:
-                global_var.set_value("load_ass_data",False)
-                global_var.set_value("save_ass_data",False)  
+        
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        train_data,val_data = dataset.build_series_data()
+        train_series_transformed,past_convariates_train,future_convariates_train = train_data
+        val_series_transformed,past_convariates_val,future_convariates_val = val_data
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)  
             
         # 使用股票代码数量作为embbding长度
         emb_size = dataset.get_emb_size()
@@ -377,17 +340,18 @@ class FuturesProcessModel(TftDataframeModel):
         
         if self.type=="pred_futures_bidi":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
-            trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=True)
+            trainer,model,train_loader,val_loader = \
+            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.set_outer_params(outer_params) 
             trainer.validate(model=model,dataloaders=val_loader)
         else:
             trainer,model_inner,train_loader,val_loader= \
-            self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
+            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
             # model_inner.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type}) 
             # self.model.train(trainer, model_inner, train_loader, val_loader)

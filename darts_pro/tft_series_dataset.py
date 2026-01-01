@@ -269,7 +269,11 @@ class TFTSeriesDataset(TFTDataset):
         # 如果只需要df数据，则不进行series数据生成
         if no_series_data:
             return
-        return self.create_series_data(self.df_all,self.df_train,self.df_val,fill_future=fill_future)        
+        
+        # 单独生成训练数据序列和验证数据序列
+        train_data = self.create_series_data(self.df_train,fill_future=fill_future)  
+        val_data = self.create_series_data(self.df_val,fill_future=fill_future)  
+        return [train_data,val_data]       
           
     def build_series_data(self,outer_df=None,no_series_data=False,val_ds_filter=False,fill_future=True):
         """从pandas数据生成时间序列类型数据"""
@@ -277,7 +281,7 @@ class TFTSeriesDataset(TFTDataset):
         segments = self.segments
         return self.build_series_data_with_segments(segments, outer_df=outer_df, no_series_data=no_series_data, val_ds_filter=val_ds_filter, fill_future=fill_future)
 
-    def create_series_data(self,df_all,df_train,df_val,fill_future=False):
+    def create_series_data(self,df_data,fill_future=False):
         
         group_column = self.get_group_rank_column()
         target_column = self.get_target_column()
@@ -292,98 +296,49 @@ class TFTSeriesDataset(TFTDataset):
         static_columns = self.get_static_scale_columns()
         
         # 分别生成训练和测试序列数据
-        train_series = TimeSeries.from_group_dataframe(df_train,
+        data_series = TimeSeries.from_group_dataframe(df_data,
                                                 time_col=time_column,
                                                  group_cols=group_column,# 会自动成为静态协变量
                                                  freq=1,
                                                  fill_missing_dates=True,
                                                  static_cols=static_columns,
                                                  value_cols=target_column)   
-        val_series = TimeSeries.from_group_dataframe(df_val,
-                                                time_col=time_column,
-                                                 group_cols=group_column,# 会自动成为静态协变量
-                                                 freq=1,
-                                                 fill_missing_dates=True,
-                                                 static_cols=static_columns,
-                                                 value_cols=target_column) 
-        total_series = TimeSeries.from_group_dataframe(df_all,
-                                                time_col=time_column,
-                                                 group_cols=group_column,# 会自动成为静态协变量
-                                                 freq=1,
-                                                 fill_missing_dates=True,
-                                                 static_cols=static_columns,
-                                                 value_cols=target_column)    
-        # 生成归一化的目标序列--取消，改为dataset内部进行           
-        train_series_transformed = []
-        val_series_transformed = []
-        total_series_transformed = []
-        
-        if not self.transform_inner:
-            for index,ts in enumerate(train_series):
-                target_scaler = self.target_scalers[int(ts.static_covariates[group_column].values[0])]
-                ts_transformed = target_scaler.fit_transform(ts)
-                vs_transformed = target_scaler.transform(val_series[index])
-                total_transformed = target_scaler.transform(total_series[index])
-                train_series_transformed.append(ts_transformed)
-                val_series_transformed.append(vs_transformed)
-                total_series_transformed.append(total_transformed)
-            
         def build_covariates(column_names):
             covariates_array = []
-            for index,series in enumerate(train_series):
+            for _,series in enumerate(data_series):
                 group_col_val = series.static_covariates[group_column].values[0]
-                scaler = Scaler()
-                # 遍历并筛选出不同分组字段(股票)的单个dataframe
-                df_item = df_all[df_all[group_column]==group_col_val]
-                df_item_train = df_train[df_train[group_column]==group_col_val] 
+                # 为每个品种单独计算协变量，再合并
+                df_item = df_data[df_data[group_column]==group_col_val]
                 covariates = TimeSeries.from_dataframe(df_item,time_col=time_column,
                                                          freq=1,
                                                          fill_missing_dates=True,
                                                          value_cols=column_names)  
-                train_covariates = TimeSeries.from_dataframe(df_item_train,time_col=time_column,
-                                                         freq=1,
-                                                         fill_missing_dates=True,
-                                                         value_cols=column_names)       
-                if self.transform_inner:
-                    covariates_array.append(covariates)
-                    continue
-                
-                # 使用训练数据fit，并transform到整个序列    
-                scaler.fit(train_covariates)
-                covariates_transformed = scaler.transform(covariates)    
-                covariates_array.append(covariates_transformed)
+                covariates_array.append(covariates)
             return covariates_array            
 
         # 在series中植入业务编号，以便后续调试排查
-        def inset_codes(target_series,df_data=None):
-            for index,series in enumerate(target_series):
+        def inset_codes(target_series,inset_dates=True):
+            for _,series in enumerate(target_series):
                 group_col_val = series.static_covariates[group_column].values[0]
                 instrument_code = self.get_group_code_by_rank(group_col_val)
                 series.instrument_code = instrument_code
                 series.last_time_idx = series.time_index.stop
                 # 序列中植入日期数组，用于后续数据筛选
-                if df_data is not None:
-                    series.datetime_arr =  df_data[df_data['instrument']==instrument_code]['datetime_number'].values
+                if inset_dates:
+                    series.datetime_arr = df_data[df_data['instrument']==instrument_code]['datetime_number'].values
 
-        # 生成过去协变量，并归一化
-        logger.info("begin build_covariates")
-        # 在过去协变量的数据中加入目标值原值，借用此协变量带入后续dataset中，用于原值分类计算--cancel
-        # past_columns = [target_column] + past_columns
+        # 生成过去协变量
         past_convariates = build_covariates(past_columns)      
-        # 生成未来协变量，并归一化
+        # 生成未来协变量
         future_convariates = build_covariates(future_columns)    
         # 在series中植入业务编号，以便后续调试排查
-        inset_codes(train_series)
-        inset_codes(val_series,df_data=df_val)
-        
+        inset_codes(data_series)
         # 补充未来协变量数据,与验证数据相对应    
         if fill_future:           
             future_convariates = self.fill_future_data(future_convariates,future_columns,self.pred_len)
             
-        # 分别返回用于训练预测的序列series_transformed，以及完整序列series
-        if not self.transform_inner:
-            return train_series_transformed,val_series_transformed,total_series_transformed,past_convariates,future_convariates
-        return train_series,val_series,total_series,past_convariates,future_convariates   
+        # 分别返回用序列数据（主要包含目标数据和静态协变量），过去协变量，未来协变量
+        return data_series,past_convariates,future_convariates   
 
     def fill_future_data(self,future_convariates,column_names,fill_length):
         """补充未来协变量数据"""

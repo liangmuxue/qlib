@@ -571,6 +571,17 @@ def scale_multiple_series(data):
     result_main = MinMaxScaler().fit_transform(np.expand_dims(result_main,-1)).squeeze(-1)
     return result,result_main
 
+
+def linear_map(arr, new_min, new_max):
+    """线性映射到新范围"""
+    
+    arr_min, arr_max = arr.min(), arr.max()
+    # 避免除零错误
+    if arr_max - arr_min == 0:
+        return np.full_like(arr, (new_min + new_max) / 2)
+    # 线性映射公式
+    return (arr - arr_min) / (arr_max - arr_min) * (new_max - new_min) + new_min
+
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)

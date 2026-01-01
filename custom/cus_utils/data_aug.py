@@ -8,6 +8,7 @@ from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from cus_utils.db_accessor import DbAccessor
 from pickle import TRUE
+from cus_utils.common_compute import linear_map
 
 class DictToObject:
     def __init__(self, dictionary):
@@ -215,7 +216,9 @@ class CollResAna():
         qlib.init(provider_uri=qlib_init_config["provider_uri"], region=qlib_init_config["region"])  
         with R.start(experiment_name=experiment_name, recorder_name=None):              
             dataset = init_instance_by_config(config["task"]["dataset"])
-            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
+            train_data,val_data = dataset.build_series_data()
+            train_series_transformed,past_convariates_train,future_convariates_train = train_data
+            val_series_transformed,past_convariates_val,future_convariates_val = val_data
             process_model = init_instance_by_config(config["task"]["model"])
             process_model.init_env(dataset)
             self.output_chunk_length = process_model.optargs["forecast_horizon"]
@@ -223,9 +226,10 @@ class CollResAna():
             model = process_model._build_model(dataset,emb_size=emb_size,use_model_name=False,mode=0) 
             model.set_outer_params({'pred_weights':process_model.optargs["pred_weights"],'mode':process_model.type,'candidate_inverse':process_model.optargs['candidate_inverse']}) 
             model.mode = "predict"
-            _,_,train_loader,val_loader = model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                                 val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                                 max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=True)
+            _,_,train_loader,val_loader= \
+            model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=False)  
             self.val_dataset = val_loader.dataset
             self.train_dataset = train_loader.dataset
                 
@@ -241,8 +245,55 @@ class CollResAna():
         self.prepare_data()
         # self.relative_stat()
         # self.normal_stat()
-        self.price_range_stat()
+        # self.price_range_stat()
+        self.target_corr_stat()
 
+    def target_corr_stat(self):
+        """查看价格涨跌幅与辅助指标的协同关系"""
+ 
+        futures_dataset = self.train_dataset
+        futures_dataset = self.val_dataset
+        main_index = futures_dataset.main_index
+        instrument_index = futures_dataset.instrument_index
+        output_chunk_length = self.output_chunk_length
+        cut_len = futures_dataset.cut_len
+        diff_data_total = []
+        trend_data_total = []
+        target_index = 0
+        for i in range(len(futures_dataset)):
+            past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,\
+                index_round_targets,long_diff_seq_targets,target_info_total  = futures_dataset[i]
+            future_start_datetime = int(futures_dataset.date_list[i])    
+            price_diff = long_diff_seq_targets[0]    
+            # 取cut_len相关目标值做比较
+            target_len = -output_chunk_length+cut_len-1
+            round_target = past_future_round_targets[main_index,target_len,target_index]
+            diff_range = np.array([item['diff_range'] for item in target_info_total])
+            diff_range_main = diff_range[main_index]
+            # 优化目标值映射到价格涨跌幅数组数据空间
+            target_series = past_target_total[main_index,:,target_index]
+            round_target_series_mapped = linear_map(target_series, diff_range_main.min(), diff_range_main.max()) 
+            # 取得映射后实际价格目标对应的下标，查看映射的数据和实际价格数据的相关性
+            round_target_item = round_target_series_mapped[target_len]
+            round_target_ins = past_future_round_targets[instrument_index,-1,target_index]
+            price_diff_ins = price_targets[instrument_index]
+            diff_data_arr = np.stack([round_target_ins,price_diff_ins]).transpose(1,0)
+            diff_data_arr = pd.DataFrame(diff_data_arr,columns=['target_round_ins','price_diff_ins'])
+            corr_data = diff_data_arr[['target_round_ins','price_diff_ins']].corr().values
+            diff_data_total.append([future_start_datetime,corr_data[0,1]])
+            trend_data_total.append([future_start_datetime,price_diff,round_target,round_target_item])   
+        # 总体趋势数据一致性
+        trend_data_total = pd.DataFrame(np.array(trend_data_total),columns=['date','trend_price_diff','trend_round_target','trend_target_map'])
+        trend_data_total['date'] = trend_data_total['date'].astype(int)
+        corr_data = trend_data_total[['trend_price_diff','trend_round_target','trend_target_map']].corr().values
+        pd.set_option('expand_frame_repr', False)
+        print("trend_data_total:\n ",trend_data_total)
+        print("trend_data corr:\n {}".format(corr_data))
+        # 品种间的目标值和价格涨跌幅度的一致性
+        diff_data_total = pd.DataFrame(np.array(diff_data_total),columns=['date','round_price_corr'])
+        print("round_price corr:\n {}".format(diff_data_total))
+         
     def price_range_stat(self):
         """统计价格涨跌幅度以及指标的分布情况"""
         

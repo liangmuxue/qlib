@@ -297,6 +297,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 index_target_total = []
                 future_covs_main_total = []
                 dec_combine_total = []
+                sv_out_total = []
                 target_total = []
                 for j in range(target_class.shape[0]):
                     target_info_inbatch = target_info[j]
@@ -318,11 +319,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     future_covs_main = future_covs[i][j,main_index_abs,-1,:]
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
-                    # 借用1号目标作为整体走势衡量
-                    ref_indicator = 1                    
-                    target_item = target[j,main_index_abs,:,ref_indicator]
-                    target_item_ins = target[j,ins_rel_index,:,ref_indicator]
-                    target_total.append(target_item)
                     output_main = sw_index_data[j]
                     sv_out_item = sv_out_item[ins_rel_index]
                     price_diff_range = price_targets[j,ins_rel_index]  
@@ -334,23 +330,26 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         if indus_index.shape[0]<2:
                             continue
                         # 板块整体损失计算
-                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j],index_target_item[:,-1])/10
+                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index],index_target_item[:,-1])/10
                         # if target_mode==1: 
                         #     ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),time_diff_targets.unsqueeze(-1))  
                     elif target_mode==2:
                         # 比较全部品种，辅助整体指数比较
                         dec_out_item = dec_out[j,ins_rel_index].squeeze(-1)
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
+                        # 借用1号目标作为整体走势衡量
+                        ref_indicator = 1                    
+                        target_item = target[j,main_index_abs,:,ref_indicator]
+                        target_total.append(target_item)                        
                         # 所有品种的目标阶段涨跌幅
                         price_diff_range_ins = np.array([self.compute_diff_range_class(item)[0] for item in target_info_item])
                         price_diff_range_ins = torch.Tensor(price_diff_range_ins).to(self.device) 
                         price_diff_range_ins = normalization_axis(price_diff_range_ins)
                         round_targets_item_att = future_round_targets[j,ins_rel_index,ref_indicator]
-                        # ce_loss[i] += self.ccc_loss_comp(dec_out_item, round_targets_item_att)  
-                        # ce_loss[i] += self.mse_loss(dec_out_item, target_item)  
                         # 使用价格指标作为主要指标
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
-                        ce_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)
+                        ce_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),round_targets_item)
+                        fds_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index], round_targets_item_att)  
                         
                         # fds_loss[i] += self.ccc_loss_comp(sv_out_item,target_item_ins)
                         index_target_total.append(future_index_round_target[j,main_index,-1,ref_indicator])
@@ -363,6 +362,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # index_target_total.append(future_round_targets[j,main_index_abs,i])
                         sw_index_total.append(output_main)
                         dec_combine_total.append(dec_out_item)
+                        ce_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
+                        sv_out_total.append(sv_out_item)
                         # ce_loss[i] += self.contrast_loss(future_covs_ins,dec_out_item,round_targets_item.unsqueeze(-1))
                         # 计算标量特征损失
                         # cls_loss[i] += self.index_feature_loss(sw_index_data.squeeze(-1)[j],index_target)
@@ -377,24 +378,23 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if target_mode in [2]:
                     cls_loss[i] = cls_loss[i]/batch_size
                     ce_loss[i] = ce_loss[i]/batch_size
-                    # fds_loss[i] = fds_loss[i]/batch_size
+                    fds_loss[i] = fds_loss[i]/batch_size
                     # 板块整体损失计算,批次内样本比较
                     index_target_total = torch.stack(index_target_total)
                     target_total = torch.stack(target_total)
                     # 对目标值在批次内进行归一化
-                    index_target_total = normalization_axis(index_target_total)
+                    # index_target_total = normalization_axis(index_target_total)
                     dec_out_item = dec_out[j]
                     # fds_loss[i] += self.ccc_loss_comp(sw_index_total,target_total)    
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]           
                 if target_mode in [3]:
                     # 板块整体损失计算,批次内样本比较
                     dec_combine_total = torch.stack(dec_combine_total)
-                    sw_index_total = torch.stack(sw_index_total)
                     index_target_total = torch.stack(index_target_total)
                     # 对目标值在批次内进行归一化
                     # index_target_total = normalization_axis(index_target_total)
-                    cls_loss[i] += self.ccc_loss_comp(sw_index_total,price_index_total)
-                    ce_loss[i] = self.ccc_loss_comp(dec_combine_total,index_target_total)
+                    ce_loss[i] = ce_loss[i]/batch_size
+                    cls_loss[i] = self.ccc_loss_comp(dec_combine_total,index_target_total)
                     # ce_loss[i] += self.ccc_loss_comp(features_out_main_total,future_covs_main_total)
                     # cls_loss[i] += self.contrast_loss(features_out_main_total,index_target_total)
                     # 主任务为排序学习损失
