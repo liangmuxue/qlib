@@ -104,15 +104,14 @@ class TFTFuturesDataset(TFTSeriesDataset):
                 rolling_size = self.cut_len
             diff_range = df.groupby(group_column)[source_col].rolling(window=rolling_size).apply(rl_apply,args=(div,open_mode,)).values
             df[target_col] = diff_range  
-        compute_diff("label_ori","diff_range")
         compute_diff("VOLUME_CLOSE","VOLUME_RANGE")
         compute_diff("RSV5","rsv_diff",div=False)
         compute_diff("QTLUMA5","qtluma_diff",div=False)
-        compute_diff("QTLU5","qtlu_diff",div=True)
+        compute_diff("QTLU5","qtlu_diff")
         compute_diff("CCI5","cci_diff",div=False)
-        compute_diff("BULLS","bulls_diff",div=False,open_mode=True)
         compute_diff("SUMPMA5","sumpma_diff",div=False)
-        compute_diff("OPEN","open_diff",open_mode=True)
+        compute_diff("OPEN","open_diff")
+        compute_diff("OPEN","diff_range",open_mode=True)
         compute_diff("OPEN","open_range")
         compute_diff("CLOSE","close_range",open_mode=True)
         # 做标准化的时候，只针对训练集生成缩放对象

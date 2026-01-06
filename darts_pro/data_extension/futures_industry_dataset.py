@@ -142,7 +142,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 datetime_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["datetime_number"].values                                
                 diff_range = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["open_range"].values        
+                                    &(df_data["instrument_rank"]==code)]["open_diff"].values        
                 open_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                     &(df_data["instrument_rank"]==code)]["OPEN"].values      
                 # 对于行业或者总体指标，需要计算下属所有品种的差值的平均
@@ -608,6 +608,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 品种索引
         real_past_target = past_target_total[real_index]
         real_future_target = future_target_total[real_index]
+        ref_target = np.concatenate([real_past_target,real_future_target],1).copy()
         # 目标值逐个进行归一化,过去和未来值需要共用scaler   
         for i in range(real_past_target.shape[0]):
             real_past_target_item = real_past_target[i]
@@ -634,7 +635,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 整体目标数据拆分为过去值和目标值
         past_round_targets = round_targets[:,:self.input_chunk_length,:]
         future_round_targets = round_targets[:,self.input_chunk_length:,:]
-        
+        ref_round_target = np.concatenate([past_round_targets,future_round_targets],1).copy()
         # 行业板块数据归一化
         past_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.input_chunk_length,self.past_target_shape[-1]])
         future_index_round_targets = np.zeros([self.ins_in_indus_index.shape[0],self.output_chunk_length,self.past_target_shape[-1]])
@@ -680,23 +681,21 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                         # 过滤全部趋近于0的数据
                         if past_data_item.max()<1e-4:
                             continue
+                        past_data_scale[k,:,i] = past_data_item.squeeze(-1)
                         scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_data_item)
                         past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
                         scale_data = scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
                         future_round_targets[k,:,i] = scale_data
                     # 针对目标值，再次归一化以加速收敛                    
                     future_round_targets[index_real,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
-                # 对于数值模式，只进行一次过去未来的归一化，只进行行业内部的归一化操作
-                if (self.scale_mode[i]==1 and inner_idx!=self.main_index_rel):
+                # 对于数值模式，只进行品种间的归一化操作，不进行过去未来的归一化
+                if (self.scale_mode[i]==0 and inner_idx!=self.main_index_rel) or (self.scale_mode[i]==1 and inner_idx==self.main_index_rel):
+                    # 使用过去数值参考,进行第一次归一化
                     for k in index_real:
                         past_data_item = past_round_targets[k,:,i:i+1]
-                        # 过滤全部趋近于0的数据
-                        if past_data_item.max()<1e-4:
-                            continue
-                        scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_data_item)
-                        past_data_scale[k,:,i] = scaler.transform(past_data_item).squeeze(-1)
-                        scale_data= scaler.transform(future_round_targets[k,:,i:i+1]).squeeze(-1)
-                        future_round_targets[k,:,i] = scale_data
+                        past_data_scale[k,:,i] = past_data_item.squeeze(-1)
+                    # 针对目标值，归一化以加速收敛                    
+                    future_round_targets[index_real,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
         past_future_round_targets = np.concatenate([past_data_scale,future_round_targets],axis=1)
 
         # 如果当天没有交易，则保留空值
@@ -707,7 +706,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 价格数据的归一化
         target_info_ins = np.array(target_info_total)[real_ins_index]
         open_diff_arr = np.array([item['open_diff'] for item in target_info_ins])
-        open_diff_norm = self.create_scaler('standard').fit_transform(np.expand_dims(open_diff_arr,-1)).squeeze(-1)
+        open_diff_norm = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(np.expand_dims(open_diff_arr,-1)).squeeze(-1)
         price_targets[real_ins_index] = open_diff_norm
         # 使用均值作为整体指数参考
         long_diff_seq_targets = np.array([open_diff_arr.mean()])  

@@ -506,7 +506,7 @@ class FuturesBidiModule(MlpModule):
 
         (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info) = target 
         # 只保留最后一天的数值，作为损失目标
-        future_round_targets = past_future_round_targets[:,:, -1,:]  
+        future_round_targets = past_future_round_targets[:,:,-self.output_chunk_length:,:]  
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         return self.criterion(output, (future_target, future_covs, target_class, future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info),
