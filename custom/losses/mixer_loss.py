@@ -311,7 +311,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     if ins_rel_index.shape[0]<3:
                         continue
-                    round_targets_item_last = future_round_targets_factor[j,ins_rel_index,-1] 
+                    round_targets_item_next = future_round_targets_factor[j,ins_rel_index,self.cut_len] 
                     round_targets_item = future_round_targets_factor[j,ins_rel_index,self.cut_len-1]  
                     # 样本太少则忽略
                     if round_targets_item.shape[0]<=3:
@@ -349,7 +349,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         round_targets_item_att = future_round_targets[j,ins_rel_index,-1,ref_indicator]  
                         # 使用价格指标作为主要指标
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)  
-                        ce_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),round_targets_item_last)
+                        ce_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),round_targets_item_next)
                         fds_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index], round_targets_item_att)  
                         
                         # fds_loss[i] += self.ccc_loss_comp(sv_out_item,target_item_ins)

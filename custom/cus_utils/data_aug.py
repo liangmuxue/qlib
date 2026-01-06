@@ -237,8 +237,8 @@ class CollResAna():
         """分别找出比较准的日期和不太准的日期"""
         
         match_results = self.coll_result_data.groupby(by='date').apply(lambda x: (x['target_class'] >=2).sum())   
-        match_dates = match_results[match_results.values>=3].index.values
-        no_match_dates = match_results[match_results.values<=2].index.values
+        match_dates = match_results[match_results.values>=2].index.values
+        no_match_dates = match_results[match_results.values<2].index.values
         return  match_results, match_dates,  no_match_dates         
 
     def comprisive_stat(self):
@@ -260,6 +260,7 @@ class CollResAna():
         diff_data_total = []
         trend_data_total = []
         target_index = 0
+        att_target_index = 1
         for i in range(len(futures_dataset)):
             past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,\
@@ -268,21 +269,24 @@ class CollResAna():
             price_diff = long_diff_seq_targets[0]    
             # 取cut_len相关目标值做比较
             target_len = -output_chunk_length+cut_len-1
-            round_target = past_future_round_targets[main_index,target_len,target_index]
-            diff_range = np.array([item['diff_range'] for item in target_info_total])
-            diff_range_main = diff_range[main_index]
+            round_target = past_future_round_targets[main_index,target_len,att_target_index]
+            open_diff = np.array([item['diff_range'] for item in target_info_total])
+            diff_range_main = open_diff[main_index][:-self.output_chunk_length]
             # 优化目标值映射到价格涨跌幅数组数据空间
-            target_series = past_target_total[main_index,:,target_index]
+            target_series = past_target_total[main_index,:,att_target_index]
             round_target_series_mapped = linear_map(target_series, diff_range_main.min(), diff_range_main.max()) 
             # 取得映射后实际价格目标对应的下标，查看映射的数据和实际价格数据的相关性
             round_target_item = round_target_series_mapped[target_len]
-            round_target_ins = past_future_round_targets[instrument_index,-1,target_index]
+            trend_data_total.append([future_start_datetime,price_diff,round_target,round_target_item])  
+            
+            # 品种间的目标值和价格涨跌幅度的一致性
+            round_target_ins = past_future_round_targets[instrument_index,target_len,target_index]
             price_diff_ins = price_targets[instrument_index]
             diff_data_arr = np.stack([round_target_ins,price_diff_ins]).transpose(1,0)
             diff_data_arr = pd.DataFrame(diff_data_arr,columns=['target_round_ins','price_diff_ins'])
             corr_data = diff_data_arr[['target_round_ins','price_diff_ins']].corr().values
             diff_data_total.append([future_start_datetime,corr_data[0,1]])
-            trend_data_total.append([future_start_datetime,price_diff,round_target,round_target_item])   
+             
         # 总体趋势数据一致性
         trend_data_total = pd.DataFrame(np.array(trend_data_total),columns=['date','trend_price_diff','trend_round_target','trend_target_map'])
         trend_data_total['date'] = trend_data_total['date'].astype(int)
@@ -293,6 +297,7 @@ class CollResAna():
         # 品种间的目标值和价格涨跌幅度的一致性
         diff_data_total = pd.DataFrame(np.array(diff_data_total),columns=['date','round_price_corr'])
         print("round_price corr:\n {}".format(diff_data_total))
+        print("round_price mean:{}".format(diff_data_total['round_price_corr'].mean()))
          
     def price_range_stat(self):
         """统计价格涨跌幅度以及指标的分布情况"""
