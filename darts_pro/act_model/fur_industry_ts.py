@@ -68,6 +68,7 @@ class FurIndustryMixer(nn.Module):
         if self.target_mode==2:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
             self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
+            self.ins_att2_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
             self.dec_layer = nn.Linear(pred_len, 1)  
         if self.target_mode==3:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
@@ -92,7 +93,7 @@ class FurIndustryMixer(nn.Module):
             dec_out,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==2:
                 # 品种比对round值模式，把多预测步长转化为1个结果
-                dec_out = self.dec_layer(dec_out)     
+                dec_out = self.ins_att2_layer(cls_out.squeeze(-1)).unsqueeze(-1)   
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
                 sw_index_data = self.ins_att_layer(cls_out.squeeze(-1))   
             if self.target_mode==3:
