@@ -92,7 +92,7 @@ class FurIndustryMixer(nn.Module):
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             dec_out,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==2:
-                # dec_out = self.ins_att2_layer(cls_out.squeeze(-1)).unsqueeze(-1)   
+                dec_out = self.ins_att2_layer(cls_out.squeeze(-1)).unsqueeze(-1)   
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
                 sw_index_data = self.dec_layer(sw_index_data) 
             if self.target_mode==3:
