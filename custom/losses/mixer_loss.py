@@ -15,7 +15,7 @@ from .triplet_loss import AdaptiveSemiHardTripletLoss,ContinuousSemiHardTripletL
 from .triplet_miner import ContinuousTripletLossWithMemory,ContinuousTripletConfig
 from .contrastive_regression_loss import TripletContrastiveRegressionLoss,ContrastiveRegressionLoss,PairwiseContrastiveRegressionLoss
 from .arc_loss import RobustArcFaceRegression
-from .rank_loss import GlobalLambdaRankLoss,GlobalListwiseRankingLoss,LambdaRankLoss
+from .rank_loss import LambdaRankLoss
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from audioop import minmax
 
@@ -320,7 +320,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     future_covs_main = future_covs[i][j,main_index_abs,-1,:]
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
-                    output_main = sw_index_data[j]
                     sv_out_item = sv_out_item[ins_rel_index]
                     price_diff_range = price_targets[j,ins_rel_index]  
                     # price_diff_range = long_diff_seq_targets[j,0]  
@@ -352,7 +351,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         round_targets_item_att2 = future_round_targets[j,ins_rel_index,self.cut_len-1,ref_indicator2]    
                         # 使用价格指标作为主要指标
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)  
-                        fds_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),target_item_ins)
+                        # fds_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),target_item_ins)
                         # corr_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index], round_targets_item_att2)  
                         
                         # 计算排序损失
@@ -363,7 +362,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         top_pred_data = torch.cat([top_pred,top_pred_inverse])
                         top_target_data = torch.cat([top_target,top_target_inverse])
                         ce_loss[i] += self.ccc_loss_comp(top_pred_data, top_target_data) 
-                        
                         index_target_total.append(future_index_round_target[j,main_index,-1,ref_indicator])
                         # index_target_total.append(price_diff_arr_mean)
                         sw_index_total.append(sw_index_data[j])
@@ -372,7 +370,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         dec_out_item = dec_out[j].squeeze(-1)
                         index_target_total.append(future_index_round_target[j,main_index,:,i])
                         # index_target_total.append(future_round_targets[j,main_index_abs,i])
-                        sw_index_total.append(output_main)
+                        sw_index_total.append(sw_index_data[j])
                         dec_combine_total.append(dec_out_item)
                         ce_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
                         sv_out_total.append(sv_out_item)
@@ -391,14 +389,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cls_loss[i] = cls_loss[i]/batch_size
                     ce_loss[i] = ce_loss[i]/batch_size
                     fds_loss[i] = fds_loss[i]/batch_size
-                    corr_loss[i] = corr_loss[i]/batch_size
                     # 板块整体损失计算,批次内样本比较
                     index_target_total = torch.stack(index_target_total)
                     target_total = torch.stack(target_total)
                     # 对目标值在批次内进行归一化
-                    # index_target_total = normalization_axis(index_target_total)
-                    dec_out_item = dec_out[j]
-                    # fds_loss[i] += self.ccc_loss_comp(sw_index_total,target_total)    
+                    index_target_total = normalization_axis(index_target_total)
+                    fds_loss[i] += self.ccc_loss_comp(sw_index_total.squeeze(-1),index_target_total)
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i]           
                 if target_mode in [3]:
                     # 板块整体损失计算,批次内样本比较

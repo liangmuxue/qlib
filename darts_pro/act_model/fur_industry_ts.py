@@ -94,7 +94,7 @@ class FurIndustryMixer(nn.Module):
             if self.target_mode==2:
                 # dec_out = self.ins_att2_layer(cls_out.squeeze(-1)).unsqueeze(-1)   
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
-                sw_index_data = self.ins_att_layer(cls_out.squeeze(-1))   
+                sw_index_data = self.dec_layer(sw_index_data) 
             if self.target_mode==3:
                 # 生成单指数预测时间序列数据
                 dec_out = self.index_combine_layer(dec_out.permute(0,2,1))
