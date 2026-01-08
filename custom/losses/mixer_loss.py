@@ -232,6 +232,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # self.contrast_loss = PairwiseContrastiveRegressionLoss(device=self.device)
         # self.rank_loss = GlobalLambdaRankLoss(reduction='none')
         self.rank_loss = LambdaRankLoss()
+        self.rank_loss_inverse = LambdaRankLoss()
 
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):
         """根据实际涨跌数据计算类别"""
@@ -355,13 +356,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # corr_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index], round_targets_item_att2)  
                         
                         # 计算排序损失
-                        top_pred, top_pred_index = torch.topk(sv_out_item, k=top_num, dim=0)
-                        top_pred_inverse, top_pred_inverse_index = torch.topk(sv_out_item, k=top_num, largest=False, dim=0)
-                        top_target = torch.gather(round_targets_item, 0, top_pred_index)
-                        top_target_inverse = torch.gather(round_targets_item, 0, top_pred_inverse_index)
-                        top_pred_data = torch.cat([top_pred,top_pred_inverse])
-                        top_target_data = torch.cat([top_target,top_target_inverse])
-                        ce_loss[i] += self.ccc_loss_comp(top_pred_data, top_target_data) 
+                        # top_pred, top_pred_index = torch.topk(sv_out_item, k=top_num, dim=0)
+                        # top_pred_inverse, top_pred_inverse_index = torch.topk(sv_out_item, k=top_num, largest=False, dim=0)
+                        # top_target = torch.gather(round_targets_item, 0, top_pred_index)
+                        # top_target_inverse = torch.gather(round_targets_item, 0, top_pred_inverse_index)
+                        # top_pred_data = torch.cat([top_pred,top_pred_inverse])
+                        # top_target_data = torch.cat([top_target,top_target_inverse])
+                        ce_loss[i] += self.rank_loss(sv_out_item.unsqueeze(0),round_targets_item.unsqueeze(0)) + \
+                            self.rank_loss_inverse(-sv_out_item.unsqueeze(0),-round_targets_item.unsqueeze(0))
+                        # ce_loss[i] += self.ccc_loss_comp(top_pred_data, top_target_data) 
                         index_target_total.append(future_index_round_target[j,main_index,-1,ref_indicator])
                         # index_target_total.append(price_diff_arr_mean)
                         sw_index_total.append(sw_index_data[j])

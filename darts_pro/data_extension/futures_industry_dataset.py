@@ -692,7 +692,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             future_index_round_targets[i] = indus_future_round
             
         for i in range(self.past_target_shape[-1]):
-            if self.scale_mode[i] in [0,5]:
+            if self.scale_mode[i] in [2]:
                 # 分行业归一化
                 scaler = self.create_scaler(feature_range=(1e-5, 1)).fit(past_index_round_targets[...,i].transpose(1,0)) 
                 past_index_round_targets[...,i] = scaler.transform(past_index_round_targets[...,i].transpose(1,0)).transpose(1,0)
@@ -700,7 +700,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 
         # 统合归一化所有行业板块的整体预测数值
         for i in range(self.past_target_shape[-1]):
-            if self.scale_mode[i] in [0]:
+            if self.scale_mode[i] in [1,2]:
                 future_index_round_targets[self.indus_rel_index,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_index_round_targets[self.indus_rel_index,:,i])
         # 合并过去行业整体数值的归一化形态，与未来目标数值的单独形态
         index_round_targets = np.concatenate([past_index_round_targets,future_index_round_targets],axis=1)
