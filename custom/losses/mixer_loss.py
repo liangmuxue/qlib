@@ -339,20 +339,31 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         dec_out_item = dec_out[j,ins_rel_index].squeeze(-1)
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         # 借用1号目标作为整体走势衡量
-                        ref_indicator = 1                    
+                        ref_indicator = 1 
+                        ref_indicator2 = 2                   
                         target_item = target[j,main_index_abs,:,ref_indicator]
+                        target_item_ins = target[j,ins_rel_index,:,ref_indicator]
                         target_total.append(target_item)                        
                         # 所有品种的目标阶段涨跌幅
                         price_diff_range_ins = np.array([self.compute_diff_range_class(item)[0] for item in target_info_item])
                         price_diff_range_ins = torch.Tensor(price_diff_range_ins).to(self.device) 
                         price_diff_range_ins = normalization_axis(price_diff_range_ins)
-                        round_targets_item_att = future_round_targets[j,ins_rel_index,-1,ref_indicator]  
+                        round_targets_item_att = future_round_targets[j,ins_rel_index,self.cut_len-1,ref_indicator]
+                        round_targets_item_att2 = future_round_targets[j,ins_rel_index,self.cut_len-1,ref_indicator2]    
                         # 使用价格指标作为主要指标
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)  
-                        ce_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),round_targets_item_next)
-                        fds_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index], round_targets_item_att)  
+                        fds_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),target_item_ins)
+                        # corr_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index], round_targets_item_att2)  
                         
-                        # fds_loss[i] += self.ccc_loss_comp(sv_out_item,target_item_ins)
+                        # 计算排序损失
+                        top_pred, top_pred_index = torch.topk(sv_out_item, k=top_num, dim=0)
+                        top_pred_inverse, top_pred_inverse_index = torch.topk(sv_out_item, k=top_num, largest=False, dim=0)
+                        top_target = torch.gather(round_targets_item, 0, top_pred_index)
+                        top_target_inverse = torch.gather(round_targets_item, 0, top_pred_inverse_index)
+                        top_pred_data = torch.cat([top_pred,top_pred_inverse])
+                        top_target_data = torch.cat([top_target,top_target_inverse])
+                        ce_loss[i] += self.ccc_loss_comp(top_pred_data, top_target_data) 
+                        
                         index_target_total.append(future_index_round_target[j,main_index,-1,ref_indicator])
                         # index_target_total.append(price_diff_arr_mean)
                         sw_index_total.append(sw_index_data[j])
@@ -380,6 +391,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cls_loss[i] = cls_loss[i]/batch_size
                     ce_loss[i] = ce_loss[i]/batch_size
                     fds_loss[i] = fds_loss[i]/batch_size
+                    corr_loss[i] = corr_loss[i]/batch_size
                     # 板块整体损失计算,批次内样本比较
                     index_target_total = torch.stack(index_target_total)
                     target_total = torch.stack(target_total)

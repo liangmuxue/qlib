@@ -32,6 +32,49 @@ from cus_utils.log_util import AppLogger
 from torch._jit_internal import ignore
 logger = AppLogger()
 
+def time_series_augment(x, aug_type='gaussian_noise'):
+    """
+    x: 输入时序数据，shape=(batch_size, seq_len, input_dim)
+    aug_type: 增强类型，可选['gaussian_noise', 'time_warp', 'amplitude_scaling']
+    """
+    x_aug = x.copy()
+    batch_size, seq_len, input_dim = x_aug.shape
+    
+    if aug_type == 'gaussian_noise':
+        # 高斯噪声注入：标准差为序列自身标准差的8%
+        noise = np.random.normal(loc=0, scale=x.std() * 0.08, size=x.shape)
+        x_aug += noise
+    
+    elif aug_type == 'time_warp':
+        # 时间扭曲：随机选择一个区间拉伸/压缩
+        warp_factor = np.random.uniform(0.8, 1.2)  # 扭曲系数
+        warp_start = np.random.randint(0, seq_len//2)
+        warp_end = np.random.randint(seq_len//2, seq_len)
+        warp_len = warp_end - warp_start
+        new_warp_len = int(warp_len * warp_factor)
+        
+        # 插值调整扭曲区间的长度
+        for b in range(batch_size):
+            for d in range(input_dim):
+                warp_segment = x_aug[b, warp_start:warp_end, d].numpy()
+                new_warp_segment = np.interp(
+                    np.linspace(0, warp_len-1, new_warp_len),
+                    np.arange(warp_len),
+                    warp_segment
+                )
+                # 截断/填充到原长度
+                if new_warp_len > warp_len:
+                    x_aug[b, warp_start:warp_end, d] = torch.tensor(new_warp_segment[:warp_len])
+                else:
+                    pad_len = warp_len - new_warp_len
+                    x_aug[b, warp_start:warp_end-pad_len, d] = torch.tensor(new_warp_segment)
+    
+    elif aug_type == 'amplitude_scaling':
+        # 幅值缩放：每个样本随机缩放
+        scale = torch.FloatTensor(batch_size, 1, 1).uniform_(0.8, 1.2)
+        x_aug *= scale
+    
+    return x_aug
 
 class FuturesIndustryDataset(GenericShiftedDataset):
     """期货数据整合行业板块数据，形成多重数据架构"""
@@ -717,7 +760,13 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         #     with open(result_file_path, "wb") as fout:
         #         pickle.dump(results, fout)    
         #     print("ggg")  
-                
+        
+        # Using Data Augment
+        # if self.mode=="train":
+        #     past_target_total = time_series_augment(past_target_total)
+        #     past_covariate_total = time_series_augment(past_covariate_total)
+        #     past_future_round_targets = time_series_augment(past_future_round_targets)
+        
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
                             

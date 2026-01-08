@@ -30,6 +30,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
 TRACK_DATE = [20250512, 20250528, 20250522]
+TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240731, 20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
@@ -336,20 +337,24 @@ class FuturesBidiModule(MlpModule):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
             loss, detail_loss = self._compute_loss((output, vr_class, tar_class),
                             (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=i)
-            (corr_loss_combine, ce_loss, fds_loss, cls_loss, _) = detail_loss 
+            (corr_loss, ce_loss, fds_loss, cls_loss, _) = detail_loss 
             if cls_loss[i] != 0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             if ce_loss[i] != 0:
                 self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             if fds_loss[i] != 0:
-                self.log("train_fds_loss_{}".format(i), fds_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)               
-            self.loss_data.append((corr_loss_combine.detach(), ce_loss.detach(), fds_loss.detach(), cls_loss.detach()))
+                self.log("train_fds_loss_{}".format(i), fds_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)       
+            if corr_loss[i] != 0:
+                self.log("train_corr_loss_{}".format(i), corr_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)                        
+            self.loss_data.append((corr_loss.detach(), ce_loss.detach(), fds_loss.detach(), cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
             if len(self.task_weights) == 3:
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i]])
             elif len(self.task_weights) == 2:
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i]])
+            elif len(self.task_weights) == 4:
+                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i]])                
             else:
                 # 对于三元组损失，有可能没有样例，会返回0，需要忽略
                 if cls_loss[i] == 0:
@@ -362,12 +367,14 @@ class FuturesBidiModule(MlpModule):
                 # total_loss = total_loss + update_info["total_loss"]
                 # 当前总梯度和分量梯度
                 if "conflict_analysis" in update_info:
-                    self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=True)
-                    self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=True)
+                    self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
+                    self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
                     if len(self.task_weights) > 2:
-                        self.log("task_grad_norm_fds", update_info["task_grad_norms"][2], batch_size=train_batch[0].shape[0], prog_bar=True)
-                    self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
-                    self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
+                        self.log("task_grad_norm_fds", update_info["task_grad_norms"][2], batch_size=train_batch[0].shape[0], prog_bar=False)
+                    if len(self.task_weights) > 3:
+                        self.log("task_grad_norm_corr", update_info["task_grad_norms"][3], batch_size=train_batch[0].shape[0], prog_bar=False)                        
+                    # self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
+                    # self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
                 # self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
                 # self.log("ce_similarity", update_info["conflict_analysis"]["ce_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=True) 
             else:
@@ -430,7 +437,7 @@ class FuturesBidiModule(MlpModule):
         # 全部损失
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
                     (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=-1)
-        (corr_loss_combine, ce_loss, fds_loss, cls_loss, predictions) = detail_loss
+        (corr_loss, ce_loss, fds_loss, cls_loss, predictions) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
         preds_combine = []
         for i in range(1):
@@ -440,7 +447,8 @@ class FuturesBidiModule(MlpModule):
                 self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             if fds_loss[i] != 0 and len(self.task_weights) > 2:
                 self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)                
-            # self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+            if corr_loss[i] != 0 and len(self.task_weights) > 3:
+                self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)   
         
         output_combine = (output, vr_class, price_targets, past_future_round_targets)
         return loss, detail_loss, output_combine       
