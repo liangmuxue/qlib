@@ -521,7 +521,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_class_total = target_class_total.astype(np.int8)
         round_targets = np.zeros([self.total_instrument_num,self.input_chunk_length + self.output_chunk_length,self.past_target_shape[-1]])
         long_diff_targets = np.zeros([self.total_instrument_num,self.input_chunk_length,self.past_target_shape[-1]])
-        price_targets = np.zeros([self.total_instrument_num])
+        price_targets = np.zeros([self.total_instrument_num+1])
         
         ########### 生成行业数据 #########
         sw_date_mapping = self.date_mappings_ext[idx]
@@ -641,7 +641,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             target_class_total[keep_index] = p_target_class
 
         # 重新计算指数价格幅度，取平均值
-        target_info_total_effect = np.array(target_info_total)[target_class_total>=0][self.instrument_index]
+        target_info_total_effect = np.array(target_info_total)[self.instrument_index][target_class_total[self.instrument_index]>=0]
         diff_range_all = np.stack([t['diff_range'] for t in target_info_total_effect])
         target_info_total[self.main_index]['diff_range'] = np.mean(diff_range_all,0)
         
@@ -753,7 +753,10 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         price_targets[real_ins_index] = open_diff_norm
         # 使用均值作为整体指数参考
         long_diff_seq_targets = np.array([open_diff_arr.mean()])  
-        # if future_start_datetime==20250812:
+        # 记录涨跌品种数量比例，用于整体趋势损失
+        target_info_total[self.main_index]['long_ins_num'] = np.sum(open_diff_arr>0)
+        
+        # if future_start_datetime==20250512:
         #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
         #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]

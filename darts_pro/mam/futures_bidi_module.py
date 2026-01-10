@@ -20,7 +20,8 @@ from darts_pro.act_model.fur_industry_ts import FurIndustryMixer, FurStrategy
 from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from .multiTask_optimizer import MultiTaskOptimizer
-from cus_utils.common_compute import compute_price_class, pairwise_compare, scale_multiple_series
+from cus_utils.common_compute import compute_price_class, pairwise_compare, scale_multiple_series,\
+    normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
 
@@ -29,8 +30,9 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-TRACK_DATE = [20250512, 20250528, 20250522]
-TRACK_DATE = [20250312, 20250328, 20250322]
+TRACK_DATE = [20250512, 20250528, 20250522, 20250428, 20250620]
+TRACK_DATE = [item for item in range(20250512,20250530)]
+# TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240731, 20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
@@ -449,7 +451,12 @@ class FuturesBidiModule(MlpModule):
                 self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)                
             if corr_loss[i] != 0 and len(self.task_weights) > 3:
                 self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)   
-        
+
+        # # 计算整体趋势判断准确率
+        # total_match_cnt,match_rate = self.compute_trend_acc(output,price_targets,target_info=target_info,top_num=self.top_num)
+        # self.log("match_rate", match_rate, batch_size=val_batch[0].shape[0], prog_bar=True)   
+
+                
         output_combine = (output, vr_class, price_targets, past_future_round_targets)
         return loss, detail_loss, output_combine       
 
@@ -583,6 +590,7 @@ class FuturesBidiModule(MlpModule):
             
             for index in range(target_class_3d.shape[0]):
             
+                sw_index_cur = sw_index[index,0]
                 viz_total_size += 1
                 target_class_item = target_class_3d[index]
                 keep_index = np.where(target_class_item >= 0)[0]
@@ -609,7 +617,7 @@ class FuturesBidiModule(MlpModule):
                     ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output, -1)).squeeze(-1)
                     dec_output_item = dec_output[index,:,:, j]
                     # dec_output_item = dec_output[index,inner_index,-1,j] 
-                    fur_round_target = round_targets[instruments, -1, j]
+                    fur_round_target = round_targets[instruments, -self.output_chunk_length+self.cut_len-1, j]
                     price_targets = price_targets_total[index, instruments]
                     # 品种比对图
                     if j in DRAW_SEQ_DETAIL:
@@ -629,7 +637,8 @@ class FuturesBidiModule(MlpModule):
                         win = "detail_target_{}_{}=".format(j, viz_total_size)
                         index_target = round_targets[main_index, -1, j]
                         index_output = dec_output_item[-1, -1]
-                        target_title = "Detail_{}_{}_{},date:{}".format(round(index_price, 3), round(index_target, 3), round(index_output, 3), date)  
+                        trend_value = ts_arr[main_index]['trend_value']
+                        target_title = "Detail_{}_{}_{},date:{}".format(round(index_price, 3), round(index_target, 3), round(trend_value, 3), date)  
                         # target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(dec_output_mean,3),date)  
                         viz_result_detail.viz_bar_compare(view_data, win=win, title=target_title, rownames=name_arr, legends=["pred_cls", "target", "price"])
                     # 品种走势图,所有候选的目标走势和价格走势
@@ -768,10 +777,16 @@ class FuturesBidiModule(MlpModule):
         industry_index_proxy = [main_index] if self.target_mode[0] in [3, 6] else industry_index
         # 按照时间索引暂存预测数据，用于全局化共享使用
         glo_match_data = []
+        ref_output_index = 0
         for i in range(target_class_3d.shape[0]):
             target_class_list = target_class_3d[i]
             target_info_list = target_info_3d[i]
             ce_index = [item[i] for item in output_3d[3]]
+            # 根据区间多段预测，取得关注段数值在整个区间的相对数值
+            sw_index_value = output_3d[3][ref_output_index][i].squeeze(-1)
+            sw_index_value_nor = normalization_axis(sw_index_value)       
+            focus_value = sw_index_value_nor[self.cut_len-1]     
+            target_info_list[main_index]['trend_value'] = focus_value
             # 根据配置，决定针对行业数据进行处理还是针对整体指数数据进行处理
             for j, indus_index in enumerate(industry_index_proxy):
                 target_info = target_info_list[indus_index]
@@ -863,12 +878,12 @@ class FuturesBidiModule(MlpModule):
 
         if predict_mode:
             return result_date_list      
-                        
+        
         # 统合计算准确率数值
         rate_columns = ["total_cnt", "yield_rate", "win_rate"]    
         rate_total = [result_total_list.shape[0],
                       round(result_total_list['diff_range'].sum(), 3),
-                      round(np.sum(result_total_list['diff_range'] > 0) / result_total_list.shape[0], 3)
+                      round(np.sum(result_total_list['diff_range'] > 0) / result_total_list.shape[0], 3),
                       ]
         rate_total = pd.DataFrame(np.array([rate_total]), columns=rate_columns)
         for i in range(4):
@@ -879,7 +894,35 @@ class FuturesBidiModule(MlpModule):
             return None, None
         
         return rate_total, result_total_list
-            
+    
+    def compute_trend_acc(self,outputs,price_targets,target_info=None,top_num=3,appro_num_rate=0.6):
+        """评估整体趋势判断"""
+        
+        total_data = []
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+        ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        total_ins_num = ins_all.shape[0]
+        appro_num = total_ins_num * appro_num_rate
+        ref_output_index = 0
+        for i in range(price_targets.shape[0]):
+            # 使用整体趋势预测指标，取得排名靠前的结果判断为多方，排名靠后的结果判断为空方，通过和整体价格涨跌幅度的对比，评估多空的准确度
+            open_diff_arr = np.array([item['open_diff'] for item in target_info[i]])
+            trend_long_num = np.sum(open_diff_arr[ins_all]>0)
+            trend_short_num = np.sum(open_diff_arr[ins_all]<=0)
+            sw_index_value = outputs[ref_output_index][2][i].squeeze(-1).item()
+            # 根据区间多段预测，取得关注段数值在整个区间的相对数值
+            total_data.append([sw_index_value,trend_long_num,trend_short_num])
+        
+        total_data = pd.DataFrame(np.array(total_data),columns=['pred_trend','tar_long_num','tar_short_num']).astype(
+            {"pred_trend":float,"tar_long_num":int,"tar_short_num":int})   
+        # 判断多方或空方预测的数据对应的品种上涨或下跌数量是否超出阈值
+        top_long_data = total_data.sort_values(by="pred_trend",ascending=False).iloc[:top_num]
+        top_short_data = total_data.sort_values(by="pred_trend").iloc[:top_num]
+        total_match_cnt = np.sum(top_long_data['tar_long_num']>=appro_num) + np.sum(top_short_data['tar_short_num']>=appro_num)
+        match_rate = total_match_cnt/(2*top_num)
+        return total_match_cnt,match_rate
+      
     def build_import_index(self, date=None, pred_top_num=2, output_data=None, target=None, price_target=None, target_info=None,
                            combine_instrument=None, index_round_targets=None): 
         """生成涨幅达标的预测数据下标"""
@@ -899,24 +942,39 @@ class FuturesBidiModule(MlpModule):
 
     def strategy_main_index(self, ce, cls, dec_out, pred_top_num=2, target=None, target_info=None, index_round_targets=None, combine_instrument=None):
         """衡量指数数据"""
-        
-        main_index_feature = dec_out[..., -1]                        
+
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)        
+        main_index_feature = target_info[main_index]['trend_value']           
+        return main_index_feature
     
     def strategy_top_bidi(self, ce, cls, dec_out, pred_top_num=2, target=None, target_info=None, index_round_targets=None, combine_instrument=None):
         """筛选品种明细,使用双向模式"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)        
+        trend_value = target_info[main_index]['trend_value']              
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
-        top_num = pred_top_num
         cancidate_list = []
         mode = 'single'
         # 同时从正反2个方向选取品种
-        pre_index = self.compute_arg_sort(cls, dec_out, mode=mode, trend=1, top_num=top_num)
-        for i in range(top_num): 
+        if trend_value>0.8:
+            # 如果整体趋势看涨，则增加多方候选数量
+            top_num_long = pred_top_num + 1
+            top_num_short = pred_top_num - 1
+        elif trend_value<0.2:
+            # 如果整体趋势看跌，则增加空方候选数量
+            top_num_short = pred_top_num + 1
+            top_num_long = pred_top_num - 1
+        else:
+            top_num_long = pred_top_num
+            top_num_short = pred_top_num
+        pre_index = self.compute_arg_sort(cls, dec_out, mode=mode, trend=1, top_num=top_num_long)
+        for i in range(top_num_long): 
             import_index_real = ins_all[pre_index[i]]
             cancidate_list.append([import_index_real, 1])    
-        pre_index = self.compute_arg_sort(cls, dec_out, mode=mode, trend=0, top_num=top_num)
-        for i in range(top_num): 
+        pre_index = self.compute_arg_sort(cls, dec_out, mode=mode, trend=0, top_num=top_num_short)
+        for i in range(top_num_short): 
             import_index_real = ins_all[pre_index[i]]
             cancidate_list.append([import_index_real, 0])                          
         

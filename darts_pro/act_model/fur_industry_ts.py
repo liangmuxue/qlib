@@ -69,10 +69,10 @@ class FurIndustryMixer(nn.Module):
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
             self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
             self.ins_att2_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
-            self.dec_layer = nn.Linear(pred_len, 1)  
+            self.dec_layer = LinelessLayer(pred_len,1,hidden_size=hidden_size,layer_norm=False,batch_norm=False,dropout=0.3) 
         if self.target_mode==3:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
-            self.step_scale_layer = LinelessLayer(pred_len,cut_len,hidden_size=hidden_size,layer_norm=True,batch_norm=False)
+            self.step_scale_layer = LinelessLayer(pred_len,1,hidden_size=hidden_size,layer_norm=False,batch_norm=False)
         if self.target_mode in [6]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.shape[0],1)
 
@@ -90,14 +90,15 @@ class FurIndustryMixer(nn.Module):
             x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
-            dec_out,cls_out,sw_index_data = m(x_inner)
+            dec_out_ori,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==2:
-                dec_out = self.ins_att2_layer(cls_out.squeeze(-1)).unsqueeze(-1)   
+                # dec_out = self.ins_att2_layer(cls_out.squeeze(-1)).unsqueeze(-1)   
+                dec_out = self.dec_layer(dec_out_ori) 
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
-                sw_index_data = self.dec_layer(sw_index_data) 
+                sw_index_data = self.index_combine_layer(dec_out_ori.permute(0,2,1))
             if self.target_mode==3:
                 # 生成单指数预测时间序列数据
-                dec_out = self.index_combine_layer(dec_out.permute(0,2,1))
+                dec_out = self.index_combine_layer(dec_out_ori.permute(0,2,1))
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))     
                 sw_index_data = self.step_scale_layer(sw_index_data)     
             elif self.target_mode==5:

@@ -43,7 +43,11 @@ def compute_bidirectional_lambdas(y_true, y_score, k=3):
             s_ij = 1 if y_true[i] > y_true[j] else -1
             lambdas_forward[i] += 0.5 * delta_ndcg * s_ij
             lambdas_forward[j] -= 0.5 * delta_ndcg * s_ij
-    
+
+    # 优化：对前k名候选的lambda额外加权（强制区分核心候选）
+    top_k_true_indices = np.argsort(y_true)[::-1][:k]
+    lambdas_forward[top_k_true_indices] *= 2.0  # 前k名lambda权重翻倍
+        
     # 2. 计算反向lambda（劣→优）
     lambdas_backward = np.zeros(n)
     ndcg_backward_base = reverse_ndcg_score(y_true, y_score, k)
@@ -60,17 +64,23 @@ def compute_bidirectional_lambdas(y_true, y_score, k=3):
             s_ij_rev = 1 if y_true_rev[i] > y_true_rev[j] else -1
             lambdas_backward[i] += 0.5 * delta_ndcg * s_ij_rev
             lambdas_backward[j] -= 0.5 * delta_ndcg * s_ij_rev
-    
-    # 3. 双向lambda：正向 + 反向（加权平衡，可调整alpha）
+
+    # 优化：对前k名候选的lambda额外加权（强制区分核心候选）
+    top_k_true_indices = np.argsort(-y_true)[::-1][:k]
+    lambdas_backward[top_k_true_indices] *= 2.0  # 前k名lambda权重翻倍
+
+            
+    # 双向lambda：正向 + 反向（加权平衡，可调整alpha）
     alpha = 0.5  # 正向/反向权重，总和为1
     lambdas_bi = alpha * lambdas_forward + (1 - alpha) * lambdas_backward
     return lambdas_bi
 
 # -------------------------- 2. 定义双向LambdaRank Loss类 --------------------------
 class BidirectionalLambdaRankLoss(nn.Module):
-    def __init__(self, k=3):
+    def __init__(self, k=3,temperature=0.1):
         super().__init__()
         self.k = k  # 关注前k名的排序质量
+        self.temperature = temperature  # 温度系数，越小分数分布越分散
     
     def forward(self, pred_scores, y_true):
         """
@@ -90,9 +100,20 @@ class BidirectionalLambdaRankLoss(nn.Module):
             # 计算双向lambda值
             lambdas_bi = compute_bidirectional_lambdas(true_np, scores_np, self.k)
             lambdas_bi = torch.tensor(lambdas_bi, dtype=torch.float32, device=pred_scores.device)
+
+            # 关键改进1：对分数做softmax归一化（强制拉开分布，避免均值）
+            # temperature越小，分数差异越明显
+            pred_softmax = torch.softmax(pred_scores[i] / self.temperature, dim=0)
             
-            # 双向损失计算：lambda值 * 对数损失项（约束排序方向）
-            loss = torch.sum(lambdas_bi * torch.log(1 + torch.exp(-pred_scores[i])))
+            # 关键改进2：替换损失项（用交叉熵形式，梯度更陡峭，避免饱和）
+            # lambda值加权的交叉熵损失，强制高lambda候选的分数更高
+            loss = -torch.sum(lambdas_bi * torch.log(pred_softmax + 1e-8))  # +1e-8避免log(0)
+            
+            # 额外约束：分数方差惩罚（强制分数分布分散，避免均值）
+            score_var = torch.var(pred_scores[i])
+            var_penalty = 1.0 - score_var  # 方差越小，惩罚越大
+            loss += 0.1 * var_penalty  # 惩罚权重可调整
+                                    
             batch_loss += loss
         
         return batch_loss / batch_size

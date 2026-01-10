@@ -162,6 +162,7 @@ class LinelessLayer(nn.Module):
         self.linear_hidden = nn.Linear(input_num, hidden_size)
         self.linear_output = nn.Linear(hidden_size, output_num)
         self.relu = nn.GELU() 
+        # self.relu = nn.ReLU() 
         self.batch_norm = batch_norm
         self.output_num = output_num
         self.dropout_value = dropout

@@ -283,7 +283,7 @@ class MultiTaskOptimizer(Adam):
         # adjusted_gradients = self._compute_auto_weights(task_losses, helpfulness, all_gradients)
         # 应用梯度手术,合并梯度
         if self.use_pcgrad:
-            pc_grad(gradient_components, main_task_seq_arr=[2])
+            pc_grad(gradient_components, main_task_seq_arr=[1,2])
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components,)
         # 统计梯度范数

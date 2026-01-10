@@ -171,6 +171,45 @@ def normalization_axis(data,res=1e-5,avoid_zero=True,axis=0):
         rtn = rtn + res  
     return rtn
 
+def normalization_standard(x, dim=-1, eps=1e-8, weight=None, bias=None, clamp_range=None):
+    """
+    自定义标准化函数（支持加权均值、维度指定、值域截断）
+    :param x: 输入张量 (batch_size, ..., n_features/n_candidates)
+    :param dim: 计算均值/方差的维度（排序任务中设为-1，对每个样本的候选者维度标准化）
+    :param eps: 避免除零的极小值
+    :param weight: 可选的缩放权重（可学习，类似BatchNorm的gamma）
+    :param bias: 可选的偏移权重（可学习，类似BatchNorm的beta）
+    :param clamp_range: 标准化后的值域截断（如(0.01, 0.99)，避免极端值）
+    :return: 标准化后的张量
+    """
+    # 1. 计算自定义均值（支持加权，无权重则为普通均值）
+    if weight is not None:
+        # 加权均值：适用于对重要特征/候选者赋予更高权重
+        weighted_x = x * weight
+        mu = torch.sum(weighted_x, dim=dim, keepdim=True) / torch.sum(weight, dim=dim, keepdim=True)
+    else:
+        # 普通均值（按指定维度）
+        mu = torch.mean(x, dim=dim, keepdim=True)
+    
+    # 2. 计算自定义标准差（无偏方差）
+    var = torch.var(x, dim=dim, keepdim=True, unbiased=True)
+    sigma = torch.sqrt(var + eps)
+    
+    # 3. 标准化核心计算
+    x_norm = (x - mu) / sigma
+    
+    # 4. 可选：缩放+偏移（模拟BatchNorm的可学习参数）
+    if weight is not None:
+        x_norm = x_norm * weight
+    if bias is not None:
+        x_norm = x_norm + bias
+    
+    # 5. 可选：值域截断（避免极端值，增强稳定性）
+    if clamp_range is not None:
+        x_norm = torch.clamp(x_norm, min=clamp_range[0], max=clamp_range[1])
+    
+    return x_norm
+
 def normalization_except_outlier(x):
     """归一化并可以兼顾处理离群值"""
     
@@ -571,6 +610,24 @@ def scale_multiple_series(data):
     result_main = MinMaxScaler().fit_transform(np.expand_dims(result_main,-1)).squeeze(-1)
     return result,result_main
 
+def all_elements_same(tensor, eps=1e-6):
+    """
+    判断张量内所有元素是否为同一个值
+    :param tensor: 输入PyTorch张量
+    :param eps: 浮点数精度容错（整数设为0）
+    :return: bool，True表示所有元素相同
+    """
+    if tensor.numel() == 1:  # 只有1个元素，默认相同
+        return True
+    
+    # 取第一个元素作为基准
+    base = tensor.flatten()[0]
+    
+    # 浮点数用绝对值差判断，整数直接相等判断
+    if tensor.dtype in (torch.float16, torch.float32, torch.float64):
+        return torch.all(torch.abs(tensor - base) < eps).item()
+    else:
+        return torch.all(tensor == base).item()
 
 def linear_map(arr, new_min, new_max):
     """线性映射到新范围"""
