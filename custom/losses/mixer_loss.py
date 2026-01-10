@@ -189,13 +189,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 比较全部品种，辅助整体指数比较
                         # target_len = -1
                         target_len = -self.output_chunk_length + self.cut_len - 1
-                        dec_out_item = dec_out[j].squeeze(-1)[ins_rel_index]
+                        dec_out_item = dec_out[j,:,0][ins_rel_index]
+                        dec_out_item_att = dec_out[j,:,1][ins_rel_index]
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         # 使用价格指标作为主要指标
-                        ccc_loss = self.ccc_loss_comp(sv_out_item,round_targets_item)   
+                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)   
                         # 计算top损失
-                        top_loss = self.compute_top_loss(sv_out_item, round_targets_item, top_num=top_num)
-                        cls_loss[i] += (ccc_loss + top_loss)                                           
+                        ce_loss[i] += self.compute_top_loss(sv_out_item, round_targets_item, top_num=top_num)
                         # 借用1号目标作为整体走势衡量
                         ref_indicator = 1 
                         ref_indicator2 = 2                   
@@ -213,13 +213,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # price_diff_main_futures = normalization_standard(price_diff_main_futures)
                         # top_loss = self.compute_top_loss(dec_out_item, price_diff_main_futures, top_num=2)
                         round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,ref_indicator]
-                        # round_targets_item_att2 = future_round_targets[j,ins_rel_index,self.cut_len-1,ref_indicator2]    
-                        ce_loss[i] += self.ccc_loss_comp(dec_out_item,round_targets_item_att)
-                        fds_loss[i] += self.ccc_loss_comp(sw_index_data[j].squeeze(-1),target_item)
-                        # corr_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index], round_targets_item_att2)  
-                        # ce_loss[i] += self.rank_loss(dec_out_item.unsqueeze(0),round_targets_item.unsqueeze(0))/100
+                        round_targets_item_att2 = future_round_targets[j,ins_rel_index,-1,ref_indicator2]    
+                        fds_loss[i] += self.ccc_loss_comp(dec_out_item,round_targets_item_att)
+                        # fds_loss[i] += self.ccc_loss_comp(sw_index_data[j].squeeze(-1),target_item)
+                        # corr_loss[i] += self.ccc_loss_comp(dec_out_item_att, round_targets_item_att2)  
                         index_target_total.append(future_index_round_target[j,main_index,target_len,ref_indicator])
-                        # index_target_total.append(price_diff_arr_mean)
                         sw_index_total.append(sw_index_data[j])
                     elif target_mode==3:
                         ref_indicator = 1 
@@ -243,6 +241,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cls_loss[i] = cls_loss[i]/batch_size
                     ce_loss[i] = ce_loss[i]/batch_size
                     fds_loss[i] = fds_loss[i]/batch_size
+                    corr_loss[i] = corr_loss[i]/batch_size
                     # 板块整体损失计算,批次内样本比较
                     index_target_total = torch.stack(index_target_total)
                     target_total = torch.stack(target_total)
@@ -256,7 +255,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     # index_loss = self.ccc_loss_comp(sw_index_total.squeeze(-1),long_ins_num)
                     # top_loss = self.compute_top_loss(sw_index_total.squeeze(-1), long_ins_num, top_num=3)
                     # fds_loss[i] += (index_loss + top_loss)                    
-                    loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i]   
+                    loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
                           
                 if target_mode in [3]:
                     # 板块整体损失计算,批次内样本比较
