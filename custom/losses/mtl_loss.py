@@ -418,9 +418,10 @@ class UncertaintyLoss(nn.Module):
         numerator = 2*cor*sd_true*sd_pred
         mse_part = self.mse_dis(input_with_dims,target_with_dims)
         denominator = var_true + var_pred + mse_part
-        if denominator==0:
+        if len(input_ori.shape)==1 and denominator==0:
             return torch.tensor(0.0).to(numerator.device) 
-        ccc = numerator/denominator
+        compli_index = torch.where(denominator!=0)[0]
+        ccc = numerator/denominator[compli_index]
         ccc_loss = 1 - ccc
         return ccc_loss     
     

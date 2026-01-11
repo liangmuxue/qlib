@@ -31,7 +31,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
 TRACK_DATE = [20250512, 20250528, 20250522, 20250428, 20250620]
-TRACK_DATE = [item for item in range(20250512,20250530)]
+TRACK_DATE = [item for item in range(20250225,20250315)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240731, 20260731]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
@@ -783,10 +783,9 @@ class FuturesBidiModule(MlpModule):
             target_info_list = target_info_3d[i]
             ce_index = [item[i] for item in output_3d[3]]
             # 根据区间多段预测，取得关注段数值在整个区间的相对数值
-            sw_index_value = output_3d[3][ref_output_index][i].squeeze(-1)
-            sw_index_value_nor = normalization_axis(sw_index_value)       
-            focus_value = sw_index_value_nor[self.cut_len-1]     
-            target_info_list[main_index]['trend_value'] = focus_value
+            sw_index = output_3d[3][ref_output_index][i]
+            sw_index_nor = normalization_axis(sw_index)      
+            target_info_list[main_index]['trend_value'] = sw_index_nor[self.cut_len-1]
             # 根据配置，决定针对行业数据进行处理还是针对整体指数数据进行处理
             for j, indus_index in enumerate(industry_index_proxy):
                 target_info = target_info_list[indus_index]
@@ -947,8 +946,28 @@ class FuturesBidiModule(MlpModule):
         main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)        
         main_index_feature = target_info[main_index]['trend_value']           
         return main_index_feature
-    
+
     def strategy_top_bidi(self, ce, cls, dec_out, pred_top_num=2, target=None, target_info=None, index_round_targets=None, combine_instrument=None):
+        """筛选品种明细,使用双向模式"""
+        
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        top_num = pred_top_num
+        cancidate_list = []
+        mode = 'single'
+        # 同时从正反2个方向选取品种
+        pre_index = self.compute_arg_sort(cls, dec_out, mode=mode, trend=1, top_num=top_num)
+        for i in range(top_num): 
+            import_index_real = ins_all[pre_index[i]]
+            cancidate_list.append([import_index_real, 1])    
+        pre_index = self.compute_arg_sort(cls, dec_out, mode=mode, trend=0, top_num=top_num)
+        for i in range(top_num): 
+            import_index_real = ins_all[pre_index[i]]
+            cancidate_list.append([import_index_real, 0])                          
+        
+        return cancidate_list
+        
+    def strategy_top_bidi_old(self, ce, cls, dec_out, pred_top_num=2, target=None, target_info=None, index_round_targets=None, combine_instrument=None):
         """筛选品种明细,使用双向模式"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -958,7 +977,7 @@ class FuturesBidiModule(MlpModule):
         cancidate_list = []
         mode = 'single'
         # 同时从正反2个方向选取品种
-        if trend_value>0.8:
+        if trend_value>0.6:
             # 如果整体趋势看涨，则增加多方候选数量
             top_num_long = pred_top_num + 1
             top_num_short = pred_top_num - 1
@@ -983,24 +1002,28 @@ class FuturesBidiModule(MlpModule):
     def compute_arg_sort(self, cls, dec_out, mode='single', trend=1, top_num=2):
         """根据输出进行排序"""
         
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        cls_main = cls[0][:ins_all.shape[0]]
+        cls_att = cls[0][-ins_all.shape[0]:]
         if self.pred_mode == 'single':
             if self.candidate_inverse:
                 flag = 1
             else:
                 flag = -1        
             if self.pred_weights[0] > self.pred_weights[1]: 
-                can_ins = flag * cls[0]
+                can_ins = flag * cls_main
             else:
-                can_ins = flag * dec_out[:, -1, 0]
+                can_ins = flag * cls_att
             if trend == 1:
                 pre_index = np.argsort(can_ins)[:top_num]
             else:
                 pre_index = np.argsort(-can_ins)[:top_num]
         else:
             if trend == 1:
-                pre_index = self.compute_comprehensive_info(cls, dec_out)[0].values[:, 0][:top_num]
+                pre_index = self.compute_comprehensive_info(cls_main, cls_att)[0].values[:, 0][:top_num]
             else:
-                pre_index = self.compute_comprehensive_info(cls, dec_out)[0].values[:, 0][-top_num:]
+                pre_index = self.compute_comprehensive_info(cls_main, cls_att)[0].values[:, 0][-top_num:]
         return pre_index.astype(int)
         
     def compute_comprehensive_info(self, cls, dec_out):

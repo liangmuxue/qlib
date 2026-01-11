@@ -112,7 +112,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("SUMPMA5","sumpma_diff",div=False)
         compute_diff("OPEN","open_diff")
         compute_diff("OPEN","diff_range",open_mode=True)
-        compute_diff("OPEN","open_range")
+        compute_diff("OPEN","open_range",open_mode=True)
         compute_diff("CLOSE","close_range",open_mode=True)
         # 做标准化的时候，只针对训练集生成缩放对象
         df_train = df[df["datetime"]<pd.to_datetime(str(val_range[1].strftime("%Y-%m-%d")))]

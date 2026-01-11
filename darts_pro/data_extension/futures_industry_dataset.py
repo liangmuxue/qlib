@@ -733,7 +733,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     future_round_targets[index_real,:,i] = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(future_round_targets[index_real,:,i])
                 # 对于数值模式，只进行品种间的归一化操作，不进行过去未来的归一化
                 if (self.scale_mode[i]==0 and inner_idx!=self.main_index_rel) or (self.scale_mode[i]==1 and inner_idx==self.main_index_rel):
-                    # 使用过去数值参考,进行第一次归一化
                     for k in index_real:
                         past_data_item = past_round_targets[k,:,i:i+1]
                         past_data_scale[k,:,i] = past_data_item.squeeze(-1)

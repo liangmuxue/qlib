@@ -58,7 +58,8 @@ class FurIndustryMixer(nn.Module):
         # 整合输出网络
         self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
         # 多品种预测时间序列数据转单指数预测时间序列数据
-        self.index_combine_layer = LinelessLayer(self.combine_nodes_num,1)
+        self.index_combine_layer = nn.Sequential(LinelessLayer(pred_len,pred_len),nn.Softplus())
+        
         # ArcFace部分
         # self.arc_layer = ContinuousArcFace(past_cov_dim,num_proxies=past_cov_dim)
         
@@ -67,9 +68,9 @@ class FurIndustryMixer(nn.Module):
             self.seq_layer = LinelessLayer(cut_len,cut_len)        
         if self.target_mode==2:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
-            self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
-            self.ins_att2_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
-            self.dec_layer = LinelessLayer(pred_len,1,hidden_size=hidden_size,layer_norm=False,batch_norm=False,dropout=0.3) 
+            self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
+            self.ins_att2_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
+            self.dec_layer = LinelessLayer(pred_len,pred_len,hidden_size=hidden_size,layer_norm=False,batch_norm=False,dropout=0.3) 
         if self.target_mode==3:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
             self.step_scale_layer = LinelessLayer(pred_len,1,hidden_size=hidden_size,layer_norm=False,batch_norm=False)
@@ -92,20 +93,24 @@ class FurIndustryMixer(nn.Module):
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
             dec_out_ori,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==2:
-                dec_out = torch.stack([self.ins_att_layer(cls_out.squeeze(-1)),self.ins_att2_layer(cls_out.squeeze(-1))]).permute(1,2,0)
-                # dec_out = self.dec_layer(dec_out_ori) 
+                # 品种间比较目标的网络输出
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
-                sw_index_data = self.index_combine_layer(dec_out_ori.permute(0,2,1))
+                # 添加辅助品种比较目标输出
+                cls_out_ins_att = self.ins_att_layer(cls_out.squeeze(-1))
+                # cls_out_ins_att2 = self.ins_att2_layer(cls_out.squeeze(-1))
+                cls_out_combine.append(cls_out_ins)
+                cls_out_combine.append(cls_out_ins_att)
+                # cls_out_combine.append(cls_out_ins_att2)
+                # 预测时间段方向的网络输出
+                dec_out = self.dec_layer(dec_out_ori) 
+                # 整体指数预测的网络输出
+                sw_index_data = self.index_combine_layer(sw_index_data)
             if self.target_mode==3:
                 # 生成单指数预测时间序列数据
                 dec_out = self.index_combine_layer(dec_out_ori.permute(0,2,1))
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))     
                 sw_index_data = self.step_scale_layer(sw_index_data)     
-            elif self.target_mode==5:
-                # 行业内品种整合输出
-                cls_out_ins = self.cls_sub_models[i](cls_out[:,:,-1]) 
-            # 叠加归一化输出
-            cls_out_combine.append(cls_out_ins)
+                cls_out_combine.append(cls_out_ins)
             # 从指数特征值整合到指数数据，并合并输出
             index_data_combine.append(sw_index_data)
             # arc_feature = self.arc_layer(sw_index_future).unsqueeze(-1)
