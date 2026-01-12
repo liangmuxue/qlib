@@ -89,7 +89,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         del model_kwargs["scale_mode"]
         if "train_step_mode" in model_kwargs:
             del model_kwargs["train_step_mode"]
-        ext_kwargs = ['cut_len','step_mode','rolling_size','task_weights','grad_limits','pred_weights']
+        ext_kwargs = ['cut_len','step_mode','rolling_size','task_weights','main_task_seq','grad_limits','pred_weights']
         for key in ext_kwargs:
             if key in model_kwargs:
                 del model_kwargs[key]
