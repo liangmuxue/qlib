@@ -71,9 +71,9 @@ class FuturesBidiModule(MlpModule):
         valid_sw_ins_mappings=None,
         pred_top_num=3,
         task_weights=None,
-        main_task_seq=None,
         grad_limits=None,
         opt_size=1,
+        main_task_seq=None,
         **kwargs,
     ):
         self.mode = None
@@ -87,11 +87,10 @@ class FuturesBidiModule(MlpModule):
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
         self.train_step_mode = train_step_mode
         # 任务初始权重
-        self.task_weights = task_weights
+        self.task_weights = torch.tensor(task_weights)  
         self.grad_limits = torch.tensor(grad_limits)  
         self.pred_weights = [1.0, 0.0]
-        self.main_task_seq = main_task_seq   
-         
+              
         super().__init__(output_dim, variables_meta_array, num_static_components, hidden_size, lstm_layers, num_attention_heads,
                                     full_attention, feed_forward, hidden_continuous_size,
                                     categorical_embedding_sizes, dropout, add_relative_index, norm_type, past_split=past_split,
@@ -221,20 +220,20 @@ class FuturesBidiModule(MlpModule):
         """定制优化器"""
 
         optimizers = []
+        optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}  
+        use_gradient_surgery_flag = (len(self.task_weights) > 1 and self.task_weights[1] > 0)
         # 使用自定义优化器，用于调整多任务损失函数权重和梯度策略
-        for i in range(self.opt_size):
-            optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}  
-            task_weights = self.task_weights[i]
-            use_gradient_surgery_flag = (len(task_weights) > 1 and task_weights[1] > 0)
-            main_task_seq = self.main_task_seq[i]            
+        for i in range(len(self.past_split)):
+            # base_lr = self.lr_scheduler_kwargs["base_lr"] 
+            
             mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(), optimizer_kws,
-                            model=self.sub_models[i], task_weights=task_weights, grad_limits=self.grad_limits,
-                            use_gradient_surgery=use_gradient_surgery_flag,main_task_seq=main_task_seq,
+                            model=self.sub_models[i], task_weights=self.task_weights, grad_limits=self.grad_limits,
+                            use_gradient_surgery=use_gradient_surgery_flag,
                             use_adaptive_clip=False, use_pcgrad=self.use_pcgrad)  
             optimizers.append(mt_optimizer)
         # 对应优化器，生成多个学习率
         lr_schedulers = []
-        for i in range(self.opt_size):
+        for i in range(len(self.past_split)):
             lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
             lr_sched_kws["optimizer"] = optimizers[i]
             lr_monitor = lr_sched_kws.pop("monitor", None)
@@ -248,7 +247,7 @@ class FuturesBidiModule(MlpModule):
                 "monitor": lr_monitor if lr_monitor is not None else "val_loss",
             } 
             lr_schedulers.append(lr_scheduler_config)  
-        lr_schedulers.append(lr_scheduler_config)
+        lr_schedulers.append(lr_scheduler_config) 
         return optimizers, lr_schedulers     
             
     def forward(
@@ -337,7 +336,7 @@ class FuturesBidiModule(MlpModule):
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained   
         total_loss = torch.tensor(0.0).to(self.device)
-        for i in range(self.opt_size):
+        for i in range(self.get_optimizer_size()):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
             loss, detail_loss = self._compute_loss((output, vr_class, tar_class),
                             (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=i)
@@ -353,14 +352,12 @@ class FuturesBidiModule(MlpModule):
             self.loss_data.append((corr_loss.detach(), ce_loss.detach(), fds_loss.detach(), cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
-            # 多个权重组合
-            task_weights = self.task_weights[i]
-            if len(task_weights) == 2:
-                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i]])
-            elif len(task_weights) == 3:
+            if len(self.task_weights) == 3:
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i]])
-            elif len(task_weights) == 4:
-                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i]])   
+            elif len(self.task_weights) == 2:
+                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i]])
+            elif len(self.task_weights) == 4:
+                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i]])                
             else:
                 # 对于三元组损失，有可能没有样例，会返回0，需要忽略
                 if cls_loss[i] == 0:
@@ -369,7 +366,7 @@ class FuturesBidiModule(MlpModule):
                 update_info = opt.step([cls_loss[i]])
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
             self.lr_schedulers()[i].step() 
-            if len(task_weights) > 1 and update_info is not None:
+            if len(self.task_weights) > 1 and update_info is not None:
                 # total_loss = total_loss + update_info["total_loss"]
                 # 当前总梯度和分量梯度
                 if "conflict_analysis" in update_info:
@@ -446,7 +443,7 @@ class FuturesBidiModule(MlpModule):
         (corr_loss, ce_loss, fds_loss, cls_loss, predictions) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
         preds_combine = []
-        for i in range(self.opt_size):
+        for i in range(1):
             if ce_loss[i] != 0 and len(self.task_weights) > 1:
                 self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             if cls_loss[i] != 0:
