@@ -226,8 +226,7 @@ class MultiTaskGradientCalculator():
 
 class MultiTaskOptimizer(Adam):
     
-    def __init__(self, params, defaults_dict,model=None,task_weights=None,grad_limits=None,use_gradient_surgery=True,
-                 use_adaptive_clip=False,use_pcgrad=False,main_task_seq=[],device=None):
+    def __init__(self, params, defaults_dict,model=None,task_weights=None,grad_limits=None,use_gradient_surgery=True,use_adaptive_clip=False,main_task_seq=None,use_pcgrad=False,device=None):
         super().__init__(params, **defaults_dict)
         self.model = model
         self.task_weights = task_weights
@@ -235,12 +234,12 @@ class MultiTaskOptimizer(Adam):
         self.use_gradient_surgery = use_gradient_surgery
         self.use_adaptive_clip = use_adaptive_clip
         self.use_pcgrad = use_pcgrad
-        self.main_task_seq = main_task_seq
         self.gradient_calculator = MultiTaskGradientCalculator(model, task_weights,grad_limits)
         self.accumulation_steps = 4
         self.gradients_recorder = []
         self.loss_recorder = []
         self.device = device
+        self.main_task_seq = main_task_seq
         
         self.primary_tasks = [0]
         self.auxiliary_tasks = [i for i in range(len(task_weights)) if i not in self.primary_tasks]
@@ -285,7 +284,7 @@ class MultiTaskOptimizer(Adam):
         # adjusted_gradients = self._compute_auto_weights(task_losses, helpfulness, all_gradients)
         # 应用梯度手术,合并梯度
         if self.use_pcgrad:
-            pc_grad(gradient_components, main_task_seq_arr=self.main_task_seq)
+            pc_grad(gradient_components, main_task_seq_arr=[2])
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components,)
         # 统计梯度范数
