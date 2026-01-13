@@ -342,7 +342,7 @@ class FuturesBidiModule(MlpModule):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
             loss, detail_loss = self._compute_loss((output, vr_class, tar_class),
                             (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=i)
-            (corr_loss, ce_loss, fds_loss, cls_loss,time_ser_loss, _) = detail_loss 
+            (corr_loss, ce_loss, fds_loss, cls_loss, _) = detail_loss 
             if cls_loss[i] != 0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             if ce_loss[i] != 0:
@@ -351,9 +351,7 @@ class FuturesBidiModule(MlpModule):
                 self.log("train_fds_loss_{}".format(i), fds_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)       
             if corr_loss[i] != 0:
                 self.log("train_corr_loss_{}".format(i), corr_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)  
-            if time_ser_loss[i] != 0:
-                self.log("train_time_ser_loss_{}".format(i), time_ser_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)                                        
-            self.loss_data.append((corr_loss.detach(), ce_loss.detach(), fds_loss.detach(), cls_loss.detach(),time_ser_loss.detach()))
+            self.loss_data.append((corr_loss.detach(), ce_loss.detach(), fds_loss.detach(), cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
             # 多个权重组合
@@ -364,8 +362,6 @@ class FuturesBidiModule(MlpModule):
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i]])
             elif len(task_weights) == 4:
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i]])   
-            elif len(task_weights) == 5:
-                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i],time_ser_loss[i]])                                
             else:
                 # 对于三元组损失，有可能没有样例，会返回0，需要忽略
                 if cls_loss[i] == 0:
@@ -450,7 +446,7 @@ class FuturesBidiModule(MlpModule):
         # 全部损失
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
                     (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=-1)
-        (corr_loss, ce_loss, fds_loss, cls_loss, time_ser_loss,predictions) = detail_loss
+        (corr_loss, ce_loss, fds_loss, cls_loss,predictions) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
         preds_combine = []
         for i in range(self.opt_size):
@@ -463,8 +459,6 @@ class FuturesBidiModule(MlpModule):
                 self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)                
             if corr_loss[i] != 0 and len(task_weights) > 3:
                 self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)   
-            if time_ser_loss[i] != 0 and len(task_weights) > 4:
-                self.log("val_time_ser_loss_{}".format(i), time_ser_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)   
 
                 
         output_combine = (output, vr_class, price_targets, past_future_round_targets)
@@ -805,7 +799,7 @@ class FuturesBidiModule(MlpModule):
                 # 因为预测的是最后一个未来日期和前面的差值，因此按照最后一个时间序号作为序列编号
                 time_index = target_info["future_end"] - 1 
                 # 预测数据放入记录，与最后一个日期序号对应
-                pred_data = ce_index[0][self.cut_len-1,-1]
+                pred_data = ce_index[0][self.cut_len-1]
                 glo_match_data.append([indus_index, date, indus_code, time_index, pred_data])
         
         columns = ["indus_index", "date", "indus_code", "time_index", "pred_data"]       
@@ -881,8 +875,8 @@ class FuturesBidiModule(MlpModule):
             # 验证准确性
             coll_results = self.collect_result_compindex(date=date, target_info=target_info_list, result_list=result_list, keep_index=keep_index)  
             # 计算整体趋势判断准确率
-            match_rate = self.compute_trend_acc(output_3d,price_targets_3d,target_info=target_info_3d,top_num=self.top_num)
-            self.log("match_rate", match_rate, prog_bar=True)               
+            # match_rate = self.compute_trend_acc(output_3d,price_targets_3d,target_info=target_info_3d,top_num=self.top_num)
+            # self.log("match_rate", match_rate, prog_bar=True)               
             # 把结果数据整合到预测记录中
             if result_total_list is None:
                 result_total_list = coll_results

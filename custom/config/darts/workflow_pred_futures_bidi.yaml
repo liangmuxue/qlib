@@ -85,10 +85,10 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanData2012Step3_combineTimeSerLoss_2501"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
-               task_weights: [[1.0,1.0,0.5],[1.0,1.0]]
-               main_task_seq: [[2],[1]]
+               task_weights: [[1.0,1.0,0.5],[1.0]]
+               main_task_seq: [[2],[0]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
                use_pcgrad: True
@@ -96,17 +96,17 @@ task:
                pred_mode: 'single'
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
-               wave_period : &wave_period 50
+               wave_period : &wave_period 35
                hidden_size: 16
-               forecast_horizon: &forecast_horizon 10
+               forecast_horizon: &forecast_horizon 5
                cut_len: &cut_len 3
                dropout: 0.5
-               opt_size: 2
+               opt_size: 1
                past_split: [[0,15],[15,30],[30,45]]
                target_mode: [2,3,3,1,3]
                scale_mode: [1,2,2,2,0]
                filter_conv_index: -1
-               pred_top_num: 2
+               pred_top_num: 3
     dataset:
         class: TFTFuturesDataset
         module_path: darts_pro.tft_futures_dataset
@@ -141,7 +141,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['open_diff','SUMPMA5','RSV5','SUMPMA5','RSV5']
+                target_column: ['open_diff','SUMPMA5','CCI5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
                 past_covariate_col: ['VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
