@@ -53,7 +53,7 @@ task:
         module_path: darts_pro.futures_process
         kwargs:
             GPU: [0] 
-            batch_size: 16
+            batch_size: 32
             seed: 0
             n_jobs: 20
             log_every_n_steps: 50
@@ -87,10 +87,10 @@ task:
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
-               task_weights: [1.0,1.0,0.5]
+               task_weights: [[1.0,1.0,0.5],[1.0]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [2]
+               main_task_seq: [[2],[0]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
@@ -141,7 +141,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['open_diff','SUMPMA5','SUMPMA5','SUMPMA5','RSV5']
+                target_column: ['open_diff','SUMPMA5','RSV5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
                 past_covariate_col: ['VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'

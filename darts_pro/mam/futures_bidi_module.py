@@ -87,7 +87,7 @@ class FuturesBidiModule(MlpModule):
         # 阶段模式，0--表示全阶段， 1--表示第一阶段，先进行整体和行业预测 2--表示第二阶段，进行品种预测
         self.train_step_mode = train_step_mode
         # 任务初始权重
-        self.task_weights = torch.tensor(task_weights)  
+        self.task_weights = task_weights  
         self.grad_limits = torch.tensor(grad_limits)  
         self.pred_weights = [1.0, 0.0]
               
@@ -221,19 +221,19 @@ class FuturesBidiModule(MlpModule):
 
         optimizers = []
         optimizer_kws = {k: v for k, v in self.optimizer_kwargs.items()}  
-        use_gradient_surgery_flag = (len(self.task_weights) > 1 and self.task_weights[1] > 0)
+        
         # 使用自定义优化器，用于调整多任务损失函数权重和梯度策略
-        for i in range(len(self.past_split)):
-            # base_lr = self.lr_scheduler_kwargs["base_lr"] 
-            
+        for i in range(self.opt_size):
+            task_weights = self.task_weights[i]
+            use_gradient_surgery_flag = (len(task_weights) > 1 and task_weights[1] > 0)
             mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(), optimizer_kws,
-                            model=self.sub_models[i], task_weights=self.task_weights, grad_limits=self.grad_limits,
+                            model=self.sub_models[i], task_weights=task_weights, grad_limits=self.grad_limits,
                             use_gradient_surgery=use_gradient_surgery_flag,
                             use_adaptive_clip=False, use_pcgrad=self.use_pcgrad)  
             optimizers.append(mt_optimizer)
         # 对应优化器，生成多个学习率
         lr_schedulers = []
-        for i in range(len(self.past_split)):
+        for i in range(self.opt_size):
             lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
             lr_sched_kws["optimizer"] = optimizers[i]
             lr_monitor = lr_sched_kws.pop("monitor", None)
@@ -352,11 +352,12 @@ class FuturesBidiModule(MlpModule):
             self.loss_data.append((corr_loss.detach(), ce_loss.detach(), fds_loss.detach(), cls_loss.detach()))
             # 手动更新参数，使用自定义具备梯度校正功能的优化器
             opt = self.trainer.optimizers[i]
-            if len(self.task_weights) == 3:
+            task_weights = self.task_weights[i]
+            if len(task_weights) == 3:
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i]])
-            elif len(self.task_weights) == 2:
+            elif len(task_weights) == 2:
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i]])
-            elif len(self.task_weights) == 4:
+            elif len(task_weights) == 4:
                 update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i]])                
             else:
                 # 对于三元组损失，有可能没有样例，会返回0，需要忽略
@@ -366,15 +367,16 @@ class FuturesBidiModule(MlpModule):
                 update_info = opt.step([cls_loss[i]])
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
             self.lr_schedulers()[i].step() 
-            if len(self.task_weights) > 1 and update_info is not None:
+            task_weights = self.task_weights[i]
+            if len(task_weights) > 1 and update_info is not None:
                 # total_loss = total_loss + update_info["total_loss"]
                 # 当前总梯度和分量梯度
                 if "conflict_analysis" in update_info:
                     self.log("task_grad_norm_cls", update_info["task_grad_norms"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
                     self.log("task_grad_norm_ce", update_info["task_grad_norms"][1], batch_size=train_batch[0].shape[0], prog_bar=False)
-                    if len(self.task_weights) > 2:
+                    if len(task_weights) > 2:
                         self.log("task_grad_norm_fds", update_info["task_grad_norms"][2], batch_size=train_batch[0].shape[0], prog_bar=False)
-                    if len(self.task_weights) > 3:
+                    if len(task_weights) > 3:
                         self.log("task_grad_norm_corr", update_info["task_grad_norms"][3], batch_size=train_batch[0].shape[0], prog_bar=False)                        
                     # self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
                     # self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
@@ -443,14 +445,15 @@ class FuturesBidiModule(MlpModule):
         (corr_loss, ce_loss, fds_loss, cls_loss, predictions) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
         preds_combine = []
-        for i in range(1):
-            if ce_loss[i] != 0 and len(self.task_weights) > 1:
+        for i in range(self.opt_size):
+            task_weights = self.task_weights[i]
+            if ce_loss[i] != 0 and len(task_weights) > 1:
                 self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
             if cls_loss[i] != 0:
                 self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
-            if fds_loss[i] != 0 and len(self.task_weights) > 2:
+            if fds_loss[i] != 0 and len(task_weights) > 2:
                 self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)                
-            if corr_loss[i] != 0 and len(self.task_weights) > 3:
+            if corr_loss[i] != 0 and len(task_weights) > 3:
                 self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)   
 
         # # 计算整体趋势判断准确率
