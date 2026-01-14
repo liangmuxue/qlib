@@ -170,7 +170,7 @@ class LinelessLayer(nn.Module):
             self.dropout = nn.Dropout(dropout)
         
         if batch_norm:
-            self.bn = nn.BatchNorm1d(input_num)        
+            self.bn = nn.BatchNorm1d(hidden_size)        
         if output_num>1 and layer_norm:
             self.layer_norm = True
             self.ln = nn.LayerNorm(output_num)      
@@ -183,11 +183,10 @@ class LinelessLayer(nn.Module):
             
     def forward(self, input_data,res_data=None): 
         
-        if self.batch_norm:
-            input_data = self.bn(input_data)
-            input_data = self.relu(input_data)
         input_data = self.linear_hidden(input_data)
         input_data = self.relu(input_data)
+        if self.batch_norm:
+            input_data = self.bn(input_data)         
         input_data = self.linear_output(input_data)
         if self.dropout_value>0:
             input_data = self.dropout(input_data)

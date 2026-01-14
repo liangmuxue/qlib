@@ -90,6 +90,7 @@ class FuturesBidiModule(MlpModule):
         self.task_weights = task_weights  
         self.grad_limits = torch.tensor(grad_limits)  
         self.pred_weights = [1.0, 0.0]
+        self.main_task_seq = main_task_seq
               
         super().__init__(output_dim, variables_meta_array, num_static_components, hidden_size, lstm_layers, num_attention_heads,
                                     full_attention, feed_forward, hidden_continuous_size,
@@ -227,7 +228,7 @@ class FuturesBidiModule(MlpModule):
             task_weights = self.task_weights[i]
             use_gradient_surgery_flag = (len(task_weights) > 1 and task_weights[1] > 0)
             mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(), optimizer_kws,
-                            model=self.sub_models[i], task_weights=task_weights, grad_limits=self.grad_limits,
+                            model=self.sub_models[i], task_weights=task_weights, main_task_seq=self.main_task_seq[i],grad_limits=self.grad_limits,
                             use_gradient_surgery=use_gradient_surgery_flag,
                             use_adaptive_clip=False, use_pcgrad=self.use_pcgrad)  
             optimizers.append(mt_optimizer)
