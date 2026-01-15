@@ -9,7 +9,7 @@ from tft.class_define import get_simple_class
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
-from cus_utils.common_compute import tensor_intersect,normalization_axis,pairwise_compare,normalization_standard,all_elements_same
+from cus_utils.common_compute import tensor_intersect,normalization_axis,pairwise_compare,normalization_standard,all_elements_same,is_same_elements
 from .feature_loss import AdaptiveSingleFeatureLoss
 from .triplet_loss import AdaptiveSemiHardTripletLoss,ContinuousSemiHardTripletLoss
 from .triplet_miner import ContinuousTripletLossWithMemory,ContinuousTripletConfig
@@ -193,14 +193,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         ref_indicator2 = 2                          
                         # dec_out_item = dec_out[j,:,:][ins_rel_index]
                         dec_out_item = dec_out[j,ins_rel_index].squeeze(-1)
-                        # sv_out_item_att = sv[1][j][ins_rel_index]
-                        # sv_out_item_att2 = sv[2][j][ins_rel_index]
+                        sv_out_item_att = sv[1][j][ins_rel_index]
+                        sv_out_item_att2 = sv[2][j][ins_rel_index]
                         # dec_out_item_att = dec_out[j,:,1][ins_rel_index]
-                        target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
                         round_targets_item_att = future_round_targets[j,ins_rel_index,-1,ref_indicator]
                         round_targets_item_att2 = future_round_targets[j,ins_rel_index,-1,ref_indicator2]
+                        # if not is_same_elements(att_tar,price_diff_range,eps=1e-3):
+                        #     print("not same")
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)   
                         # 计算top损失
                         # ce_loss[i] += self.compute_top_loss(sv_out_item, round_targets_item, top_num=top_num)
@@ -211,8 +212,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 整体指数损失
                         # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item_ins)
                         # 辅助目标的损失
-                        ce_loss[i] += self.ccc_loss_comp(dec_out_item.squeeze(-1),round_targets_item_att)
-                        fds_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index],round_targets_item_att2)
+                        ce_loss[i] += self.ccc_loss_comp(sv_out_item_att,round_targets_item_att)
+                        fds_loss[i] += self.ccc_loss_comp(sv_out_item_att2,round_targets_item_att2)
                         # corr_loss[i] += self.ccc_loss_comp(sv_out_item_att2,round_targets_item_att2)
                         index_target_total.append(future_index_round_target[j,main_index,target_len,ref_indicator])
                         sw_index_total.append(sw_index_data[j])

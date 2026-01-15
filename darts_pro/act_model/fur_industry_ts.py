@@ -58,7 +58,8 @@ class FurIndustryMixer(nn.Module):
         # 整合输出网络
         self.combine_layer = LinelessLayer(self.combine_nodes_num.shape[0],index_num)
         # 多品种预测时间序列数据转单指数预测时间序列数据
-        self.index_combine_layer = LinelessLayer(self.combine_nodes_num,1)
+        self.index_combine_layer = nn.Sequential(LinelessLayer(pred_len,pred_len),nn.Softplus())
+        
         # ArcFace部分
         # self.arc_layer = ContinuousArcFace(past_cov_dim,num_proxies=past_cov_dim)
         
@@ -66,12 +67,13 @@ class FurIndustryMixer(nn.Module):
             # 多段时间比对模式
             self.seq_layer = LinelessLayer(cut_len,cut_len)        
         if self.target_mode==2:
-            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
-            self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
-            self.dec_layer = nn.Linear(pred_len, 1)  
+            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.5)
+            self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.5)
+            self.ins_att2_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.5)
+            self.dec_layer = LinelessLayer(pred_len,pred_len,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3) 
         if self.target_mode==3:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
-            self.step_scale_layer = LinelessLayer(pred_len,cut_len,hidden_size=hidden_size,layer_norm=True,batch_norm=False)
+            self.step_scale_layer = LinelessLayer(pred_len,1,hidden_size=hidden_size,layer_norm=False,batch_norm=False)
         if self.target_mode in [6]:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.shape[0],1)
 
@@ -89,22 +91,26 @@ class FurIndustryMixer(nn.Module):
             x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
             x_inner = (x_enc[:,instrument_index,...],historic_future_covariates[:,instrument_index,...],
                         future_covariates[:,instrument_index,...],past_round_targets[:,instrument_index,...],past_index_round_targets[:,i,...])
-            dec_out,cls_out,sw_index_data = m(x_inner)
+            dec_out_ori,cls_out,sw_index_data = m(x_inner)
             if self.target_mode==2:
-                # 品种比对round值模式，把多预测步长转化为1个结果
-                dec_out = self.dec_layer(dec_out)     
+                # 品种间比较目标的网络输出
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
-                sw_index_data = self.ins_att_layer(cls_out.squeeze(-1))   
+                # 添加辅助品种比较目标输出
+                cls_out_ins_att = self.ins_att_layer(cls_out.squeeze(-1))
+                cls_out_ins_att2 = self.ins_att2_layer(cls_out.squeeze(-1))
+                cls_out_combine.append(cls_out_ins)
+                cls_out_combine.append(cls_out_ins_att)
+                cls_out_combine.append(cls_out_ins_att2)
+                # 预测时间段方向的网络输出
+                dec_out = self.dec_layer(dec_out_ori) 
+                # 整体指数预测的网络输出
+                sw_index_data = self.index_combine_layer(sw_index_data)
             if self.target_mode==3:
                 # 生成单指数预测时间序列数据
-                dec_out = self.index_combine_layer(dec_out.permute(0,2,1))
+                dec_out = self.index_combine_layer(dec_out_ori.permute(0,2,1))
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))     
                 sw_index_data = self.step_scale_layer(sw_index_data)     
-            elif self.target_mode==5:
-                # 行业内品种整合输出
-                cls_out_ins = self.cls_sub_models[i](cls_out[:,:,-1]) 
-            # 叠加归一化输出
-            cls_out_combine.append(cls_out_ins)
+                cls_out_combine.append(cls_out_ins)
             # 从指数特征值整合到指数数据，并合并输出
             index_data_combine.append(sw_index_data)
             # arc_feature = self.arc_layer(sw_index_future).unsqueeze(-1)
@@ -131,104 +137,6 @@ class FurIndustryMixer(nn.Module):
             
         return dec_out_out_combine,cls_out_combine,index_data_combine
 
-class FurIndustryDRollMixer(nn.Module):
-    """混合TimeMixer以及STID相关设计思路的序列模型,使用MLP作为底层网络.
-       使用二次滚动计算的模式，整合批次和二次序列数组
-    """
-    
-    def __init__(self, seq_len=25,round_skip_len=25, pred_len=5,past_cov_dim=12, dropout=0.3,industry_index=None,hidden_size=16,down_sampling_window=5,
-                 main_index=-1,rolling_size=18,num_nodes=6,index_num=1,device="cpu"):
-        """行业总体网络，分为子网络，以及整合网络2部分"""
-        
-        super().__init__()
-        
-        self.industry_index = industry_index
-        self.main_index = main_index
-        self.num_nodes = num_nodes
-        self.index_num = index_num
-        self.rolling_size = rolling_size
-        
-        # 循环取得不同时间段的多个下级模型
-        sub_model_list = []
-        for _ in range(rolling_size):
-            sub_model = FurTimeMixer(
-                num_nodes=num_nodes,
-                seq_len=seq_len,
-                pred_len=pred_len,
-                past_cov_dim=past_cov_dim,
-                dropout=dropout,
-                round_skip_len=round_skip_len,
-                down_sampling_window=down_sampling_window,
-                device=device,
-                )
-            sub_model_list.append(sub_model)
-        self.sub_models = nn.ModuleList(sub_model_list)
-        # Last Rolling Data
-        self.indus_lst_layers = nn.Sequential(
-                nn.Linear(rolling_size*num_nodes, hidden_size),
-                nn.ReLU(), 
-                nn.Linear(hidden_size,num_nodes),
-                nn.LayerNorm(num_nodes)
-            ).to(device)
-                      
-        # 整合输出网络
-        self.combine_layer = nn.Sequential(
-                nn.Linear(rolling_size, hidden_size),
-                nn.ReLU(), 
-                nn.Linear(hidden_size,index_num),
-                nn.LayerNorm(index_num)
-            ).to(device)
-        indus_combine_layers = []
-        for _ in range(num_nodes):
-            indus_combine_layer = nn.Sequential(
-                    nn.Linear(rolling_size, hidden_size),
-                    nn.ReLU(), 
-                    nn.Linear(hidden_size,rolling_size),
-                    nn.LayerNorm(rolling_size)
-                ).to(device)    
-            indus_combine_layers.append(indus_combine_layer)      
-        self.indus_combine_layers = nn.ModuleList(indus_combine_layers)      
-        
-    def forward(self, x_in): 
-        """多个子模型顺序输出，整合输出形成统一输出"""
-        
-        cls_out_combine = []
-        index_data_combine = []
-        rolling_size = self.rolling_size
-        x_enc, historic_future_covariates,future_covariates,past_round_targets,past_index_round_targets = x_in
-        batch_size = int(x_enc.shape[0]/rolling_size)
-        
-        x_enc_rs = x_enc.reshape(batch_size,rolling_size,*x_enc.shape[1:])
-        future_covariates_rs = future_covariates.reshape(batch_size,rolling_size,*future_covariates.shape[1:])
-        historic_future_covariates_rs = historic_future_covariates.reshape(batch_size,rolling_size,*historic_future_covariates.shape[1:])
-        past_round_targets_rs = past_round_targets.reshape(batch_size,rolling_size,*past_round_targets.shape[1:])
-        past_index_round_targets_rs = past_index_round_targets.reshape(batch_size,rolling_size,*past_index_round_targets.shape[1:])
-        # 不同日期滚动范围，使用子模型分别输出
-        for i in range(self.rolling_size):
-            m = self.sub_models[i]
-            x_enc_inner = x_enc_rs[:,i,self.industry_index,...]
-            historic_future_covariates_inner = historic_future_covariates_rs[:,i,self.industry_index,...]
-            future_covariates_inner = future_covariates_rs[:,i,self.industry_index,...]
-            past_round_targets_inner = past_round_targets_rs[:,i,self.industry_index,...]
-            past_index_round_targets_inner = past_index_round_targets_rs[:,i,self.main_index,...]
-            x_inner = (x_enc_inner,historic_future_covariates_inner,future_covariates_inner,past_round_targets_inner,past_index_round_targets_inner)
-            _,cls_out,sw_index_data = m(x_inner)
-            # 叠加归一化输出
-            # cls_out = m_after(cls_out.squeeze(-1)).unsqueeze(-1)
-            cls_out_combine.append(cls_out)
-            index_data_combine.append(sw_index_data)
-        cls_out_combine = torch.stack(cls_out_combine).permute(1,0,2,3)
-        
-        indus_out_combine = []
-        # 不同行业分别进行多时间段整合连接
-        for i in range(self.num_nodes):
-            m = self.indus_combine_layers[i]
-            indus_out_combine.append(m(cls_out_combine[:,:,i,0]))
-        indus_out_combine = torch.stack(indus_out_combine).permute(1,2,0).unsqueeze(-1)
-        # 拼接整合整体指数预测数据
-        index_data_combine = self.combine_layer(torch.cat(index_data_combine,dim=1))   
-        lst_data = self.indus_lst_layers(indus_out_combine.reshape([indus_out_combine.shape[0],-1]))  
-        return None,indus_out_combine,lst_data
 
 #####################   新增策略模型  #########################    
       

@@ -610,7 +610,7 @@ def scale_multiple_series(data):
     result_main = MinMaxScaler().fit_transform(np.expand_dims(result_main,-1)).squeeze(-1)
     return result,result_main
 
-def all_elements_same(tensor, eps=1e-6):
+def all_elements_same(tensor, eps=1e-5):
     """
     判断张量内所有元素是否为同一个值
     :param tensor: 输入PyTorch张量
@@ -629,6 +629,13 @@ def all_elements_same(tensor, eps=1e-6):
     else:
         return torch.all(tensor == base).item()
 
+def is_same_elements(tensor1, tensor2,eps=1e-5):
+    diff_num = torch.sum(torch.abs(tensor1 - tensor2)>eps)
+    if diff_num>0:
+        return False
+    return True
+    
+    
 def linear_map(arr, new_min, new_max):
     """线性映射到新范围"""
     
