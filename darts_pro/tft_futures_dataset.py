@@ -110,7 +110,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("QTLU5","qtlu_diff")
         compute_diff("CCI5","cci_diff",div=False)
         compute_diff("SUMPMA5","sumpma_diff",div=False)
-        compute_diff("OPEN","open_diff")
+        compute_diff("OPEN","open_diff",open_mode=True)
         compute_diff("OPEN","diff_range",open_mode=True)
         compute_diff("OPEN","open_range",open_mode=True)
         compute_diff("CLOSE","close_range",open_mode=True)

@@ -81,10 +81,10 @@ task:
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
-               task_weights: [[1.0,0.5],[1.0]]
+               task_weights: [[1.0,0.5,0.5],[1.0]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[1],[0]]
+               main_task_seq: [[1,2],[0]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
@@ -98,7 +98,7 @@ task:
                opt_size: 1
                past_split: [[0,15],[15,30],[30,45]]
                target_mode: [2,2,2,1,3]
-               scale_mode: [2,2,2,2,0]
+               scale_mode: [1,2,2,2,0]
                filter_conv_index: -1
                pred_top_num: 2
     dataset:
@@ -135,7 +135,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['open_diff','SUMPMA5','CCI5','SUMPMA5','RSV5']
+                target_column: ['open_diff','open_diff','SUMPMA5','SUMPMA5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['dayofweek','month','dayofmonth']   
                 past_covariate_col: ['VOLUME_RANGE','RSV5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
