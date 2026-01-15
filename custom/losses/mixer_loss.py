@@ -72,18 +72,18 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_pred_data = torch.cat([top_pred,top_pred_inverse])
         top_target_data = torch.cat([top_target,top_target_inverse])
         top_loss = self.ccc_loss_comp(top_pred_data, top_target_data) 
-        # # 优化：对前k名候选的目标值进行比对，实现额外加权（强制区分核心候选）
-        # target_topk_index = torch.argsort(target)[:top_num]
-        # target_topk_insverse_index = torch.argsort(-target)[:top_num]
-        # rel_pred_data = pred[torch.cat([target_topk_index,target_topk_insverse_index])]
-        # if all_elements_same(rel_pred_data):
+        top_loss_target = 0
+        # 优化：对前k名候选的目标值进行比对，实现额外加权（强制区分核心候选）
+        # top_real,target_topk_index = torch.topk(target, k=top_num, dim=0)
+        # top_real_inverse,target_topk_insverse_index = torch.topk(target, k=top_num,largest=False, dim=0)
+        # top_real_index = torch.cat([target_topk_index,target_topk_insverse_index])
+        # top_pred_ref_data = torch.gather(pred, 0, top_real_index)
+        # top_target_data = torch.cat([top_real,top_real_inverse])
+        # if all_elements_same(top_pred_ref_data):
         #     top_loss_target = 0
         # else:
-        #     top_target_real = target[torch.cat([target_topk_index,target_topk_insverse_index])]
-        #     top_loss_target = self.ccc_loss_comp(rel_pred_data, top_target_real) 
-        
-        return top_loss  
-        # return top_loss + top_loss_target
+        #     top_loss_target = self.ccc_loss_comp(top_pred_ref_data, top_target_data) 
+        return top_loss
                
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):
         """根据实际涨跌数据计算类别"""
@@ -193,15 +193,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         ref_indicator2 = 2                          
                         dec_out_item = dec_out[j,:,:][ins_rel_index]
                         sv_out_item_att = sv[1][j][ins_rel_index]
-                        # sv_out_item_att2 = sv[2][j][ins_rel_index]
+                        sv_out_item_att2 = sv[2][j][ins_rel_index]
                         # dec_out_item_att = dec_out[j,:,1][ins_rel_index]
                         target_info_item = np.array(target_info[j])[ins_rel_index.cpu().numpy()]
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
                         round_targets_item_att = future_round_targets[j,ins_rel_index,self.cut_len-1,ref_indicator]
+                        round_targets_item_att2 = future_round_targets[j,ins_rel_index,self.cut_len-1,ref_indicator2]
                         cls_loss[i] += self.ccc_loss_comp(sv_out_item,round_targets_item)   
                         # 计算top损失
-                        ce_loss[i] += self.compute_top_loss(sv_out_item, round_targets_item, top_num=top_num)
+                        # ce_loss[i] += self.compute_top_loss(sv_out_item, round_targets_item, top_num=top_num)
                         # target_item = target[j,main_index_abs,:,ref_indicator]
                         # price_last_target_items = target[j,ins_rel_index,-1,0]
                         # ce_loss[i] += self.compute_top_loss(sv_out_item_att2, price_last_target_items)
@@ -209,7 +210,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 整体指数损失
                         # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item_ins)
                         # 辅助目标的损失
-                        fds_loss[i] += self.ccc_loss_comp(sv_out_item_att,round_targets_item_att)
+                        ce_loss[i] += self.ccc_loss_comp(sv_out_item_att,round_targets_item_att)
+                        # corr_loss[i] += self.ccc_loss_comp(sv_out_item_att2,round_targets_item_att2)
                         index_target_total.append(future_index_round_target[j,main_index,target_len,ref_indicator])
                         sw_index_total.append(sw_index_data[j])
                     elif target_mode==3:

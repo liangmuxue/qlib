@@ -286,7 +286,7 @@ class MultiTaskOptimizer(Adam):
         if self.use_pcgrad:
             pc_grad(gradient_components)
         # 多个任务的梯度相加（带权重）
-        total_gradients,gradient_components = self.grad_combine(gradient_components)
+        total_gradients,gradient_components = self.grad_combine(gradient_components,dynamic_grad=False)
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
         # 更新辅助任务权重
@@ -324,14 +324,14 @@ class MultiTaskOptimizer(Adam):
             task_grad_norms_total = np.array([item for item in task_grad_norms])
             # 根据主任务的权重设置以及实际权重数值，把辅助任务的权重等比缩减
             task_grad_norms_main = task_grad_norms_total[main_task_seq_arr].max()
-            task_weights_max = np.array(self.task_weights)[main_task_seq_arr].max()
+            task_weights_bench = np.array(self.task_weights)[main_task_seq_arr].min()
             task_weights = []
             for i in range(len(self.task_weights)):
                 if i in main_task_seq_arr:
                     task_weight = self.task_weights[i]
                 else:
                     dynamic_rate = task_grad_norms_main/task_grad_norms_total[i] if task_grad_norms_main<task_grad_norms_total[i] else 1
-                    task_weight = dynamic_rate * (self.task_weights[i]/task_weights_max)
+                    task_weight = dynamic_rate * (self.task_weights[i]/task_weights_bench)
                 task_weights.append(task_weight)   
         else:
             task_weights = self.task_weights

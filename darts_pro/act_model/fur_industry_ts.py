@@ -97,10 +97,10 @@ class FurIndustryMixer(nn.Module):
                 cls_out_ins = self.ins_layer(cls_out.squeeze(-1))
                 # 添加辅助品种比较目标输出
                 cls_out_ins_att = self.ins_att_layer(cls_out.squeeze(-1))
-                # cls_out_ins_att2 = self.ins_att2_layer(cls_out.squeeze(-1))
+                cls_out_ins_att2 = self.ins_att2_layer(cls_out.squeeze(-1))
                 cls_out_combine.append(cls_out_ins)
                 cls_out_combine.append(cls_out_ins_att)
-                # cls_out_combine.append(cls_out_ins_att2)
+                cls_out_combine.append(cls_out_ins_att2)
                 # 预测时间段方向的网络输出
                 dec_out = self.dec_layer(dec_out_ori) 
                 # 整体指数预测的网络输出
