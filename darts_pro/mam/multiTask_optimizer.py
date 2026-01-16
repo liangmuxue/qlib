@@ -1,9 +1,11 @@
+import math
 import numpy as np
 from  torch.optim import Adam
 import torch
 import torch.nn as nn
 from typing import List, Dict
 from rqalpha import interface
+
 
 def calculate_gradient_norm(gradient):
     total_norm = 0.0
@@ -226,7 +228,8 @@ class MultiTaskGradientCalculator():
 
 class MultiTaskOptimizer(Adam):
     
-    def __init__(self, params, defaults_dict,model=None,task_weights=None,grad_limits=None,use_gradient_surgery=True,use_adaptive_clip=False,main_task_seq=None,use_pcgrad=False,device=None):
+    def __init__(self, params, defaults_dict,model=None,task_weights=None,helpful_compute_step=10,grad_limits=None,use_gradient_surgery=True,
+                 use_adaptive_clip=False,main_task_seq=None,use_pcgrad=False,device=None):
         super().__init__(params, **defaults_dict)
         self.model = model
         self.task_weights = task_weights
@@ -240,17 +243,18 @@ class MultiTaskOptimizer(Adam):
         self.loss_recorder = []
         self.device = device
         self.main_task_seq = main_task_seq
+        self.helpful_compute_step = helpful_compute_step
         
-        self.primary_tasks = [0]
+        self.primary_tasks = main_task_seq
         self.auxiliary_tasks = [i for i in range(len(task_weights)) if i not in self.primary_tasks]
         # 辅助任务权重（可学习）
         self.auxiliary_weights = nn.ParameterDict()
         self._init_weights()  
               
-        # 记录历史损失信息
-        self.history_losses = {task_idx: [] for task_idx in range(len(task_weights))}
+        # 记录历史梯度信息
+        self.history_grad = {task_idx: [] for task_idx in range(len(task_weights))}
         # 日志记录
-        self.info = {
+        self.dynamic_weights_info = {
             'auxiliary_weights': [],
             'helpfulness_scores': []
         }
@@ -259,29 +263,28 @@ class MultiTaskOptimizer(Adam):
         """初始化辅助任务权重"""
         
         for task_idx in self.auxiliary_tasks:
-            weight = nn.Parameter(torch.ones(1, device=self.device) * 0.5)  # 初始权重0.5
+            # 初始权重从配置中获取
+            weight = nn.Parameter(torch.tensor(self.task_weights[task_idx], device=self.device))  
             self.auxiliary_weights[f'w_{task_idx}'] = weight
             
     def step_with_auto_weights(self, task_losses):
         """辅助任务自适应权重"""
         
-        # 记录历史损失数据
+        # 记录历史梯度数据
         for task_idx, loss in enumerate(task_losses):
-            self.history_losses[task_idx].append(loss.item())
+            self.history_grad[task_idx].append(loss.item())
         # 计算辅助任务对主任务的帮助程度
         helpfulness = self._compute_helpfulness()
-        
+        # 更新辅助任务权重
+        dynamic_weights_info = self._update_weights(helpfulness)        
         # 计算所有任务梯度
-        total_gradients, gradient_components,loss_total = self.gradient_calculator.compute_gradients(
+        _, gradient_components,loss_total = self.gradient_calculator.compute_gradients(
             task_losses, return_components=True
         )
         # 统计梯度冲突情况
         conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
         conflict_count,similarity = self.combine_conflict_analysis(conflict_analysis_total)    
-            
-        all_gradients = [self._compute_grad_norm(comp) for comp in gradient_components] 
-        # 自适应调整辅助任务梯度
-        # adjusted_gradients = self._compute_auto_weights(task_losses, helpfulness, all_gradients)
+           
         # 应用梯度手术,合并梯度
         if self.use_pcgrad:
             pc_grad(gradient_components)
@@ -289,8 +292,7 @@ class MultiTaskOptimizer(Adam):
         total_gradients,gradient_components = self.grad_combine(gradient_components,dynamic_grad=False)
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
-        # 更新辅助任务权重
-        self._update_weights(helpfulness)
+
                 
         # 手动设置梯度并更新参数
         self._set_gradients(total_gradients)
@@ -303,8 +305,9 @@ class MultiTaskOptimizer(Adam):
             'total_loss': show_loss,
             'total_grad_norm': self._compute_total_grad_norm(total_gradients),
             'conflict_analysis': {'conflict_count':conflict_count,'similarity':similarity},
-            'task_grad_norms': task_grad_norms
-                if gradient_components else None
+            'task_grad_norms': task_grad_norms if gradient_components else None,
+            'auxiliary_weights': dynamic_weights_info['auxiliary_weights'], 
+            'helpfulness_scores': dynamic_weights_info['helpfulness_scores']   
         }
 
     def grad_combine(self,gradient_components,dynamic_grad=True):
@@ -312,29 +315,8 @@ class MultiTaskOptimizer(Adam):
     
         processed_grads = {}
         param_names = interact_grad_names(gradient_components,interact=False)
-        
-        # 根据配置中的权重比例数值，动态设置权重配比
-        if dynamic_grad:
-            main_task_seq_arr = self.main_task_seq
-            asis_task_seq = [i for i in range(len(self.task_weights))]
-            for main_task_seq in main_task_seq_arr:
-                asis_task_seq.remove(main_task_seq)
-            # 计算所有任务的实际权重数据
-            task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
-            task_grad_norms_total = np.array([item for item in task_grad_norms])
-            # 根据主任务的权重设置以及实际权重数值，把辅助任务的权重等比缩减
-            task_grad_norms_main = task_grad_norms_total[main_task_seq_arr].max()
-            task_weights_bench = np.array(self.task_weights)[main_task_seq_arr].min()
-            task_weights = []
-            for i in range(len(self.task_weights)):
-                if i in main_task_seq_arr:
-                    task_weight = self.task_weights[i]
-                else:
-                    dynamic_rate = task_grad_norms_main/task_grad_norms_total[i] if task_grad_norms_main<task_grad_norms_total[i] else 1
-                    task_weight = dynamic_rate * (self.task_weights[i]/task_weights_bench)
-                task_weights.append(task_weight)   
-        else:
-            task_weights = self.task_weights
+        # 自适应调整辅助任务梯度
+        task_weights = self.compute_auto_weights(gradient_components=gradient_components,dynamic_grad=dynamic_grad)
         # 实际设置梯度
         gradient_components_after = gradient_components.copy()
         for param_name in param_names:   
@@ -356,56 +338,66 @@ class MultiTaskOptimizer(Adam):
             
         return processed_grads,gradient_components_after
 
-    def _compute_auto_weights(self,task_losses,helpfulness,all_gradients):
+    def compute_auto_weights(self,gradient_components=None,dynamic_grad=True):
         
-        adjusted_gradients = {}
-        for task_idx in range(len(task_losses)):
-            if task_idx in self.auxiliary_tasks:
-                # 获取当前辅助任务权重
-                weight = torch.sigmoid(self.auxiliary_weights[f'w_{task_idx}'])
-                
-                # 根据帮助程度调整权重
-                if task_idx in helpfulness:
-                    helpfulness_score = helpfulness[task_idx]
-                    # 帮助程度越高，权重越大
-                    adjusted_weight = weight * (1.0 + helpfulness_score * 0.5)
+        # 根据配置中的权重比例数值，动态设置权重配比
+        if dynamic_grad:
+            main_task_seq_arr = self.main_task_seq
+            asis_task_seq = [i for i in range(len(self.task_weights))]
+            for main_task_seq in main_task_seq_arr:
+                asis_task_seq.remove(main_task_seq)
+            # 计算所有任务的实际权重数据
+            task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
+            task_grad_norms_total = np.array([item for item in task_grad_norms])
+            # 根据主任务的权重设置以及实际权重数值，把辅助任务的权重等比缩减
+            task_grad_norms_main = task_grad_norms_total[main_task_seq_arr].max()
+            task_weights_bench = np.array(self.task_weights)[main_task_seq_arr].min()
+            task_weights = []
+            for i in range(len(self.task_weights)):
+                if i in main_task_seq_arr:
+                    task_weight = self.task_weights[i]
                 else:
-                    adjusted_weight = weight
-                
-                adjusted_gradients[task_idx] = all_gradients[task_idx] * adjusted_weight
-                
-                # 记录帮助程度和权重
-                if task_idx in helpfulness:
-                    self.info['helpfulness_scores'].append(helpfulness[task_idx])
-            else:
-                # 主任务梯度保持不变
-                adjusted_gradients[task_idx] = all_gradients[task_idx]
-        
-        return adjusted_gradients
+                    task_weight = self.auxiliary_weights[f'w_{i}']
+                    # task_weight = self.task_weights[i]
+                    norm_rate = task_grad_norms_main/task_grad_norms_total[i]
+                    if norm_rate>1:
+                        dynamic_rate = 1 # + math.log(norm_rate)
+                    else:   
+                        dynamic_rate = norm_rate
+                    task_weight = dynamic_rate * (task_weight/task_weights_bench)
+                task_weights.append(task_weight)   
+        else:
+            task_weights = self.task_weights        
+        return task_weights
                 
     def _update_weights(self, helpfulness: Dict[int, float]):
         """更新辅助任务权重"""
+        
+        dynamic_weights_info = {'auxiliary_weights':[],'helpfulness_scores':[]}
         with torch.no_grad():
             for task_idx in self.auxiliary_tasks:
                 weight_param = self.auxiliary_weights[f'w_{task_idx}']
                 
                 if task_idx in helpfulness:
                     helpful_score = helpfulness[task_idx]
+                    dynamic_weights_info['helpfulness_scores'].append(helpful_score)
                     # 根据帮助程度调整权重
                     if helpful_score > 0:
                         # 正向帮助，增加权重
-                        adjustment = helpful_score * 0.01
+                        adjustment = helpful_score * 0.1
                     else:
                         # 负向影响，减少权重
-                        adjustment = helpful_score * 0.02
+                        adjustment = helpful_score * 0.2
                 else:
                     # 默认小幅随机调整
                     adjustment = torch.randn(1, device=self.device).item() * 0.005
-                
                 weight_param.data += adjustment
                 # 限制在合理范围
                 weight_param.data = torch.clamp(weight_param.data, -3, 3)
-                    
+                # 记录日志
+                dynamic_weights_info['auxiliary_weights'].append(weight_param.data)
+        return dynamic_weights_info
+                           
     def clear_record(self):
         self.gradients_recorder = []
         self.loss_recorder = []
@@ -544,42 +536,50 @@ class MultiTaskOptimizer(Adam):
     def _compute_helpfulness(self) -> Dict[int, float]:
         """计算辅助任务对主任务的帮助程度"""
         
-        if len(self.history_losses[0]) < 2:
+        if len(self.history_grad[0]) < 2:
             return {}
         
         helpfulness = {}
+        step_size = self.helpful_compute_step
         
-        # 计算主任务损失变化
-        primary_losses = []
+        # 计算主任务梯度变化
+        primary_grad = []
         for task_idx in self.primary_tasks:
-            if len(self.history_losses[task_idx]) >= 2:
-                recent_loss = np.mean(self.history_losses[task_idx][-5:])  # 最近5步平均
-                prev_loss = np.mean(self.history_losses[task_idx][-10:-5]) if len(self.history_losses[task_idx]) >= 10 else recent_loss
-                loss_change = prev_loss - recent_loss  # 正数表示损失下降
-                primary_losses.append(loss_change)
+            if len(self.history_grad[task_idx]) >= 2:
+                recent_grad = np.mean(self.history_grad[task_idx][-step_size:])  # 最近几步平均
+                prev_grad = np.mean(self.history_grad[task_idx][-2*step_size:-step_size]) if len(self.history_grad[task_idx]) >= (2*step_size) else recent_grad
+                grad_change = prev_grad - recent_grad  # 正数表示梯度下降
+                primary_grad.append(grad_change)
         
-        if not primary_losses:
+        if not primary_grad:
             return {}
         
-        avg_primary_change = np.mean(primary_losses)
+        avg_primary_change = np.mean(primary_grad)
         
-        step_range = 10
-        
+        task_weights_bench = np.array(self.task_weights)[self.main_task_seq].min()
         # 计算每个辅助任务的帮助程度
         for task_idx in self.auxiliary_tasks:
-            if len(self.history_losses[task_idx]) >= 2:
-                recent_loss = np.mean(self.history_losses[task_idx][-step_range:])
-                prev_loss = np.mean(self.history_losses[task_idx][-2*step_range:-step_range]) if len(self.history_losses[task_idx]) >= 2*step_range else recent_loss
-                aux_loss_change = prev_loss - recent_loss
+            # 当前任务权重比例
+            task_weight_rate = (self.auxiliary_weights[f'w_{task_idx}']/task_weights_bench)            
+            if len(self.history_grad[task_idx]) >= 2:
+                recent_grad = np.mean(self.history_grad[task_idx][-step_size:])
+                prev_grad = np.mean(self.history_grad[task_idx][-2*step_size:-step_size]) if len(self.history_grad[task_idx]) >= (2*step_size) else recent_grad
+                aux_grad_change = recent_grad - prev_grad
                 
-                # 帮助程度定义：辅助任务损失下降且主任务损失也下降
-                if avg_primary_change > 0 and aux_loss_change > 0:
-                    helpfulness[task_idx] = min(aux_loss_change, avg_primary_change)
-                elif avg_primary_change > 0:
-                    helpfulness[task_idx] = avg_primary_change * 0.1  # 小幅正影响
+                # 帮助程度定义
+                if avg_primary_change < 0 and aux_grad_change < 0:
+                    # 辅助任务梯度下降且主任务梯度也下降，认为是有帮助
+                    helpfulness[task_idx] = min(aux_grad_change, avg_primary_change)
+                elif avg_primary_change > 0 and aux_grad_change < 0:
+                    # 辅助任务梯度下降且主任务梯度上升，认为帮助为0
+                    helpfulness[task_idx] = 0
+                elif avg_primary_change > 0 and aux_grad_change > 0:
+                    # 辅助任务梯度上升且主任务梯度也上升，如果主任务梯度上升更快，则认为有帮助，反之则为负面影响
+                    helpfulness[task_idx] = avg_primary_change * task_weight_rate - aux_grad_change         
                 else:
-                    helpfulness[task_idx] = -0.02  # 负影响
-        
+                    # 辅助任务梯度上升且主任务梯度下降，认为负面影响
+                    helpfulness[task_idx] = -aux_grad_change
+                    
         return helpfulness
     
     def _set_gradients(self, gradients_dict):
