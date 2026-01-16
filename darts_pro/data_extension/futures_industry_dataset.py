@@ -408,11 +408,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
-                # combine_values[:,i] = self.create_scaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1)
-            if scale_mode[i] in [1]:     
-                # 用于价格涨跌幅，不剔除异常值
-                continue       
-            if scale_mode[i] in [2,3]:
+                # combine_values[:,i] = self.create_scaler(feature_range=(eps, 1)).fit_transform(np.expand_dims(combine_values[:,i],-1)).squeeze(-1)             
+            if scale_mode[i] in [1,2,3]:
                 # 剔除异常值
                 combine_values[:,i] = interquartile_range(combine_values[:,i])
                 # 直接归一化
@@ -758,7 +755,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 记录涨跌品种数量比例，用于整体趋势损失
         target_info_total[self.main_index]['long_ins_num'] = np.sum(open_diff_arr>0)
         
-        # if future_start_datetime==20150903:
+        # if future_start_datetime==20250512:
         #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
         #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]

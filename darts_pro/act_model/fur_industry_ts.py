@@ -67,9 +67,12 @@ class FurIndustryMixer(nn.Module):
             # 多段时间比对模式
             self.seq_layer = LinelessLayer(cut_len,cut_len)        
         if self.target_mode==2:
-            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.5)
-            self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.5)
-            self.ins_att2_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.5)
+            self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),
+                                hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
+            self.ins_att_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),
+                            hidden_size=hidden_size,layer_norm=True,batch_norm=False)
+            self.ins_att2_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),
+                                                hidden_size=hidden_size,layer_norm=True,batch_norm=False)
             self.dec_layer = LinelessLayer(pred_len,pred_len,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3) 
         if self.target_mode==3:
             self.ins_layer = LinelessLayer(self.combine_nodes_num.item(),self.combine_nodes_num.item(),hidden_size=hidden_size,layer_norm=True,batch_norm=False)
