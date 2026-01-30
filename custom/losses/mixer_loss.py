@@ -71,18 +71,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_target_inverse = torch.gather(target, 0, top_pred_inverse_index)
         top_pred_data = torch.cat([top_pred,top_pred_inverse])
         top_target_data = torch.cat([top_target,top_target_inverse])
-        top_loss = self.ccc_loss_comp(top_pred_data, top_target_data) 
-        top_loss_target = 0
+        if all_elements_same(top_target_data):
+            top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
+        else:
+            top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
         # 优化：对前k名候选的目标值进行比对，实现额外加权（强制区分核心候选）
-        # top_real,target_topk_index = torch.topk(target, k=top_num, dim=0)
-        # top_real_inverse,target_topk_insverse_index = torch.topk(target, k=top_num,largest=False, dim=0)
-        # top_real_index = torch.cat([target_topk_index,target_topk_insverse_index])
-        # top_pred_ref_data = torch.gather(pred, 0, top_real_index)
-        # top_target_data = torch.cat([top_real,top_real_inverse])
-        # if all_elements_same(top_pred_ref_data):
-        #     top_loss_target = 0
-        # else:
-        #     top_loss_target = self.ccc_loss_comp(top_pred_ref_data, top_target_data) 
+        top_real,target_topk_index = torch.topk(target, k=top_num, dim=0)
+        top_real_inverse,target_topk_insverse_index = torch.topk(target, k=top_num,largest=False, dim=0)
+        top_real_index = torch.cat([target_topk_index,target_topk_insverse_index])
+        top_pred_ref_data = torch.gather(pred, 0, top_real_index)
+        top_real_target_data = torch.cat([top_real,top_real_inverse])
+        # 使用当前索引对应的实际数据与实际排名靠前的数据作差，作为加权的权重
+        real_dis_weights = self.mse_loss(top_target_data.unsqueeze(0),top_real_target_data.unsqueeze(0))/2
+        top_loss = top_loss + real_dis_weights/2
         return top_loss
                
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):

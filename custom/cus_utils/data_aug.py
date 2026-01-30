@@ -9,6 +9,7 @@ from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from cus_utils.db_accessor import DbAccessor
 from pickle import TRUE
 from cus_utils.common_compute import linear_map, normalization_axis
+from tft.class_define import get_simple_class
 
 class DictToObject:
     def __init__(self, dictionary):
@@ -246,8 +247,8 @@ class CollResAna():
         # self.relative_stat()
         # self.normal_stat()
         # self.price_range_stat()
-        # self.target_corr_stat()
-        self.ins_index_stat()
+        self.target_corr_stat()
+        # self.ins_index_stat()
 
     def target_corr_stat(self):
         """查看价格涨跌幅与辅助指标的协同关系"""
@@ -258,10 +259,12 @@ class CollResAna():
         instrument_index = futures_dataset.instrument_index
         output_chunk_length = self.output_chunk_length
         cut_len = futures_dataset.cut_len
+        self.cut_len = cut_len
         diff_data_total = []
         trend_data_total = []
         target_index = 0
         att_target_index = 1
+        
         for i in range(len(futures_dataset)):
             past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
                 covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,\
@@ -271,7 +274,7 @@ class CollResAna():
             # 取cut_len相关目标值做比较
             target_len = -output_chunk_length+cut_len-1
             round_target = past_future_round_targets[main_index,target_len,att_target_index]
-            open_diff = np.array([item['diff_range'] for item in target_info_total])
+            open_diff = np.array([item['open_diff_arr'] for item in target_info_total])
             diff_range_main = open_diff[main_index][:-self.output_chunk_length]
             # 优化目标值映射到价格涨跌幅数组数据空间
             target_series = past_target_total[main_index,:,att_target_index]
@@ -283,10 +286,21 @@ class CollResAna():
             # 品种间的目标值和价格涨跌幅度的一致性
             round_target_ins = past_future_round_targets[instrument_index,target_len,target_index]
             price_diff_ins = price_targets[instrument_index]
+            price_diff_ins = self.compute_diff_range_class(None, target_info_arr=np.array(target_info_total)[instrument_index],jump_mode=False)[0]            
             diff_data_arr = np.stack([round_target_ins,price_diff_ins]).transpose(1,0)
             diff_data_arr = pd.DataFrame(diff_data_arr,columns=['target_round_ins','price_diff_ins'])
             corr_data = diff_data_arr[['target_round_ins','price_diff_ins']].corr().values
-            diff_data_total.append([future_start_datetime,corr_data[0,1]])
+            top_num = 3
+            top_round = price_diff_ins[np.argsort(price_diff_ins)[:top_num]]
+            top_round_inverse = price_diff_ins[np.argsort(price_diff_ins)[-top_num:]]                     
+            top_round_price = np.concatenate([top_round,top_round_inverse])
+            top_round = round_target_ins[np.argsort(round_target_ins)[:top_num]]
+            top_round_inverse = round_target_ins[np.argsort(round_target_ins)[-top_num:]]                     
+            top_round_att = np.concatenate([top_round,top_round_inverse])   
+            diff_top_data_arr = np.stack([top_round_att,top_round_price]).transpose(1,0)
+            diff_top_data_arr = pd.DataFrame(diff_top_data_arr,columns=['top_target_round_ins','top_price_diff_ins'])
+            top_corr_data = diff_top_data_arr[['top_target_round_ins','top_price_diff_ins']].corr().values                     
+            diff_data_total.append([future_start_datetime,corr_data[0,1],top_corr_data[0,1]])
              
         # 总体趋势数据一致性
         trend_data_total = pd.DataFrame(np.array(trend_data_total),columns=['date','trend_price_diff','trend_round_target','trend_target_map'])
@@ -296,7 +310,7 @@ class CollResAna():
         print("trend_data_total:\n ",trend_data_total)
         print("trend_data corr:\n {}".format(corr_data))
         # 品种间的目标值和价格涨跌幅度的一致性
-        diff_data_total = pd.DataFrame(np.array(diff_data_total),columns=['date','round_price_corr'])
+        diff_data_total = pd.DataFrame(np.array(diff_data_total),columns=['date','round_price_corr','top_round_price_corr'])
         print("round_price corr:\n {}".format(diff_data_total))
         print("round_price mean:{}".format(diff_data_total['round_price_corr'].mean()))
 
@@ -349,7 +363,57 @@ class CollResAna():
         diff_data_total = pd.DataFrame(np.array(diff_data_total),columns=['date','price_att_corr','price_cut_tar','price_cut_nor','att_cut_tar'])
         print("price_att_corr:\n {}".format(diff_data_total))
         print("price_att_corr mean:{}".format(diff_data_total['price_att_corr'].mean()))
-                
+
+    def check_train_val_corr(self):
+        """检查训练集和测试集的数据一致性"""
+ 
+        futures_dataset = self.train_dataset
+        futures_dataset = self.val_dataset
+        main_index = futures_dataset.main_index
+        instrument_index = futures_dataset.instrument_index
+        output_chunk_length = self.output_chunk_length
+        cut_len = futures_dataset.cut_len
+        diff_data_total = []
+        trend_data_total = []
+        target_index = 0
+        att_target_index = 2
+        target_len = -output_chunk_length+cut_len-1
+        for i in range(len(futures_dataset)):
+            past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,\
+                index_round_targets,long_diff_seq_targets,target_info_total  = futures_dataset[i]
+            future_start_datetime = int(futures_dataset.date_list[i])    
+            # 价格涨跌幅指标
+            price_target_total = np.concatenate([past_target_total[...,0],future_target_total[...,0]],-1)
+            price_main = price_target_total[main_index]
+            price_main_mean = np.mean(price_target_total[instrument_index],0)
+            # 辅助指标
+            att_target_total = np.concatenate([past_target_total[...,att_target_index],future_target_total[...,att_target_index]],-1)
+            att_target_main = att_target_total[main_index]
+            att_target_main_mean = np.mean(att_target_total[instrument_index],0)
+            att_main_mean_nor = normalization_axis(att_target_main_mean)
+            price_att_arr = np.stack([price_main,price_main_mean,att_target_main,att_target_main_mean,att_main_mean_nor]).transpose(1,0)
+            price_att_arr = pd.DataFrame(price_att_arr,columns=['price_index','price_mean','att_index','att_mean','att_mean_nor'])
+            att_main_mean_nor_future = normalization_axis(att_target_main_mean[-output_chunk_length:])
+            price_future_nor = normalization_axis(price_main_mean[-output_chunk_length:])
+            price_att_arr_future = price_att_arr.iloc[-output_chunk_length:]
+            price_att_arr_future['att_mean_nor'] = att_main_mean_nor_future
+            price_att_arr_future['price_mean_nor'] = price_future_nor
+            # 添加目标点位的价格和辅助指标
+            price_cut_tar = price_att_arr['price_mean'].iloc[target_len]
+            price_cut_nor = price_att_arr_future['price_mean_nor'].iloc[target_len]
+            att_cut_tar = att_main_mean_nor_future[target_len]
+            # 查看整体指数和品种平均的一致性
+            # TODO
+            # 查看价格指数与辅助指标指数的一致性
+            corr_data = price_att_arr_future[['price_mean','att_mean']].corr().values
+            diff_data_total.append([future_start_datetime,corr_data[0,1],price_cut_tar,price_cut_nor,att_cut_tar])            
+
+        # 价格指数与辅助指标指数的一致性
+        diff_data_total = pd.DataFrame(np.array(diff_data_total),columns=['date','price_att_corr','price_cut_tar','price_cut_nor','att_cut_tar'])
+        print("price_att_corr:\n {}".format(diff_data_total))
+        print("price_att_corr mean:{}".format(diff_data_total['price_att_corr'].mean()))
+                        
     def price_range_stat(self):
         """统计价格涨跌幅度以及指标的分布情况"""
         
@@ -430,7 +494,41 @@ class CollResAna():
             title = "correct" if index==0 else "fail"
             print("{} eva info{}".format(title,normal_info))
             # print("{} eva mean:{},std:{}".format(title,normal_info['mean'].describe(),normal_info['std'].describe()))
-    
+
+    def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False,jump_mode=False):
+        """根据实际涨跌数据计算类别"""
+        
+        target_len = -self.output_chunk_length+self.cut_len-1
+        total_len = -self.output_chunk_length
+        if jump_mode:
+            target_len = target_len + 1
+            total_len = total_len + 1
+        # 对于整体指标，不能使用开盘和收盘价格直接计算，使用原数据（所有品种收盘价差的均值,之前的dataset中已经设置好了）
+        if is_main:
+            # 使用所有品种的均值进行计算
+            diff_range_total = np.array([pr['open_diff_arr'][target_len] for pr in target_info_arr])
+            diff_range = diff_range_total.mean()
+            diff_range_arr =  np.stack([pr["open_diff_arr"] for pr in target_info_arr])
+            diff_range_arr = np.mean(diff_range_arr,0)
+            range_class = get_simple_class(diff_range)
+        else:
+            # 收盘与前收盘价差作为衡量指标
+            # diff_range = (price_array[-self.output_chunk_length+self.cut_len-1] - price_array[-self.output_chunk_length])/price_array[-self.output_chunk_length]*100
+            # 预测结束日期的开盘与预测开始日期的开盘价差作为衡量指标
+            if target_info is not None:
+                diff_range = target_info['open_diff_arr'][target_len]
+                range_class = get_simple_class(diff_range)
+                diff_range_arr = None
+            # 价差展示，从过去一直延续到预测当日
+            elif target_info_arr is not None:
+                diff_range_arr = np.stack([pr["open_diff_arr"] for pr in target_info_arr])     
+                diff_range = diff_range_arr[:,target_len] 
+                range_class = None
+            else:
+                diff_range_arr = None
+                range_class = None
+        
+        return diff_range,range_class,diff_range_arr    
     
 if __name__ == "__main__":
     file_path = "custom/data/aug/test_100.npy"
