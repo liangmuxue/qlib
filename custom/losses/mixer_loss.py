@@ -61,7 +61,23 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # self.contrast_loss = PairwiseContrastiveRegressionLoss(device=self.device)
         # self.rank_loss = GlobalLambdaRankLoss(reduction='none')
         self.rank_loss = BidirectionalLambdaRankLoss()
-    
+
+    def compute_main_loss(self,pred,target):
+        """计算主要损失"""
+        
+        # 主体损失，斯皮尔逊相关性
+        main_loss = self.ccc_loss_comp(pred, target)
+        # 优化：增加对应的排序损失
+        pred_index = torch.argsort(pred)
+        # real_target = torch.gather(target, 0, pred_index)
+        # real_loss = self.ccc_loss_comp(real_target,target)
+        pred_index_norm = pred_index/pred_index.shape[0]
+        real_index_norm = torch.Tensor(np.array([i for i in range(pred_index.shape[0])]))/pred_index.shape[0]
+        real_index_norm = real_index_norm.to(self.device)
+        sort_loss = self.mse_loss(pred_index_norm.unsqueeze(0),real_index_norm.unsqueeze(0))
+        top_loss = main_loss - main_loss + sort_loss
+        return top_loss
+        
     def compute_top_loss(self,pred,target,top_num=3):
         """计算top损失"""
         
@@ -82,8 +98,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_pred_ref_data = torch.gather(pred, 0, top_real_index)
         top_real_target_data = torch.cat([top_real,top_real_inverse])
         # 使用当前索引对应的实际数据与实际排名靠前的数据作差，作为加权的权重
-        real_dis_weights = self.mse_loss(top_target_data.unsqueeze(0),top_real_target_data.unsqueeze(0))/2
-        top_loss = top_loss + real_dis_weights/2
+        real_dis_weights = self.ccc_loss_comp(top_target_data,top_real_target_data)
+        top_loss = top_loss + real_dis_weights
         return top_loss
                
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):
@@ -203,7 +219,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         round_targets_item_att2 = future_round_targets[j,ins_rel_index,target_len,ref_indicator2]
                         # if not is_same_elements(att_tar,price_diff_range,eps=1e-3):
                         #     print("not same")
-                        cls_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)   
+                        cls_loss[i] += self.compute_main_loss(sv_out_item,price_diff_range)   
                         # 计算top损失
                         ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num)
                         # target_item = target[j,main_index_abs,:,ref_indicator]
