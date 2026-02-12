@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
-from losses.mtl_loss import UncertaintyLoss
+from losses.mtl_loss import UncertaintyLoss,similarity_consistency_loss
 from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normalization
 from tft.class_define import get_simple_class
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
@@ -66,17 +66,20 @@ class FuturesIndustryLoss(UncertaintyLoss):
         """计算主要损失"""
         
         # 主体损失，斯皮尔逊相关性
-        main_loss = self.ccc_loss_comp(pred, target)
+        if all_elements_same(target):
+            main_loss = 0
+        else:
+            main_loss = self.ccc_loss_comp(pred, target)
         # 优化：增加对应的排序损失
-        pred_index = torch.argsort(pred)
-        # real_target = torch.gather(target, 0, pred_index)
-        # real_loss = self.ccc_loss_comp(real_target,target)
-        pred_index_norm = pred_index/pred_index.shape[0]
-        real_index_norm = torch.Tensor(np.array([i for i in range(pred_index.shape[0])]))/pred_index.shape[0]
-        real_index_norm = real_index_norm.to(self.device)
-        sort_loss = self.mse_loss(pred_index_norm.unsqueeze(0),real_index_norm.unsqueeze(0))
-        top_loss = main_loss - main_loss + sort_loss
-        return top_loss
+        # pred_index = torch.argsort(pred)
+        # # real_target = torch.gather(target, 0, pred_index)
+        # # real_loss = self.ccc_loss_comp(real_target,target)
+        # pred_index_norm = pred_index/pred_index.shape[0]
+        # real_index_norm = torch.Tensor(np.array([i for i in range(pred_index.shape[0])]))/pred_index.shape[0]
+        # real_index_norm = real_index_norm.to(self.device)
+        # sort_loss = self.mse_loss(pred_index_norm.unsqueeze(0),real_index_norm.unsqueeze(0))
+        # top_loss = main_loss - main_loss + sort_loss
+        return main_loss
         
     def compute_top_loss(self,pred,target,top_num=3):
         """计算top损失"""
@@ -98,7 +101,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_pred_ref_data = torch.gather(pred, 0, top_real_index)
         top_real_target_data = torch.cat([top_real,top_real_inverse])
         # 使用当前索引对应的实际数据与实际排名靠前的数据作差，作为加权的权重
-        real_dis_weights = self.ccc_loss_comp(top_target_data,top_real_target_data)
+        if all_elements_same(top_real_target_data) or True:
+            real_dis_weights = 0
+        else:
+            real_dis_weights = self.ccc_loss_comp(top_target_data,top_real_target_data)
         top_loss = top_loss + real_dis_weights
         return top_loss
                
@@ -209,28 +215,31 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         ref_indicator = 0 
                         ref_indicator2 = 1                          
                         # dec_out_item = dec_out[j,:,:][ins_rel_index]
-                        dec_out_item = dec_out[j,ins_rel_index].squeeze(-1)
+                        dec_out_item = dec_out[j,ins_rel_index,:,0]
                         sv_out_item_att = sv[1][j][ins_rel_index]
-                        sv_out_item_att2 = sv[2][j][ins_rel_index]
+                        # sv_out_item_att2 = sv[2][j][ins_rel_index]
                         # dec_out_item_att = dec_out[j,:,1][ins_rel_index]
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
-                        round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,ref_indicator]
-                        round_targets_item_att2 = future_round_targets[j,ins_rel_index,target_len,ref_indicator2]
+                        round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,ref_indicator2]
+                        # round_targets_item_att2 = future_round_targets[j,ins_rel_index,:,ref_indicator2]
                         # if not is_same_elements(att_tar,price_diff_range,eps=1e-3):
                         #     print("not same")
                         cls_loss[i] += self.compute_main_loss(sv_out_item,price_diff_range)   
                         # 计算top损失
                         ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num)
-                        # target_item = target[j,main_index_abs,:,ref_indicator]
+                        target_item = target[j,ins_rel_index,:,ref_indicator2]
                         # price_last_target_items = target[j,ins_rel_index,-1,0]
-                        # ce_loss[i] += self.compute_top_loss(sv_out_item_att2, price_last_target_items)
+                        # fds_loss[i] += self.compute_main_loss(sv_out_item_att, round_targets_item_att)
                         # target_total.append(target_item)                        
                         # 整体指数损失
-                        # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item_ins)
                         # 辅助目标的损失
                         # ce_loss[i] += self.ccc_loss_comp(sv_out_item_att,round_targets_item_att)
-                        fds_loss[i] += self.ccc_loss_comp(sv_out_item_att,round_targets_item_att2)
+                        
+                        for k in range(dec_out_item.shape[-1]):
+                            fds_loss[i] += self.compute_main_loss(dec_out_item[:,k],target_item[:,k])
+                            if torch.isnan(fds_loss[i]):
+                                print("nnn")
                         # corr_loss[i] += self.ccc_loss_comp(sv_out_item_att2,round_targets_item_att2)
                         index_target_total.append(future_index_round_target[j,main_index,target_len,ref_indicator])
                         sw_index_total.append(sw_index_data[j])

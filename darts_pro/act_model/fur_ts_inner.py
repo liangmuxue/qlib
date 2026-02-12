@@ -168,10 +168,7 @@ class FurTimeMixer(nn.Module):
                 # x的形状：[B * N, T, past_cov_dim],输出形状: [B * N, T, d_model]
                 enc_out = self.enc_embedding(x, None)
                 # 对x_mark进行嵌入计算，原形状：[B * N, T, D]，输出形状: [B * N, T, d_model]
-                try:
-                    x_mark = self.ti_sp_enc(x_mark)
-                except Exception:
-                    print("eee")
+                x_mark = self.ti_sp_enc(x_mark)
                 # 合并两类数据,输出形状[B * N, T, d_model]
                 enc_out = enc_out + x_mark
                 enc_out_list.append(enc_out)

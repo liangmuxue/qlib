@@ -37,7 +37,7 @@ from qlib.model.base import Model
 from qlib.data.dataset.handler import DataHandlerLP
 
 from cus_utils.tensor_viz import TensorViz
-from darts_pro.data_extension.futures_model import FuturesModel,FuturesIndustryModel,FuturesIndustryDRollModel
+from darts_pro.data_extension.futures_model import FuturesModel,FuturesIndustryModel
 from darts_pro.tft_futures_dataset import TFTFuturesDataset
 
 from cus_utils.common_compute import compute_price_class
@@ -70,7 +70,13 @@ class FuturesProcessModel(TftDataframeModel):
             return        
         if self.type.startswith("fit_futures_bidi"):
             self.fit_futures_bidi(dataset)
-            return            
+            return    
+        if self.type.startswith("fit_futures_trans"):
+            self.fit_futures_trans(dataset)
+            return         
+        if self.type.startswith("fit_futures_tcn"):
+            self.fit_futures_tcn(dataset)
+            return                  
         if self.type.startswith("pred_futures_industry"):
             self.fit_futures_industry(dataset)
             return            
@@ -79,7 +85,10 @@ class FuturesProcessModel(TftDataframeModel):
             return     
         if self.type.startswith("pred_futures_bidi"):
             self.fit_futures_bidi(dataset)
-            return            
+            return     
+        if self.type.startswith("pred_futures_tcn"):
+            self.fit_futures_tcn(dataset)
+            return                
         if self.type.startswith("data_corr"):
             self.data_corr(dataset)   
             return     
@@ -213,92 +222,6 @@ class FuturesProcessModel(TftDataframeModel):
                      val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
 
-    def fit_futures_industry(
-        self,
-        dataset: TFTFuturesDataset,
-    ):
-        self.pred_data_path = self.kwargs["pred_data_path"]
-        self.batch_file_path = self.kwargs["batch_file_path"]
-        self.load_dataset_file = self.kwargs["load_dataset_file"]
-        self.save_dataset_file = self.kwargs["save_dataset_file"]      
-        if not os.path.exists(self.batch_file_path):
-            os.mkdir(self.batch_file_path)
-            
-        df_data_path = os.path.join(self.batch_file_path,"main_data.pkl")
-        df_train_path = os.path.join(self.batch_file_path,"df_train.pkl")
-        df_valid_path = os.path.join(self.batch_file_path,"df_valid.pkl")
-        ass_train_path = os.path.join(self.batch_file_path,"ass_data_train.pkl")
-        ass_valid_path = os.path.join(self.batch_file_path,"ass_data_valid.pkl")
-            
-        if self.load_dataset_file:
-            # 加载主要序列数据和辅助数据
-            with open(df_data_path, "rb") as fin:
-                train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
-                    pickle.load(fin)   
-            with open(ass_train_path, "rb") as fin:
-                ass_data_train = pickle.load(fin)  
-            with open(ass_valid_path, "rb") as fin:
-                ass_data_valid = pickle.load(fin) 
-            with open(df_train_path, "rb") as fin:
-                dataset.df_train = pickle.load(fin)  
-                dataset.prepare_inner_data(dataset.df_train)      
-            with open(df_valid_path, "rb") as fin:
-                dataset.df_val = pickle.load(fin)     
-                dataset.prepare_inner_data(dataset.df_val)           
-            global_var.set_value("ass_data_train",ass_data_train)
-            global_var.set_value("ass_data_valid",ass_data_valid)
-            global_var.set_value("load_ass_data",True)
-        else:
-            # 生成tft时间序列数据集,包括目标数据、协变量等
-            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
-            # 保存序列数据
-            if self.save_dataset_file:
-                dump_data = (train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates)
-                with open(df_data_path, "wb") as fout:
-                    pickle.dump(dump_data, fout)   
-                # 还需要保存原始的DataFrame数据
-                with open(df_train_path, "wb") as fout:
-                    pickle.dump(dataset.df_train, fout)       
-                with open(df_valid_path, "wb") as fout:
-                    pickle.dump(dataset.df_val, fout)                                       
-                global_var.set_value("ass_data_path",self.batch_file_path)
-                global_var.set_value("load_ass_data",False)
-                global_var.set_value("save_ass_data",True)
-            else:
-                global_var.set_value("load_ass_data",False)
-                global_var.set_value("save_ass_data",False)  
-            
-        # 使用股票代码数量作为embbding长度
-        emb_size = dataset.get_emb_size()
-        # emb_size = 500
-        load_weight = self.optargs["load_weight"]
-        # map_location = torch.device("cpu")
-        device = self._build_device()
-        
-        if load_weight:
-            best_weight = self.optargs["best_weight"]    
-            self.model = FuturesIndustryDRollModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
-                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
-            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
-        else:
-            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
-        
-        self.model.mode = self.type  
-        
-        if self.type=="pred_futures_droll_industry":  
-            # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
-            trainer,model,train_loader,val_loader = self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0)
-            self.model.model.mode = self.type  
-            self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            trainer.validate(model=model,dataloaders=val_loader)
-                        
-        else:
-            self.model.fit(train_series_transformed, future_covariates=future_convariates, val_series=val_series_transformed,
-                     val_future_covariates=future_convariates,past_covariates=past_convariates,val_past_covariates=past_convariates,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8)  
 
     def fit_futures_bidi(
         self,
@@ -356,7 +279,118 @@ class FuturesProcessModel(TftDataframeModel):
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
             # model_inner.set_outer_params({'pred_weights':self.optargs["pred_weights"],'mode':self.type}) 
             # self.model.train(trainer, model_inner, train_loader, val_loader)
-    
+
+    def fit_futures_trans(
+        self,
+        dataset: TFTFuturesDataset,
+    ):
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        if not os.path.exists(self.batch_file_path):
+            os.mkdir(self.batch_file_path)
+        
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        train_data,val_data = dataset.build_series_data()
+        train_series_transformed,past_convariates_train,future_convariates_train = train_data
+        val_series_transformed,past_convariates_val,future_convariates_val = val_data
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)  
+            
+        # 使用股票代码数量作为embbding长度
+        emb_size = dataset.get_emb_size()
+        # emb_size = 500
+        load_weight = self.optargs["load_weight"]
+        # map_location = torch.device("cpu")
+        device = self._build_device()
+        
+        outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
+                        'top_num':self.optargs['pred_top_num'],'pred_top_num':self.optargs['pred_top_num'],
+                        'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}
+        if load_weight:
+            best_weight = self.optargs["best_weight"]    
+            self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
+            self.model.model.set_outer_params(outer_params) 
+        else:
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
+        self.model.mode = self.type 
+        self.model.set_outer_params(outer_params) 
+        
+        if self.type=="pred_futures_trans":  
+            # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
+            trainer,model,train_loader,val_loader = \
+            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+            self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            self.model.model.set_outer_params(outer_params) 
+            trainer.validate(model=model,dataloaders=val_loader)
+        else:
+            trainer,model_inner,train_loader,val_loader= \
+            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+
+    def fit_futures_tcn(
+        self,
+        dataset: TFTFuturesDataset,
+    ):
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        if not os.path.exists(self.batch_file_path):
+            os.mkdir(self.batch_file_path)
+        
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        train_data,val_data = dataset.build_series_data()
+        train_series_transformed,past_convariates_train,future_convariates_train = train_data
+        val_series_transformed,past_convariates_val,future_convariates_val = val_data
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)  
+            
+        # 使用股票代码数量作为embbding长度
+        emb_size = dataset.get_emb_size()
+        # emb_size = 500
+        load_weight = self.optargs["load_weight"]
+        # map_location = torch.device("cpu")
+        device = self._build_device()
+        
+        outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
+                        'top_num':self.optargs['pred_top_num'],'pred_top_num':self.optargs['pred_top_num'],
+                        'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}
+        if load_weight:
+            best_weight = self.optargs["best_weight"]    
+            self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
+            self.model.model.set_outer_params(outer_params) 
+        else:
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=2) 
+        self.model.mode = self.type 
+        self.model.set_outer_params(outer_params) 
+        
+        if self.type=="pred_futures_tcn":  
+            # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
+            trainer,model,train_loader,val_loader = \
+            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+            self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            self.model.model.set_outer_params(outer_params) 
+            trainer.validate(model=model,dataloaders=val_loader)
+        else:
+            trainer,model_inner,train_loader,val_loader= \
+            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+             
+      
     def rebuild_model_params(self,model,model_name=None):
         
         model.model.model_name = model_name
@@ -413,7 +447,7 @@ class FuturesProcessModel(TftDataframeModel):
         pl_trainer_kwargs = {"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}    
         pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": 
                              gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}               
-        if mode==0:  
+        if mode in [0,1,2]:  
             my_model = FuturesModel(
                     input_chunk_length=input_chunk_length,
                     output_chunk_length=self.optargs["forecast_horizon"],
@@ -458,90 +492,7 @@ class FuturesProcessModel(TftDataframeModel):
                     pred_weights=self.optargs["pred_weights"],
                     # pl_trainer_kwargs={"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
                 )
-        if mode==1:  
-            train_step_mode = self.optargs["step_mode"]
-            my_model = FuturesIndustryModel(
-                    input_chunk_length=input_chunk_length,
-                    output_chunk_length=self.optargs["forecast_horizon"],
-                    cut_len=self.optargs["cut_len"],
-                    hidden_size=64,
-                    lstm_layers=1,
-                    num_attention_heads=4,
-                    dropout=self.optargs["dropout"],
-                    batch_size=self.batch_size,
-                    n_epochs=self.n_epochs,
-                    add_relative_index=True,
-                    add_encoders=None,
-                    categorical_embedding_sizes=categorical_embedding_sizes,
-                    # likelihood=QuantileRegression(
-                    #     quantiles=quantiles
-                    # ), 
-                    likelihood=None,
-                    # loss_fn=torch.nn.MSELoss(),
-                    use_weighted_loss_func=True,
-                    loss_number=4,
-                    # torch_metrics=metric_collection,
-                    random_state=42,
-                    model_name=model_name,
-                    force_reset=True,
-                    log_tensorboard=True,
-                    save_checkpoints=True,
-                    past_split=past_split,
-                    target_mode=target_mode,
-                    scale_mode=scale_mode,
-                    filter_conv_index=filter_conv_index,
-                    work_dir=self.optargs["work_dir"],
-                    lr_scheduler_cls=scheduler,
-                    lr_scheduler_kwargs=scheduler_config,
-                    optimizer_cls=optimizer_cls,
-                    optimizer_kwargs=optimizer_kwargs,
-                    model_type=model_type,
-                    train_step_mode=train_step_mode,
-                    pl_trainer_kwargs=pl_trainer_kwargs,
-                    # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
-                )     
-        if mode==2:  
-            train_step_mode = self.optargs["step_mode"]
-            my_model = FuturesIndustryDRollModel(
-                    input_chunk_length=input_chunk_length,
-                    output_chunk_length=self.optargs["forecast_horizon"],
-                    cut_len=self.optargs["cut_len"],
-                    hidden_size=64,
-                    lstm_layers=1,
-                    num_attention_heads=4,
-                    dropout=self.optargs["dropout"],
-                    batch_size=self.batch_size,
-                    n_epochs=self.n_epochs,
-                    add_relative_index=True,
-                    add_encoders=None,
-                    categorical_embedding_sizes=categorical_embedding_sizes,
-                    # likelihood=QuantileRegression(
-                    #     quantiles=quantiles
-                    # ), 
-                    likelihood=None,
-                    # loss_fn=torch.nn.MSELoss(),
-                    use_weighted_loss_func=True,
-                    loss_number=4,
-                    # torch_metrics=metric_collection,
-                    random_state=42,
-                    model_name=model_name,
-                    force_reset=True,
-                    log_tensorboard=True,
-                    save_checkpoints=True,
-                    past_split=past_split,
-                    target_mode=target_mode,
-                    scale_mode=scale_mode,
-                    filter_conv_index=filter_conv_index,
-                    work_dir=self.optargs["work_dir"],
-                    lr_scheduler_cls=scheduler,
-                    lr_scheduler_kwargs=scheduler_config,
-                    optimizer_cls=optimizer_cls,
-                    optimizer_kwargs=optimizer_kwargs,
-                    model_type=model_type,
-                    train_step_mode=train_step_mode,
-                    pl_trainer_kwargs=pl_trainer_kwargs,
-                    # pl_trainer_kwargs={"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks},
-                )     
+            my_model.act_model_type = mode
         return my_model
                     
     def data_corr(

@@ -22,6 +22,34 @@ from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 from torchmetrics.regression import ConcordanceCorrCoef
 from networkx.algorithms import similarity
 
+def similarity_consistency_loss(pred, target):
+    """
+    多通道相似度一致性损失：约束预测通道间的余弦相似度与真实一致
+    Args:
+        pred: 预测值，shape=[batch_size, seq_len, n_channels]
+        target: 真实值，shape=[batch_size, seq_len, n_channels]
+    Returns:
+        sim_loss: 相似度一致性损失值
+    """
+    # 维度调整：[batch*seq_len, n_channels]，方便计算通道间相似度
+    batch_seq = pred.shape[0] * pred.shape[1]
+    pred_flat = pred.reshape(batch_seq, -1)  # [batch*seq_len, n_channels]
+    target_flat = target.reshape(batch_seq, -1)
+    
+    # 计算真实通道间的余弦相似度矩阵
+    target_sim = F.cosine_similarity(
+        target_flat.unsqueeze(1), target_flat.unsqueeze(2), dim=-1
+    )  # [batch*seq_len, n_channels, n_channels]
+    
+    # 计算预测通道间的余弦相似度矩阵
+    pred_sim = F.cosine_similarity(
+        pred_flat.unsqueeze(1), pred_flat.unsqueeze(2), dim=-1
+    )
+    
+    # 约束相似度矩阵一致
+    sim_loss = F.mse_loss(pred_sim, target_sim, reduction='mean')
+    return sim_loss
+
 class MinerLoss(_Loss):
     """具备挖掘功能的损失函数"""
 

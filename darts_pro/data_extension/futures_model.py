@@ -18,7 +18,8 @@ from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from .industry_model import IndustryRollModel
 from cus_utils.common_compute import normalization_axis
 from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset,FuturesInferenceDataset
-from darts_pro.mam.futures_industry_droll_module import FuturesIndustryDRollModule
+from darts_pro.mam.futures_transformer_module import FuturesTransformerModule
+from darts_pro.mam.futures_tcn_module import FuturesTcnModule
 from darts_pro.mam.futures_bidi_module import FuturesBidiModule
 from darts_pro.mam.futures_industry_module import FuturesIndustryModule
 from darts.logging import raise_if_not,raise_if
@@ -185,39 +186,106 @@ class FuturesModel(IndustryRollModel):
         )
 
         self.categorical_embedding_sizes = categorical_embedding_sizes
-               
-        model = FuturesBidiModule(
-                output_dim=self.output_dim,
-                cut_len=self.ext_kwargs['cut_len'],
-                variables_meta_array=variables_meta_array,
-                num_static_components=n_static_components,
-                hidden_size=self.hidden_size,
-                lstm_layers=self.lstm_layers,
-                dropout=self.dropout,
-                num_attention_heads=self.num_attention_heads,
-                full_attention=self.full_attention,
-                feed_forward=self.feed_forward,
-                hidden_continuous_size=self.hidden_continuous_size,
-                categorical_embedding_sizes=self.categorical_embedding_sizes,
-                add_relative_index=self.add_relative_index,
-                norm_type=self.norm_type,
-                use_weighted_loss_func=self.use_weighted_loss_func,
-                past_split=self.past_split,
-                target_mode=self.target_mode,
-                scale_mode=self.scale_mode,
-                filter_conv_index=self.filter_conv_index,
-                device=self.device,
-                batch_file_path=self.batch_file_path,
-                model_type=self.model_type,
-                train_sample=self.train_sample,
-                train_sw_ins_mappings=self.train_sw_ins_mappings,     
-                valid_sw_ins_mappings=self.valid_sw_ins_mappings,  
-                pred_top_num=self.ext_kwargs['pred_top_num'],  
-                task_weights=self.ext_kwargs['task_weights'],  
-                main_task_seq=self.ext_kwargs['main_task_seq'],  
-                grad_limits=self.ext_kwargs['grad_limits'], 
-                **self.pl_module_params,
-        )     
+              
+        if self.act_model_type==0: 
+            model = FuturesBidiModule(
+                    output_dim=self.output_dim,
+                    cut_len=self.ext_kwargs['cut_len'],
+                    variables_meta_array=variables_meta_array,
+                    num_static_components=n_static_components,
+                    hidden_size=self.hidden_size,
+                    lstm_layers=self.lstm_layers,
+                    dropout=self.dropout,
+                    num_attention_heads=self.num_attention_heads,
+                    full_attention=self.full_attention,
+                    feed_forward=self.feed_forward,
+                    hidden_continuous_size=self.hidden_continuous_size,
+                    categorical_embedding_sizes=self.categorical_embedding_sizes,
+                    add_relative_index=self.add_relative_index,
+                    norm_type=self.norm_type,
+                    use_weighted_loss_func=self.use_weighted_loss_func,
+                    past_split=self.past_split,
+                    target_mode=self.target_mode,
+                    scale_mode=self.scale_mode,
+                    filter_conv_index=self.filter_conv_index,
+                    device=self.device,
+                    batch_file_path=self.batch_file_path,
+                    model_type=self.model_type,
+                    train_sample=self.train_sample,
+                    train_sw_ins_mappings=self.train_sw_ins_mappings,     
+                    valid_sw_ins_mappings=self.valid_sw_ins_mappings,  
+                    pred_top_num=self.ext_kwargs['pred_top_num'],  
+                    task_weights=self.ext_kwargs['task_weights'],  
+                    main_task_seq=self.ext_kwargs['main_task_seq'],  
+                    grad_limits=self.ext_kwargs['grad_limits'], 
+                    **self.pl_module_params,
+            )     
+        elif self.act_model_type==1:
+            model = FuturesTransformerModule(
+                    output_dim=self.output_dim,
+                    cut_len=self.ext_kwargs['cut_len'],
+                    variables_meta_array=variables_meta_array,
+                    num_static_components=n_static_components,
+                    hidden_size=self.hidden_size,
+                    lstm_layers=self.lstm_layers,
+                    dropout=self.dropout,
+                    num_attention_heads=self.num_attention_heads,
+                    full_attention=self.full_attention,
+                    feed_forward=self.feed_forward,
+                    hidden_continuous_size=self.hidden_continuous_size,
+                    categorical_embedding_sizes=self.categorical_embedding_sizes,
+                    add_relative_index=self.add_relative_index,
+                    norm_type=self.norm_type,
+                    use_weighted_loss_func=self.use_weighted_loss_func,
+                    past_split=self.past_split,
+                    target_mode=self.target_mode,
+                    scale_mode=self.scale_mode,
+                    filter_conv_index=self.filter_conv_index,
+                    device=self.device,
+                    batch_file_path=self.batch_file_path,
+                    model_type=self.model_type,
+                    train_sample=self.train_sample,
+                    train_sw_ins_mappings=self.train_sw_ins_mappings,     
+                    valid_sw_ins_mappings=self.valid_sw_ins_mappings,  
+                    pred_top_num=self.ext_kwargs['pred_top_num'],  
+                    task_weights=self.ext_kwargs['task_weights'],  
+                    main_task_seq=self.ext_kwargs['main_task_seq'],  
+                    grad_limits=self.ext_kwargs['grad_limits'], 
+                    **self.pl_module_params,
+            )      
+        else:
+            model = FuturesTcnModule(
+                    output_dim=self.output_dim,
+                    cut_len=self.ext_kwargs['cut_len'],
+                    variables_meta_array=variables_meta_array,
+                    num_static_components=n_static_components,
+                    hidden_size=self.hidden_size,
+                    lstm_layers=self.lstm_layers,
+                    dropout=self.dropout,
+                    num_attention_heads=self.num_attention_heads,
+                    full_attention=self.full_attention,
+                    feed_forward=self.feed_forward,
+                    hidden_continuous_size=self.hidden_continuous_size,
+                    categorical_embedding_sizes=self.categorical_embedding_sizes,
+                    add_relative_index=self.add_relative_index,
+                    norm_type=self.norm_type,
+                    use_weighted_loss_func=self.use_weighted_loss_func,
+                    past_split=self.past_split,
+                    target_mode=self.target_mode,
+                    scale_mode=self.scale_mode,
+                    filter_conv_index=self.filter_conv_index,
+                    device=self.device,
+                    batch_file_path=self.batch_file_path,
+                    model_type=self.model_type,
+                    train_sample=self.train_sample,
+                    train_sw_ins_mappings=self.train_sw_ins_mappings,     
+                    valid_sw_ins_mappings=self.valid_sw_ins_mappings,  
+                    pred_top_num=self.ext_kwargs['pred_top_num'],  
+                    task_weights=self.ext_kwargs['task_weights'],  
+                    main_task_seq=self.ext_kwargs['main_task_seq'],  
+                    grad_limits=self.ext_kwargs['grad_limits'], 
+                    **self.pl_module_params,
+            )                        
         self.after_create_model(model)
         return model         
     
@@ -608,100 +676,5 @@ class FuturesIndustryModel(FuturesModel):
         predictions = self.model.result_target
         
         return predictions
-    
-class FuturesIndustryDRollModel(FuturesIndustryModel):    
-
-    def _create_model(self, train_sample) -> nn.Module:
-        """重载创建模型方法，使用自定义模型"""
-        
-        (
-            past_target,
-            past_covariate,
-            historic_future_covariate,
-            future_covariate,
-            static_covariates,
-            _,
-            future_target,
-            _,
-            _,
-            _,
-            _,
-            _,
-            _
-        ) = train_sample
-
-        # add a covariate placeholder so that relative index will be included
-        if self.add_relative_index:
-            time_steps = self.input_chunk_length + self.output_chunk_length
-
-            expand_future_covariate = np.arange(time_steps).reshape((time_steps, 1))
-
-            historic_future_covariate = np.concatenate(
-                [
-                    ts[: self.input_chunk_length]
-                    for ts in [historic_future_covariate[0], expand_future_covariate]
-                    if ts is not None
-                ],
-                axis=1,
-            )
-            future_covariate = np.concatenate(
-                [
-                    ts[-self.output_chunk_length :]
-                    for ts in [future_covariate[0], expand_future_covariate]
-                    if ts is not None
-                ],
-                axis=1,
-            )
-        
-        # 修改原内容，固定设置为1，以适应后续分别运行的独立模型
-        self.output_dim = self.define_output_dim()
-        
-        # 根据拆分的过去协变量，生成多个配置，需要把原来的3维改成2维进行计算
-        ori_tensors = [
-            past_target[0],
-            past_covariate[0],
-            historic_future_covariate,  # for time varying encoders
-            future_covariate,
-            future_target[0],  # for time varying decoders
-            static_covariates[0],  # for static encoder
-        ]          
-        variables_meta_array,categorical_embedding_sizes = self.build_variable(ori_tensors)
-        
-        n_static_components = (
-            len(static_covariates) if static_covariates is not None else 0
-        )
-
-        self.categorical_embedding_sizes = categorical_embedding_sizes
-               
-        model = FuturesIndustryDRollModule(
-                output_dim=self.output_dim,
-                cut_len=self.ext_kwargs['cut_len'],
-                variables_meta_array=variables_meta_array,
-                num_static_components=n_static_components,
-                hidden_size=self.hidden_size,
-                lstm_layers=self.lstm_layers,
-                dropout=self.dropout,
-                num_attention_heads=self.num_attention_heads,
-                full_attention=self.full_attention,
-                feed_forward=self.feed_forward,
-                hidden_continuous_size=self.hidden_continuous_size,
-                categorical_embedding_sizes=self.categorical_embedding_sizes,
-                add_relative_index=self.add_relative_index,
-                norm_type=self.norm_type,
-                use_weighted_loss_func=self.use_weighted_loss_func,
-                past_split=self.past_split,
-                target_mode=self.target_mode,
-                scale_mode=self.scale_mode,
-                filter_conv_index=self.filter_conv_index,
-                device=self.device,
-                batch_file_path=self.batch_file_path,
-                train_step_mode=self.ext_kwargs['train_step_mode'],
-                model_type=self.model_type,
-                train_sample=self.train_sample,
-                train_sw_ins_mappings=self.train_sw_ins_mappings,     
-                valid_sw_ins_mappings=self.valid_sw_ins_mappings,     
-                **self.pl_module_params,
-        )     
-        return model            
 
     
