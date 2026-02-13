@@ -236,10 +236,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 辅助目标的损失
                         # ce_loss[i] += self.ccc_loss_comp(sv_out_item_att,round_targets_item_att)
                         
+                        fds_loss_inner = 0
                         for k in range(dec_out_item.shape[-1]):
-                            fds_loss[i] += self.compute_main_loss(dec_out_item[:,k],target_item[:,k])
-                            if torch.isnan(fds_loss[i]):
-                                print("nnn")
+                            fds_loss_inner += self.compute_main_loss(dec_out_item[:,k],target_item[:,k])
+                        fds_loss_inner = fds_loss_inner/dec_out_item.shape[-1]
+                        fds_loss[i] += fds_loss_inner
                         # corr_loss[i] += self.ccc_loss_comp(sv_out_item_att2,round_targets_item_att2)
                         index_target_total.append(future_index_round_target[j,main_index,target_len,ref_indicator])
                         sw_index_total.append(sw_index_data[j])
