@@ -7,6 +7,7 @@ from torchvision.models.resnet import Bottleneck, BasicBlock, ResNet
 from darts.models.forecasting.tide_model import _ResidualBlock
 
 from cus_utils.metrics import pca_apply
+from numba.core.types import float64
 
 class LineClassify(nn.Module):
     """简单线性分类器，用于对预测结果指标进行分类"""

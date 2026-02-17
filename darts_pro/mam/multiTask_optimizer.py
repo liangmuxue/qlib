@@ -1,3 +1,4 @@
+import sys
 import math
 import numpy as np
 from  torch.optim import Adam
@@ -5,6 +6,7 @@ import torch
 import torch.nn as nn
 from typing import List, Dict
 from rqalpha import interface
+from cus_utils.common_compute import check_param_nan
 
 
 def calculate_gradient_norm(gradient):
@@ -163,7 +165,7 @@ class MultiTaskGradientCalculator():
         self.task_weights = task_weights
         self.grad_limits = grad_limits
         
-    def compute_gradients(self, task_losses: List[torch.Tensor],return_components: bool = True):
+    def compute_gradients(self, task_losses: List[torch.Tensor],return_components: bool = True,epoch_num=0):
         """
         计算多任务学习的梯度分解
         
@@ -179,7 +181,7 @@ class MultiTaskGradientCalculator():
                
         if return_components:
             # 单独计算损失和梯度
-            gradient_components,loss_total = self._compute_gradient_components(task_losses)
+            gradient_components,loss_total = self._compute_gradient_components(task_losses,epoch_num=epoch_num)
             main_grads = self._get_parameter_gradients()
             return main_grads, gradient_components,loss_total
         else:
@@ -193,7 +195,7 @@ class MultiTaskGradientCalculator():
             loss_total.backward()          
             return self._get_parameter_gradients()
     
-    def _compute_gradient_components(self, task_losses):
+    def _compute_gradient_components(self, task_losses,epoch_num=0):
         """计算每个任务对共享参数的梯度贡献"""
         
         gradient_components = []
@@ -206,7 +208,7 @@ class MultiTaskGradientCalculator():
             if i==len(task_losses)-1:
                 weighted_loss.backward()     
             else:
-                weighted_loss.backward(retain_graph=True)     
+                weighted_loss.backward(retain_graph=True)  
             loss_total.append(weighted_loss)
             # 获取该任务的梯度贡献
             task_grads = {}
@@ -267,7 +269,7 @@ class MultiTaskOptimizer(Adam):
             weight = nn.Parameter(torch.tensor(self.task_weights[task_idx], device=self.device))  
             self.auxiliary_weights[f'w_{task_idx}'] = weight
             
-    def step_with_auto_weights(self, task_losses):
+    def step_with_auto_weights(self, task_losses,epoch_num=0):
         """辅助任务自适应权重"""
         
         # 记录历史梯度数据
@@ -278,8 +280,8 @@ class MultiTaskOptimizer(Adam):
         # 更新辅助任务权重
         dynamic_weights_info = self._update_weights(helpfulness)        
         # 计算所有任务梯度
-        _, gradient_components,loss_total = self.gradient_calculator.compute_gradients(
-            task_losses, return_components=True
+        main_grads, gradient_components,loss_total = self.gradient_calculator.compute_gradients(
+            task_losses, return_components=True,epoch_num=epoch_num
         )
         # 统计梯度冲突情况
         conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
@@ -288,8 +290,22 @@ class MultiTaskOptimizer(Adam):
         # 应用梯度手术,合并梯度
         if self.use_pcgrad:
             pc_grad(gradient_components)
+        if epoch_num==37:
+            for i in range(len(gradient_components)):
+                comp_item = gradient_components[i]
+                nan_name = check_param_nan(comp_item)
+                if nan_name is not None:
+                    print("opt_{} {} is nan".format(i,nan_name)) 
+                    sys.exit("opt pcgrad nan exit")            
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components,dynamic_grad=False)
+        if epoch_num==37:
+            for i in range(len(gradient_components)):
+                comp_item = gradient_components[i]
+                nan_name = check_param_nan(comp_item)
+                if nan_name is not None:
+                    print("opt_{} {} is nan".format(i,nan_name)) 
+                    sys.exit("opt combine nan exit")           
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
 

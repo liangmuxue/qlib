@@ -156,6 +156,7 @@ class FuturesTcnModule(MlpModule):
                 past_target_shape
                 +past_covariates_shape
                 +future_covariate.shape[-1]
+                +(static_covariates.shape[-1]-1)
             )
             
             main_index = FuturesMappingUtil.get_main_index_in_indus(self.train_sw_ins_mappings)
@@ -176,8 +177,8 @@ class FuturesTcnModule(MlpModule):
             # 使用混合时间序列模型,Transformer底座
             model = UnionTcnCombine(
                 input_dim=input_dim,static_feat=(static_covariates.shape[-1]-1),fut_feat=future_covariate.shape[-1],
-                C=combine_nodes_num,seq_len=self.input_chunk_length,pred_len=pred_len,target_feat_dim=1,
-                tcn_channels=[64, 32, 16],k=(3,3,3),dropout=0.3,act=nn.GELU()
+                C=combine_nodes_num,seq_len=self.input_chunk_length,pred_len=pred_len,target_feat_dim=len(self.past_split),
+                tcn_channels=[128,64, 32, 16],k=(3,3),dropout=0.2,act=nn.GELU()
             )                
             self.embedding_size = input_dim
             return model
@@ -319,7 +320,8 @@ class FuturesTcnModule(MlpModule):
             long_diff_index_targets,
             target_info
         ) = train_batch
-                
+                        
+                                    
         inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
@@ -330,6 +332,9 @@ class FuturesTcnModule(MlpModule):
         total_loss = torch.tensor(0.0).to(self.device)
         for i in range(self.get_optimizer_size()):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
+            # Print params data
+            self.print_params_data()
+            
             loss, detail_loss = self._compute_loss((output, vr_class, tar_class),
                             (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=i)
             (corr_loss, ce_loss, fds_loss, cls_loss, _) = detail_loss 
@@ -346,11 +351,11 @@ class FuturesTcnModule(MlpModule):
             opt = self.trainer.optimizers[i]
             task_weights = self.task_weights[i]
             if len(task_weights) == 3:
-                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i]])
+                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i]],epoch_num=self.current_epoch)
             elif len(task_weights) == 2:
-                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i]])
+                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i]],epoch_num=self.current_epoch)
             elif len(task_weights) == 4:
-                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i]])                
+                update_info = opt.step_with_auto_weights([cls_loss[i], ce_loss[i], fds_loss[i],corr_loss[i]],epoch_num=self.current_epoch)                
             else:
                 # 对于三元组损失，有可能没有样例，会返回0，需要忽略
                 if cls_loss[i] == 0:
@@ -384,7 +389,51 @@ class FuturesTcnModule(MlpModule):
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss, detail_loss, output 
-
+    
+    def print_params_data(self):
+        # return
+        # 获取TensorBoard的SummaryWriter实例（PL自动管理）
+        tb_logger = self.logger.experiment
+        # 1. 记录参数分布（Histogram）
+        for name, param in self.named_parameters():
+            # 清洗参数名（替换.为/，TensorBoard自动分组）
+            clean_name = name.replace(".", "/")
+            if not clean_name.startswith("sub_models/0"):
+                continue
+            if clean_name.endswith("bias"):
+                continue      
+            if "out_seq_head/" in clean_name:
+                continue                     
+            if "out_head/" in clean_name:
+                continue  
+                       
+            # 写入参数分布（global_step为当前epoch）
+            if "tcn_model" in clean_name:
+                show_name = clean_name.split("tcn_model")[1]
+            else:
+                show_name = clean_name
+            tb_logger.add_histogram(
+                tag=f"Params/{show_name}",
+                values=param.data,
+                global_step=self.current_epoch
+            )
+            # 2. 记录参数统计量（均值、最大值、最小值、标准差）
+            tb_logger.add_scalar(f"Param_Stats/{show_name}/mean", param.data.mean(), self.current_epoch)
+            # tb_logger.add_scalar(f"Param_Stats/{show_name}/max", param.data.max(), self.current_epoch)
+            # tb_logger.add_scalar(f"Param_Stats/{show_name}/min", param.data.min(), self.current_epoch)
+            # tb_logger.add_scalar(f"Param_Stats/{show_name}/std", param.data.std(), self.current_epoch)     
+ 
+            if param.grad is not None:
+                tb_logger.add_histogram(
+                    tag=f"Grad/{show_name}",
+                    values=param.grad,
+                    global_step=self.current_epoch
+                )            
+                tb_logger.add_scalar(f"Param_grad/{show_name}/mean", param.grad.mean(), self.current_epoch)
+                # tb_logger.add_scalar(f"Param_grad/{show_name}/max", param.grad.max(), self.current_epoch)
+                # tb_logger.add_scalar(f"Param_grad/{show_name}/min", param.grad.min(), self.current_epoch)
+                # tb_logger.add_scalar(f"Param_grad/{show_name}/std", param.grad.std(), self.current_epoch)               
+    
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -611,7 +660,7 @@ class FuturesTcnModule(MlpModule):
                     ins_output = ins_output[inner_index]
                     ins_output_mean = ins_output.mean()
                     ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output, -1)).squeeze(-1)
-                    dec_output_item = dec_output[index,:,:, j]
+                    dec_output_item = dec_output[index,:,:, 0]
                     # dec_output_item = dec_output[index,inner_index,-1,j] 
                     fur_round_target = round_targets[instruments, -self.output_chunk_length+self.cut_len-1, j]
                     price_targets = price_targets_total[index, instruments]

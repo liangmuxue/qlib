@@ -629,6 +629,25 @@ def all_elements_same(tensor, eps=1e-5):
     else:
         return torch.all(tensor == base).item()
 
+def check_nan(tensor, name="tensor"):
+    has_nan = torch.isnan(tensor).any().item()
+    has_inf = torch.isinf(tensor).any().item()
+    if has_nan or has_inf:
+        print(f" {name} has NaN)")
+        print(f"  mean={tensor.mean().item():.4f}, max={tensor.max().item():.4f}, min={tensor.min().item():.4f}")   
+        return True
+    return False
+
+def check_param_nan(params):
+    for key in params:
+        param = params[key]
+        try:
+            if param is not None and torch.any(torch.isnan(param.data)):
+                return key
+        except Exception as e:
+            print("eee:{}".format(e))
+    return None
+ 
 def is_same_elements(tensor1, tensor2,eps=1e-5):
     diff_num = torch.sum(torch.abs(tensor1 - tensor2)>eps)
     if diff_num>0:

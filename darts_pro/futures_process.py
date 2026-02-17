@@ -445,8 +445,8 @@ class FuturesProcessModel(TftDataframeModel):
                 lightning_callbacks.append(callback)          
                    
         pl_trainer_kwargs = {"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}    
-        pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": 
-                             gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}               
+        # pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": 
+        #                      gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}               
         if mode in [0,1,2]:  
             my_model = FuturesModel(
                     input_chunk_length=input_chunk_length,
