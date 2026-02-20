@@ -1,354 +1,786 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import TransformerEncoder, TransformerEncoderLayer, TransformerDecoder, TransformerDecoderLayer
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from torch.utils.data import Dataset, DataLoader
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from .cov_cnn import LinelessLayer
 
-# ===================================== 1. 位置编码（无改造，支持连续历史+未来）=====================================
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 1000, dropout: float = 0.1):
+# ---------------------- 核心新增：样本维度交互模块 ----------------------
+class SampleCrossAttention(nn.Module):
+    """样本维度自注意力：建模样本间（站点/设备/用户）的关联"""
+    def __init__(self, feat_dim, num_heads=4, dropout=0.1):
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-torch.log(torch.tensor(10000.0)) / d_model))
-        pe = torch.zeros(1,max_len, d_model)
-        pe[0,:,  0::2] = torch.sin(position * div_term)
-        pe[0,:,  1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
+        self.num_heads = num_heads
+        # 样本间自注意力层
+        self.attn = nn.MultiheadAttention(
+            embed_dim=feat_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        # 门控融合：控制交互信息的权重
+        self.gate = nn.Sequential(
+            nn.Linear(feat_dim * 2, feat_dim),
+            nn.Sigmoid()
+        )
+        # 层归一化
+        self.norm = nn.LayerNorm(feat_dim)
 
-    def forward(self, x: torch.Tensor, start_pos: int = 0) -> torch.Tensor:
-        x = x + self.pe[:,start_pos:start_pos + x.size(1),:]
-        return self.dropout(x)
+    def forward(self, x):
+        """
+        x: [B, S, F]  B=batch, S=样本维度（站点/设备数）, F=特征维度
+        return: [B, S, F]  融合样本间关联后的特征
+        """
+        # 样本间自注意力计算
+        attn_out, attn_weights = self.attn(x, x, x)
+        
+        # 门控融合：原特征 + 交互特征
+        gate_weight = self.gate(torch.cat([x, attn_out], dim=-1))
+        out = x * (1 - gate_weight) + attn_out * gate_weight
+        
+        # 层归一化
+        out = self.norm(out)
+        return out, attn_weights
 
-# ===================================== 2. 全局跨对象注意力（全C维度，捕捉5类关联）=====================================
-class CrossObjAttentionWithC(nn.Module):
-    def __init__(self, d_model: int, M_total: int, M_cov: int, M_tgt: int, C: int, nhead: int, dropout: float = 0.1):
+# ---------------------- 工具函数 ----------------------
+def generate_causal_mask(seq_len, device):
+    """生成因果掩码（禁止访问未来）"""
+    mask = (torch.triu(torch.ones(seq_len, seq_len, device=device)) == 1).transpose(0, 1)
+    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+    return mask
+
+class TimeFeatureEncoder:
+    """时间特征编码：提取年/月/日/小时等周期特征并嵌入"""
+    def __init__(self, time_col, embed_dims=None,device='cpu'):
+        self.time_col = time_col
+        self.encoders = {}
+        self.embed_layers = nn.ModuleDict().to(device)
+        
+        # 默认嵌入维度
+        if embed_dims is None:
+            self.embed_dims = {
+                'year': 4, 'month': 4, 'day': 4,'dayofweek': 4  # 新增节假日特征
+            }
+        else:
+            self.embed_dims = embed_dims
+
+    def fit(self, df):
+        """拟合时间特征编码器"""
+        df_time = pd.to_datetime(df[self.time_col])
+        self.time_features = {
+            'year': df_time.dt.year.values,
+            'month': df_time.dt.month.values,
+            'day': df_time.dt.day.values,
+            'dayofweek': df_time.dt.dayofweek.values,
+        }
+        
+        # 为离散时间特征创建LabelEncoder
+        for feat_name, feat_vals in self.time_features.items():
+            le = LabelEncoder()
+            le.fit(feat_vals)
+            self.encoders[feat_name] = le
+            num_classes = len(le.classes_)
+            # 创建嵌入层
+            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name])
+        
+        return self
+
+    def fit_static(self, range_data):
+        """使用固定数值范围，拟合时间特征编码器"""
+        
+        # 为离散时间特征创建LabelEncoder
+        for feat_name in range_data.keys():
+            le = LabelEncoder()
+            le.fit(range_data[feat_name])
+            self.encoders[feat_name] = le            
+            num_classes = len(le.classes_)
+            # 创建嵌入层
+            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name])
+        
+        return self
+    
+    def transform(self, df, device='cpu'):
+        """转换时间特征为嵌入向量"""
+        df_time = pd.to_datetime(df[self.time_col])
+        time_feats = {
+            'year': df_time.dt.year.values,
+            'month': df_time.dt.month.values,
+            'day': df_time.dt.day.values,
+            'dayofweek': df_time.dt.dayofweek.values,
+        }
+        
+        embed_list = []
+        for feat_name, feat_vals in time_feats.items():
+            encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals), device=device)
+            embed = self.embed_layers[feat_name](encoded)
+            embed_list.append(embed)
+        
+        # 拼接所有时间嵌入
+        time_embed = torch.cat(embed_list, dim=-1)  # (n_samples, time_embed_dim)
+        return time_embed
+
+    def transform_inner(self, batch_data, device='cpu'):
+        """批次内转换时间特征为嵌入向量"""
+        
+        embed_list = []
+        for feat_name in batch_data.keys():
+            feat_vals = batch_data[feat_name]
+            try:
+                encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals), device=device)
+            except Exception as e:
+                print("eee:",e)
+            embed = self.embed_layers[feat_name](encoded)
+            embed_list.append(embed)
+        
+        # 拼接所有时间嵌入
+        time_embed = torch.cat(embed_list, dim=-1)  # (n_samples, time_embed_dim)
+        return time_embed
+    
+# ---------------------- TFT核心模块 ----------------------
+class GatedResidualNetwork(nn.Module):
+    """门控残差网络（GRN）：TFT核心特征处理模块"""
+    def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.1):
         super().__init__()
-        self.d_model = d_model
-        self.M_total = M_total
-        self.M_cov = M_cov
-        self.M_tgt = M_tgt
-        self.C = C
-        self.d_k = d_model // M_total
-        assert d_model % M_total == 0, "d_model必须是总对象数M_total的整数倍"
-
-        self.temporal_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
-        self.cov_c_fuse_mlp = nn.Sequential(nn.Linear(self.d_k, self.d_k), nn.GELU(), nn.Dropout(dropout), nn.Linear(self.d_k, self.d_k))
-        self.tgt_c_fuse_mlp = nn.Sequential(nn.Linear(self.d_k, self.d_k), nn.GELU(), nn.Dropout(dropout), nn.Linear(self.d_k, self.d_k))
-        self.q_proj = nn.Linear(self.d_k, self.d_k)
-        self.kv_proj = nn.Linear(d_model, self.d_k * 2)
-        self.alpha = nn.Parameter(torch.tensor(0.5))
-        self.norm = nn.LayerNorm(d_model)
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.gate = nn.Linear(output_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(output_dim)
+        
+        # 残差连接适配
+        self.residual = nn.Linear(input_dim, output_dim) if input_dim != output_dim else nn.Identity()
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
-        B, T, D = x.shape
-        # 时序自注意力
-        temporal_out, _ = self.temporal_attn(x, x, x, attn_mask=mask)
-        # 按总对象数拆分
-        x_split = x.reshape(B, T, self.M_total, self.d_k)
-        x_cov, x_tgt = x_split[:, :, :self.M_cov, :], x_split[:, :, self.M_cov:, :]
-        # 分类型C维融合
-        x_cov_fused = torch.stack([self.cov_c_fuse_mlp(x_cov[:, :, m, :]) for m in range(self.M_cov)], dim=2)
-        x_tgt_fused = torch.stack([self.tgt_c_fuse_mlp(x_tgt[:, :, m, :]) for m in range(self.M_tgt)], dim=2)
-        x_obj_fused = torch.cat([x_cov_fused, x_tgt_fused], dim=2)
-        # 全局跨对象注意力
-        cross_out = []
-        for m in range(self.M_total):
-            q = self.q_proj(x_obj_fused[:, :, m, :])
-            kv = self.kv_proj(x_obj_fused.reshape(B, T, D))
-            k, v = torch.chunk(kv, 2, dim=-1)
-            attn_w = F.softmax(torch.matmul(q, k.transpose(-2, -1))/torch.sqrt(torch.tensor(self.d_k)), dim=-1)
-            cross_out.append(torch.matmul(attn_w, v))
-        cross_out = torch.cat(cross_out, dim=-1)
-        # 融合+残差
-        out = self.alpha * self.dropout(cross_out) + (1 - self.alpha) * temporal_out
-        return self.norm(out + x)
+    def forward(self, x):
+        """
+        x: (batch, seq_len, input_dim) 或 (batch, input_dim)
+        """
+        # 前向传播
+        x_res = self.residual(x)
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+        
+        # 门控机制
+        gate = torch.sigmoid(self.gate(x_res))
+        x = x * gate
+        
+        # 残差+层归一
+        x = x + x_res
+        x = self.layer_norm(x)
+        return x
 
-# ===================================== 3. 损失函数（全C维度，协变量-目标C维关联正则化）=====================================
-class CovaTgtCLossWithC(nn.Module):
-    def __init__(self, d_model: int, M_cov: int, M_tgt: int, C: int, beta1: float = 0.05, beta2: float = 0.01, eps: float = 1e-8):
+class VariableSelectionNetwork(nn.Module):
+    """变量选择网络：对输入特征加权，突出重要变量"""
+    def __init__(self, input_dim, num_vars, hidden_dim=64, dropout=0.1):
         super().__init__()
-        self.M_cov = M_cov
-        self.M_tgt = M_tgt
-        self.C = C
-        self.beta1 = beta1
-        self.beta2 = beta2
-        self.eps = eps
-        self.mse = nn.MSELoss(reduction='mean')
-        self.mine = nn.Sequential(nn.Linear(2*d_model, d_model//2), nn.GELU(), nn.Linear(d_model//2, 1))
+        self.num_vars = num_vars
+        self.grn = GatedResidualNetwork(input_dim, hidden_dim, num_vars, dropout)
 
-    def cova_tgt_corr(self, cov_feat: torch.Tensor, tgt_feat: torch.Tensor) -> torch.Tensor:
-        cov_flat = cov_feat.reshape(cov_feat.shape[0], cov_feat.shape[1], -1)
-        tgt_flat = tgt_feat.reshape(tgt_feat.shape[0], tgt_feat.shape[1], -1)
-        cov_cent = cov_flat - cov_flat.mean(dim=1, keepdim=True)
-        tgt_cent = tgt_flat - tgt_flat.mean(dim=1, keepdim=True)
-        cov_mat = torch.matmul(cov_cent.transpose(-2, -1), tgt_cent) / (cov_flat.shape[1]-1)
-        cov_std = torch.sqrt(torch.sum(cov_cent**2, dim=1, keepdim=True)/(cov_flat.shape[1]-1)+self.eps)
-        tgt_std = torch.sqrt(torch.sum(tgt_cent**2, dim=1, keepdim=True)/(tgt_flat.shape[1]-1)+self.eps)
-        corr_mat = cov_mat / (torch.matmul(cov_std, tgt_std.transpose(-2, -1))+self.eps)
-        return corr_mat.mean(dim=0)
+    def forward(self, x):
+        """
+        x: (batch, seq_len, input_dim)
+        return: 
+            weighted_x: (batch, seq_len, input_dim) 加权后的特征
+            var_weights: (batch, seq_len, num_vars) 变量权重（可解释性）
+        """
+        # 计算变量权重
+        var_weights = self.grn(x)  # (batch, seq_len, num_vars)
+        var_weights = F.softmax(var_weights, dim=-1)
+        
+        # 重塑为加权矩阵
+        batch_size, seq_len, _ = x.shape
+        x_reshaped = x.reshape(batch_size, seq_len, self.num_vars, -1)  # (batch, seq_len, num_vars, var_dim)
+        var_weights_expanded = var_weights.unsqueeze(-1)  # (batch, seq_len, num_vars, 1)
+        
+        # 加权特征
+        weighted_x = (x_reshaped * var_weights_expanded).reshape(batch_size, seq_len, -1)
+        return weighted_x, var_weights
 
-    def mine_mi(self, h_dec: torch.Tensor, fut_cov_enc: torch.Tensor) -> torch.Tensor:
-        concat = torch.cat([h_dec, fut_cov_enc], dim=-1)
-        pos = self.mine(concat).mean()
-        fut_shuffle = fut_cov_enc[torch.randperm(fut_cov_enc.shape[0])]
-        concat_shuffle = torch.cat([h_dec, fut_shuffle], dim=-1)
-        neg = torch.exp(self.mine(concat_shuffle)).mean()
-        return pos - torch.log(neg + self.eps)
-
-    def forward(self, pred: torch.Tensor, true: torch.Tensor, h_dec: torch.Tensor, fut_cov_enc: torch.Tensor,
-                cov_feat_hist: torch.Tensor, tgt_feat_hist: torch.Tensor) -> tuple:
-        loss_base = self.mse(pred, true)
-        corr_pred = self.cova_tgt_corr(cov_feat_hist, pred)
-        corr_true = self.cova_tgt_corr(cov_feat_hist, true)
-        loss_corr = F.mse_loss(corr_pred, corr_true)
-        loss_fut = -self.mine_mi(h_dec, fut_cov_enc)
-        loss_total = loss_base + self.beta1 * loss_corr + self.beta2 * loss_fut
-        return loss_total, loss_base, loss_corr, loss_fut
-
-# ===================================== 4. 主模型（全张量含C维度，核心实现）=====================================
-class MultiTargetTransformerWithFuture(nn.Module):
+class TFTWithFutureCovariates(nn.Module):
+    """带已知未来协变量+样本关联的TFT模型（无未来泄露）"""
     def __init__(
         self,
-        M_cov_p: int,          # 历史协变量组数
-        M_cov_f: int,          # 未来协变量组数
-        M_tgt: int,            # 多目标数
-        C: int,                # 全张量统一C维度（核心）
-        F_s: int,              # 静态协变量基础维度
-        d_model: int = 256,
-        nhead: int = 8,
-        num_layers: int = 3,
-        dropout: float = 0.1,
-        max_len: int = 1000
+        static_dim=0,          # 静态特征维度
+        obs_dim=6,             # 历史观测特征维度（要预测的变量）
+        fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
+        time_embed_dim=28,     # 时间特征嵌入维度（含节假日）
+        hidden_dim=64,         # 隐藏层维度
+        nhead=8,               # 注意力头数
+        num_layers=2,          # Transformer层数
+        dropout=0.1,
+        pred_len=1,            # 预测步长
+        sample_dim=3,          # 样本维度（站点/设备数）
+        sample_heads=4,        # 样本间注意力头数
+        device='cuda'
     ):
         super().__init__()
-        # 核心维度定义
-        self.M_cov_p = M_cov_p
-        self.M_cov_f = M_cov_f
-        self.M_cov = M_cov_p + M_cov_f  # 总协变量组数
-        self.M_tgt = M_tgt
-        self.M_total = self.M_cov + M_tgt  # 总对象数（协变量+目标）
-        self.C = C
-        self.d_model = d_model
-        self.d_k = d_model // self.M_total
-        assert d_model % self.M_total == 0, "d_model必须是总对象数M_total的整数倍"
-
-        # 1. 静态协变量投影+广播适配（含C维度）
-        self.static_proj = nn.Sequential(
-            nn.Linear(F_s, self.M_total),
-            nn.LayerNorm(self.M_total),
-            nn.GELU()
-        )
-        # 2. C维融合投影层（所有张量共用，保证C维融合逻辑一致）
-        self.c_fuse_proj = nn.Sequential(
-            nn.Linear(C, self.d_k),
-            nn.LayerNorm(self.d_k),
-            nn.GELU(),
-            nn.Dropout(dropout)
-        )
-        # 3. 位置编码
-        self.pos_enc = PositionalEncoding(d_model, max_len, dropout)
-
-        # 4. 编码器层（含全局跨对象注意力）
-        encoder_layers = TransformerEncoderLayer(d_model, nhead, dropout=dropout, batch_first=True, norm_first=True)
-        self.encoder = TransformerEncoder(encoder_layers, num_layers=num_layers)
-        self.encoder_cross_obj = CrossObjAttentionWithC(
-            d_model, self.M_total, self.M_cov, self.M_tgt, C, nhead, dropout
-        )
-
-        # 5. 解码器层（含全局跨对象注意力）
-        decoder_layers = TransformerDecoderLayer(d_model, nhead, dropout=dropout, batch_first=True, norm_first=True)
-        self.decoder = TransformerDecoder(decoder_layers, num_layers=num_layers)
-        self.decoder_cross_obj = CrossObjAttentionWithC(
-            d_model, self.M_total, self.M_cov, self.M_tgt, C, nhead, dropout
-        )
-
-        # 6. 输出门控解码层（全C维度适配）
-        self.fuse_proj = nn.Sequential(
-            nn.Linear(2 * d_model, d_model),
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-            nn.Dropout(dropout)
-        )
-        self.gate_proj = nn.Linear(d_model, M_tgt)
-        self.out_proj = nn.Linear(d_model, M_tgt * C)
+        self.device = device
+        self.pred_len = pred_len
+        self.static_dim = static_dim
+        self.obs_dim = obs_dim
+        self.fut_dim = fut_dim
+        self.sample_dim = sample_dim
+        self.hidden_dim = hidden_dim
         
-    def forward(
-        self,
-        x_cov_p: torch.Tensor,        # 历史协变量 [B, T_past, M_cov_p, C]
-        x_cov_f_past: torch.Tensor,   # 未来协变量历史段 [B, T_past, M_cov_f, C]
-        y_past: torch.Tensor,         # 历史多目标 [B, T_past, M_tgt, C]
-        x_cov_f_fut: torch.Tensor,    # 未来协变量未来段 [B, T_fut, M_cov_f, C]
-        x_static: torch.Tensor,       # 静态协变量 [B, F_s]
-        src_mask: torch.Tensor = None,
-        tgt_mask: torch.Tensor = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        B, T_past, _, _ = x_cov_p.shape
-        _, T_fut, _, _ = x_cov_f_fut.shape
-
-        # ===================================== 步骤1：编码器输入全C维融合（核心）=====================================
-        # 协变量拼接（历史+未来协变量历史段）[B,T_past,M_cov,C]
-        x_cov_total_past = torch.cat([x_cov_p, x_cov_f_past], dim=2)
-        # 协变量-目标拼接（总对象数）[B,T_past,M_total,C]
-        X_enc_raw = torch.cat([x_cov_total_past, y_past], dim=2)
-        # C维融合+投影 [B,T_past,M_total,d_k] → [B,T_past,d_model]
-        X_c_fused = self.c_fuse_proj(X_enc_raw)
-        X_enc_in = X_c_fused.reshape(B, T_past, self.d_model)
-
-        # ===================================== 步骤2：静态协变量广播适配（含C维度）=====================================
-        x_static_proj = self.static_proj(x_static.permute(0,2,1)).reshape(B, 1, self.M_total, self.C)  # [B,1,M_total,C]
-        x_static_c_fused = self.c_fuse_proj(x_static_proj).reshape(B, 1, self.d_model)  # [B,1,d_model]
-        x_static_past = x_static_c_fused.repeat(1, T_past, 1)  # [B,T_past,d_model]
-        x_static_fut = x_static_c_fused.repeat(1, T_fut, 1)    # [B,T_fut,d_model]
-
-        # ===================================== 步骤3：编码器编码（全C维度关联捕捉）=====================================
-        x_past_enc = self.pos_enc(X_enc_in, start_pos=0) + x_static_past
-        enc_out = self.encoder(x_past_enc, mask=src_mask)
-        enc_out = self.encoder_cross_obj(enc_out, mask=src_mask)
-
-        # ===================================== 步骤4：解码器输入全C维适配（未来协变量）=====================================
-        # 未来协变量C维融合+投影+补0 [B,T_fut,M_cov_f,d_k] → [B,T_fut,d_model]
-        x_cov_f_fused = self.c_fuse_proj(x_cov_f_fut)
-        x_cov_f_proj = x_cov_f_fused.reshape(B, T_fut, -1)
-        pad_dim = self.d_model - x_cov_f_proj.shape[-1]
-        x_cov_f_proj_pad = F.pad(x_cov_f_proj, (0, pad_dim))
-        # 位置编码+静态特征融合（连续位置）
-        x_fut_enc = self.pos_enc(x_cov_f_proj_pad, start_pos=T_past) + x_static_fut
-
-        # ===================================== 步骤5：解码器解码（历史-未来C维联动）=====================================
-        dec_out = self.decoder(
-            tgt=x_fut_enc, memory=enc_out,
-            tgt_mask=tgt_mask, memory_mask=None
+        # 1. 样本维度交互模块（仅作用于历史观测特征）
+        self.sample_cross_attn = SampleCrossAttention(
+            feat_dim=obs_dim + time_embed_dim,  # 历史观测+时间嵌入
+            num_heads=sample_heads,
+            dropout=dropout
         )
-        dec_out = self.decoder_cross_obj(dec_out, mask=tgt_mask)
+        
+        # 2. 静态特征处理
+        if static_dim > 0:
+            self.static_grn = GatedResidualNetwork(static_dim, hidden_dim, hidden_dim, dropout)
+            self.static_context = nn.Linear(hidden_dim, hidden_dim)
+        
+        # 3. 历史特征投影（观测+时间）
+        self.obs_proj = nn.Linear(obs_dim + time_embed_dim, hidden_dim)
+        
+        # 4. 未来协变量投影
+        self.fut_proj = nn.Linear(time_embed_dim, hidden_dim)
+        
+        # 5. 变量选择网络（仅对历史观测变量）
+        self.var_selection = VariableSelectionNetwork(hidden_dim, obs_dim, hidden_dim, dropout)
+        
+        # 6. Transformer编码器（因果掩码，仅处理历史）
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=nhead,
+            dim_feedforward=hidden_dim*4,
+            dropout=dropout,
+            batch_first=True,
+            activation='gelu'
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # 7. 未来协变量融合网络（关键：融合历史编码+未来协变量）
+        self.future_fusion = GatedResidualNetwork(hidden_dim * 2, hidden_dim, hidden_dim, dropout)
+        
+        # 8. 门控注意力融合
+        self.attention_gate = GatedResidualNetwork(hidden_dim, hidden_dim, hidden_dim, dropout)
+        
+        # 9. 输出层（预测目标变量）
+        self.output_grn = GatedResidualNetwork(hidden_dim, hidden_dim, hidden_dim, dropout)
+        self.final_proj = nn.Linear(hidden_dim, obs_dim)
 
-        # ===================================== 步骤6：输出解码（恢复全C维度多目标）=====================================
-        h_fuse = torch.cat([dec_out, x_fut_enc], dim=-1)
-        h_fuse_proj = self.fuse_proj(h_fuse)
-        # 门控权重适配C维
-        gate = torch.sigmoid(self.gate_proj(h_fuse_proj)).unsqueeze(-1)
-        # 基础预测恢复[B,T_fut,M_tgt,C]
-        y_base_flat = self.out_proj(h_fuse_proj)
-        y_base = y_base_flat.reshape(B, T_fut, self.M_tgt, self.C)
-        # 门控融合
-        y_pred = gate * y_base + (1 - gate) * y_base.mean(dim=2, keepdim=True)
-
-        # 返回预测值+编码器输出+解码器输出+历史协变量（用于损失计算）
-        return y_pred, enc_out, dec_out, x_cov_total_past
-
+    def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None, time_embed_fut=None):
+        """
+        static_feat: [B, S, static_dim] - 静态特征
+        obs_feat: [B, S, T, obs_dim] - 历史观测特征（仅过去）
+        time_embed_hist: [B, S, T, time_embed_dim] - 历史时间嵌入
+        time_embed_fut: [B, S, P, time_embed_dim] - 未来时间嵌入
+        return: 
+            pred: [B, S, P, obs_dim] - 预测结果
+            var_weights: [B, S, T, obs_dim] - 变量权重
+            sample_attn_weights: [B, sample_heads, S, S] - 样本间注意力权重
+        """
+        B, S, T, _ = obs_feat.shape  # B=batch, S=样本数, T=历史序列长度
+        P = self.pred_len            # P=预测步长
+        
+        # ---------------------- 步骤1：样本维度交互（仅历史，无未来泄露） ----------------------
+        # 1.1 历史特征全局池化
+        obs_global = obs_feat.mean(dim=2)  # [B, S, obs_dim]
+        time_hist_global = time_embed_hist.mean(dim=2)  # [B, S, time_embed_dim]
+        sample_feat = torch.cat([obs_global, time_hist_global], dim=-1)  # [B, S, F]
+        
+        # 1.2 样本间自注意力（建模样本关联）
+        sample_feat_interact, sample_attn_weights = self.sample_cross_attn(sample_feat)  # [B, S, F]
+        
+        # 1.3 广播回时间维度
+        sample_feat_interact = sample_feat_interact.unsqueeze(2).repeat(1, 1, T, 1)  # [B, S, T, F]
+        
+        # ---------------------- 步骤2：历史特征处理（因果掩码，仅看过去） ----------------------
+        # 2.1 融合历史观测+时间嵌入+样本交互
+        obs_input = torch.cat([obs_feat, time_embed_hist], dim=-1)  # [B,S,T,F]
+        obs_input = obs_input + sample_feat_interact  # 残差融合
+        
+        # 2.2 展平样本维度：[B,S,T,F] → [B*S, T, F]
+        obs_input = obs_input.reshape(B*S, T, -1)
+        
+        # 2.3 静态特征处理
+        if static_feat is not None and self.static_dim > 0:
+            static_feat_flat = static_feat.reshape(B*S, self.static_dim)  # [B*S, static_dim]
+            static_feat_processed = self.static_grn(static_feat_flat)    # [B*S, hidden_dim]
+            static_context = self.static_context(static_feat_processed).unsqueeze(1)  # [B*S, 1, hidden_dim]
+        else:
+            static_context = None
+        
+        # 2.4 历史特征投影
+        obs_proj = self.obs_proj(obs_input)  # [B*S, T, hidden_dim]
+        if static_context is not None:
+            obs_proj = obs_proj + static_context
+        
+        # 2.5 变量选择
+        obs_proj, var_weights = self.var_selection(obs_proj)  # [B*S, T, hidden_dim]
+        
+        # 2.6 Transformer编码（因果掩码，禁止看未来）
+        causal_mask = generate_causal_mask(T, self.device)
+        hist_encoded = self.transformer_encoder(obs_proj, mask=causal_mask)  # [B*S, T, hidden_dim]
+        
+        # 2.7 取最后时间步的历史编码（历史信息总结）
+        hist_summary = hist_encoded[:, -1, :]  # [B*S, hidden_dim]
+        
+        time_embed_fut_flat = time_embed_fut.reshape(B*S, P, time_embed_fut.shape[-1])
+        
+        # 3.2 未来协变量投影
+        fut_input = time_embed_fut_flat.to(static_feat.device)  # [B*S, P, F]
+        fut_proj = self.fut_proj(fut_input)  # [B*S, P, hidden_dim]
+        
+        # 3.3 融合历史总结+未来协变量（核心：历史指导未来预测）
+        hist_summary_expanded = hist_summary.unsqueeze(1).repeat(1, P, 1)  # [B*S, P, hidden_dim]
+        fusion_input = torch.cat([hist_summary_expanded, fut_proj], dim=-1)  # [B*S, P, 2*hidden_dim]
+        fusion_out = self.future_fusion(fusion_input)  # [B*S, P, hidden_dim]
+        
+        # ---------------------- 步骤4：输出预测 ----------------------
+        # 4.1 门控融合
+        final_feat = self.attention_gate(fusion_out)  # [B*S, P, hidden_dim]
+        
+        # 4.2 输出层（每个预测步独立预测）
+        final_feat_flat = final_feat.reshape(B*S*P, self.hidden_dim)  # [B*S*P, hidden_dim]
+        final_feat_processed = self.output_grn(final_feat_flat)   # [B*S*P, hidden_dim]
+        pred_flat = self.final_proj(final_feat_processed)        # [B*S*P, obs_dim]
+        
+        # 4.3 恢复维度
+        pred = pred_flat.reshape(B*S, P, self.obs_dim)  # [B*S, P, obs_dim]
+        pred = pred.reshape(B, S, P, self.obs_dim)      # [B, S, P, obs_dim]
+        
+        # 4.4 变量权重恢复
+        var_weights = var_weights.reshape(B, S, T, self.obs_dim)  # [B, S, T, obs_dim]
+        
+        return pred, var_weights, sample_attn_weights
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
 
     def __init__(
         self,
-        M_cov_p: int,          # 历史协变量组数
-        M_cov_f: int,          # 未来协变量组数
-        M_tgt: int,            # 多目标数
-        C: int,                # 全张量统一C维度（核心）
-        F_s: int,              # 静态协变量基础维度
-        pred_len: int = 5,     # 预测长度
-        d_model: int = 256,
-        nhead: int = 8,
-        num_layers: int = 4,
-        dropout: float = 0.1,
-        max_len: int = 100,
+        static_dim=0,          # 静态特征维度
+        obs_dim=6,             # 历史观测特征维度（要预测的变量）
+        fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
+        time_embed_dim=28,     # 时间特征嵌入维度（含节假日）
+        hidden_dim=64,         # 隐藏层维度
+        nhead=8,               # 注意力头数
+        num_layers=2,          # Transformer层数
+        dropout=0.1,
+        pred_len=1,            # 预测步长
+        sample_dim=3,          # 样本维度（站点/设备数）
+        sample_heads=4,        # 样本间注意力头数
+        target_feat_dim=2,
         hidden_size=16,
+        device='cuda'
     ):
         super().__init__()
-        self.trans_model = MultiTargetTransformerWithFuture(
-            M_cov_p=M_cov_p, M_cov_f=M_cov_f, F_s=F_s,M_tgt=M_tgt,C=C,
-            d_model=d_model,nhead=nhead,num_layers=num_layers,dropout=dropout,max_len=max_len
-        )    
-        self.pred_len = pred_len           
+        self.trans_model = TFTWithFutureCovariates(
+                static_dim=static_dim,
+                obs_dim=obs_dim,
+                fut_dim=fut_dim,
+                time_embed_dim=time_embed_dim,
+                hidden_dim=hidden_dim,
+                nhead=nhead,
+                num_layers=num_layers,
+                dropout=dropout,
+                pred_len=pred_len,
+                sample_dim=sample_dim,
+                sample_heads=sample_heads,
+                device=device,
+            )
+        
+        self.pred_len = pred_len         
+        self.sample_dim = sample_dim
+        self.target_feat_dim = target_feat_dim  
         # 整合输出网络
-        self.ins_layer = LinelessLayer(C*pred_len,C,
-                            hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
-        self.ins_att_layer = LinelessLayer(C*pred_len,C,
-                        hidden_size=hidden_size,layer_norm=True,batch_norm=False)    
+        self.ins_layer = nn.ParameterList([LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3).double() for _ in range(self.target_feat_dim)])
+        self.dec_layer = LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim*pred_len*target_feat_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
         # 指数整合输出网络       
-        self.index_combine_layer = LinelessLayer(C*pred_len,pred_len)     
+        self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
             
     def forward(
-        self,
-        x_cov_p: torch.Tensor,        # 历史协变量 [B, T_past, M_cov_p, C]
-        x_cov_f_past: torch.Tensor,   # 未来协变量历史段 [B, T_past, M_cov_f, C]
-        y_past: torch.Tensor,         # 历史多目标 [B, T_past, M_tgt, C]
-        x_cov_f_fut: torch.Tensor,    # 未来协变量未来段 [B, T_fut, M_cov_f, C]
-        x_static: torch.Tensor,       # 静态协变量 [B, F_s]
-        src_mask: torch.Tensor = None,
-        tgt_mask: torch.Tensor = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:    
+        self,static_covs,past_convs_item, his_future_emb,future_emb
+    ):    
         
         # 基础模型的向前传播
-        y_pred, enc_out, dec_out, cov_feat_hist = self.trans_model(
-            x_cov_p, x_cov_f_past, y_past, x_cov_f_fut, x_static,src_mask=src_mask,tgt_mask=tgt_mask
+        y_pred,_,_ = self.trans_model(
+            static_covs,past_convs_item, his_future_emb,future_emb
         )   
-        cls_out_combine = []
-        index_data_combine = []
-        dec_out_combine = []        
+        y_pred_reshape = y_pred.reshape(y_pred.shape[0],-1)
+        
+        dec_out_combine = self.dec_layer(y_pred_reshape).reshape(y_pred.shape[0],self.sample_dim,self.pred_len,self.target_feat_dim)
+        cls_out_combine = []    
         # 品种间比较目标的网络输出
-        y_pred = y_pred.permute(0,3,1,2)
-        pred_reshape = y_pred.reshape(y_pred.shape[0],-1)
-        dec_out_combine.append(y_pred)   
-        dec_out_combine = torch.cat(dec_out_combine,dim=1).squeeze(-1)
-        # 主要比较目标输出
-        cls_out_ins = self.ins_layer(pred_reshape)
-        # 添加辅助品种比较目标输出
-        cls_out_ins_att = self.ins_att_layer(pred_reshape)    
-        cls_out_combine.append(cls_out_ins)
-        cls_out_combine.append(cls_out_ins_att)  
+        for i in range(self.target_feat_dim):
+            # 主要比较目标输出
+            cls_out_ins = self.ins_layer[i](y_pred_reshape)
+            cls_out_combine.append(cls_out_ins)
         # 整体指数预测的网络输出
-        sw_index_data = self.index_combine_layer(pred_reshape)     
-        index_data_combine = sw_index_data
+        index_data_combine = self.index_combine_layer(y_pred_reshape)
         
-        return dec_out_combine,cls_out_combine,index_data_combine 
+        return dec_out_combine,cls_out_combine,index_data_combine   
+
+
+
+
+
+
+
+
+
+# ---------------------- 带未来协变量的数据集构建 ----------------------
+class TFTFutureCovDataset(Dataset):
+    """支持已知未来协变量的多样本时序数据集"""
+    def __init__(
+        self, 
+        df_list,               # 列表：每个元素是一个样本的DataFrame
+        obs_cols,              # 历史观测列（要预测的变量）
+        fut_cols,              # 已知未来协变量列（天气/节假日等）
+        time_col, 
+        static_cols=[],
+        seq_len=24, 
+        pred_len=1,
+        scaler_obs=None,
+        scaler_fut=None,
+        time_encoder=None,
+        device='cuda'
+    ):
+        self.df_list = df_list
+        self.sample_dim = len(df_list)
+        self.obs_cols = obs_cols
+        self.fut_cols = fut_cols
+        self.time_col = time_col
+        self.static_cols = static_cols
+        self.seq_len = seq_len
+        self.pred_len = pred_len
+        self.device = device
         
-# ===================================== 5. 测试代码（验证全C维度维度正确性）=====================================
-if __name__ == "__main__":
-    # 超参数设置（可根据业务自由调整）
-    B, T_past, T_fut = 4, 10, 5  # 批次、历史长度、预测长度
-    M_cov_p, M_cov_f, M_tgt = 2, 1, 3  # 历史协变量组=2，未来协变量组=1，多目标=3
-    C = 3  # 全张量统一C维度（核心，所有协变量+目标都是3维）
-    F_s = 4  # 静态协变量基础维度
-    d_model, nhead, num_layers = 96, 8, 2  # d_model=96 = M_total(2+1+3)*d_k(16)
+        # 检查数据长度
+        self.n_samples = min([len(df) for df in df_list]) - seq_len - pred_len + 1
+        assert self.n_samples > 0, "数据长度不足"
+        
+        # 标准化：观测变量和未来协变量分开标准化
+        # 观测变量scaler
+        if scaler_obs is None:
+            self.scaler_obs = StandardScaler()
+            all_obs_data = np.concatenate([df[obs_cols].values for df in df_list])
+            self.scaler_obs.fit(all_obs_data)
+        else:
+            self.scaler_obs = scaler_obs
+        
+        # 未来协变量scaler
+        if scaler_fut is None:
+            self.scaler_fut = StandardScaler()
+            all_fut_data = np.concatenate([df[fut_cols].values for df in df_list])
+            self.scaler_fut.fit(all_fut_data)
+        else:
+            self.scaler_fut = scaler_fut
+        
+        # 处理每个样本的数据
+        self.obs_data_list = []      # 历史观测数据
+        self.fut_data_list = []      # 未来协变量数据
+        self.time_embed_list = []    # 时间嵌入（全时间范围）
+        self.static_data_list = []   # 静态特征
+        
+        # 时间编码器
+        if time_encoder is None:
+            self.time_encoder = TimeFeatureEncoder(time_col,device=device)
+            self.time_encoder.fit(df_list[0])
+        else:
+            self.time_encoder = time_encoder
+        
+        for df in df_list:
+            # 1. 观测变量标准化
+            obs_data = torch.FloatTensor(self.scaler_obs.transform(df[obs_cols])).to(device)
+            self.obs_data_list.append(obs_data)
+            
+            # 2. 未来协变量标准化
+            fut_data = torch.FloatTensor(self.scaler_fut.transform(df[fut_cols])).to(device)
+            self.fut_data_list.append(fut_data)
+            
+            # 3. 时间嵌入
+            time_embed = self.time_encoder.transform(df, device)
+            self.time_embed_list.append(time_embed)
+            
+            # 4. 静态特征
+            if len(static_cols) > 0:
+                static_data = torch.FloatTensor(df[static_cols].values).to(device)
+                self.static_data_list.append(static_data)
+            else:
+                self.static_data_list.append(None)
 
-    # 生成测试数据（严格匹配全C维度）
-    x_cov_p = torch.randn(B, T_past, M_cov_p, C)        # [4,10,2,3] 历史协变量（含C）
-    x_cov_f_past = torch.randn(B, T_past, M_cov_f, C)   # [4,10,1,3] 未来协变量历史段（含C）
-    y_past = torch.randn(B, T_past, M_tgt, C)           # [4,10,3,3] 历史多目标（含C）
-    x_cov_f_fut = torch.randn(B, T_fut, M_cov_f, C)     # [4,5,1,3] 未来协变量未来段（含C）
-    x_static = torch.randn(B, F_s)                      # [4,4] 静态协变量
-    y_true = torch.randn(B, T_fut, M_tgt, C)            # [4,5,3,3] 未来真实多目标（含C）
+    def __getitem__(self, idx):
+        """
+        返回：
+        (静态特征, 历史观测, 历史时间嵌入, 未来协变量, 未来时间嵌入), 目标值
+        """
+        x_static = []
+        x_obs = []       # [S, T, obs_dim]
+        x_time_hist = [] # [S, T, time_embed_dim]
+        x_fut = []       # [S, P, fut_dim]
+        x_time_fut = []  # [S, P, time_embed_dim]
+        y_list = []      # [S, P, obs_dim]
+        
+        for s in range(self.sample_dim):
+            # 历史观测特征：[idx, idx+seq_len]
+            obs_data = self.obs_data_list[s]
+            x_o = obs_data[idx:idx+self.seq_len]
+            x_obs.append(x_o)
+            
+            # 历史时间嵌入：[idx, idx+seq_len]
+            time_embed = self.time_embed_list[s]
+            x_th = time_embed[idx:idx+self.seq_len]
+            x_time_hist.append(x_th)
+            
+            # 已知未来协变量：[idx+seq_len, idx+seq_len+pred_len]（合法未来）
+            fut_data = self.fut_data_list[s]
+            x_fu = fut_data[idx+self.seq_len:idx+self.seq_len+self.pred_len]
+            x_fut.append(x_fu)
+            
+            # 未来时间嵌入：[idx+seq_len, idx+seq_len+pred_len]
+            x_tf = time_embed[idx+self.seq_len:idx+self.seq_len+self.pred_len]
+            x_time_fut.append(x_tf)
+            
+            # 静态特征
+            if self.static_data_list[s] is not None:
+                x_st = self.static_data_list[s][idx]
+                x_static.append(x_st)
+            
+            # 目标值：[idx+seq_len, idx+seq_len+pred_len]
+            y_t = obs_data[idx+self.seq_len:idx+self.seq_len+self.pred_len]
+            y_list.append(y_t)
+        
+        # 转换为张量
+        x_obs = torch.stack(x_obs, dim=0)
+        x_time_hist = torch.stack(x_time_hist, dim=0)
+        x_fut = torch.stack(x_fut, dim=0)
+        x_time_fut = torch.stack(x_time_fut, dim=0)
+        y = torch.stack(y_list, dim=0)
+        x_static = torch.stack(x_static, dim=0) if len(x_static) > 0 else None
+        
+        return (x_static, x_obs, x_time_hist, x_fut, x_time_fut), y
 
-    # 初始化模型、损失函数、优化器
-    model = MultiTargetTransformerWithFuture(
-        M_cov_p=M_cov_p, M_cov_f=M_cov_f, M_tgt=M_tgt, C=C, F_s=F_s,
-        d_model=d_model, nhead=nhead, num_layers=num_layers
-    )
-    loss_fn = CovaTgtCLossWithC(
-        d_model=d_model, M_cov=M_cov_p+M_cov_f, M_tgt=M_tgt, C=C
-    )
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    def __len__(self):
+        return self.n_samples
 
-    # 前向传播
-    y_pred, enc_out, dec_out, cov_feat_hist = model(
-        x_cov_p, x_cov_f_past, y_past, x_cov_f_fut, x_static
-    )
-    # 计算损失（需传入历史协变量特征用于相关性正则化）
-    loss_total, loss_base, loss_corr, loss_fut = loss_fn(
-        y_pred, y_true, dec_out, model.fut_proj(x_cov_f_fut),
-        cov_feat_hist, y_past
-    )
-    # 反向传播+参数更新
-    optimizer.zero_grad()
-    loss_total.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # 梯度裁剪，防止爆炸
-    optimizer.step()
+# ---------------------- 训练与推理 ----------------------
+def train_tft_future(model, dataloader, criterion, optimizer, device):
+    model.train()
+    total_loss = 0.0
+    pbar = tqdm(dataloader, desc='Training (with future covariates)')
+    
+    for batch in pbar:
+        (x_static, x_obs, x_time_hist, x_fut, x_time_fut), y = batch
+        
+        # 前向传播
+        pred, _, _ = model(x_static, x_obs, x_time_hist, x_fut, x_time_fut)
+        loss = criterion(pred, y)
+        
+        # 反向传播
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        total_loss += loss.item()
+        pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+    
+    avg_loss = total_loss / len(dataloader)
+    return avg_loss
 
-    # 打印维度和损失（验证全C维度正确性）
-    print(f"预测值形状: {y_pred.shape} | 预期形状: ({B}, {T_fut}, {M_tgt}, {C})")
-    print(f"总损失: {loss_total.item():.4f} | 基础MSE损失: {loss_base.item():.4f}")
-    print(f"协变量-目标C维相关性损失: {loss_corr.item():.4f} | 未来协变量C维MI损失: {loss_fut.item():.4f}")
+def predict_tft_future(model, dataloader, scaler_obs, device):
+    model.eval()
+    preds = []
+    trues = []
+    sample_attn_weights_list = []
+    
+    with torch.no_grad():
+        for batch in dataloader:
+            (x_static, x_obs, x_time_hist, x_fut, x_time_fut), y = batch
+            
+            # 前向传播
+            pred, _, sample_attn_weights = model(x_static, x_obs, x_time_hist, x_fut, x_time_fut)
+            sample_attn_weights_list.append(sample_attn_weights.cpu().numpy())
+            
+            # 维度展平+反标准化
+            B, S, P, F = pred.shape
+            pred_np = pred.cpu().numpy().reshape(-1, F)
+            true_np = y.cpu().numpy().reshape(-1, F)
+            
+            pred_original = scaler_obs.inverse_transform(pred_np)
+            true_original = scaler_obs.inverse_transform(true_np)
+            
+            # 恢复维度
+            pred_original = pred_original.reshape(B, S, P, F)
+            true_original = true_original.reshape(B, S, P, F)
+            
+            preds.append(pred_original)
+            trues.append(true_original)
+    
+    preds = np.concatenate(preds, axis=0)
+    trues = np.concatenate(trues, axis=0)
+    sample_attn_weights = np.concatenate(sample_attn_weights_list, axis=0)
+    
+    return preds, trues, sample_attn_weights
+
+# ---------------------- 测试用例（带未来协变量） ----------------------
+if __name__ == '__main__':
+    # 1. 生成模拟数据（3个样本+已知未来协变量）
+    np.random.seed(42)
+    n_samples = 2000
+    sample_dim = 3  # 3个站点
+    time_index = pd.date_range(start='2024-01-01', periods=n_samples, freq='H')
+    
+    # 生成节假日数据（已知未来协变量）
+    holidays = pd.to_datetime(['2024-01-01', '2024-02-10', '2024-04-05', '2024-05-01'])
+    is_holiday = np.isin(time_index.date, holidays.date).astype(int)
+    
+    # 生成3个样本的数据集
+    df_list = []
+    for s in range(sample_dim):
+        # 历史观测变量（6个，要预测的）
+        base_trend = np.cumsum(np.random.randn(n_samples)) * (s+1)
+        # 已知未来协变量（3个：温度、湿度、节假日）
+        temp = 20 + np.sin(np.linspace(0, 100, n_samples) + s) * 5 + np.random.randn(n_samples)*0.5
+        humidity = 60 + np.cos(np.linspace(0, 100, n_samples) + s) * 10 + np.random.randn(n_samples)*1
+        holiday = is_holiday.copy()
+        
+        df = pd.DataFrame({
+            'timestamp': time_index,
+            # 观测变量（要预测的）
+            'var1': base_trend + 10 + temp*0.5 + holiday*10 + np.random.randn(n_samples)*0.5,
+            'var2': base_trend * 0.8 + 20 + temp*0.3 + holiday*5 + np.random.randn(n_samples)*0.5,
+            'var3': np.sin(np.linspace(0, 100, n_samples) + s) * 5 + 30 + humidity*0.2,
+            'var4': np.cos(np.linspace(0, 100, n_samples) + s) * 3 + 15,
+            'var5': np.random.randn(n_samples) * 2 + 5,
+            'var6': base_trend * 0.5 + 40 + holiday*8 + np.random.randn(n_samples)*0.5,
+            # 已知未来协变量（天气+节假日）
+            'temperature': temp,
+            'humidity': humidity,
+            'is_holiday': holiday
+        })
+        df_list.append(df)
+    
+    # 2. 配置参数
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = 'cpu'
+    seq_len = 48        # 历史序列长度
+    pred_len = 6        # 预测步长
+    obs_cols = ['var1', 'var2', 'var3', 'var4', 'var5', 'var6']  # 观测变量
+    fut_cols = ['temperature', 'humidity', 'is_holiday']         # 已知未来协变量
+    static_cols = []    # 无静态特征
+    time_col = 'timestamp'
+    
+    # 3. 划分训练/测试集
+    train_size = int(0.8 * n_samples)
+    train_df_list = [df.iloc[:train_size] for df in df_list]
+    test_df_list = [df.iloc[train_size:] for df in df_list]
+    
+    # 4. 构建数据集
+    train_dataset = TFTFutureCovDataset(
+        train_df_list, obs_cols, fut_cols, time_col, static_cols,
+        seq_len=seq_len, pred_len=pred_len, device=device
+    )
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+    
+    test_dataset = TFTFutureCovDataset(
+        test_df_list, obs_cols, fut_cols, time_col, static_cols,
+        seq_len=seq_len, pred_len=pred_len,
+        scaler_obs=train_dataset.scaler_obs,
+        scaler_fut=train_dataset.scaler_fut,
+        time_encoder=train_dataset.time_encoder,
+        device=device
+    )
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False)
+    
+    # 5. 初始化模型
+    model = TFTWithFutureCovariates(
+        static_dim=len(static_cols),
+        obs_dim=len(obs_cols),
+        fut_dim=len(fut_cols),
+        time_embed_dim=train_dataset.time_encoder.transform(train_df_list[0].iloc[:1], device).shape[-1],
+        hidden_dim=64,
+        nhead=8,
+        num_layers=2,
+        dropout=0.1,
+        pred_len=pred_len,
+        sample_dim=sample_dim,
+        sample_heads=4,
+        device=device
+    ).to(device)
+    
+    # 6. 训练配置
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+    epochs = 20
+    
+    # 7. 训练模型
+    loss_history = []
+    for epoch in range(epochs):
+        train_loss = train_tft_future(model, train_loader, criterion, optimizer, device)
+        loss_history.append(train_loss)
+        print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}')
+    
+    # 8. 推理预测
+    preds, trues, sample_attn_weights = predict_tft_future(model, test_loader, train_dataset.scaler_obs, device)
+    
+    # 9. 可视化结果
+    plt.figure(figsize=(15, 10))
+    
+    # 9.1 损失曲线
+    plt.subplot(2, 3, 1)
+    plt.plot(loss_history)
+    plt.title('Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('MSE Loss')
+    
+    # 9.2 样本1的var6预测（受节假日影响大）
+    plt.subplot(2, 3, 2)
+    plt.plot(trues[:200, 0, 0, 5], label='True (Sample 1 - var6)', alpha=0.7)
+    plt.plot(preds[:200, 0, 0, 5], label='Pred (Sample 1 - var6)', alpha=0.7)
+    plt.title('Sample 1 - var6 (Holiday Impact)')
+    plt.legend()
+    
+    # 9.3 样本2的var3预测（受湿度影响大）
+    plt.subplot(2, 3, 3)
+    plt.plot(trues[:200, 1, 0, 2], label='True (Sample 2 - var3)', alpha=0.7)
+    plt.plot(preds[:200, 1, 0, 2], label='Pred (Sample 2 - var3)', alpha=0.7)
+    plt.title('Sample 2 - var3 (Humidity Impact)')
+    plt.legend()
+    
+    # 9.4 样本间注意力权重
+    plt.subplot(2, 3, 4)
+    avg_sample_attn = sample_attn_weights.mean(axis=(0,1))
+    plt.imshow(avg_sample_attn, cmap='Blues')
+    plt.title('Sample Cross Attention Weights')
+    plt.xlabel('Sample Index')
+    plt.ylabel('Sample Index')
+    plt.colorbar()
+    plt.xticks(range(sample_dim))
+    plt.yticks(range(sample_dim))
+    
+    # 9.5 未来协变量（温度）vs 预测值
+    plt.subplot(2, 3, 5)
+    temp_data = test_df_list[0]['temperature'].iloc[:200].values
+    plt.plot(temp_data, label='Temperature (Future Cov)', alpha=0.7, color='green')
+    plt.plot(preds[:200, 0, 0, 0], label='Pred var1 (Sample 1)', alpha=0.7, color='red')
+    plt.title('Temperature vs Pred var1')
+    plt.legend()
+    
+    # 9.6 节假日vs预测值
+    plt.subplot(2, 3, 6)
+    holiday_data = test_df_list[0]['is_holiday'].iloc[:200].values
+    plt.plot(holiday_data*50, label='Holiday (0/1)', alpha=0.5, color='orange')
+    plt.plot(preds[:200, 0, 0, 5], label='Pred var6 (Sample 1)', alpha=0.7, color='blue')
+    plt.title('Holiday vs Pred var6')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # 输出关键信息
+    print("\n=== 关键结果 ===")
+    print(f"样本间平均注意力权重：\n{avg_sample_attn.round(3)}")
+    print(f"\n预测误差（MSE）：{np.mean((preds - trues)**2):.4f}")
+    print("\n说明：模型合法使用了未来温度、湿度、节假日等协变量，无未来泄露！")

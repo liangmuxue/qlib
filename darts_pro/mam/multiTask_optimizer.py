@@ -283,6 +283,7 @@ class MultiTaskOptimizer(Adam):
         main_grads, gradient_components,loss_total = self.gradient_calculator.compute_gradients(
             task_losses, return_components=True,epoch_num=epoch_num
         )
+        
         # 统计梯度冲突情况
         conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
         conflict_count,similarity = self.combine_conflict_analysis(conflict_analysis_total)    
@@ -299,16 +300,10 @@ class MultiTaskOptimizer(Adam):
                     sys.exit("opt pcgrad nan exit")            
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components,dynamic_grad=False)
-        if epoch_num==37:
-            for i in range(len(gradient_components)):
-                comp_item = gradient_components[i]
-                nan_name = check_param_nan(comp_item)
-                if nan_name is not None:
-                    print("opt_{} {} is nan".format(i,nan_name)) 
-                    sys.exit("opt combine nan exit")           
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
-
+        # 计算重点层梯度参数数值情况
+        total_norm_tcn,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)
                 
         # 手动设置梯度并更新参数
         self._set_gradients(total_gradients)
@@ -320,39 +315,57 @@ class MultiTaskOptimizer(Adam):
         return {
             'total_loss': show_loss,
             'total_grad_norm': self._compute_total_grad_norm(total_gradients),
+            'total_norm_tcn': total_norm_tcn,
+            'total_norm_ins_layer': total_norm_ins_layer,
             'conflict_analysis': {'conflict_count':conflict_count,'similarity':similarity},
             'task_grad_norms': task_grad_norms if gradient_components else None,
             'auxiliary_weights': dynamic_weights_info['auxiliary_weights'], 
             'helpfulness_scores': dynamic_weights_info['helpfulness_scores']   
         }
+    
+    def compute_focus_grad_info(self,total_gradients):
+        
+        total_norm_tcn = 0
+        total_norm_ins_layer = 0
+        for grad_name in total_gradients.keys():
+            grad = total_gradients[grad_name]
+            if grad_name.startswith("trans_model"):
+                total_norm_tcn += torch.norm(grad) ** 2
+            else:
+                total_norm_ins_layer += torch.norm(grad) ** 2
+                
+        total_norm_ins_layer = torch.sqrt(total_norm_ins_layer).item()
+        total_norm_tcn = torch.sqrt(total_norm_tcn).item()
+        
+        return total_norm_tcn,total_norm_ins_layer
 
     def grad_combine(self,gradient_components,dynamic_grad=True):
-        """合并多个任务梯度"""
-    
-        processed_grads = {}
-        param_names = interact_grad_names(gradient_components,interact=False)
-        # 自适应调整辅助任务梯度
-        task_weights = self.compute_auto_weights(gradient_components=gradient_components,dynamic_grad=dynamic_grad)
-        # 实际设置梯度
-        gradient_components_after = gradient_components.copy()
-        for param_name in param_names:   
-            final_grad = None 
-            for i in range(len(gradient_components)):
-                # 不同子模型，梯度有可能不一致
-                if param_name in gradient_components[i]:
-                    item_grad = gradient_components[i][param_name]
-                    # 不同任务不同梯度剪裁
-                    item_grad = item_grad  * task_weights[i]  
-                    gradient_components_after[i][param_name] = item_grad
-                    # 加权合并处理后的梯度
-                    if final_grad is None:
-                        final_grad = item_grad                   
-                    else:
-                        final_grad = final_grad + item_grad
-    
-            processed_grads[param_name] = final_grad
-            
-        return processed_grads,gradient_components_after
+            """合并多个任务梯度"""
+        
+            processed_grads = {}
+            param_names = interact_grad_names(gradient_components,interact=False)
+            # 自适应调整辅助任务梯度
+            task_weights = self.compute_auto_weights(gradient_components=gradient_components,dynamic_grad=dynamic_grad)
+            # 实际设置梯度
+            gradient_components_after = gradient_components.copy()
+            for param_name in param_names:   
+                final_grad = None 
+                for i in range(len(gradient_components)):
+                    # 不同子模型，梯度有可能不一致
+                    if param_name in gradient_components[i]:
+                        item_grad = gradient_components[i][param_name]
+                        # 不同任务不同梯度剪裁
+                        item_grad = item_grad  * task_weights[i]  
+                        gradient_components_after[i][param_name] = item_grad
+                        # 加权合并处理后的梯度
+                        if final_grad is None:
+                            final_grad = item_grad                   
+                        else:
+                            final_grad = final_grad + item_grad
+        
+                processed_grads[param_name] = final_grad
+                
+            return processed_grads,gradient_components_after
 
     def compute_auto_weights(self,gradient_components=None,dynamic_grad=True):
         

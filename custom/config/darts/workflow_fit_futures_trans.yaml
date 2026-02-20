@@ -102,7 +102,7 @@ task:
                cut_len: &cut_len 2
                dropout: 0.5
                opt_size: 1
-               past_split: [[0,15],[15,30],[30,45]]
+               past_split: [[0,15],[15,30]]
                target_mode: [2,2,2,1,3]
                scale_mode: [1,2,2,2,0]
                filter_conv_index: -1
@@ -141,9 +141,9 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['diff_range','RSV5','RSV5','SUMD5','RSV5']
+                target_column: ['diff_range','CCI5','RSV5','SUMD5','RSV5']
                 time_column: 'time_idx'    
-                future_covariate_col: ['dayofweek','month','dayofmonth']   
+                future_covariate_col: ['year','dayofweek','month','day']   
                 past_covariate_col: ['VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'

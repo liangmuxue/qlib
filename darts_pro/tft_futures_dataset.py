@@ -21,7 +21,6 @@ from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.data_filter import DataFilter
-from numba.core.types import none
 from cus_utils.db_accessor import DbAccessor
 
 from cus_utils.log_util import AppLogger
@@ -132,11 +131,11 @@ class TFTFuturesDataset(TFTSeriesDataset):
             conv_col_scale = conv_col + "_scale"
             df[conv_col] = df[conv_col].astype(np.int)
             df[conv_col_scale] = (df[conv_col] - df[conv_col].min()) / (df[conv_col].max() - df[conv_col].min() + 1e-5)    
-        future_covariate_col = self.get_future_columns()          
+        future_covariate_col = self.get_future_columns()     
         for conv_col in future_covariate_col:
             conv_col_scale = conv_col + "_scale"
             df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).min()) / (df[conv_col].astype(int).max() - df[conv_col].astype(int).min())                
-        # 按照股票代码，新增排序字段，用于后续embedding
+        # 按照代码，新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=True).astype("int")  
         self.build_group_rank_map(df)

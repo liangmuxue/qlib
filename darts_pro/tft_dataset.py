@@ -145,7 +145,8 @@ class TFTDataset(DatasetH):
         # month重新编号为1到12
         data["month"] = data["month"].str.slice(5,7).astype(int) - 1
         data["dayofweek"] = data.datetime.dt.dayofweek    
-        data["dayofmonth"] = data.datetime.dt.day  
+        data["day"] = data.datetime.dt.day  
+        data["year"] = data.datetime.dt.year  
         # 保留时间戳
         data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)     
         data["label"] = data["label"].astype("float64")

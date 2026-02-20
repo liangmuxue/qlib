@@ -267,10 +267,12 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         date_container = pd.to_datetime(pd.Series(date_list.tolist()),format='%Y%m%d')
         date_covs_list = [date_container]
         for col in date_conv_columns:
+            if col=='year':
+                s = pd.Series(date_container.dt.year,name='year')            
             if col=='dayofweek':
                 s = pd.Series(date_container.dt.dayofweek,name='dayofweek')
-            if col=='dayofmonth':
-                s = pd.Series(date_container.dt.day,name='dayofmonth')       
+            if col=='day':
+                s = pd.Series(date_container.dt.day,name='day')       
             if col=='month':
                 s = pd.Series(date_container.dt.month-1,name='month')                             
             date_covs_list.append(s)

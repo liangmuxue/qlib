@@ -98,9 +98,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
             top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
         else:
             top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
-        if epoch_num==37:
-            if torch.isnan(top_loss):
-                print("top loss nan,top_pred_data:{},top_target_data:{}".format(top_pred_data,top_target_data))
         # # 优化：对前k名候选的目标值进行比对，实现额外加权（强制区分核心候选）
         # top_real,target_topk_index = torch.topk(target, k=top_num, dim=0)
         # top_real_inverse,target_topk_insverse_index = torch.topk(target, k=top_num,largest=False, dim=0)
@@ -225,28 +222,28 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # dec_out_item = dec_out[j,ins_rel_index,:,0]
                         sv_out_item_att = sv[1][j][ins_rel_index]
                         # sv_out_item_att2 = sv[2][j][ins_rel_index]
+                        # sv_out_item_att2 = sv[2][j][ins_rel_index]
                         # dec_out_item_att = dec_out[j,:,1][ins_rel_index]
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
                         round_targets_att = future_round_targets[j,ins_rel_index,:,:]
-                        round_targets_item = future_round_targets[j,ins_rel_index,target_len,ref_indicator]
-                        round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,ref_indicator2]
+                        # round_targets_item = future_round_targets[j,ins_rel_index,target_len,ref_indicator]
+                        round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,1]
+                        # round_targets_item_att2 = future_round_targets[j,ins_rel_index,target_len,2]
                         # round_targets_item_att2 = future_round_targets[j,ins_rel_index,:,ref_indicator2]
                         # if not is_same_elements(att_tar,price_diff_range,eps=1e-3):
                         #     print("not same")
                         cls_loss[i] += self.compute_main_loss(sv_out_item,round_targets_item)   
-                        if torch.isnan(cls_loss[i]):
-                            print("nnn1:{}".format(sv_out_item))                                                
-                            sys.exit("nnn1 exit") 
                         # 计算top损失
                         ce_loss[i] += self.compute_top_loss(sv_out_item, round_targets_item, top_num=top_num,epoch_num=epoch_num)
                         target_item = target[j,ins_rel_index,:,ref_indicator]
                         # price_last_target_items = target[j,ins_rel_index,-1,0]
-                        fds_loss[i] += self.compute_main_loss(sv_out_item_att, round_targets_item_att)
+                        # fds_loss[i] += self.compute_main_loss(sv_out_item_att, round_targets_item_att)
                         # target_total.append(target_item)                        
                         # 整体指数损失
                         # 辅助目标的损失
-                        # fds_loss[i] += self.compute_main_loss(sv_out_item_att,round_targets_item_att)
+                        fds_loss[i] += self.compute_main_loss(sv_out_item_att,round_targets_item_att)
+                        # corr_loss[i] += self.compute_main_loss(sv_out_item_att2,round_targets_item_att2)
                         # dec_loss_inner = 0
                         # iter_num = 0
                         # for h in range(len(output)):

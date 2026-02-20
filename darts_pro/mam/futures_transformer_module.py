@@ -20,6 +20,7 @@ from darts_pro.act_model.union_transformer import UnionTransCombine
 from darts_pro.act_model.fur_industry_ts import FurIndustryMixer, FurStrategy
 from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
+from darts_pro.act_model.union_transformer import TimeFeatureEncoder
 from .multiTask_optimizer import MultiTaskOptimizer
 from cus_utils.common_compute import compute_price_class, pairwise_compare, scale_multiple_series,\
     normalization_axis
@@ -172,11 +173,40 @@ class FuturesTransformerModule(MlpModule):
             instrument_index = np.expand_dims(combine_nodes, 0)  
             industry_index = [main_index]      
             index_num = 1   
-            # 使用混合时间序列模型,Transformer底座
+            # 初始化时间编码器
+            time_encoder = TimeFeatureEncoder('datetime',device=device)   
+            # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
+            #               'month':df['datetime'].dt.month.unique().tolist(),
+            #               'day':df['datetime'].dt.day.unique().tolist(),
+            #               'dayofweek':df['datetime'].dt.dayofweek.unique().tolist(),
+            #             }
+            range_data = {'year':[i for i in range(2012,2026)],
+                          'month':[i for i in range(0,12)],
+                          'day':[i for i in range(1,32)],
+                          'dayofweek':[i for i in range(0,5)],
+                        }            
+            time_encoder.fit_static(range_data) 
+            dataset = global_var.get_value("dataset")    
+            time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
+            # 记录时间字段
+            self.embed_cols = dataset.get_future_columns()
+            self.time_encoder = time_encoder
+            # 使用混合时间序列模型,TFT底座
             model = UnionTransCombine(
-                M_cov_p=input_dim, M_cov_f=future_covariate.shape[-1], F_s=static_covariates.shape[-1]-1,
-                M_tgt=1,C=combine_nodes_num,d_model=combine_nodes_num*20
-            )                
+                static_dim=static_covariates.shape[-1]-1,
+                obs_dim=input_dim,
+                fut_dim=future_covariate.shape[-1],
+                time_embed_dim=time_embed_dim,
+                hidden_dim=64,
+                hidden_size=16,
+                nhead=8,
+                num_layers=2,
+                dropout=0.1,
+                pred_len=pred_len,
+                sample_dim=combine_nodes_num,
+                sample_heads=4,
+                device=device,
+            ).to(device)            
             self.embedding_size = input_dim
             return model
 
@@ -258,16 +288,37 @@ class FuturesTransformerModule(MlpModule):
             futures_convs = x_in[3]
             his_future_covs = x_in[2]
             static_covs = x_in[4]
+            target_class = x_in[8][:,instruments]
             # 根据优化器编号匹配计算,当编号超出模型数量时，也需要全部进行向前传播，此时没有梯度回传，主要用于生成二次模型输入数据
             if optimizer_idx == i or optimizer_idx >= sub_model_length or optimizer_idx == -1:
                 x_in_item = (past_convs_item, his_future_covs, futures_convs, past_round_targets, past_index_round_targets)
-                past_convs_item = past_convs_item.permute(0,2,3,1)[...,instruments]
-                his_future_covs = his_future_covs.permute(0,2,3,1)[...,instruments]
+                past_convs_item = past_convs_item[:,instruments,:,:]
+                his_future_covs = his_future_covs[:,instruments,:,:]
                 past_round_targets = past_round_targets.permute(0,2,1)[...,instruments].unsqueeze(2)
                 past_targets = past_convs_item[:,:,:1,:]
-                futures_convs = futures_convs.permute(0,2,3,1)[...,instruments]
-                static_covs = static_covs.permute(0,2,1)[...,instruments]
-                out = m(past_convs_item, his_future_covs,past_targets,futures_convs, static_covs)                
+                futures_convs = futures_convs[:,instruments,:,:]
+                static_covs = static_covs[:,instruments,:]
+                # 批次内计算时间嵌入特征,按照品类分别计算
+                def transform_emb(convs):
+                    convs_emb = []
+                    ref_emb = {}
+                    for k in range(convs.shape[1]):
+                        batch_data = {}
+                        # 如果当前品种没有数据，则取其他品种的日期数据进行对照，避免嵌入异常
+                        nodata_idx = torch.where(target_class[:,k]<0)[0]
+                        if nodata_idx.shape[0]>0:
+                            # 直接使用1号参考数值
+                            convs[nodata_idx,k,:,:] = convs[nodata_idx,0,:,:]
+                        for k_idx,key in enumerate(self.embed_cols):
+                            batch_data[key] = convs[:,k,:,k_idx].flatten()     
+                        emb_data = self.time_encoder.transform_inner(batch_data, device=self.device)
+                        emb_data = emb_data.reshape(his_future_covs.shape[0],convs.shape[2],-1)
+                        convs_emb.append(emb_data)
+                    convs_emb = torch.stack(convs_emb).permute(1,0,2,3)
+                    return convs_emb
+                his_future_emb = transform_emb(his_future_covs)         
+                future_emb = transform_emb(futures_convs).double()        
+                out = m(static_covs,past_convs_item, his_future_emb,future_emb)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
             else:
                 # 模拟数据
@@ -317,7 +368,8 @@ class FuturesTransformerModule(MlpModule):
             target_info
         ) = train_batch
                 
-        inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets)     
+        inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
+               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
         future_covs = input_batch[1]
@@ -423,7 +475,8 @@ class FuturesTransformerModule(MlpModule):
             target_info
         ) = val_batch
               
-        inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets) 
+        inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
+               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class) 
         input_batch = self._process_input_batch(inp)
         future_covs = input_batch[1]
         (output, vr_class, vr_class_list) = self(input_batch, optimizer_idx=-1)
@@ -467,7 +520,8 @@ class FuturesTransformerModule(MlpModule):
             past_future_covariates,
             price_targets,
             past_future_round_targets,
-            index_round_targets
+            index_round_targets,
+            target_class
         ) = input_batch
         dim_variable = -1
 
@@ -507,7 +561,8 @@ class FuturesTransformerModule(MlpModule):
         # 切分单独的过去round数值
         past_round_targets = past_future_round_targets[:,:,:self.input_chunk_length,:]
         # 整合相关数据，分为输入值和目标值两组
-        return (x_past_array, x_future_array, historic_future_covariates, future_covariates, static_covariates, price_targets, past_round_targets, past_index_targets)
+        return (x_past_array, x_future_array, historic_future_covariates, future_covariates, 
+                static_covariates, price_targets, past_round_targets, past_index_targets,target_class)
     
     def _compute_loss(self, output, target, optimizers_idx=0):
         """重载父类方法"""
@@ -711,7 +766,7 @@ class FuturesTransformerModule(MlpModule):
                 else:
                     comm_index_total[i] = np.concatenate([comm_index_total[i], comm_index.cpu().numpy()], axis=0)
                 
-            dec_inner = np.stack(dec_inner).transpose(1, 2, 3, 0)
+            dec_inner = np.stack(dec_inner).transpose(1, 2, 3, 4,0)
             dec_total.append(dec_inner)
             # ce_index_inner = np.stack(ce_index_inner).transpose(1,2,0)
             x_bar_total.append(x_bar_inner)
@@ -1117,7 +1172,8 @@ class FuturesTransformerModule(MlpModule):
             target_info
         ) = batch
                
-        inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets)     
+        inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
+               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class)     
         input_batch = self._process_input_batch(inp)
         (output, vr_class, vr_class_list) = self(input_batch, optimizer_idx=-1)
         choice_out, trend_value, combine_index = vr_class

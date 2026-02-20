@@ -54,6 +54,7 @@ class TFTSeriesDataset(TFTDataset):
         
         self.dbaccessor = DbAccessor({})
         self.emb_size = 0
+        self.time_encoder = None
         self.transform_inner = kwargs["transform_inner"]
         
     def _create_target_scalers(self,df):

@@ -178,7 +178,7 @@ class FuturesTcnModule(MlpModule):
             model = UnionTcnCombine(
                 input_dim=input_dim,static_feat=(static_covariates.shape[-1]-1),fut_feat=future_covariate.shape[-1],
                 C=combine_nodes_num,seq_len=self.input_chunk_length,pred_len=pred_len,target_feat_dim=len(self.past_split),
-                tcn_channels=[128,64, 32, 16],k=(3,3),dropout=0.2,act=nn.GELU()
+                tcn_channels=[256,128,64, 32, 16],k=(3,3),dropout=0.2,act=nn.GELU()
             )                
             self.embedding_size = input_dim
             return model
@@ -377,8 +377,8 @@ class FuturesTcnModule(MlpModule):
                         self.log("task_grad_norm_corr", update_info["task_grad_norms"][3], batch_size=train_batch[0].shape[0], prog_bar=False)                        
                     # self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
                     # self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
-                # self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
-                # self.log("ce_similarity", update_info["conflict_analysis"]["ce_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=True) 
+                self.log("total_norm_tcn", update_info["total_norm_tcn"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                self.log("total_norm_ins_layer", update_info["total_norm_ins_layer"], prog_bar=True) 
             else:
                 self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)           
                                        
@@ -391,7 +391,7 @@ class FuturesTcnModule(MlpModule):
         return total_loss, detail_loss, output 
     
     def print_params_data(self):
-        # return
+        return
         # 获取TensorBoard的SummaryWriter实例（PL自动管理）
         tb_logger = self.logger.experiment
         # 1. 记录参数分布（Histogram）
@@ -412,13 +412,13 @@ class FuturesTcnModule(MlpModule):
                 show_name = clean_name.split("tcn_model")[1]
             else:
                 show_name = clean_name
-            tb_logger.add_histogram(
-                tag=f"Params/{show_name}",
-                values=param.data,
-                global_step=self.current_epoch
-            )
-            # 2. 记录参数统计量（均值、最大值、最小值、标准差）
-            tb_logger.add_scalar(f"Param_Stats/{show_name}/mean", param.data.mean(), self.current_epoch)
+            # tb_logger.add_histogram(
+            #     tag=f"Params/{show_name}",
+            #     values=param.data,
+            #     global_step=self.current_epoch
+            # )
+            # # 2. 记录参数统计量（均值、最大值、最小值、标准差）
+            # tb_logger.add_scalar(f"Param_Stats/{show_name}/mean", param.data.mean(), self.current_epoch)
             # tb_logger.add_scalar(f"Param_Stats/{show_name}/max", param.data.max(), self.current_epoch)
             # tb_logger.add_scalar(f"Param_Stats/{show_name}/min", param.data.min(), self.current_epoch)
             # tb_logger.add_scalar(f"Param_Stats/{show_name}/std", param.data.std(), self.current_epoch)     
@@ -429,7 +429,7 @@ class FuturesTcnModule(MlpModule):
                     values=param.grad,
                     global_step=self.current_epoch
                 )            
-                tb_logger.add_scalar(f"Param_grad/{show_name}/mean", param.grad.mean(), self.current_epoch)
+                # tb_logger.add_scalar(f"Param_grad/{show_name}/mean", param.grad.mean(), self.current_epoch)
                 # tb_logger.add_scalar(f"Param_grad/{show_name}/max", param.grad.max(), self.current_epoch)
                 # tb_logger.add_scalar(f"Param_grad/{show_name}/min", param.grad.min(), self.current_epoch)
                 # tb_logger.add_scalar(f"Param_grad/{show_name}/std", param.grad.std(), self.current_epoch)               

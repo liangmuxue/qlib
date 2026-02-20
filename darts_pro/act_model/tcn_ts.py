@@ -133,7 +133,7 @@ class TCN2DPredictor(nn.Module):
         self.main_feat = main_feat
         self.target_feat_dim = target_feat_dim
 
-        # ========== 1) 历史特征编码（3D-TCN主干） ==========
+        # ========== 1) 历史特征编码（2D-TCN主干） ==========
         layers = []
         in_c = hist_feat
         mid_time_len = 0
@@ -169,15 +169,12 @@ class TCN2DPredictor(nn.Module):
         """
         B = x_hist.shape[0]
 
-        # --------------------- 1. 历史3D编码 ---------------------
+        # --------------------- 1. 历史2D编码 ---------------------
         x_stat_his = x_stat.unsqueeze(1).repeat(1,self.seq_len,1,1) 
         x = x_hist.permute(0,1,3,2) 
         x = torch.cat([x,x_stat_his],-1) 
         x = x.permute(0,3,2,1) # [B,F_hist,C,seq_len]
         feat_hist = self.tcn(x)  # [B,F_hist,C,pred_len]
-        
-        if check_nan(feat_hist,"feat_hist"):
-            sys.exit("nan exit")
 
         # --------------------- 静态协变量扩维到未来 ✅ ---------------------
         s = x_stat.unsqueeze(1).repeat(1,self.pred_len,1,1) 
@@ -224,14 +221,14 @@ class UnionTcnCombine(nn.Module):
         self.pred_len = pred_len         
         self.target_feat_dim = target_feat_dim  
         # 整合输出网络
-        self.ins_layer = LinelessLayer(C,C,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
-        self.ins_att_layer = LinelessLayer(C,C,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
+        self.ins_layer = nn.ParameterList([LinelessLayer(C,C,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3).double() for _ in range(self.target_feat_dim)])
+        # self.ins_att_layer = LinelessLayer(C,C,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
         #CausalConv1D(C, C, k=1,stride=1, drop=0.2,act=act)  
         # self.ins_att_layer = LinelessLayer(C*pred_len,C,
         #                 hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)    
         # self.dec_layer = LinelessLayer(C*pred_len,C*pred_len,
         #                 hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)     
-        self.dec_layer = CausalConv2D(C, C, k=(1,1),stride=(1,1), drop=0.2,act=act)         
+        # self.dec_layer = CausalConv2D(C, C, k=(1,1),stride=(1,1), drop=0.2,act=act)         
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(C*pred_len,pred_len)     
             
@@ -258,10 +255,7 @@ class UnionTcnCombine(nn.Module):
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
             cls_out_ins = y_single[:,:,i,0]
-            if i==0:
-                cls_out_ins = self.ins_layer(cls_out_ins)
-            else:
-                cls_out_ins = self.ins_att_layer(cls_out_ins)
+            cls_out_ins = self.ins_layer[i](cls_out_ins)
             cls_out_combine.append(cls_out_ins)
         # 整体指数预测的网络输出
         index_data_combine = self.index_combine_layer(y_pred[...,0].reshape(y_pred.shape[0],-1))    
