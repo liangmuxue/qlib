@@ -291,13 +291,6 @@ class MultiTaskOptimizer(Adam):
         # 应用梯度手术,合并梯度
         if self.use_pcgrad:
             pc_grad(gradient_components)
-        if epoch_num==37:
-            for i in range(len(gradient_components)):
-                comp_item = gradient_components[i]
-                nan_name = check_param_nan(comp_item)
-                if nan_name is not None:
-                    print("opt_{} {} is nan".format(i,nan_name)) 
-                    sys.exit("opt pcgrad nan exit")            
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components,dynamic_grad=False)
         # 统计梯度范数

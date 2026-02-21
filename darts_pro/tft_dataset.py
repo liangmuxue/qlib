@@ -296,7 +296,17 @@ class TFTDataset(DatasetH):
         """取得静态协变量字段名"""
         static_columns = self.col_def["static_covariate_col"] 
         return static_columns
-    
+
+    def get_static_cate_columns(self):
+        """取得离散静态协变量字段名"""
+        static_columns = self.col_def["static_cate_col"] 
+        return static_columns
+
+    def get_static_cont_columns(self):
+        """取得连续静态协变量字段名"""
+        static_columns = self.col_def["static_cont_col"] 
+        return static_columns
+          
     def get_static_scale_columns(self):
         static_columns = self.col_def["static_covariate_col"]    
         scale_columns = [col+"_scale" for col in static_columns]

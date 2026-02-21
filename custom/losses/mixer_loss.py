@@ -218,9 +218,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 借用其他目标作为整体走势衡量
                         ref_indicator = 0 
                         ref_indicator2 = 1                          
-                        dec_out_item = dec_out[j,:,:,:][ins_rel_index]
+                        dec_out_item = dec_out[j,:,:,:][ins_rel_index].squeeze(-1)
                         # dec_out_item = dec_out[j,ins_rel_index,:,0]
-                        sv_out_item_att = sv[1][j][ins_rel_index]
+                        # sv_out_item_att = sv[1][j][ins_rel_index]
                         # sv_out_item_att2 = sv[2][j][ins_rel_index]
                         # sv_out_item_att2 = sv[2][j][ins_rel_index]
                         # dec_out_item_att = dec_out[j,:,1][ins_rel_index]
@@ -228,21 +228,21 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         price_diff_range = price_targets[j,ins_rel_index]  
                         round_targets_att = future_round_targets[j,ins_rel_index,:,:]
                         # round_targets_item = future_round_targets[j,ins_rel_index,target_len,ref_indicator]
-                        round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,1]
+                        # round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,1]
                         # round_targets_item_att2 = future_round_targets[j,ins_rel_index,target_len,2]
                         # round_targets_item_att2 = future_round_targets[j,ins_rel_index,:,ref_indicator2]
                         # if not is_same_elements(att_tar,price_diff_range,eps=1e-3):
                         #     print("not same")
-                        cls_loss[i] += self.compute_main_loss(sv_out_item,round_targets_item)   
+                        cls_loss[i] += self.compute_main_loss(sv_out_item,price_diff_range)   
                         # 计算top损失
-                        ce_loss[i] += self.compute_top_loss(sv_out_item, round_targets_item, top_num=top_num,epoch_num=epoch_num)
+                        ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num,epoch_num=epoch_num)
                         target_item = target[j,ins_rel_index,:,ref_indicator]
                         # price_last_target_items = target[j,ins_rel_index,-1,0]
                         # fds_loss[i] += self.compute_main_loss(sv_out_item_att, round_targets_item_att)
-                        # target_total.append(target_item)                        
-                        # 整体指数损失
                         # 辅助目标的损失
-                        fds_loss[i] += self.compute_main_loss(sv_out_item_att,round_targets_item_att)
+                        fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)
+                        # 整体损失计算
+                        # fds_loss[i] += self.ccc_loss_comp(sw_index_data[j],target_item.mean(dim=0))
                         # corr_loss[i] += self.compute_main_loss(sv_out_item_att2,round_targets_item_att2)
                         # dec_loss_inner = 0
                         # iter_num = 0

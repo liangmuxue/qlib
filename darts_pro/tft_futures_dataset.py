@@ -2,7 +2,7 @@ import warnings
 
 from qlib.data.dataset import DatasetH
 from qlib.data.dataset.handler import DataHandler, DataHandlerLP
-from sklearn.preprocessing import MinMaxScaler,StandardScaler
+from sklearn.preprocessing import MinMaxScaler,StandardScaler,LabelEncoder
 from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
@@ -125,12 +125,20 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # 消除异常数据-Again
         df = df[df['industry']!='None']    
         df = df.fillna(0) 
-        df = df[df['datetime_number']!=0]                  
-        # 静态协变量和未来协变量提前进行归一化
-        for conv_col in self.get_static_columns():
+        df = df[df['datetime_number']!=0]   
+        cate_dict = {}               
+        # 静态协变量:离散型生成嵌入数值，连续型生成标准化数据
+        for conv_col in self.get_static_cate_columns():
+            num_class = df[conv_col].unique().shape[0]
+            cate_dict[conv_col] = num_class
             conv_col_scale = conv_col + "_scale"
-            df[conv_col] = df[conv_col].astype(np.int)
-            df[conv_col_scale] = (df[conv_col] - df[conv_col].min()) / (df[conv_col].max() - df[conv_col].min() + 1e-5)    
+            df[conv_col_scale] = LabelEncoder().fit_transform(df[conv_col].values)
+        # 保存离散数量，用于后续模型参数
+        self.cate_static_dict = cate_dict
+        for conv_col in self.get_static_cont_columns():
+            conv_col_scale = conv_col + "_scale"
+            df[conv_col_scale] = (df[conv_col] - df[conv_col].mean())/df[conv_col].std()
+        # 未来协变量提前进行归一化
         future_covariate_col = self.get_future_columns()     
         for conv_col in future_covariate_col:
             conv_col_scale = conv_col + "_scale"
@@ -145,6 +153,9 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # Sort
         df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
         return df    
+    
+    def get_cate_dict(self):
+        return self.cate_static_dict
     
     def build_industry_mean(self,df,indus_info=None):
         """针对特定指标，生成行业平均值"""

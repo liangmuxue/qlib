@@ -93,6 +93,7 @@ class FuturesTransformerModule(MlpModule):
         self.grad_limits = torch.tensor(grad_limits)  
         self.pred_weights = [1.0, 0.0]
         self.main_task_seq = main_task_seq
+        self.time_encoder = None
               
         super().__init__(output_dim, variables_meta_array, num_static_components, hidden_size, lstm_layers, num_attention_heads,
                                     full_attention, feed_forward, hidden_continuous_size,
@@ -174,37 +175,40 @@ class FuturesTransformerModule(MlpModule):
             industry_index = [main_index]      
             index_num = 1   
             # 初始化时间编码器
-            time_encoder = TimeFeatureEncoder('datetime',device=device)   
-            # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
-            #               'month':df['datetime'].dt.month.unique().tolist(),
-            #               'day':df['datetime'].dt.day.unique().tolist(),
-            #               'dayofweek':df['datetime'].dt.dayofweek.unique().tolist(),
-            #             }
-            range_data = {'year':[i for i in range(2012,2026)],
-                          'month':[i for i in range(0,12)],
-                          'day':[i for i in range(1,32)],
-                          'dayofweek':[i for i in range(0,5)],
-                        }            
-            time_encoder.fit_static(range_data) 
-            dataset = global_var.get_value("dataset")    
-            time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
-            # 记录时间字段
-            self.embed_cols = dataset.get_future_columns()
-            self.time_encoder = time_encoder
+            if self.time_encoder is None:
+                time_encoder = TimeFeatureEncoder('datetime',device=device)   
+                # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
+                #               'month':df['datetime'].dt.month.unique().tolist(),
+                #               'day':df['datetime'].dt.day.unique().tolist(),
+                #               'dayofweek':df['datetime'].dt.dayofweek.unique().tolist(),
+                #             }
+                range_data = {'year':[i for i in range(2012,2026)],
+                              'month':[i for i in range(0,12)],
+                              'day':[i for i in range(1,32)],
+                              'dayofweek':[i for i in range(0,5)],
+                            }            
+                time_encoder.fit_static(range_data) 
+                dataset = global_var.get_value("dataset")    
+                time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
+                # 记录时间字段
+                self.embed_cols = dataset.get_future_columns()
+                self.time_encoder = time_encoder
             # 使用混合时间序列模型,TFT底座
             model = UnionTransCombine(
-                static_dim=static_covariates.shape[-1]-1,
+                target_feat_dim=len(self.past_split),
+                static_num=static_covariates.shape[-1]-1,
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
                 time_embed_dim=time_embed_dim,
                 hidden_dim=64,
                 hidden_size=16,
                 nhead=8,
-                num_layers=2,
+                num_layers=3,
                 dropout=0.1,
                 pred_len=pred_len,
                 sample_dim=combine_nodes_num,
                 sample_heads=4,
+                static_cate_emb=dataset.get_cate_dict(),
                 device=device,
             ).to(device)            
             self.embedding_size = input_dim
@@ -310,7 +314,7 @@ class FuturesTransformerModule(MlpModule):
                             # 直接使用1号参考数值
                             convs[nodata_idx,k,:,:] = convs[nodata_idx,0,:,:]
                         for k_idx,key in enumerate(self.embed_cols):
-                            batch_data[key] = convs[:,k,:,k_idx].flatten()     
+                            batch_data[key] = convs[:,k,:,k_idx].flatten().cpu()   
                         emb_data = self.time_encoder.transform_inner(batch_data, device=self.device)
                         emb_data = emb_data.reshape(his_future_covs.shape[0],convs.shape[2],-1)
                         convs_emb.append(emb_data)
@@ -421,8 +425,8 @@ class FuturesTransformerModule(MlpModule):
                         self.log("task_grad_norm_corr", update_info["task_grad_norms"][3], batch_size=train_batch[0].shape[0], prog_bar=False)                        
                     # self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
                     # self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
-                # self.log("ce_conflict_cnt", update_info["conflict_analysis"]["ce_conflict"][0], batch_size=train_batch[0].shape[0], prog_bar=False)
-                # self.log("ce_similarity", update_info["conflict_analysis"]["ce_conflict"][1], batch_size=train_batch[0].shape[0], prog_bar=True) 
+                self.log("total_norm_tcn", update_info["total_norm_tcn"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                self.log("total_norm_ins_layer", update_info["total_norm_ins_layer"], prog_bar=True) 
             else:
                 self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)           
                                        

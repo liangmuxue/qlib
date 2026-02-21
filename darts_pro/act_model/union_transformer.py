@@ -59,7 +59,8 @@ class TimeFeatureEncoder:
     def __init__(self, time_col, embed_dims=None,device='cpu'):
         self.time_col = time_col
         self.encoders = {}
-        self.embed_layers = nn.ModuleDict().to(device)
+        self.embed_layers = nn.ModuleDict()
+        self.device = device
         
         # 默认嵌入维度
         if embed_dims is None:
@@ -68,6 +69,9 @@ class TimeFeatureEncoder:
             }
         else:
             self.embed_dims = embed_dims
+    
+    def to_device(self):
+        self.embed_layers = self.embed_layers.to(self.device)
 
     def fit(self, df):
         """拟合时间特征编码器"""
@@ -86,7 +90,7 @@ class TimeFeatureEncoder:
             self.encoders[feat_name] = le
             num_classes = len(le.classes_)
             # 创建嵌入层
-            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name])
+            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name]).to(self.device)
         
         return self
 
@@ -100,7 +104,7 @@ class TimeFeatureEncoder:
             self.encoders[feat_name] = le            
             num_classes = len(le.classes_)
             # 创建嵌入层
-            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name])
+            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name]).to(self.device)
         
         return self
     
@@ -130,10 +134,7 @@ class TimeFeatureEncoder:
         embed_list = []
         for feat_name in batch_data.keys():
             feat_vals = batch_data[feat_name]
-            try:
-                encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals), device=device)
-            except Exception as e:
-                print("eee:",e)
+            encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals.cpu()), device=device)
             embed = self.embed_layers[feat_name](encoded)
             embed_list.append(embed)
         
@@ -205,7 +206,7 @@ class TFTWithFutureCovariates(nn.Module):
     """带已知未来协变量+样本关联的TFT模型（无未来泄露）"""
     def __init__(
         self,
-        static_dim=0,          # 静态特征维度
+        static_num=0,          # 静态特征维度
         obs_dim=6,             # 历史观测特征维度（要预测的变量）
         fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
         time_embed_dim=28,     # 时间特征嵌入维度（含节假日）
@@ -216,17 +217,34 @@ class TFTWithFutureCovariates(nn.Module):
         pred_len=1,            # 预测步长
         sample_dim=3,          # 样本维度（站点/设备数）
         sample_heads=4,        # 样本间注意力头数
+        static_emb_dim=4,      # 离散特征嵌入维度
+        static_cate_emb=None,  # 静态离散特征嵌入
         device='cuda'
     ):
         super().__init__()
         self.device = device
         self.pred_len = pred_len
-        self.static_dim = static_dim
+        self.static_dim = static_num * static_emb_dim
         self.obs_dim = obs_dim
         self.fut_dim = fut_dim
         self.sample_dim = sample_dim
         self.hidden_dim = hidden_dim
         
+        # 静态离散特征嵌入初始化
+        self.static_embed_layers = nn.ParameterList()
+        for key in static_cate_emb:
+            num_classes = static_cate_emb[key]
+            self.static_embed_layers.append(nn.Embedding(num_classes, static_emb_dim))
+        cate_static_num = len(self.static_embed_layers)
+        cont_static_num = static_num - cate_static_num            
+        # 1. 连续静态特征的全连接层
+        emb_dim = cont_static_num*static_emb_dim
+        self.static_cont_mlp = nn.Sequential(
+            nn.Linear(cont_static_num, emb_dim),  # 第一层：维度映射
+            nn.GELU(),                            # 非线性激活
+            nn.Linear(emb_dim, emb_dim)           # 第二层：增强表达
+        )
+               
         # 1. 样本维度交互模块（仅作用于历史观测特征）
         self.sample_cross_attn = SampleCrossAttention(
             feat_dim=obs_dim + time_embed_dim,  # 历史观测+时间嵌入
@@ -235,15 +253,18 @@ class TFTWithFutureCovariates(nn.Module):
         )
         
         # 2. 静态特征处理
-        if static_dim > 0:
-            self.static_grn = GatedResidualNetwork(static_dim, hidden_dim, hidden_dim, dropout)
-            self.static_context = nn.Linear(hidden_dim, hidden_dim)
-        
+        if self.static_dim > 0:
+            self.static_grn_hist = GatedResidualNetwork(self.static_dim, hidden_dim, hidden_dim, dropout)
+            self.static_context_hist = nn.Linear(hidden_dim, hidden_dim)
+            # 未来阶段静态特征处理（新增）
+            self.static_grn_fut = GatedResidualNetwork(self.static_dim, hidden_dim, hidden_dim, dropout)
+            self.static_context_fut = nn.Linear(hidden_dim, hidden_dim)
+                    
         # 3. 历史特征投影（观测+时间）
         self.obs_proj = nn.Linear(obs_dim + time_embed_dim, hidden_dim)
         
-        # 4. 未来协变量投影
-        self.fut_proj = nn.Linear(time_embed_dim, hidden_dim)
+        # 4. 未来协变量投影（✨ 修正：输入维度新增静态特征维度）
+        self.fut_proj = nn.Linear(time_embed_dim + hidden_dim, hidden_dim)
         
         # 5. 变量选择网络（仅对历史观测变量）
         self.var_selection = VariableSelectionNetwork(hidden_dim, obs_dim, hidden_dim, dropout)
@@ -304,17 +325,35 @@ class TFTWithFutureCovariates(nn.Module):
         obs_input = obs_input.reshape(B*S, T, -1)
         
         # 2.3 静态特征处理
+        cate_static_num = len(self.static_embed_layers)
+        
         if static_feat is not None and self.static_dim > 0:
+            # 对离散特征，转换嵌入特征
+            cate_static_feat = static_feat[...,:cate_static_num]
+            cate_emb_arr = []
+            for i,layer in enumerate(self.static_embed_layers):
+                cate_emb = layer(cate_static_feat[...,i].long())
+                cate_emb_arr.append(cate_emb)
+            cate_emb_arr = torch.cat(cate_emb_arr,dim=-1)
+            # 对于连续静态特征，使用全连接进行特征转换
+            cont_static_feat = static_feat[...,cate_static_num:]
+            cont_static_feat = self.static_cont_mlp(cont_static_feat)
+            static_feat = torch.cat([cate_emb_arr,cont_static_feat],dim=-1)
             static_feat_flat = static_feat.reshape(B*S, self.static_dim)  # [B*S, static_dim]
-            static_feat_processed = self.static_grn(static_feat_flat)    # [B*S, hidden_dim]
-            static_context = self.static_context(static_feat_processed).unsqueeze(1)  # [B*S, 1, hidden_dim]
+            # 历史阶段静态特征融入
+            static_feat_hist = self.static_grn_hist(static_feat_flat)
+            static_context_hist = self.static_context_hist(static_feat_hist).unsqueeze(1)  # [B*S,1,hidden_dim]
+            
+            # ✨ 修正：未来阶段静态特征预处理
+            static_feat_fut = self.static_grn_fut(static_feat_flat)
+            static_context_fut = self.static_context_fut(static_feat_fut).unsqueeze(1)  # [B*S,1,hidden_dim]
         else:
-            static_context = None
+            static_context_hist = None
         
         # 2.4 历史特征投影
         obs_proj = self.obs_proj(obs_input)  # [B*S, T, hidden_dim]
-        if static_context is not None:
-            obs_proj = obs_proj + static_context
+        if static_context_hist is not None:
+            obs_proj = obs_proj + static_context_hist
         
         # 2.5 变量选择
         obs_proj, var_weights = self.var_selection(obs_proj)  # [B*S, T, hidden_dim]
@@ -329,7 +368,13 @@ class TFTWithFutureCovariates(nn.Module):
         time_embed_fut_flat = time_embed_fut.reshape(B*S, P, time_embed_fut.shape[-1])
         
         # 3.2 未来协变量投影
-        fut_input = time_embed_fut_flat.to(static_feat.device)  # [B*S, P, F]
+        fut_input = time_embed_fut_flat # [B*S, P, F]
+        if static_context_fut is not None:
+            # 静态特征广播到所有预测步：[B*S,1,hidden_dim] → [B*S,P,hidden_dim]
+            static_broadcast = static_context_fut.repeat(1, P, 1)
+            # 拼接未来协变量 + 静态特征
+            fut_input = torch.cat([fut_input, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
+                  
         fut_proj = self.fut_proj(fut_input)  # [B*S, P, hidden_dim]
         
         # 3.3 融合历史总结+未来协变量（核心：历史指导未来预测）
@@ -373,11 +418,13 @@ class UnionTransCombine(nn.Module):
         sample_heads=4,        # 样本间注意力头数
         target_feat_dim=2,
         hidden_size=16,
+        static_num=4,
+        static_cate_emb=None,
         device='cuda'
     ):
         super().__init__()
         self.trans_model = TFTWithFutureCovariates(
-                static_dim=static_dim,
+                static_num=static_num,
                 obs_dim=obs_dim,
                 fut_dim=fut_dim,
                 time_embed_dim=time_embed_dim,
@@ -388,6 +435,7 @@ class UnionTransCombine(nn.Module):
                 pred_len=pred_len,
                 sample_dim=sample_dim,
                 sample_heads=sample_heads,
+                static_cate_emb=static_cate_emb,
                 device=device,
             )
         
@@ -421,13 +469,6 @@ class UnionTransCombine(nn.Module):
         index_data_combine = self.index_combine_layer(y_pred_reshape)
         
         return dec_out_combine,cls_out_combine,index_data_combine   
-
-
-
-
-
-
-
 
 
 # ---------------------- 带未来协变量的数据集构建 ----------------------
