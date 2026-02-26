@@ -32,7 +32,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-TRACK_DATE = [item for item in range(20250625,20250715)]
+TRACK_DATE = [item for item in range(20250825,20250905)]
 # TRACK_DATE = [item for item in range(20250225,20250315)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240731, 20260731]
@@ -159,22 +159,15 @@ class FuturesTransformerModule(MlpModule):
                 +past_covariates_shape
             )
             
-            main_index = FuturesMappingUtil.get_main_index_in_indus(self.train_sw_ins_mappings)
             combine_nodes = FuturesMappingUtil.get_industry_instrument(self.train_sw_ins_mappings, without_main=True)
             combine_nodes_num = np.array([ins.shape[0] for ins in combine_nodes])
             combine_nodes_num = torch.Tensor(combine_nodes_num).int().to(self.device)
-            instrument_index = combine_nodes
-            industry_index = FuturesMappingUtil.get_industry_data_index_without_main(self.train_sw_ins_mappings)
-            index_num = combine_nodes_num.shape[0]
             # 加入短期指标
             pred_len = self.output_chunk_length    
-            cut_len = self.cut_len    
             combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
             combine_nodes_num = combine_nodes.shape[0]
-            instrument_index = np.expand_dims(combine_nodes, 0)  
-            industry_index = [main_index]      
-            index_num = 1   
             # 初始化时间编码器
+            dataset = global_var.get_value("dataset") 
             if self.time_encoder is None:
                 time_encoder = TimeFeatureEncoder('datetime',device=device)   
                 # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
@@ -188,18 +181,17 @@ class FuturesTransformerModule(MlpModule):
                               'dayofweek':[i for i in range(0,5)],
                             }            
                 time_encoder.fit_static(range_data) 
-                dataset = global_var.get_value("dataset")    
-                time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
+                self.time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
                 # 记录时间字段
                 self.embed_cols = dataset.get_future_columns()
                 self.time_encoder = time_encoder
             # 使用混合时间序列模型,TFT底座
             model = UnionTransCombine(
-                target_feat_dim=len(self.past_split),
+                target_feat_dim=1,
                 static_num=static_covariates.shape[-1]-1,
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
-                time_embed_dim=time_embed_dim,
+                time_embed_dim=self.time_embed_dim,
                 hidden_dim=64,
                 hidden_size=16,
                 nhead=8,
@@ -208,6 +200,7 @@ class FuturesTransformerModule(MlpModule):
                 pred_len=pred_len,
                 sample_dim=combine_nodes_num,
                 sample_heads=4,
+                static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
                 device=device,
             ).to(device)            
@@ -216,7 +209,7 @@ class FuturesTransformerModule(MlpModule):
 
     def create_loss(self, model, device="cpu"):
         return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num, output_chunk_length=self.output_chunk_length,
-                                   embedding_size=self.embedding_size, target_mode=self.target_mode, cut_len=self.cut_len, loss_weights=self.task_weights)       
+                        opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, cut_len=self.cut_len, loss_weights=self.task_weights)       
 
     def _construct_classify_layer(self, input_dim, output_dim, device=None):
         """新增策略选择模型"""
@@ -502,11 +495,6 @@ class FuturesTransformerModule(MlpModule):
             if corr_loss[i] != 0 and len(task_weights) > 3:
                 self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)   
 
-        # # 计算整体趋势判断准确率
-        # total_match_cnt,match_rate = self.compute_trend_acc(output,price_targets,target_info=target_info,top_num=self.top_num)
-        # self.log("match_rate", match_rate, batch_size=val_batch[0].shape[0], prog_bar=True)   
-
-                
         output_combine = (output, vr_class, price_targets, past_future_round_targets)
         return loss, detail_loss, output_combine       
 
@@ -660,7 +648,7 @@ class FuturesTransformerModule(MlpModule):
                 index_price = price_diff_range_ins.mean()        
                 price_diff = self.criterion.compute_diff_range_class(ts_arr[main_index], target_info_arr=ts_arr[instruments], is_main=True)[2]    
                 
-                for j in range(len(self.past_split)):
+                for j in range(1):
                     inner_class_item = target_class_item[ins_all]
                     inner_index = np.where(inner_class_item >= 0)[0]           
                     ins_output = cls_output[j][index,:]
@@ -946,34 +934,6 @@ class FuturesTransformerModule(MlpModule):
         
         return rate_total, result_total_list
     
-    def compute_trend_acc(self,outputs,price_targets,target_info=None,top_num=3,appro_num_rate=0.6):
-        """评估整体趋势判断"""
-        
-        total_data = []
-        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
-        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-        ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
-        total_ins_num = ins_all.shape[0]
-        appro_num = total_ins_num * appro_num_rate
-        ref_output_index = 0
-        for i in range(price_targets.shape[0]):
-            # 使用整体趋势预测指标，取得排名靠前的结果判断为多方，排名靠后的结果判断为空方，通过和整体价格涨跌幅度的对比，评估多空的准确度
-            open_diff_arr = np.array([item['open_diff'] for item in target_info[i]])
-            trend_long_num = np.sum(open_diff_arr[ins_all]>0)
-            trend_short_num = np.sum(open_diff_arr[ins_all]<=0)
-            sw_index_value = outputs[ref_output_index][2][i].squeeze(-1).item()
-            # 根据区间多段预测，取得关注段数值在整个区间的相对数值
-            total_data.append([sw_index_value,trend_long_num,trend_short_num])
-        
-        total_data = pd.DataFrame(np.array(total_data),columns=['pred_trend','tar_long_num','tar_short_num']).astype(
-            {"pred_trend":float,"tar_long_num":int,"tar_short_num":int})   
-        # 判断多方或空方预测的数据对应的品种上涨或下跌数量是否超出阈值
-        top_long_data = total_data.sort_values(by="pred_trend",ascending=False).iloc[:top_num]
-        top_short_data = total_data.sort_values(by="pred_trend").iloc[:top_num]
-        total_match_cnt = np.sum(top_long_data['tar_long_num']>=appro_num) + np.sum(top_short_data['tar_short_num']>=appro_num)
-        match_rate = total_match_cnt/(2*top_num)
-        return total_match_cnt,match_rate
-      
     def build_import_index(self, date=None, pred_top_num=2, output_data=None, target=None, price_target=None, target_info=None,
                            combine_instrument=None, index_round_targets=None): 
         """生成涨幅达标的预测数据下标"""
@@ -1050,28 +1010,37 @@ class FuturesTransformerModule(MlpModule):
             cancidate_list.append([import_index_real, 0])                          
         
         return cancidate_list
-    
+
     def compute_arg_sort(self, cls, dec_out, mode='single', trend=1, top_num=2):
         """根据输出进行排序"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
-        cls_main = cls[0][:ins_all.shape[0]]
-        cls_att = cls[0][-ins_all.shape[0]:]
-        if self.pred_mode == 'single':
-            if self.candidate_inverse:
-                flag = 1
-            else:
-                flag = -1        
-            if self.pred_weights[0] > self.pred_weights[1]: 
-                can_ins = flag * cls_main
-            else:
-                can_ins = flag * cls_att
-            if trend == 1:
-                pre_index = np.argsort(can_ins)[:top_num]
-            else:
-                pre_index = np.argsort(-can_ins)[:top_num]
+        node_num = ins_all.shape[0]
+        cls_long = cls[0][:node_num]
+        cls_short = cls[0][node_num:2*node_num]
+        if trend == 1:
+            pre_index = np.argsort(-cls_long)[:top_num]
         else:
+            pre_index = np.argsort(cls_short)[:top_num]
+        return pre_index.astype(int)
+       
+    def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):
+        """根据输出进行排序"""
+        
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        cls_main = cls[0][:ins_all.shape[0]]
+        index_long,index_short = self.criterion.filter_top_index(torch.Tensor(cls_main),top_num=self.top_num,ins_rel_index=ins_all)
+        index_long = index_long.numpy()
+        index_short = index_short.numpy()
+        if self.pred_mode == 'single':
+            if trend == 1:
+                pre_index = index_long[:top_num]
+            else:
+                pre_index = index_short[:top_num]
+        else:
+            cls_att = cls[0][-ins_all.shape[0]:]
             if trend == 1:
                 pre_index = self.compute_comprehensive_info(cls_main, cls_att)[0].values[:, 0][:top_num]
             else:

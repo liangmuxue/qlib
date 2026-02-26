@@ -400,12 +400,128 @@ class TFTWithFutureCovariates(nn.Module):
         
         return pred, var_weights, sample_attn_weights
 
+def mask_with_flag(features,mask):
+        mask_exp = mask.unsqueeze(-1).expand(-1, -1, features.shape[-1])
+        features_exp = features * mask_exp   
+        return features_exp
+    
+
+class GumbelTopK(nn.Module):
+    def __init__(self, k, tau=1.0, hard=True):
+        super().__init__()
+        self.k = k
+        self.tau = tau
+        self.hard = hard
+
+    def forward(self, logits):
+        # logits: (batch, d)
+        noise = -torch.log(-torch.log(torch.rand_like(logits) + 1e-20) + 1e-20)
+        perturbed = logits + noise
+        # 使用 softmax 获得连续松弛
+        soft = F.softmax(perturbed / self.tau, dim=-1)
+        # 取 topk 索引
+        indices = perturbed.topk(self.k, dim=-1).indices
+        # 构造 one-hot 掩码
+        hard_mask = torch.zeros_like(logits).scatter(-1, indices, 1.0)
+        if self.hard:
+            # Straight-through: 前向用 hard，反向用 soft 的梯度
+            mask = hard_mask - soft.detach() + soft
+        else:
+            mask = soft
+        return mask,hard_mask
+
+class GatingNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dim=None, k=5, num_layers=2,tau=1.0):
+        super().__init__()
+        self.input_dim = input_dim
+        self.k = k
+        if hidden_dim is None:
+            hidden_dim = input_dim
+        # 门控 logits 生成层
+        self.temporal_gate = self.create_gate_layer(input_dim, hidden_dim, num_layers)
+           
+        self.gumbel_topk_long = GumbelTopK(k, tau,hard=False)
+        self.gumbel_topk_short = GumbelTopK(k, tau,hard=False)
+    
+    def create_gate_layer(self,input_dim,hidden_dim,num_layers):
+        layers = []
+        prev_dim = input_dim
+        for _ in range(num_layers - 1):
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, 1))
+        return nn.Sequential(*layers)      
+    
+    def forward(self, x):
+        # x: (batch, input_dim)
+        logits = self.temporal_gate(x).squeeze(-1) 
+        mask_long,hard_mask_long = self.gumbel_topk_long(logits)    # (batch, input_dim) 近似 0/1
+        mask_short,hard_mask_short = self.gumbel_topk_short(-logits)
+        # 应用掩码
+        selected_long = mask_with_flag(x,hard_mask_long)
+        selected_short = mask_with_flag(x,hard_mask_short)
+        return (selected_long,selected_short), (hard_mask_long,hard_mask_short) , logits
+    
+class SparseGateFeatureTopK(nn.Module):
+    """
+    稀疏门控特征Top-K：基于注意力机制,并通过门控网络学习特征重要性，仅激活Top-K特征
+    优势：可随输入动态调整Top-K特征（不同样本选不同特征）
+    """
+    def __init__(self,sample_dim,input_dim,k=3, hidden_dim=16,num_heads=4, dropout=0.1):
+        super().__init__()
+        self.sample_dim = sample_dim
+        self.k = k
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        # 单层 Transformer 编码器
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, dropout=dropout)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        # 门控网络：对每个样本的特征时序序列建模，输出特征重要性
+        # self.gate_net = UltimateNormalizedGate(hidden_dim)
+        self.gate_net = GatingNetwork(input_dim,k=k)
+        # 整合输出为结合topk选择的品类
+        # self.top_ins_layer = LinelessLayer(2*k*input_dim,k*2,hidden_size=hidden_dim,
+        #                             layer_norm=True,batch_norm=False,dropout=0.3)
+        self.top_ins_layer_long = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
+                                    layer_norm=True,batch_norm=False,dropout=0.3)      
+        self.top_ins_layer_short = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
+                                    layer_norm=True,batch_norm=False,dropout=0.3)                     
+        self.ins_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
+                                    layer_norm=True,batch_norm=False,dropout=0.3)    
+    def forward(self, x):
+        # x: (batch_size, 品种S, 特征input_dim)
+        batch_size, S, input_dim = x.shape
+        # # Transformer 期望输入形状为 (N, B, H)
+        # h = x.transpose(0, 1)                    # (N, S, H)
+        # h = self.transformer(h)
+        # h = h.transpose(0, 1)                    # (B, S, H)
+               
+        # 计算每个特征的门控分数（逐样本）：(batch_size, S, 1)
+        (selected_long,selected_short), (mask_long,mask_short), gate_scores = self.gate_net(x)
+        
+        # 逐样本筛选Top-K特征索引：(batch_size, k),分别从正反取得
+        # _, topk_indices = torch.topk(gate_scores, k=self.k, dim=1)
+        # _, topk_inverse_indices = torch.topk(-gate_scores, k=self.k, dim=1)
+        #
+        # tok_combine_index = torch.cat([topk_indices,topk_inverse_indices],dim=1)
+        # # 提取top特征
+        # topk_indices_expanded = tok_combine_index.unsqueeze(-1).expand(-1, -1, x.shape[-1])
+        # topk_features = torch.gather(x, dim=1, index=topk_indices_expanded)
+        # 整合输出
+        topk_features_long = self.top_ins_layer_long(selected_long.reshape(selected_long.shape[0],-1))    
+        topk_features_short = self.top_ins_layer_short(selected_short.reshape(selected_short.shape[0],-1)) 
+        topk_features_combine = torch.cat([topk_features_long,topk_features_short],-1)
+          
+        normal_features = self.ins_layer(x.reshape(x.shape[0],-1))  
+        
+        return normal_features,(topk_features_long,topk_features_short),(mask_long,mask_short)
+    
+            
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
 
     def __init__(
         self,
-        static_dim=0,          # 静态特征维度
         obs_dim=6,             # 历史观测特征维度（要预测的变量）
         fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
         time_embed_dim=28,     # 时间特征嵌入维度（含节假日）
@@ -418,8 +534,10 @@ class UnionTransCombine(nn.Module):
         sample_heads=4,        # 样本间注意力头数
         target_feat_dim=2,
         hidden_size=16,
-        static_num=4,
-        static_cate_emb=None,
+        static_num=4,         # 静态特征维度
+        static_emb_dim=4,      # 离散特征嵌入维度
+        static_cate_emb=None, # 静态离散特征嵌入
+        top_num=3,            # topk数量
         device='cuda'
     ):
         super().__init__()
@@ -436,6 +554,7 @@ class UnionTransCombine(nn.Module):
                 sample_dim=sample_dim,
                 sample_heads=sample_heads,
                 static_cate_emb=static_cate_emb,
+                static_emb_dim=static_emb_dim,
                 device=device,
             )
         
@@ -447,6 +566,8 @@ class UnionTransCombine(nn.Module):
         self.dec_layer = LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim*pred_len*target_feat_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
+        # TOPK选择器网络
+        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim*pred_len, k=top_num, hidden_dim=hidden_size,num_heads=4, dropout=0.1) for _ in range(self.target_feat_dim)])
             
     def forward(
         self,static_covs,past_convs_item, his_future_emb,future_emb
@@ -463,8 +584,9 @@ class UnionTransCombine(nn.Module):
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            cls_out_ins = self.ins_layer[i](y_pred_reshape)
-            cls_out_combine.append(cls_out_ins)
+            normal_features,topk_features,mask = self.top_selector[i](y_pred.reshape(y_pred.shape[0],self.sample_dim,-1))
+            topk_features = torch.cat(topk_features,-1)
+            cls_out_combine.append(torch.cat([topk_features,normal_features],1))
         # 整体指数预测的网络输出
         index_data_combine = self.index_combine_layer(y_pred_reshape)
         

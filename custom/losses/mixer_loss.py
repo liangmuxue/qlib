@@ -23,7 +23,8 @@ from audioop import minmax
 class FuturesIndustryLoss(UncertaintyLoss):
     """整合不同行业板块，并基于策略选取的损失"""
 
-    def __init__(self,ref_model=None,device=None,target_mode=None,embedding_size=16,lock_epoch_num=0,num_mixtures=5,output_chunk_length=2,cut_len=2,loss_weights=None):
+    def __init__(self,ref_model=None,device=None,target_mode=None,embedding_size=16,lock_epoch_num=0
+                 ,opt_size=1,num_mixtures=5,output_chunk_length=2,cut_len=2,loss_weights=None):
         
         super(FuturesIndustryLoss, self).__init__(ref_model=ref_model,device=device)
         
@@ -38,6 +39,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         self.loss_weights = loss_weights
         self.num_mixtures = num_mixtures
         self.embedding_size = embedding_size
+        self.opt_size = opt_size
         
         # 整体及品种特征值回归损失函数
         self.index_feature_loss = AdaptiveSingleFeatureLoss(loss_type='welsch', device=self.device)
@@ -84,7 +86,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # top_loss = main_loss - main_loss + sort_loss
         return main_loss
         
-    def compute_top_loss(self,pred,target,top_num=3,epoch_num=0):
+    def compute_top_loss(self,pred,target,top_num=3,no_real_dis=True):
         """计算top损失"""
         
         top_pred, top_pred_index = torch.topk(pred, k=top_num, dim=0)
@@ -98,20 +100,87 @@ class FuturesIndustryLoss(UncertaintyLoss):
             top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
         else:
             top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
-        # # 优化：对前k名候选的目标值进行比对，实现额外加权（强制区分核心候选）
-        # top_real,target_topk_index = torch.topk(target, k=top_num, dim=0)
-        # top_real_inverse,target_topk_insverse_index = torch.topk(target, k=top_num,largest=False, dim=0)
-        # top_real_index = torch.cat([target_topk_index,target_topk_insverse_index])
-        # top_pred_ref_data = torch.gather(pred, 0, top_real_index)
-        # top_real_target_data = torch.cat([top_real,top_real_inverse])
-        # # 使用当前索引对应的实际数据与实际排名靠前的数据作差，作为加权的权重
-        # if all_elements_same(top_real_target_data) or True:
-        #     real_dis_weights = 0
-        # else:
-        #     real_dis_weights = self.ccc_loss_comp(top_target_data,top_real_target_data)
-        # top_loss = top_loss + real_dis_weights
+        # 优化：对前k名候选的目标值进行比对，实现额外加权（强制区分核心候选）
+        top_real,target_topk_index = torch.topk(target, k=top_num, dim=0)
+        top_real_inverse,target_topk_insverse_index = torch.topk(target, k=top_num,largest=False, dim=0)
+        top_real_index = torch.cat([target_topk_index,target_topk_insverse_index])
+        top_pred_ref_data = torch.gather(pred, 0, top_real_index)
+        top_real_target_data = torch.cat([top_real,top_real_inverse])
+        # 使用当前索引对应的实际数据与实际排名靠前的数据作差，作为加权的权重
+        if all_elements_same(top_real_target_data) or no_real_dis:
+            real_dis_weights = 0
+        else:
+            real_dis_weights = self.ccc_loss_comp(top_target_data,top_real_target_data)
+        top_loss = top_loss + real_dis_weights
+        if not no_real_dis:
+            top_loss = top_loss/2
         return top_loss
-               
+       
+    def filter_top_index_bidi(self,pred,top_num=3,ins_rel_index=None):
+        # 数组中已经把非目标置零，因此通过下标还原实际目标
+        pred_index = torch.argwhere(pred!=0)[:,0]
+        # 拆分出排名靠前和靠后的分组
+        sort_index = pred_index[torch.argsort(-pred[pred_index])]
+        pred_index_long = sort_index[:top_num]
+        pred_index_short = sort_index[top_num:]
+        # 当前可用品种的再次筛选
+        pred_index_long = tensor_intersect(pred_index_long,ins_rel_index)
+        pred_index_short = tensor_intersect(pred_index_short,ins_rel_index)
+        
+        return pred_index_long,pred_index_short
+
+    def filter_top_index(self,pred,top_num=3,ins_rel_index=None,mask_mode=False):
+        # 数组中已经把非目标置零，因此通过下标还原实际目标
+        if mask_mode:
+            pred_index = torch.argwhere(pred!=0)[:,0]
+        else:
+            pred_index = torch.argsort(-pred)[:top_num]
+        # 当前可用品种的再次筛选
+        pred_index = tensor_intersect(pred_index,ins_rel_index)
+        
+        return pred_index
+
+    def compute_gate_top_loss(self,pred_long,pred_short,target,top_num=3,ins_rel_index=None):
+        """配合注意力及门控机制，计算top损失"""
+        
+        # 数组中已经把非目标置零，因此通过下标还原实际目标
+        pred_index_long = self.filter_top_index(pred_long,top_num=top_num,ins_rel_index=ins_rel_index)
+        pred_index_short = self.filter_top_index(-pred_short,top_num=top_num,ins_rel_index=ins_rel_index)
+        # 比较预测数值和实际数值
+        top_pred = pred_long[pred_index_long]
+        top_pred_inverse = pred_short[pred_index_short]
+        top_target = torch.gather(target, 0, pred_index_long)
+        top_target_inverse = torch.gather(target, 0, pred_index_short)
+        top_pred_data = torch.cat([top_pred,top_pred_inverse])
+        top_target_data = torch.cat([top_target,top_target_inverse])
+        if top_pred_data.shape[0]<2:
+            return 0
+        if all_elements_same(top_target_data) or all_elements_same(top_pred_data):
+            top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
+        else:
+            top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
+        return top_loss
+                  
+    def compute_gate_top_loss_bidi(self,pred,target,top_num=3,ins_rel_index=None):
+        """配合注意力及门控机制，计算top损失"""
+        
+        # 数组中已经把非目标置零，因此通过下标还原实际目标
+        pred_index_long,pred_index_short = self.filter_top_index(pred,top_num=top_num,ins_rel_index=ins_rel_index)
+        # 比较预测数值和实际数值
+        top_pred = pred[pred_index_long]
+        top_pred_inverse = pred[pred_index_short]
+        top_target = torch.gather(target, 0, pred_index_long)
+        top_target_inverse = torch.gather(target, 0, pred_index_short)
+        top_pred_data = torch.cat([top_pred,top_pred_inverse])
+        top_target_data = torch.cat([top_target,top_target_inverse])
+        if top_pred_data.shape[0]<2:
+            return 0
+        if all_elements_same(top_target_data) or all_elements_same(top_pred_data):
+            top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
+        else:
+            top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
+        return top_loss
+                   
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):
         """根据实际涨跌数据计算类别"""
         
@@ -160,8 +229,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         main_index_abs = FuturesMappingUtil.get_main_index(sw_ins_mappings)
         ins_index_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         predictions = None
-        loop_size = len(output)
-        loop_size = 1
+        loop_size = self.opt_size
         
         for i in range(loop_size):
             target_mode = self.target_mode[i]
@@ -178,6 +246,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 target_info_total = []
                 sv_out_total = []
                 target_total = []
+                batch_size = 0
                 for j in range(target_class.shape[0]):
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
@@ -185,7 +254,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     index_target_item = future_index_round_target[j,indus_rel_index,:,i]
                     indus_index = tensor_intersect(keep_index,indus_data_index).to(keep_index.device)
                     inner_class_item = target_class_item[indus_data_index]                            
-                    sv_out_item = sv[0][j]
+                    sv_out_item_batch = sv[0][j]
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     if ins_rel_index.shape[0]<3:
                         continue
@@ -198,9 +267,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     future_covs_main = future_covs[i][j,main_index_abs,-1,:]
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
-                    sv_out_item = sv_out_item[ins_rel_index]
+                    sv_out_item = sv_out_item_batch[ins_rel_index]
                     price_diff_range = price_targets[j,ins_rel_index]  
-                    # price_diff_range = long_diff_seq_targets[j,0]  
+                    price_diff_range_real = price_targets[j]
+                    sv_out_item_real = sv[0][j]
                     # price_diff_range = target_info_inbatch[main_index_abs]['diff_range'][-self.output_chunk_length:]
                     
                     # 不同模式的损失计算                          
@@ -217,7 +287,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         target_len = -self.output_chunk_length + self.cut_len - 1
                         # 借用其他目标作为整体走势衡量
                         ref_indicator = 0 
-                        ref_indicator2 = 1                          
+                        ref_indicator2 = 2                          
                         dec_out_item = dec_out[j,:,:,:][ins_rel_index].squeeze(-1)
                         # dec_out_item = dec_out[j,ins_rel_index,:,0]
                         # sv_out_item_att = sv[1][j][ins_rel_index]
@@ -227,88 +297,45 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
                         round_targets_att = future_round_targets[j,ins_rel_index,:,:]
-                        # round_targets_item = future_round_targets[j,ins_rel_index,target_len,ref_indicator]
+                        round_targets_item = future_round_targets[j,ins_rel_index,target_len,ref_indicator]
                         # round_targets_item_att = future_round_targets[j,ins_rel_index,target_len,1]
                         # round_targets_item_att2 = future_round_targets[j,ins_rel_index,target_len,2]
                         # round_targets_item_att2 = future_round_targets[j,ins_rel_index,:,ref_indicator2]
                         # if not is_same_elements(att_tar,price_diff_range,eps=1e-3):
                         #     print("not same")
-                        cls_loss[i] += self.compute_main_loss(sv_out_item,price_diff_range)   
+                        # cls_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, no_real_dis=False)   
+                        node_num = ins_all.shape[0]
+                        sv_out_item_real_long = sv_out_item_real[:node_num]
+                        sv_out_item_real_short = sv_out_item_real[node_num:2*node_num]
+                        sv_out_item_real_main = sv_out_item_real[-node_num:][ins_rel_index]
+                        cls_loss[i] += self.compute_gate_top_loss(sv_out_item_real_long,sv_out_item_real_short, 
+                                                                  price_diff_range_real, top_num=top_num,ins_rel_index=ins_rel_index)  
+                        # cls_loss[i] += self.compute_main_loss(sv_out_item_real_long[ins_rel_index], price_diff_range)
+                        ce_loss[i] += (self.compute_main_loss(sv_out_item_real_long[ins_rel_index], price_diff_range) +
+                                       self.compute_main_loss(sv_out_item_real_short[ins_rel_index], price_diff_range))/2
+                        # ce_loss[i] += self.compute_main_loss(sv_out_item_real_main, price_diff_range) 
                         # 计算top损失
-                        ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num,epoch_num=epoch_num)
-                        target_item = target[j,ins_rel_index,:,ref_indicator]
-                        # price_last_target_items = target[j,ins_rel_index,-1,0]
-                        # fds_loss[i] += self.compute_main_loss(sv_out_item_att, round_targets_item_att)
+                        # ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num,no_real_dis=True)
+                        target_item = target[j,ins_rel_index,:,ref_indicator2]
                         # 辅助目标的损失
-                        fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)
-                        # 整体损失计算
-                        # fds_loss[i] += self.ccc_loss_comp(sw_index_data[j],target_item.mean(dim=0))
-                        # corr_loss[i] += self.compute_main_loss(sv_out_item_att2,round_targets_item_att2)
-                        # dec_loss_inner = 0
-                        # iter_num = 0
-                        # for h in range(len(output)):
-                        #     for k in range(dec_out_item.shape[1]):
-                        #         iter_num += 1
-                        #         dec_loss_inner += self.compute_main_loss(dec_out_item[:,k,h],round_targets_att[:,k,h])
-                        # if iter_num>0:
-                        #     fds_loss[i] += dec_loss_inner/iter_num
-                        # fds_loss[i] += nn.HuberLoss(delta=1.0)(dec_out_item,round_targets_att)
-                        # if torch.isnan(fds_loss[i]):
-                        #     print("nnn")                         
-                        index_target_total.append(future_index_round_target[j,main_index,target_len,ref_indicator])
-                        sw_index_total.append(sw_index_data[j])
+                        fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)    
+                        batch_size += 1                    
                     elif target_mode==3:
                         ref_indicator = 1 
-                        target_len = -self.output_chunk_length + self.cut_len - 1
-                        # 整体指数比较，辅助品种比较 
-                        index_target_total.append(future_index_round_target[j,main_index,target_len,ref_indicator])
-                        # index_target_total.append(price_diff_arr_mean)
-                        sw_index_total.append(sw_index_data[j])
-                        # ce_loss[i] += self.contrast_loss(future_covs_ins,dec_out_item,round_targets_item.unsqueeze(-1))
-                        # 计算标量特征损失
-                        # cls_loss[i] += self.index_feature_loss(sw_index_data.squeeze(-1)[j],index_target)
-                        # ce_loss[i] += self.ins_feature_loss(dec_out_item.squeeze(-1),round_targets_item)
-                        # ce_loss[i] += self.ccc_loss_comp(sv_out_item,price_diff_range)  
-                        # index_target_total.append(future_round_targets[j,main_index_abs,i])
-                        # sw_index_total.append(sw_index_data[j,0])    
-                batch_size = len(sw_index_total)
-                sw_index_total = torch.stack(sw_index_total)
+                        # 整体损失计算
+                        target_item = target[j,ins_rel_index,:,ref_indicator]
+                        cls_loss[i] += self.ccc_loss_comp(sw_index_data[j],target_item.mean(dim=0))
+                        batch_size += 1
+                        
                 if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]           
-                if target_mode in [2]:
+                if target_mode in [2,3]:
                     cls_loss[i] = cls_loss[i]/batch_size
                     ce_loss[i] = ce_loss[i]/batch_size
                     fds_loss[i] = fds_loss[i]/batch_size
                     corr_loss[i] = corr_loss[i]/batch_size
-                    # 板块整体损失计算,批次内样本比较
-                    # index_target_total = torch.stack(index_target_total)
-                    # target_total = torch.stack(target_total)
-                    # # 对目标值在批次内进行归一化
-                    # index_target_total = normalization_standard(index_target_total)
-                    # fds_loss[i] += self.ccc_loss_comp(sw_index_total.squeeze(-1),index_target_total)
-                    # # 使用品种涨跌幅数量进行趋势比对
-                    # long_ins_num = torch.Tensor(np.array([ts[main_index_abs]['long_ins_num'] for ts in target_info_total])).to(self.device)
-                    # long_ins_num = long_ins_num/ins_index_all.shape[0]
-                    # long_ins_num = normalization_axis(long_ins_num)
-                    # index_loss = self.ccc_loss_comp(sw_index_total.squeeze(-1),long_ins_num)
-                    # top_loss = self.compute_top_loss(sw_index_total.squeeze(-1), long_ins_num, top_num=3)
-                    # fds_loss[i] += (index_loss + top_loss)                    
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
-                          
-                if target_mode in [3]:
-                    # 板块整体损失计算,批次内样本比较
-                    # dec_combine_total = torch.stack(dec_combine_total)
-                    index_target_total = torch.stack(index_target_total)
-                    # 对目标值在批次内进行归一化
-                    index_target_total = normalization_standard(index_target_total)
-                    # 使用品种涨跌幅数量进行趋势比对
-                    long_ins_num = torch.Tensor(np.array([ts[main_index_abs]['long_ins_num'] for ts in target_info_total])).to(self.device)
-                    long_ins_num = long_ins_num/ins_index_all.shape[0]
-                    long_ins_num = normalization_axis(long_ins_num)
-                    cls_loss[i] = self.ccc_loss_comp(sw_index_total.squeeze(-1),long_ins_num)
-                    top_loss = self.compute_top_loss(sw_index_total.squeeze(-1), long_ins_num, top_num=3)
-                    ce_loss[i] += top_loss
-                    loss_sum = loss_sum + cls_loss[i] + ce_loss[i]
+                    
                 if target_mode in [6]:
                     # 衡量目标值与前面各段已知结果比较的相对位置，作为优化目标，整体指标模式
                     diff_target = long_diff_seq_targets[:,main_index,-1,i]

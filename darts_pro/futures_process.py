@@ -252,7 +252,7 @@ class FuturesProcessModel(TftDataframeModel):
         device = self._build_device()
         
         outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
-                        'top_num':self.optargs['pred_top_num'],'pred_top_num':self.optargs['pred_top_num'],
+                        'top_num':self.optargs['loss_top_num'],'pred_top_num':self.optargs['pred_top_num'],
                         'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}
         if load_weight:
             best_weight = self.optargs["best_weight"]    
@@ -309,7 +309,7 @@ class FuturesProcessModel(TftDataframeModel):
         device = self._build_device()
         
         outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
-                        'top_num':self.optargs['pred_top_num'],'pred_top_num':self.optargs['pred_top_num'],
+                        'top_num':self.optargs['loss_top_num'],'pred_top_num':self.optargs['pred_top_num'],
                         'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode']}
         if load_weight:
             best_weight = self.optargs["best_weight"]    
@@ -487,6 +487,7 @@ class FuturesProcessModel(TftDataframeModel):
                     optimizer_cls=optimizer_cls,
                     optimizer_kwargs=optimizer_kwargs,
                     model_type=model_type,
+                    opt_size=self.optargs["opt_size"],
                     pl_trainer_kwargs=pl_trainer_kwargs,
                     pred_top_num=self.optargs["pred_top_num"],
                     task_weights=self.optargs["task_weights"],

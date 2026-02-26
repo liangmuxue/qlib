@@ -251,6 +251,7 @@ class FuturesModel(IndustryRollModel):
                     task_weights=self.ext_kwargs['task_weights'],  
                     main_task_seq=self.ext_kwargs['main_task_seq'],  
                     grad_limits=self.ext_kwargs['grad_limits'], 
+                    opt_size=self.ext_kwargs['opt_size'], 
                     **self.pl_module_params,
             )      
         else:
