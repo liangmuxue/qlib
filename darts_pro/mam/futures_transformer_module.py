@@ -275,6 +275,7 @@ class FuturesTransformerModule(MlpModule):
                     torch.ones([batch_size, self.select_num]).long().to(self.device))
         past_index_targets = x_in[-1]
         instruments = torch.Tensor(FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)).to(self.device).long()
+        target_len = -self.output_chunk_length + self.cut_len - 1
         # 分别单独运行模型
         for i, m in enumerate(self.sub_models):
             # 根据配置，不同的模型使用不同的过去协变量
@@ -314,8 +315,9 @@ class FuturesTransformerModule(MlpModule):
                     convs_emb = torch.stack(convs_emb).permute(1,0,2,3)
                     return convs_emb
                 his_future_emb = transform_emb(his_future_covs)         
-                future_emb = transform_emb(futures_convs).double()        
-                out = m(static_covs,past_convs_item, his_future_emb,future_emb)                
+                future_emb = transform_emb(futures_convs).double()    
+                future_single_emb =  future_emb[:,:,target_len,:]   
+                out = m(static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
             else:
                 # 模拟数据
@@ -1022,7 +1024,7 @@ class FuturesTransformerModule(MlpModule):
         if trend == 1:
             pre_index = np.argsort(-cls_long)[:top_num]
         else:
-            pre_index = np.argsort(cls_short)[:top_num]
+            pre_index = np.argsort(-cls_short)[:top_num]
         return pre_index.astype(int)
        
     def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):

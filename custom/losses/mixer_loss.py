@@ -16,7 +16,7 @@ from .triplet_loss import AdaptiveSemiHardTripletLoss,ContinuousSemiHardTripletL
 from .triplet_miner import ContinuousTripletLossWithMemory,ContinuousTripletConfig
 from .contrastive_regression_loss import TripletContrastiveRegressionLoss,ContrastiveRegressionLoss,PairwiseContrastiveRegressionLoss
 from .arc_loss import RobustArcFaceRegression
-from .rank_loss import BidirectionalLambdaRankLoss
+from .rank_loss import attention_approx_ndcg_loss
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from audioop import minmax
 
@@ -63,7 +63,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # self.contrast_loss = ContinuousTripletLossWithMemory(config)
         # self.contrast_loss = PairwiseContrastiveRegressionLoss(device=self.device)
         # self.rank_loss = GlobalLambdaRankLoss(reduction='none')
-        self.rank_loss = BidirectionalLambdaRankLoss()
 
     def compute_main_loss(self,pred,target):
         """计算主要损失"""
@@ -145,7 +144,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         # 数组中已经把非目标置零，因此通过下标还原实际目标
         pred_index_long = self.filter_top_index(pred_long,top_num=top_num,ins_rel_index=ins_rel_index)
-        pred_index_short = self.filter_top_index(-pred_short,top_num=top_num,ins_rel_index=ins_rel_index)
+        pred_index_short = self.filter_top_index(pred_short,top_num=top_num,ins_rel_index=ins_rel_index)
         # 比较预测数值和实际数值
         top_pred = pred_long[pred_index_long]
         top_pred_inverse = pred_short[pred_index_short]
@@ -305,14 +304,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         #     print("not same")
                         # cls_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, no_real_dis=False)   
                         node_num = ins_all.shape[0]
-                        sv_out_item_real_long = sv_out_item_real[:node_num]
-                        sv_out_item_real_short = sv_out_item_real[node_num:2*node_num]
-                        sv_out_item_real_main = sv_out_item_real[-node_num:][ins_rel_index]
+                        sv_out_item_real_long = sv_out_item_real[:node_num][ins_rel_index]
+                        attention_weights_long = sv_out_item_real[2*node_num:3*node_num][ins_rel_index]
+                        sv_out_item_real_short = sv_out_item_real[node_num:2*node_num][ins_rel_index]
+                        attention_weights_short = sv_out_item_real[3*node_num:][ins_rel_index]
                         cls_loss[i] += self.compute_gate_top_loss(sv_out_item_real_long,sv_out_item_real_short, 
                                                                   price_diff_range_real, top_num=top_num,ins_rel_index=ins_rel_index)  
+                        ce_loss[i] += attention_approx_ndcg_loss(sv_out_item_real_long,attention_weights_long,
+                                                        price_diff_range, temperature=0.1, top_k=top_num)*25
+                        ce_loss[i] += attention_approx_ndcg_loss(sv_out_item_real_short,attention_weights_short,
+                                                        -price_diff_range, temperature=0.1, top_k=top_num)*25
                         # cls_loss[i] += self.compute_main_loss(sv_out_item_real_long[ins_rel_index], price_diff_range)
-                        ce_loss[i] += (self.compute_main_loss(sv_out_item_real_long[ins_rel_index], price_diff_range) +
-                                       self.compute_main_loss(sv_out_item_real_short[ins_rel_index], price_diff_range))/2
+                        # ce_loss[i] += (self.compute_main_loss(sv_out_item_real_long[ins_rel_index], price_diff_range) +
+                        #                self.compute_main_loss(sv_out_item_real_short[ins_rel_index], price_diff_range))/2
                         # ce_loss[i] += self.compute_main_loss(sv_out_item_real_main, price_diff_range) 
                         # 计算top损失
                         # ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num,no_real_dis=True)
