@@ -358,6 +358,27 @@ class UncertaintyLoss(nn.Module):
     def mse_loss(self,x1, x2,weighted_data=None):
         return torch.mean(self.mse_dis(x1,x2))
 
+    def weighted_mse_loss(self,pred, target, weight, reduction='mean'):
+        """
+        pred: 预测值，形状 (N, *) 或任意形状
+        target: 目标值，形状与 pred 相同
+        weight: 权重，形状必须能与 pred 广播（通常与 pred 相同或为 (N,1) 等）
+        reduction: 'mean'（默认，除以权重和）、'sum'（直接求和）、'none'（返回逐元素加权误差）
+        """
+        # 逐元素平方误差
+        squared_error = (pred - target) ** 2
+        # 应用权重
+        weighted_squared_error = weight * squared_error
+    
+        if reduction == 'mean':
+            return weighted_squared_error.sum() / weight.sum()
+        elif reduction == 'sum':
+            return weighted_squared_error.sum()
+        elif reduction == 'none':
+            return weighted_squared_error
+        else:
+            raise ValueError(f"Unknown reduction type: {reduction}")
+        
     def cos_loss(self,x1, x2):
         similarity = torch.cosine_similarity(x1, x2, dim=1)
         loss = 1 - similarity
@@ -506,64 +527,156 @@ class UncertaintyLoss(nn.Module):
         kl = F.kl_div(input.softmax(dim=-1).log(), target.softmax(dim=-1), reduction='mean')
         return kl
 
-    def weighted_mse_loss(self,inputs, targets, weights=None):
-        loss = (inputs - targets) ** 2
-        if weights is not None:
-            loss *= weights.expand_as(loss)
-        loss = torch.mean(loss)
-        return loss
-    
     def weighted_l1_loss(self,inputs, targets, weights=None):
         loss = F.l1_loss(inputs, targets, reduction='none')
         if weights is not None:
             loss *= weights.expand_as(loss)
         loss = torch.mean(loss)
         return loss   
-    
-class MlpLoss(UncertaintyLoss):
-    """基于MLP的损失函数"""
-    
-    def __init__(self,ref_model=None,device=None):
-        super(MlpLoss, self).__init__(ref_model=ref_model,device=device)
-        self.ref_model = ref_model
-        self.device = device  
-        
-        reducer = reducers.ThresholdReducer(low=0)
-        self.triplet_loss = losses.TripletMarginLoss(margin=0.03, reducer=reducer)
-        self.mining_func = miners.TripletMarginMiner(
-            margin=0.03,type_of_triplets="semihard"
-        )     
-        self.quan_loss = QuanlityLoss(device=device)   
-        
-    def forward(self, output_ori,target_ori,optimizers_idx=0,mode="pretrain"):
-        """Multiple Loss Combine"""
 
-        (output,vr_combine_class,vr_classes) = output_ori
-        (target,target_class,last_target,price_target) = target_ori
-        corr_loss = torch.Tensor(np.array([0 for i in range(len(output))])).to(self.device)
-        cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
-        fds_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
-        tar_cls_loss = torch.Tensor(np.array([0 for _ in range(len(output))])).to(self.device)
-        ce_loss = torch.Tensor(np.array([1 for _ in range(len(output))])).to(self.device)
-        # 指标分类
-        loss_sum = torch.tensor(0.0).to(self.device) 
-        # 相关系数损失,多个目标R
-        label_class = target_class[:,0].long()
-        for i in range(len(output)):
-            if optimizers_idx==i or optimizers_idx==-1:
-                real_target = target[...,i]
-                last_target_item = last_target[...,i:i+1]
-                # pca_target_item = normalization(pca_target_item, mode="torch")
-                output_item = output[i] 
-                x_bar,z,cls,tar_cls,x_smo = output_item  
-                # 预测值的一致性损失
-                corr_loss[i] = self.ccc_loss_comp(x_bar, real_target)
-                # 计算价格区间损失
-                # cls_loss[i] = 100 * self.mse_loss(cls, price_target)
-                             
-                # 降维目标之间的欧氏距离         
-                ce_loss[i] = 10 * self.mse_loss(x_smo, last_target_item)
-                # ce_loss[i] = self.quan_loss.compute_loss(x_smo.unsqueeze(1).unsqueeze(1), last_target_item)
-                loss_sum = loss_sum + corr_loss[i] + ce_loss[i] + cls_loss[i]
-        return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss]    
+def weighted_spearman_loss(
+    pred_scores, true_labels, external_weights,temperature=0.01
+):
+    """
+    可微的带权Spearman损失：用soft排序+gather保留梯度
+    Args:
+        pred_scores: (batch_size, docs_per_query) - 模型预测分数（带梯度）
+        true_labels: (batch_size, docs_per_query) - 真实标签
+        external_weights: (batch_size, docs_per_query) - 外部权重
+        temperature: 温度系数（越小，soft排序越接近硬排序，梯度越稳定）
+    Returns:
+        avg_loss: 批次平均损失（可微）
+    """
+    batch_size, docs_per_query = pred_scores.shape
+    
+    # -------------------------- 关键：可微排名计算（替代argsort） --------------------------
+    def soft_rank(scores, descending=True, temp=temperature):
+        """
+        可微排名计算：用softmax近似排序，返回每个元素的“软排名”（1-based）
+        Args:
+            scores: (batch_size, docs_per_query)
+            descending: 是否降序
+            temp: 温度系数
+        Returns:
+            soft_ranks: (batch_size, docs_per_query) - 可微的软排名
+        """
+        # 步骤1：生成两两比较的矩阵 (batch_size, docs_per_query, docs_per_query)
+        scores_expanded = scores.unsqueeze(2)  # (B, N, 1)
+        scores_tiled = scores.unsqueeze(1)     # (B, 1, N)
+        
+        # 步骤2：计算两两比较的相似度（可微）
+        if descending:
+            diff = scores_expanded - scores_tiled  # 降序：score_i > score_j → 排名更靠前
+        else:
+            diff = scores_tiled - scores_expanded
+        
+        # 步骤3：用sigmoid近似“是否大于”的判断（可微）
+        pairwise_similarity = torch.sigmoid(diff / temp)
+        
+        # 步骤4：计算软排名 = 1 + 所有比当前分数高的样本数（可微）
+        soft_ranks = 1.0 + torch.sum(pairwise_similarity, dim=2) - 0.5  # 减0.5修正自身比较
+        
+        return soft_ranks
+    
+    # -------------------------- 计算软排名（可微） --------------------------
+    # 预测分数的软排名（降序）
+    pred_soft_ranks = soft_rank(pred_scores, descending=True)
+    # 真实标签的软排名（降序，标签越高排名越靠前）
+    true_soft_ranks = soft_rank(true_labels, descending=True)
+    
+    # -------------------------- 用gather确认梯度链路（可选，强化梯度保留） --------------------------
+    # 对pred_scores按软排名排序（gather保留梯度）
+    sorted_indices = torch.argsort(pred_soft_ranks, dim=1, descending=False)  # 排名1在前
+    pred_scores_sorted = torch.gather(pred_scores, dim=1, index=sorted_indices)
+    # 仅用于激活梯度（gather不改变值，但保留链路）
+    pred_soft_ranks = pred_soft_ranks + (pred_scores_sorted - pred_scores_sorted).detach()
+    
+    # -------------------------- 加权Spearman损失计算（全可微） --------------------------
+    # 排名差值 d_i（可微）
+    d = pred_soft_ranks - true_soft_ranks  # (B, N)
+    
+    # 加权平方差 sum(w_i * d_i²)（可微）
+    weighted_d2 = external_weights * (d ** 2)
+    sum_weighted_d2 = torch.sum(weighted_d2, dim=1)  # (B,)
+    
+    # 加权Spearman系数（可微）
+    sum_weights = torch.sum(external_weights, dim=1)  # (B,)
+    denominator = sum_weights * (docs_per_query ** 2 - 1)  # (B,)
+    spearman_r = 1 - (6 * sum_weighted_d2) / (denominator + 1e-10)  # (B,)
+    
+    # 损失 = 1 - 相关系数（最小化损失=最大化排名一致性）
+    loss_per_query = 1 - spearman_r  # (B,)
+    avg_loss = torch.mean(loss_per_query)  # 批次平均（可微）
+    
+    return avg_loss
 
+class WeightedSpearmanLoss(nn.Module):
+    def __init__(self, tau=1.0, reduction='mean'):
+        """
+        tau: 温度参数，控制软排序的平滑程度。tau 越小越接近真实排序，但梯度越稀疏。
+        reduction: 'mean' 返回批次中所有样本的损失平均值；'sum' 返回总和。
+        """
+        super().__init__()
+        self.tau = tau
+        self.reduction = reduction
+
+    def _soft_rank(self, scores):
+        """
+        输入: scores 形状 (N, )，一维张量
+        输出: soft_ranks 形状 (N, )，每个元素的近似排名（从1开始）
+        """
+        N = scores.size(0)
+        # 计算两两差值矩阵: diff[i][j] = scores[j] - scores[i]   (j 与 i 比较)
+        diff = scores.unsqueeze(0) - scores.unsqueeze(1)  # (N, N)
+        # 使用 sigmoid 近似计数比 i 大的元素个数
+        # 对于升序排名：排名 = 1 + (比 i 小的元素个数) = 1 + sum_{j != i} [s_j < s_i]
+        # 等价于 1 + sum_{j != i} sigmoid((s_i - s_j)/tau)
+        # 这里用 (s_i - s_j)/tau 而不是 (s_j - s_i)，因为 sigmoid(x) 当 x>0 时≈1
+        soft_ranks = 1 + torch.sigmoid((scores.unsqueeze(1) - scores.unsqueeze(0)) / self.tau).sum(dim=1)
+        # 减去自身项（当 j=i 时，s_i - s_i = 0，sigmoid(0)=0.5，需要去掉）
+        soft_ranks = soft_ranks - 0.5  # 因为对角线贡献了 0.5
+        return soft_ranks
+
+    def forward(self, pred, target, weight=None):
+        """
+        pred: 预测值，形状 (N, ) 或 (batch_size, ...)，将展平为 (N,)
+        target: 目标值，形状与 pred 相同
+        weight: 样本权重，形状与 pred 相同，或为 None（等权重）
+        """
+        pred = pred.view(-1)
+        target = target.view(-1)
+        N = pred.size(0)
+
+        if weight is None:
+            weight = torch.ones_like(pred)
+        else:
+            weight = weight.view(-1)
+
+        # 计算软排名
+        pred_rank = self._soft_rank(pred)
+        target_rank = self._soft_rank(target)
+
+        # 计算加权平方差
+        diff = pred_rank - target_rank
+        weighted_diff_sq = weight * (diff ** 2)
+
+        # 计算分母：加权总样本数的立方减去加权总样本数
+        sum_w = weight.sum()
+        denom = sum_w ** 3 - sum_w
+        if denom == 0:
+            # 避免除零（例如所有权重相等且只有一个样本？但这种情况很少见）
+            denom = 1e-8
+
+        # 计算加权 Spearman 系数
+        numerator = 6 * weighted_diff_sq.sum()
+        rho_w = 1 - numerator / denom
+
+        # 损失：我们希望最大化 Spearman，所以取 1 - rho_w（最小化）
+        loss = 1 - rho_w
+
+        if self.reduction == 'mean':
+            return loss.mean() if loss.numel() > 1 else loss
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:
+            return loss

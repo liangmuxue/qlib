@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
-from losses.mtl_loss import UncertaintyLoss,similarity_consistency_loss
+from losses.mtl_loss import UncertaintyLoss,WeightedSpearmanLoss,weighted_spearman_loss
 from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normalization
 from tft.class_define import get_simple_class
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
@@ -50,7 +50,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         # self.contrast_loss = TripletContrastiveRegressionLoss(distance_func=self.ccc_distance,margin=1.0,device=self.device)
         # self.contrast_loss = ContinuousSemiHardTripletLoss(pairwise_distance=self.ccc_distance,device=self.device)
-        self.contrast_loss = RobustArcFaceRegression(embedding_size,out_dim=embedding_size,num_proxies=embedding_size,device=self.device)
+        self.contrast_loss = WeightedSpearmanLoss()
         # config = ContinuousTripletConfig(
         #     memory_size=1024,
         #     embedding_dim=embedding_size,
@@ -74,15 +74,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 print("all_elements_same for pred:{}".format(pred))
         else:
             main_loss = self.ccc_loss_comp(pred, target)
-        # 优化：增加对应的排序损失
-        # pred_index = torch.argsort(pred)
-        # # real_target = torch.gather(target, 0, pred_index)
-        # # real_loss = self.ccc_loss_comp(real_target,target)
-        # pred_index_norm = pred_index/pred_index.shape[0]
-        # real_index_norm = torch.Tensor(np.array([i for i in range(pred_index.shape[0])]))/pred_index.shape[0]
-        # real_index_norm = real_index_norm.to(self.device)
-        # sort_loss = self.mse_loss(pred_index_norm.unsqueeze(0),real_index_norm.unsqueeze(0))
-        # top_loss = main_loss - main_loss + sort_loss
         return main_loss
         
     def compute_top_loss(self,pred,target,top_num=3,no_real_dis=True):
@@ -116,12 +107,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
         return top_loss
        
     def filter_top_index_bidi(self,pred,top_num=3,ins_rel_index=None):
-        # 数组中已经把非目标置零，因此通过下标还原实际目标
         pred_index = torch.argwhere(pred!=0)[:,0]
         # 拆分出排名靠前和靠后的分组
         sort_index = pred_index[torch.argsort(-pred[pred_index])]
         pred_index_long = sort_index[:top_num]
-        pred_index_short = sort_index[top_num:]
+        pred_index_short = sort_index[-top_num:]
         # 当前可用品种的再次筛选
         pred_index_long = tensor_intersect(pred_index_long,ins_rel_index)
         pred_index_short = tensor_intersect(pred_index_short,ins_rel_index)
@@ -139,15 +129,56 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return pred_index
 
-    def compute_gate_top_loss(self,pred_long,pred_short,target,top_num=3,ins_rel_index=None):
+    def compute_att_main_loss(self,pred,target,top_num=3,att_long=None,att_short=None):
+        """配合注意力机制，计算损失"""
+        
+        # 主体损失，斯皮尔逊相关性
+        if all_elements_same(target) or all_elements_same(pred,eps=1e-6):
+            main_loss = 0
+            if all_elements_same(pred):
+                print("all_elements_same for pred:{}".format(pred))
+        else:
+            # 使用带权重的mse或ccc损失
+            long_loss = self.weighted_mse_loss(pred,target,att_long,reduction='sum')
+            short_loss = self.weighted_mse_loss(pred,target,att_short,reduction='sum')
+            main_loss = (long_loss + short_loss)/2
+            # main_loss = weighted_spearman_loss(pred.unsqueeze(0), target.unsqueeze(0),att_long.unsqueeze(0))     
+            # main_loss = main_loss + weighted_spearman_loss(pred.unsqueeze(0), target.unsqueeze(0),att_short.unsqueeze(0))    
+            # main_loss = main_loss/2
+        return main_loss
+
+    def compute_att_top_loss(self,pred,target,att_long=None,att_short=None,top_num=3,ins_rel_index=None,margin=3.0,target_margin=3.0):
+        """配合注意力机制，计算TOP损失"""
+        
+        # 分别选取注意力权重多方和空方的前几个
+        pred_index_long = torch.topk(att_long, top_num)[1]
+        pred_index_long = tensor_intersect(pred_index_long,ins_rel_index)
+        pred_index_short = torch.topk(att_short, top_num)[1]
+        pred_index_short = tensor_intersect(pred_index_short,ins_rel_index)
+        if pred_index_long.shape[0]==0 or pred_index_short.shape[0]==0:
+            return 0
+        # 比较索引对应的目标值多方和空方的数值差距区分度损失
+        top_pred = pred[pred_index_long]
+        top_pred_inverse = pred[pred_index_short]
+        top_target = torch.gather(target, 0, pred_index_long)
+        top_target_inverse = torch.gather(target, 0, pred_index_short)
+        margin_target = top_target.mean() - top_target_inverse.mean()
+        margin_loss = torch.mean(torch.clamp(target_margin - margin_target, min=0))
+        
+        # 计算预测值本身多方和空方的数值差距区分度损失
+        margin_pred = top_pred.mean() - top_pred_inverse.mean()
+        margin_loss = margin_loss + torch.mean(torch.clamp(margin - margin_pred, min=0))
+        
+        return margin_loss
+       
+    def compute_gate_top_loss(self,pred,target,top_num=3,ins_rel_index=None):
         """配合注意力及门控机制，计算top损失"""
         
         # 数组中已经把非目标置零，因此通过下标还原实际目标
-        pred_index_long = self.filter_top_index(pred_long,top_num=top_num,ins_rel_index=ins_rel_index)
-        pred_index_short = self.filter_top_index(pred_short,top_num=top_num,ins_rel_index=ins_rel_index)
+        pred_index_long,pred_index_short = self.filter_top_index_bidi(pred,top_num=top_num,ins_rel_index=ins_rel_index)
         # 比较预测数值和实际数值
-        top_pred = pred_long[pred_index_long]
-        top_pred_inverse = pred_short[pred_index_short]
+        top_pred = pred[pred_index_long]
+        top_pred_inverse = pred[pred_index_short]
         top_target = torch.gather(target, 0, pred_index_long)
         top_target_inverse = torch.gather(target, 0, pred_index_short)
         top_pred_data = torch.cat([top_pred,top_pred_inverse])
@@ -266,9 +297,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     future_covs_main = future_covs[i][j,main_index_abs,-1,:]
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
-                    sv_out_item = sv_out_item_batch[ins_rel_index]
-                    price_diff_range = price_targets[j,ins_rel_index]  
-                    price_diff_range_real = price_targets[j]
+                    price_diff_range_real = price_targets[j][ins_all]
                     sv_out_item_real = sv[0][j]
                     # price_diff_range = target_info_inbatch[main_index_abs]['diff_range'][-self.output_chunk_length:]
                     
@@ -304,25 +333,20 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         #     print("not same")
                         # cls_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, no_real_dis=False)   
                         node_num = ins_all.shape[0]
-                        sv_out_item_real_long = sv_out_item_real[:node_num][ins_rel_index]
-                        attention_weights_long = sv_out_item_real[2*node_num:3*node_num][ins_rel_index]
-                        sv_out_item_real_short = sv_out_item_real[node_num:2*node_num][ins_rel_index]
-                        attention_weights_short = sv_out_item_real[3*node_num:][ins_rel_index]
-                        cls_loss[i] += self.compute_gate_top_loss(sv_out_item_real_long,sv_out_item_real_short, 
-                                                                  price_diff_range_real, top_num=top_num,ins_rel_index=ins_rel_index)  
-                        ce_loss[i] += attention_approx_ndcg_loss(sv_out_item_real_long,attention_weights_long,
-                                                        price_diff_range, temperature=0.1, top_k=top_num)*25
-                        ce_loss[i] += attention_approx_ndcg_loss(sv_out_item_real_short,attention_weights_short,
-                                                        -price_diff_range, temperature=0.1, top_k=top_num)*25
-                        # cls_loss[i] += self.compute_main_loss(sv_out_item_real_long[ins_rel_index], price_diff_range)
-                        # ce_loss[i] += (self.compute_main_loss(sv_out_item_real_long[ins_rel_index], price_diff_range) +
-                        #                self.compute_main_loss(sv_out_item_real_short[ins_rel_index], price_diff_range))/2
-                        # ce_loss[i] += self.compute_main_loss(sv_out_item_real_main, price_diff_range) 
+                        sv_out_item = sv_out_item_real[:node_num]
+                        attention_weights_long = sv_out_item_real[node_num:2*node_num]
+                        attention_weights_short = sv_out_item_real[2*node_num:3*node_num]
+                        sv_out_item_att = sv_out_item_real[3*node_num:][ins_rel_index]
+                        cls_loss[i] += self.compute_att_top_loss(sv_out_item,price_diff_range_real, att_long=attention_weights_long,
+                                                att_short=attention_weights_short,top_num=top_num,ins_rel_index=ins_rel_index)  
+                        ce_loss[i] += self.compute_att_main_loss(sv_out_item[ins_rel_index],price_diff_range,top_num=top_num,
+                                            att_long=attention_weights_long[ins_rel_index],att_short=attention_weights_short[ins_rel_index]) 
                         # 计算top损失
                         # ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num,no_real_dis=True)
                         target_item = target[j,ins_rel_index,:,ref_indicator2]
                         # 辅助目标的损失
-                        fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)    
+                        # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)    
+                        fds_loss[i] += self.compute_main_loss(sv_out_item_att,price_diff_range)    
                         batch_size += 1                    
                     elif target_mode==3:
                         ref_indicator = 1 
