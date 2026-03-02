@@ -6,7 +6,6 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 
 from .cov_cnn import LinelessLayer
 
@@ -436,90 +435,99 @@ class TFTWithFutureCovariates(nn.Module):
         
         return (pred_seq,pred_tar), sample_attn_weights
 
-def mask_with_flag(features,mask):
-        mask_exp = mask.unsqueeze(-1).expand(-1, -1, features.shape[-1])
-        features_exp = features * mask_exp   
-        return features_exp
+class AttentionWithDualHighK(nn.Module):
+    def __init__(self, input_dim, hidden_dim=16, k=3,nor_scale=0.1,high_scale=1.0,low_scale=2.0):
+        super(AttentionWithDualHighK, self).__init__()
+        self.k = k
+        self.nor_scale = nor_scale
+        self.high_scale = high_scale
+        self.low_scale = low_scale
+        
+        # 注意力层：生成原始分数（无激活，避免提前进入Sigmoid饱和区）
+        self.attention_net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Tanh(),  # 先用Tanh把输入映射到(-1,1)，避免Sigmoid直接饱和
+            nn.Linear(hidden_dim, 1, bias=False)
+        )
+        # 可学习的缩放因子：调整Sigmoid输入的范围，避免全趋近于1
+        self.scale = nn.Parameter(torch.tensor(1.0))       
     
+    def forward(self, x):
+        """
+        前向传播：计算注意力权重，筛选top-k（排序最高）和bottom-k（排序最低）的位置
+        :param x: 输入张量，shape=[batch_size, seq_len, input_dim]
+        :return: 
+            attention_weights: 原始注意力权重，shape=[batch_size, seq_len]
+            topk_indices: 排序前k的索引，shape=[batch_size, k]
+            bottomk_indices: 排序后k的索引，shape=[batch_size, k]
+        """
+        batch_size, seq_len, _ = x.shape
+        # 校验：序列长度必须大于2k，避免前k和后k索引重叠
+        if seq_len <= 2 * self.k:
+            raise ValueError(f"序列长度{seq_len}必须大于2*{self.k}={2*self.k}")
+        
+        # 计算注意力分数并归一化（softmax确保权重和为1）
+        raw_scores = self.attention_net(x).squeeze(-1)  # [batch_size, seq_len]
+        # 关键优化1：缩放分数，避免Sigmoid饱和（scale可学习）
+        scaled_scores = raw_scores * self.scale     
+        # 步骤2：Sigmoid激活（输出0~1）
+        sigmoid_weights = torch.sigmoid(scaled_scores)  # [batch, seq]
+        # 关键优化2：L2归一化（核心！让权重区分高低，而非全接近1）
+        # L2归一化：每个样本的权重除以其L2范数，保证权重有差异
+        attn_scores = F.normalize(sigmoid_weights, p=2, dim=-1)
+                           
+        # 筛选排序前k的索引（原本权重最高）
+        _, topk_indices = torch.topk(attn_scores, self.k, dim=-1)
+        # 筛选排序后k的索引（原本权重最低）
+        _, bottomk_indices = torch.topk(attn_scores, self.k, dim=-1, largest=False)
+                
+        # 填充前K高分（并缩放增强）,填充后K低分（并缩放增强，避免权重消失）
+        mask_scores,mask_scores_hard = self.get_topk_bottomk_mask(attn_scores)    
+        # 权重归一化
+        attention_weights = F.softmax(mask_scores.squeeze(-1), dim=-1)  # [batch_size, seq_len]
+        
+        # 返回权重，以及硬掩码用于后续topk索引定位
+        return attention_weights, mask_scores_hard
 
-def straight_through_topk_bottomk(x, scores, k, temperature=1.0):
-    """
-    同时选择 Top‑k 和 Bottom‑k 特征（硬掩码 + 直通估计）
-    Args:
-        x: 输入特征，形状 (batch_size, feature_dim) 或 (batch_size, seq_len, feature_dim)
-        scores: 重要性分数，形状与 x 相同
-        k: 需要保留的前 k 个和后 k 个（总保留 2k 个，若 2k > 特征总数则全部保留）
-        temperature: 控制软权重的平滑程度
-    Returns:
-        selected_x: 经过掩码后的特征（未选中位置置零）
-        hard_mask: 二值掩码，形状与 x 相同
-    """
-    device = x.device
-    batch_size = x.size(0)
-    feat_dim = x.size(-1)
+    def get_topk_bottomk_mask(self, scores):
+        """
+        生成仅包含前K高分和后K低分位置的掩码分数矩阵
+        :param scores: 原始注意力分数 (batch, seq_len, seq_len)
+        :return: mask_scores: 仅前K+后K位置有有效分数，其余为极小值
+        """
+        batch_size, seq_len = scores.shape
+        
+        # 1. 筛选前K个高分位置和分数
+        topk_vals, topk_indices = torch.topk(scores, k=self.k, dim=-1)  # (batch, seq_len, k)
+        
+        # 筛选后K个低分位置和分数（通过取负实现bottomk）
+        bottomk_vals, bottomk_indices = torch.topk(-scores, k=self.k, dim=-1)  # (batch, seq_len, k)
+        bottomk_vals = -bottomk_vals  # 还原为原始低分
+        
+        # 初始化掩码分数矩阵，软约束版本，其他位置保留10%分数
+        mask_scores = scores * self.nor_scale  
+        mask_scores_hard = torch.zeros_like(scores)   
+        # 填充前K高分（并缩放增强）
+        batch_idx = torch.arange(batch_size).unsqueeze(1).expand(-1, self.k)
+        mask_scores[batch_idx, topk_indices] = topk_vals * self.high_scale
+        mask_scores_hard[batch_idx, topk_indices] = 1
+        # 填充后K低分（并缩放增强，避免权重消失）
+        mask_scores[batch_idx, bottomk_indices] = bottomk_vals * self.low_scale
+        mask_scores_hard[batch_idx, bottomk_indices] = -1
+        
+        return mask_scores,mask_scores_hard
     
-    # 1. 获取 Top‑k 和 Bottom‑k 索引
-    topk_vals, topk_idx = torch.topk(scores, k, dim=-1)               # 前 k 个最大值的索引
-    bottomk_vals, bottomk_idx = torch.topk(-scores, k, dim=-1)        # 前 k 个最小值的索引（通过取负实现）
-    
-    # 2. 构建硬掩码
-    hard_mask = torch.zeros_like(scores)
-    hard_mask.scatter_(-1, topk_idx, 1.0)
-    hard_mask.scatter_(-1, bottomk_idx, 1.0)   # 注意：若 topk 和 bottomk 有重叠，会重复赋值（仍为1）
-    
-    # 3. 软权重（用于梯度近似）
-    # 对分数进行温度缩放后 softmax，作为每个位置的软权重
-    soft_weights = F.softmax(scores / temperature, dim=-1)
-    
-    # 4. Straight‑Through 估计
-    weights = (hard_mask - soft_weights.detach() + soft_weights)
-    weights = weights.unsqueeze(-1).repeat(1,1,x.shape[-1])
-    selected_x = x * weights
-    return selected_x, soft_weights
-    
-    
-def soft_topk_bottomk_mask(x,scores, k, sigma=1.0):
-    """
-    生成软性两端掩码（值在 0~1 之间）
-    Args:
-        x: 输入特征，形状 (batch_size, feature_dim) 或 (batch_size, seq_len, feature_dim)
-        scores: 重要性分数，形状 (batch_size, n)
-        k: 需要保留的前 k 个和后 k 个
-        sigma: 控制软掩码锐利程度的高斯核宽度
-    Returns:
-        soft_mask: 软掩码，形状与 scores 相同
-    """
-    # 1. 找到第 k 大和第 k 小的值
-    topk_vals, _ = torch.topk(scores, k, dim=-1)
-    bottomk_vals, _ = torch.topk(-scores, k, dim=-1)   # 取负找最小
-    threshold_high = topk_vals[..., -1:]                # 第 k 大的值
-    threshold_low = -bottomk_vals[..., -1:]             # 第 k 小的值（还原符号）
-    
-    # 2. 计算每个元素与两个阈值的距离
-    diff_high = scores - threshold_high                 # 大于阈值时为正
-    diff_low = threshold_low - scores                   # 小于阈值时为正
-    
-    # 3. 使用高斯核：距离越大，越接近 1
-    # 对于大于高阈值的元素，mask_high 接近 1；对于小于低阈值的元素，mask_low 接近 1
-    mask_high = torch.exp(- (diff_high / sigma) ** 2)   # 当 diff_high > 0 时 mask_high 较大
-    mask_low  = torch.exp(- (diff_low / sigma) ** 2)    # 当 diff_low > 0 时 mask_low 较大
-    
-    # 4. 合并：取两个掩码的逐元素最大值（或求和后截断）
-    soft_mask = torch.max(mask_high, mask_low)           # 并集操作
-    selected = x * soft_mask.unsqueeze(-1).repeat(1,1,x.shape[-1])
-    
-    return selected, (mask_high, mask_low)   
-
 class RankAttention(nn.Module):
     
-    def __init__(self,input_dim, sample_dim,hidden_size=16, top_k=3,dropout=0.3):
+    def __init__(self,input_dim, node_num,hidden_size=16, top_k=3,dropout=0.3):
         super().__init__()
         self.top_k = top_k 
         self.input_dim = input_dim      
         
-        self.line_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_size,
-                                    layer_norm=True,batch_norm=False,dropout=dropout)    
-        self.score_head = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_size,
+        # self.line_layer = LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_size,
+        #                             layer_norm=True,batch_norm=False,dropout=dropout)    
+        self.att_layer = AttentionWithDualHighK(input_dim=input_dim,k=top_k)
+        self.score_head =  LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_size,
                                     layer_norm=True,batch_norm=False,dropout=dropout)            
 
     def forward(self, batch_features):
@@ -532,17 +540,16 @@ class RankAttention(nn.Module):
             batch_scores: (batch_size, node_num) - 每个文档的排序分数
             batch_attention_weights: (batch_size, node_num) - 每个文档的注意力权重
         """
-        batch_size, node_num, _ = batch_features.shape
-        # 计算初始分数        
-        flat_features = batch_features.reshape(batch_features.shape[0],-1)
-        batch_raw_scores = self.line_layer(flat_features)  # (batch_size, node_num)
+        batch_size, node_num, fea_dim = batch_features.shape
         
-        # 计算批次注意力权重
-        # selected, att_weights = straight_through_topk_bottomk(batch_features, batch_raw_scores, k=self.top_k)
-        selected, att_weights = soft_topk_bottomk_mask(batch_features, batch_raw_scores, k=self.top_k, sigma=0.3)
-        final_scores = self.score_head(selected.reshape(batch_size,-1))
+        # 根据分数计算注意力权重,其中注意力分数在权重里已经兼顾到得分靠前和靠后的K个候选
+        attention_weights, mask_scores_hard = self.att_layer(batch_features)
+        # 根据注意力权重加权生成加权特征值，并根据新特征值计算品种得分
+        attention_weights_exp = attention_weights.unsqueeze(-1).repeat(1,1,fea_dim)
+        att_features = batch_features * attention_weights_exp
+        scores_with_att = self.score_head(att_features.reshape(batch_size,-1))
         
-        return final_scores, att_weights
+        return scores_with_att,mask_scores_hard,attention_weights
              
 class SparseGateFeatureTopK(nn.Module):
     """
@@ -563,10 +570,10 @@ class SparseGateFeatureTopK(nn.Module):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
         
-        topk_features,attention_weights = self.top_att_layer(x)    
+        features,mask_scores_hard,attention_weights = self.top_att_layer(x)    
         normal_features = self.ins_layer(x.reshape(x.shape[0],-1))  
         
-        return normal_features,topk_features,attention_weights
+        return features,normal_features,mask_scores_hard,attention_weights
 
    
 class UnionTransCombine(nn.Module):
@@ -637,9 +644,8 @@ class UnionTransCombine(nn.Module):
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            normal_features,topk_features,topk_weights = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
-            topk_weights = torch.cat(topk_weights,-1)
-            cls_out_combine.append(torch.cat([topk_features,topk_weights,normal_features],1))
+            features,normal_features,topk_mask_weights,attention_weights = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
+            cls_out_combine.append(torch.cat([features,topk_mask_weights,normal_features,attention_weights],1))
         # 整体指数预测的网络输出
         # index_data_combine = self.index_combine_layer(y_pred_reshape)
         index_data_combine = pred_seq[:,0,:,0]

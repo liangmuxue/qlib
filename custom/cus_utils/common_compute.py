@@ -665,6 +665,16 @@ def linear_map(arr, new_min, new_max):
     # 线性映射公式
     return (arr - arr_min) / (arr_max - arr_min) * (new_max - new_min) + new_min
 
+def row_topk_coords(matrix, k):
+    """
+    返回每行中最大的 k 个元素的坐标 (行数*k, 2)
+    """
+    values, col_indices = torch.topk(matrix, k, dim=1)  # col_indices shape: (行数, k)
+    rows = torch.arange(matrix.size(0)).unsqueeze(1).expand_as(col_indices).to(matrix.device)  # 每行重复 k 次
+    coords = torch.stack([rows, col_indices], dim=-1)  # shape: (行数, k, 2)
+    coords = coords.view(-1, 2)  # 展平为 (行数*k, 2)
+    return coords,col_indices,values
+
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)

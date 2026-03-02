@@ -1020,16 +1020,16 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         cls_main = cls[0][:node_num]
-        cls_att_weights_long = cls[0][node_num:2*node_num]
-        cls_att_weights_short = cls[0][2*node_num:3*node_num]
+        cls_main = cls[0][2*node_num:3*node_num]
+        topk_mask_weights = cls[0][node_num:2*node_num]
         if trend == 1:
             pre_index = np.argsort(-cls_main)[:top_num]
         else:
             pre_index = np.argsort(cls_main)[:top_num]
         # if trend == 1:
-        #     pre_index = np.argsort(-cls_att_weights_long)[:top_num]
+        #     pre_index = np.argwhere(topk_mask_weights==1)[:,0][:top_num]
         # else:
-        #     pre_index = np.argsort(-cls_att_weights_short)[:top_num]            
+        #     pre_index = np.argwhere(topk_mask_weights==-1)[:,0][:top_num]           
         return pre_index.astype(int)
        
     def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):

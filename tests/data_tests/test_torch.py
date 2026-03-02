@@ -322,7 +322,10 @@ def test_multi_grad():
     #
 
         
-
+def test_topk():
+    a = torch.ones([2,8,10])
+    b = torch.topk(a, k=3, dim=-1)
+    b
        
 if __name__ == "__main__":
     # test_slice()
@@ -333,7 +336,8 @@ if __name__ == "__main__":
     # test_mul()
     # test_corr()
     # test_pca()
-    test_multi_grad()
+    # test_multi_grad()
+    test_topk()
     # test_js()
     # test_cos()
     # test_nor()
