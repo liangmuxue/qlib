@@ -83,7 +83,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2012Cutlen2_transOpenRangeTopLoss_2503"
+               model_name: "Futures_cleanData2012Cutlen2_transOpenRangeNormTopLoss_2503"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -142,14 +142,14 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['diff_range','RSV5','SUMD5','SUMD5','RSV5']
+                target_column: ['diff_range_norm','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['year','dayofweek','month','day']   
-                past_covariate_col: ['VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','diff_range','OPEN','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                past_covariate_col: ['VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                                  ,'VOLUME_RANGE','CORR5','BETA5','OBV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','price_range','limit_rate','magin_radio']   
                 static_cate_col: ['industry','night_flag','exchange_id']

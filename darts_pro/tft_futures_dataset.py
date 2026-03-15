@@ -72,16 +72,20 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df["min_time"] = df.groupby(group_column)[time_column].transform("min")
         df[time_column] = df[time_column] - df["min_time"]
         df = df.drop(['min_time'], axis=1)
+        # 取得品种创建年份
+        df["create_year"] = df.groupby("instrument")['year'].transform("min")  
+        df.reset_index(drop = True, inplace = True)        
         # 合并扩展数据
         df = pd.merge(indus_info,df,on=["instrument"],how="left",validate="one_to_many")   
         df = pd.merge(df,ext_info,on=["instrument","datetime_number"],how="left",validate="one_to_one")    
         df = pd.merge(df,outer_info,on=["instrument","datetime_number"],how="left",validate="one_to_one")
-        # 消除异常数据
+        # 消除nan数据
         df = df[df['industry']!='None']    
         df = df.fillna(0) 
         df = df[df['datetime_number']!=0]  
         # 生成价格差分数据
         df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
+        df['OPEN_COM'] = df['OPEN']
         def rl_apply(df_target,div,open_mode=False):
             values = df_target.values
             if open_mode:
@@ -113,11 +117,20 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("OPEN","diff_range",open_mode=True)
         compute_diff("OPEN","open_range",open_mode=True)
         compute_diff("CLOSE","close_range",open_mode=True)
-        # 做标准化的时候，只针对训练集生成缩放对象
-        df_train = df[df["datetime"]<pd.to_datetime(str(val_range[1].strftime("%Y-%m-%d")))]
+        # 剔除diff_range超出范围的异常值
+        df['diff_range_norm'] = df['diff_range']
+        df.loc[df['diff_range_norm']>5,'diff_range_norm'] = 5
+        df.loc[df['diff_range_norm']<-5,'diff_range_norm'] = -5      
+        df_train = df[df["datetime"]<pd.to_datetime(str(val_range[0].strftime("%Y-%m-%d")))]
+        # 针对diff_range数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
         scaler_train = StandardScaler()
-        scaler_train.fit(df_train[['open_range', 'close_range']])
-        df[['open_range_norm', 'close_range_norm']] = scaler_train.transform(df[['open_range', 'close_range']])
+        scaler_train.fit(df_train[['diff_range_norm']])
+        df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
+        # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
+        norm_cols = self.get_past_columns()
+        scaler_train.fit(df_train[norm_cols])
+        df[norm_cols] = scaler_train.transform(df[norm_cols])
+        df_val = df[(df["datetime"]>=pd.to_datetime(str(val_range[0]))) & (df["datetime"]<pd.to_datetime(str(val_range[1])))]
         # 生成行业均值数据
         df = self.build_industry_mean(df,indus_info=indus_info)     
         df['industry'] = df['industry'].astype(int)          
@@ -133,6 +146,8 @@ class TFTFuturesDataset(TFTSeriesDataset):
             cate_dict[conv_col] = num_class
             conv_col_scale = conv_col + "_scale"
             df[conv_col_scale] = LabelEncoder().fit_transform(df[conv_col].values)
+        # Reset industry's create_year
+        df.loc[df['instrument'].str.startswith('ZS_'),'create_year_scale'] = 0
         # 保存离散数量，用于后续模型参数
         self.cate_static_dict = cate_dict
         for conv_col in self.get_static_cont_columns():

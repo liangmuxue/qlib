@@ -675,6 +675,35 @@ def row_topk_coords(matrix, k):
     coords = coords.view(-1, 2)  # 展平为 (行数*k, 2)
     return coords,col_indices,values
 
+def min_max_norm(data,range=[0,1]):
+    """根据原数值和范围，计算归一化数值"""
+    
+    min_value,max_value = range
+    if data>max_value:
+        max_value = data
+    if data<min_value:
+        min_value = data        
+    mean_data = (data-min_value)/(max_value-min_value)
+    return mean_data
+
+def min_max_norm_reverse(data,range=[0,1]):
+    """根据归一化数值和归一化范围，反向计算出原数值"""
+    
+    min_value,max_value = range
+    if data>max_value:
+        max_value = data
+    if data<min_value:
+        min_value = data        
+    ori_data = data * (max_value-min_value) + min_value
+    return ori_data
+
+def build_random_mul_data(size,mul_range=[0,1]):
+    """生成指定范围内的随机乘数数组"""
+    
+    low,high = mul_range
+    rand_tensor = low + (high - low) * torch.rand(size)
+    return rand_tensor
+
 if __name__ == "__main__":
     # test_normal_vis()
     input = torch.randn(3, 2)

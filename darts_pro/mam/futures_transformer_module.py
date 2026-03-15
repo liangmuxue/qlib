@@ -22,8 +22,7 @@ from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from darts_pro.act_model.union_transformer import TimeFeatureEncoder
 from .multiTask_optimizer import MultiTaskOptimizer
-from cus_utils.common_compute import compute_price_class, pairwise_compare, scale_multiple_series,\
-    normalization_axis
+from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,min_max_norm_reverse, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
 
@@ -32,10 +31,10 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-TRACK_DATE = [item for item in range(20250825,20250905)]
-# TRACK_DATE = [item for item in range(20250225,20250315)]
+# TRACK_DATE = [item for item in range(20250825,20250905)]
+TRACK_DATE = [item for item in range(20250425,20250515)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
-STAT_DATE = [20240731, 20260731]
+STAT_DATE = [20240428, 20260505]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
 INDEX_ITEM = 0
 DRAW_SEQ = [0]
@@ -94,6 +93,7 @@ class FuturesTransformerModule(MlpModule):
         self.pred_weights = [1.0, 0.0]
         self.main_task_seq = main_task_seq
         self.time_encoder = None
+        self.nhead = 4
               
         super().__init__(output_dim, variables_meta_array, num_static_components, hidden_size, lstm_layers, num_attention_heads,
                                     full_attention, feed_forward, hidden_continuous_size,
@@ -203,13 +203,14 @@ class FuturesTransformerModule(MlpModule):
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
                 device=device,
-            ).to(device)            
+            ).to(device)             
             self.embedding_size = input_dim
             return model
 
     def create_loss(self, model, device="cpu"):
-        return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num, output_chunk_length=self.output_chunk_length,
-                        opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, cut_len=self.cut_len, loss_weights=self.task_weights)       
+        return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,output_chunk_length=self.output_chunk_length,
+                                   opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, 
+                                   cut_len=self.cut_len, loss_weights=self.task_weights)       
 
     def _construct_classify_layer(self, input_dim, output_dim, device=None):
         """新增策略选择模型"""
@@ -256,8 +257,22 @@ class FuturesTransformerModule(MlpModule):
             } 
             lr_schedulers.append(lr_scheduler_config)  
         lr_schedulers.append(lr_scheduler_config) 
-        return optimizers, lr_schedulers     
-            
+        return optimizers, lr_schedulers    
+    
+    def create_lr_scheduler(self,lr_sched_kws,lr_monitor="val_loss"):
+        # 先预热5轮，再余弦退火
+        lr_scheduler_cls = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+        lr_scheduler = create_from_cls_and_kwargs(
+            lr_scheduler_cls, lr_sched_kws
+        )
+        lr_scheduler_config = {
+            "scheduler": lr_scheduler,
+            "interval": self.lr_freq["interval"],
+            "frequency": self.lr_freq["frequency"],
+            "monitor": lr_monitor if lr_monitor is not None else "val_loss",
+        } 
+        return  lr_scheduler_config       
+         
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
         optimizer_idx=-1
@@ -293,7 +308,7 @@ class FuturesTransformerModule(MlpModule):
                 past_convs_item = past_convs_item[:,instruments,:,:]
                 his_future_covs = his_future_covs[:,instruments,:,:]
                 past_round_targets = past_round_targets.permute(0,2,1)[...,instruments].unsqueeze(2)
-                past_targets = past_convs_item[:,:,:1,:]
+                past_targets = past_convs_item[:,:,:,:1]
                 futures_convs = futures_convs[:,instruments,:,:]
                 static_covs = static_covs[:,instruments,:]
                 # 批次内计算时间嵌入特征,按照品类分别计算
@@ -653,7 +668,7 @@ class FuturesTransformerModule(MlpModule):
                 for j in range(1):
                     inner_class_item = target_class_item[ins_all]
                     inner_index = np.where(inner_class_item >= 0)[0]           
-                    ins_output = cls_output[j][index,:]
+                    ins_output = cls_output[j][index,:][:ins_all.shape[0]]
                     ins_output = ins_output[inner_index]
                     ins_output_mean = ins_output.mean()
                     ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output, -1)).squeeze(-1)
@@ -819,15 +834,37 @@ class FuturesTransformerModule(MlpModule):
         industry_index_proxy = [main_index] if self.target_mode[0] in [3, 6] else industry_index
         # 按照时间索引暂存预测数据，用于全局化共享使用
         glo_match_data = []
-        ref_output_index = 0
+        ref_output_index = 1
+        target_len = self.cut_len-1
         for i in range(target_class_3d.shape[0]):
+            past_target = past_target_3d[i]
             target_class_list = target_class_3d[i]
             target_info_list = target_info_3d[i]
+            keep_index = np.where(target_class_list >= 0)[0]
+            keep_index = np.intersect1d(keep_index, ins_all)              
+            date = target_info_list[0]['future_start_datetime']
+            # if date==20250428:
+            #     print("ggg")
             ce_index = [item[i] for item in output_3d[3]]
-            # 根据区间多段预测，取得关注段数值在整个区间的相对数值
+            # 根据区间多段预测，取得关注段数值在整个区间的相对数值--Focus-lmx
             sw_index = output_3d[3][ref_output_index][i]
             sw_index_nor = normalization_axis(sw_index)      
-            target_info_list[main_index]['trend_value'] = sw_index_nor[self.cut_len-1]
+            # 取得实际价格涨跌幅总体情况，作为评分参考
+            diff_range_arr = np.array([item['diff_range'] for item in target_info_list[keep_index]])
+            diff_range_arr_mean = diff_range_arr.mean(0)[:-self.output_chunk_length]
+            diff_range_mean = diff_range_arr_mean.mean()
+            past_target_arr_mean = past_target[keep_index,:,ref_output_index].mean(0)
+            # 把目标过去数值以及预测数值拼接，并映射到价格区间预测
+            combine_pred_tar = np.concatenate([past_target_arr_mean,sw_index])
+            price_pred_all = linear_map(combine_pred_tar,diff_range_arr_mean.min(),diff_range_arr_mean.max())
+            price_pred = price_pred_all[-self.output_chunk_length:]
+            # 直接预定义阈值范围(依据全局数据计算出并取25%-75%的区间阈值)
+            index_mean_range = [-0.5,0.4]
+            diff_range_ref = min_max_norm(price_pred[target_len],range=index_mean_range)
+            # 主要使用预测段计分，辅助使用整体计分，综合生成实际得分
+            ref_weights = 0.0
+            trend_value = ref_weights * diff_range_ref + (1-ref_weights) * sw_index_nor[target_len]
+            target_info_list[main_index]['trend_value'] = trend_value
             # 根据配置，决定针对行业数据进行处理还是针对整体指数数据进行处理
             for j, indus_index in enumerate(industry_index_proxy):
                 target_info = target_info_list[indus_index]
@@ -982,7 +1019,7 @@ class FuturesTransformerModule(MlpModule):
         return cancidate_list
         
     def strategy_top_bidi_old(self, ce, cls, dec_out, pred_top_num=2, target=None, target_info=None, index_round_targets=None, combine_instrument=None):
-        """筛选品种明细,使用双向模式"""
+        """筛选品种明细,使用双向模式，结合整体走势预测"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)        
@@ -991,11 +1028,11 @@ class FuturesTransformerModule(MlpModule):
         cancidate_list = []
         mode = 'single'
         # 同时从正反2个方向选取品种
-        if trend_value>0.6:
+        if trend_value>0.75:
             # 如果整体趋势看涨，则增加多方候选数量
             top_num_long = pred_top_num + 1
             top_num_short = pred_top_num - 1
-        elif trend_value<0.2:
+        elif trend_value<0.25:
             # 如果整体趋势看跌，则增加空方候选数量
             top_num_short = pred_top_num + 1
             top_num_long = pred_top_num - 1
@@ -1034,13 +1071,12 @@ class FuturesTransformerModule(MlpModule):
         #     pre_index = long_index
         # else:
         #     pre_index = short_index   
-        if trend == 1:
-            pre_index = np.argsort(-pred_top)[:top_num]
-            pre_index = top_index[pre_index]
-        else:
-            pre_index = np.argsort(pred_top)[:top_num]
-            pre_index = top_index[pre_index] 
-                        
+        # if trend == 1:
+        #     pre_index = np.argsort(-pred_top)[:top_num]
+        #     pre_index = top_index[pre_index]
+        # else:
+        #     pre_index = np.argsort(pred_top)[:top_num]
+        #     pre_index = top_index[pre_index] 
         return pre_index.astype(int)
        
     def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):
