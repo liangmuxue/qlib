@@ -1022,14 +1022,25 @@ class FuturesTransformerModule(MlpModule):
         cls_main = cls[0][:node_num]
         cls_main = cls[0][2*node_num:3*node_num]
         topk_mask_weights = cls[0][node_num:2*node_num]
+        long_index = np.argwhere(topk_mask_weights==1)[:,0][:top_num]
+        short_index = np.argwhere(topk_mask_weights==-1)[:,0][:top_num]
+        top_index = np.concatenate([long_index,short_index])
+        pred_top = cls_main[top_index]
         if trend == 1:
             pre_index = np.argsort(-cls_main)[:top_num]
         else:
             pre_index = np.argsort(cls_main)[:top_num]
         # if trend == 1:
-        #     pre_index = np.argwhere(topk_mask_weights==1)[:,0][:top_num]
+        #     pre_index = long_index
         # else:
-        #     pre_index = np.argwhere(topk_mask_weights==-1)[:,0][:top_num]           
+        #     pre_index = short_index   
+        if trend == 1:
+            pre_index = np.argsort(-pred_top)[:top_num]
+            pre_index = top_index[pre_index]
+        else:
+            pre_index = np.argsort(pred_top)[:top_num]
+            pre_index = top_index[pre_index] 
+                        
         return pre_index.astype(int)
        
     def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):
