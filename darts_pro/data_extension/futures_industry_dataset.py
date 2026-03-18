@@ -654,26 +654,26 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         real_past_target = past_target_total[real_index]
         real_future_target = future_target_total[real_index]
         ref_target = np.concatenate([real_past_target,real_future_target],1).copy()
-        # 目标值逐个进行归一化,过去和未来值需要共用scaler   
-        for i in range(real_past_target.shape[0]):
-            real_past_target_item = real_past_target[i]
-            real_future_reshape_item = real_future_target[i]
-            target_scaler = self.create_scaler(feature_range=(1e-5, 1))
-            target_scaler.fit(real_past_target_item)
-            scale_data_past = target_scaler.transform(real_past_target_item)
-            scale_data_future = target_scaler.transform(real_future_reshape_item)
-            past_target_total[real_index[i]] = scale_data_past
-            future_target_total[real_index[i]] = scale_data_future
-        
-        # 过去协变量的归一化处理，逐个进行
-        real_covariate_total= past_covariate_total[real_index]
-        for i in range(real_covariate_total.shape[0]):
-            real_past_conv = real_covariate_total[i]
-            scaler = self.create_scaler(feature_range=(1e-5, 1))
-            past_conv_scale = scaler.fit_transform(real_past_conv)
-            past_covariate_total[real_index[i]] = past_conv_scale
-            covariate_future_scale = scaler.transform(covariate_future_total[real_index][i])
-            covariate_future_total[real_index[i]] = covariate_future_scale
+        # # 目标值逐个进行归一化,过去和未来值需要共用scaler--cancel   
+        # for i in range(real_past_target.shape[0]):
+        #     real_past_target_item = real_past_target[i]
+        #     real_future_reshape_item = real_future_target[i]
+        #     target_scaler = self.create_scaler(feature_range=(1e-5, 1))
+        #     target_scaler.fit(real_past_target_item)
+        #     scale_data_past = target_scaler.transform(real_past_target_item)
+        #     scale_data_future = target_scaler.transform(real_future_reshape_item)
+        #     past_target_total[real_index[i]] = scale_data_past
+        #     future_target_total[real_index[i]] = scale_data_future
+        #
+        # # 过去协变量的归一化处理，逐个进行--cancel
+        # real_covariate_total= past_covariate_total[real_index]
+        # for i in range(real_covariate_total.shape[0]):
+        #     real_past_conv = real_covariate_total[i]
+        #     scaler = self.create_scaler(feature_range=(1e-5, 1))
+        #     past_conv_scale = scaler.fit_transform(real_past_conv)
+        #     past_covariate_total[real_index[i]] = past_conv_scale
+        #     covariate_future_scale = scaler.transform(covariate_future_total[real_index][i])
+        #     covariate_future_total[real_index[i]] = covariate_future_scale
         
         # 未来协变量和静态协变量已经归一化过了，不需要在此进行  
         

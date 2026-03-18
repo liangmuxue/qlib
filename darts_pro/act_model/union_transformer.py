@@ -252,19 +252,66 @@ class DecoderLayer(nn.Module):
         pred = pred.reshape(B, S, P, self.obs_dim)      # [B, S, P, obs_dim]   
              
         return pred
+
+class MultiScaleGlobalPool(nn.Module):
+    """TFT专用多尺度全局池化层（解决信息量不足问题）"""
+    def __init__(self, feature_dim, seq_len, num_scales=3):
+        super().__init__()
+        self.seq_len = seq_len
+        self.num_scales = num_scales  # 分3个时间尺度（短/中/长）
+        self.feature_dim = feature_dim
         
+        # 1. 分尺度池化（比如seq_len=40，按10/20/40步长分块）
+        self.scale_steps = [seq_len]
+        cur_len = seq_len
+        for _ in range(num_scales-1):
+            cur_len = cur_len // 2
+            self.scale_steps.append(cur_len)
+        # 2. 注意力融合多尺度特征（核心：让模型自主选择重要尺度）
+        self.attention = nn.MultiheadAttention(embed_dim=feature_dim, num_heads=4, batch_first=True)
+        # 3. 残差连接：保留原始时序特征的关键信息
+        self.residual_fc = nn.Linear(seq_len * feature_dim, feature_dim)
+
+    def forward(self, x):
+        # x: [batch_size, seq_len, feature_dim] 原始历史特征
+        batch_size = x.shape[0]
+        
+        # 步骤1：多尺度池化，保留不同时间粒度的信息
+        scale_features = []
+        for step in self.scale_steps:
+            # 按step分块池化（比如step=24：每24个时间步做一次平均池化）
+            if step == 0:
+                continue
+            num_chunks = self.seq_len // step
+            chunked_x = x.reshape(batch_size, num_chunks, step, self.feature_dim)
+            scale_pool = torch.mean(chunked_x, dim=2)  # [batch, num_chunks, feature_dim]
+            scale_features.append(scale_pool)
+        
+        # 步骤2：注意力融合多尺度特征（替代单一全局池化）
+        concat_scales = torch.cat(scale_features, dim=1)  # [batch, total_chunks, feature_dim]
+        attn_out, _ = self.attention(concat_scales, concat_scales, concat_scales)
+        global_pool = torch.mean(attn_out, dim=1)  # [batch, feature_dim] 最终1维特征
+        
+        # 步骤3：残差连接补充细节信息（避免丢失原始时序细节）
+        flat_x = x.reshape(batch_size, -1)  # [batch, seq_len*feature_dim]
+        residual = self.residual_fc(flat_x)  # 降维到feature_dim
+        final_out = global_pool + 0.1 * residual  # 残差缩放，避免主导
+        
+        return final_out
+           
 class TFTWithFutureCovariates(nn.Module):
     """带已知未来协变量+样本关联的TFT模型（无未来泄露）"""
     def __init__(
         self,
         static_num=0,          # 静态特征维度
-        obs_dim=6,             # 历史观测特征维度（要预测的变量）
+        obs_dim=6,             # 历史观测特征维度
         fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
         time_embed_dim=28,     # 时间特征嵌入维度（含节假日）
         hidden_dim=64,         # 隐藏层维度
         nhead=8,               # 注意力头数
         num_layers=2,          # Transformer层数
         dropout=0.1,
+        seq_len=1,               # 历史数据步长
         pred_len=1,            # 预测步长
         sample_dim=3,          # 样本维度（站点/设备数）
         sample_heads=4,        # 样本间注意力头数
@@ -295,7 +342,10 @@ class TFTWithFutureCovariates(nn.Module):
             nn.GELU(),                            # 非线性激活
             nn.Linear(emb_dim, emb_dim)           # 第二层：增强表达
         )
-               
+        
+        # 全局池化多尺度
+        self.pool_layer = MultiScaleGlobalPool(obs_dim, seq_len)
+        
         # 1. 样本维度交互模块（仅作用于历史观测特征）
         self.sample_cross_attn = SampleCrossAttention(
             feat_dim=obs_dim + time_embed_dim,  # 历史观测+时间嵌入
@@ -358,7 +408,7 @@ class TFTWithFutureCovariates(nn.Module):
         
         # ---------------------- 步骤1：样本维度交互（仅历史，无未来泄露） ----------------------
         # 1.1 历史特征全局池化
-        obs_global = obs_feat.mean(dim=2)  # [B, S, obs_dim]
+        obs_global = self.pool_layer(obs_feat.reshape(B*S,T,-1)).reshape(B,S,-1)  # [B, S, obs_dim]
         time_hist_global = time_embed_hist.mean(dim=2)  # [B, S, time_embed_dim]
         sample_feat = torch.cat([obs_global, time_hist_global], dim=-1)  # [B, S, F]
         
@@ -423,8 +473,9 @@ class TFTWithFutureCovariates(nn.Module):
         # 未来协变量投影
         # 静态特征广播到所有预测步：[B*S,1,hidden_dim] → [B*S,P,hidden_dim]
         static_broadcast = static_context_fut.repeat(1, P, 1)
-        # 拼接未来协变量 + 静态特征
-        fut_input = time_embed_fut_flat #torch.cat([time_embed_fut_flat, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
+        # 拼接未来协变量 + 静态特征--未来不使用静态特征，静态特征固定比重会干扰网络传播
+        # fut_input = torch.cat([time_embed_fut_flat, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
+        fut_input = time_embed_fut_flat
         # fut_single_input = torch.cat([time_embed_fut_singel_flat, static_context_fut.repeat(1, 1, 1)], dim=-1)  # [B*S,1,F_time+F_static]  
         fut_single_input = time_embed_fut_singel_flat 
                   
@@ -442,7 +493,7 @@ class TFTWithFutureCovariates(nn.Module):
         return (pred_seq,pred_tar), sample_attn_weights
 
 class AttentionWithDualHighK(nn.Module):
-    def __init__(self, input_dim,node_num=0, hidden_dim=16, k=3,nor_scale=0.5,high_scale=1.0,low_scale=2.0):
+    def __init__(self, input_dim,node_num=0, hidden_dim=16, k=3,nor_scale=0.3,high_scale=1.0,low_scale=2.0):
         super(AttentionWithDualHighK, self).__init__()
         self.k = k
         self.nor_scale = nor_scale
@@ -583,7 +634,8 @@ class SparseGateFeatureTopK(nn.Module):
         batch_size, S, input_dim = x.shape
         
         features,mask_scores_hard,attention_weights = self.top_att_layer(x)    
-        normal_features = self.ins_layer(x.reshape(x.shape[0],-1))  
+        # normal_features = self.ins_layer(x.reshape(x.shape[0],-1))
+        normal_features = features  
         
         return features,normal_features,mask_scores_hard,attention_weights
 
@@ -599,6 +651,7 @@ class UnionTransCombine(nn.Module):
         nhead=8,               # 注意力头数
         num_layers=2,          # Transformer层数
         dropout=0.1,
+        seq_len=1,             # 历史数据步长
         pred_len=1,            # 预测步长
         sample_dim=3,          # 样本维度（站点/设备数）
         sample_heads=4,        # 样本间注意力头数
@@ -620,6 +673,7 @@ class UnionTransCombine(nn.Module):
                 nhead=nhead,
                 num_layers=num_layers,
                 dropout=dropout,
+                seq_len=seq_len,
                 pred_len=pred_len,
                 sample_dim=sample_dim,
                 sample_heads=sample_heads,

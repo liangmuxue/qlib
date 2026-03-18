@@ -221,6 +221,7 @@ class FuturesTransformerModule(MlpModule):
                 nhead=8,
                 num_layers=3,
                 dropout=0.1,
+                seq_len=self.input_chunk_length,
                 pred_len=pred_len,
                 sample_dim=combine_nodes_num,
                 sample_heads=4,
@@ -286,18 +287,10 @@ class FuturesTransformerModule(MlpModule):
             lr_sched_kws = {k: v for k, v in self.lr_scheduler_kwargs.items()}
             lr_sched_kws["optimizer"] = optimizers[i]
             lr_monitor = lr_sched_kws.pop("monitor", None)
-            lr_scheduler = create_from_cls_and_kwargs(
-                self.lr_scheduler_cls, lr_sched_kws
-            )
-            lr_scheduler_config = {
-                "scheduler": lr_scheduler,
-                "interval": self.lr_freq["interval"],
-                "frequency": self.lr_freq["frequency"],
-                "monitor": lr_monitor if lr_monitor is not None else "val_loss",
-            } 
+            lr_scheduler_config = self.create_lr_scheduler(lr_sched_kws,lr_monitor=lr_monitor)
             lr_schedulers.append(lr_scheduler_config)  
         lr_schedulers.append(lr_scheduler_config) 
-        return optimizers, lr_schedulers    
+        return optimizers, lr_schedulers     
     
     def create_lr_scheduler(self,lr_sched_kws,lr_monitor="val_loss"):
         # 先预热5轮，再余弦退火
@@ -1149,7 +1142,7 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         cls_main = cls[0][:node_num]
-        cls_main = cls[0][2*node_num:3*node_num]
+        # cls_main = cls[0][2*node_num:3*node_num]
         topk_mask_weights = cls[0][node_num:2*node_num]
         long_index = np.argwhere(topk_mask_weights==1)[:,0][:top_num]
         short_index = np.argwhere(topk_mask_weights==-1)[:,0][:top_num]
@@ -1163,12 +1156,12 @@ class FuturesTransformerModule(MlpModule):
         #     pre_index = long_index
         # else:
         #     pre_index = short_index   
-        # if trend == 1:
-        #     pre_index = np.argsort(-pred_top)[:top_num]
-        #     pre_index = top_index[pre_index]
-        # else:
-        #     pre_index = np.argsort(pred_top)[:top_num]
-        #     pre_index = top_index[pre_index] 
+        if trend == 1:
+            pre_index = np.argsort(-pred_top)[:top_num]
+            pre_index = top_index[pre_index]
+        else:
+            pre_index = np.argsort(pred_top)[:top_num]
+            pre_index = top_index[pre_index] 
         return pre_index.astype(int)
        
     def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):

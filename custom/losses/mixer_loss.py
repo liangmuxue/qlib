@@ -203,29 +203,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         if all_elements_same(top_target_data) or all_elements_same(top_pred_data):
             top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
-        else:
-            top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
-        return top_loss
-       
-    def compute_gate_top_loss(self,pred,target,top_num=3,ins_rel_index=None):
-        """配合注意力及门控机制，计算top损失"""
-        
-        # 数组中已经把非目标置零，因此通过下标还原实际目标
-        pred_index_long,pred_index_short = self.filter_top_index_bidi(pred,top_num=top_num,ins_rel_index=ins_rel_index)
-        # 比较预测数值和实际数值
-        top_pred = pred[pred_index_long]
-        top_pred_inverse = pred[pred_index_short]
-        top_target = torch.gather(target, 0, pred_index_long)
-        top_target_inverse = torch.gather(target, 0, pred_index_short)
-        top_pred_data = torch.cat([top_pred,top_pred_inverse])
-        top_target_data = torch.cat([top_target,top_target_inverse])
-        if top_pred_data.shape[0]<2:
-            return 0
-        if all_elements_same(top_target_data) or all_elements_same(top_pred_data):
+        elif pred_index_long.shape[0]!=top_num or pred_index_short.shape[0]!=top_num:
             top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
         else:
             top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
+            # 叠加目标数值的差距最大化损失
+            # ts_index = top_pred_data.argsort(descending=True)
+            # top_target_resort = top_target_data[ts_index]
+            # margin = (top_target_resort[:top_num] - top_target_resort[top_num:]).mean()
+            # weights = (1 - torch.sigmoid(margin)) * 2
+            # top_loss = top_loss * weights            
         return top_loss
+       
+
 
     def dual_highk_loss(self,attention_weights, topk_indices, bottomk_indices, k):
         """
@@ -372,18 +362,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         sv_out_item_att = sv_out_item_real[2*node_num:3*node_num][ins_rel_index]
                         attention_weights = sv_out_item_real[3*node_num:4*node_num]
                         cls_loss[i] += self.compute_main_loss(sv_out_item[ins_rel_index],price_diff_range)  
-                        ce_loss[i] += self.compute_att_top_loss(sv_out_item,price_diff_range_real,ins_rel_index=ins_rel_index,
+                        ce_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],price_diff_range)  
+                        fds_loss[i] += self.compute_att_top_loss(sv_out_item,price_diff_range_real,ins_rel_index=ins_rel_index,
                                         top_num=top_num,topk_mask_weights=topk_mask_weights) 
                         # 计算双高权重损失函数：让前k和后k位置的权重都尽可能高
                         topk_indices = torch.argwhere(topk_mask_weights==1)[:,0]
                         bottomk_indices = torch.argwhere(topk_mask_weights==-1)[:,0]
-                        fds_loss[i] += self.dual_highk_loss(attention_weights.unsqueeze(0), topk_indices.unsqueeze(0), bottomk_indices.unsqueeze(0), top_num)
+                        corr_loss[i] += self.dual_highk_loss(attention_weights.unsqueeze(0), topk_indices.unsqueeze(0), bottomk_indices.unsqueeze(0), top_num)
                         # 计算top损失
                         # ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num,no_real_dis=True)
                         target_item = target[j,ins_rel_index,:,ref_indicator2]
                         # 辅助目标的损失
                         # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)    
-                        corr_loss[i] += self.compute_main_loss(sv_out_item_att,price_diff_range)    
+                        # corr_loss[i] += self.compute_main_loss(sv_out_item_att,price_diff_range)    
                         batch_size += 1                    
                     elif target_mode==3:
                         ref_indicator = 1 

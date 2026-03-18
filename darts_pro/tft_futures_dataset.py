@@ -126,11 +126,26 @@ class TFTFuturesDataset(TFTSeriesDataset):
         scaler_train = StandardScaler()
         scaler_train.fit(df_train[['diff_range_norm']])
         df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
-        # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
-        norm_cols = self.get_past_columns()
-        scaler_train.fit(df_train[norm_cols])
-        # df[norm_cols] = scaler_train.transform(df[norm_cols])
-        df_val = df[(df["datetime"]>=pd.to_datetime(str(val_range[0]))) & (df["datetime"]<pd.to_datetime(str(val_range[1])))]
+        # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化,需要按照品种分组进行
+        norm_cols = self.get_past_columns()[:15]
+        # 计算训练集每组的均值和标准差（针对所有特征列）
+        group_stats = df_train.groupby('instrument')[norm_cols].agg(['mean', 'std']).reset_index()   
+        # 处理标准差为 0 的情况（可选）
+        for feat in norm_cols:
+            group_stats[(feat, 'std')] = group_stats[(feat, 'std')].replace(0, 1)    
+        # 展平列名：将 ('feat1', 'mean') 变为 'feat1_mean'
+        group_stats.columns = ['_'.join(col).strip() for col in group_stats.columns.values]  
+        group_stats['instrument'] = group_stats['instrument_']
+        # 合并到整个数据集
+        df = df.merge(group_stats, on='instrument', how='left')
+        for feat in norm_cols:
+            mean_col = f'{feat}_mean'
+            std_col = f'{feat}_std'
+            df[f'{feat}'] = (df[feat] - df[mean_col]) / df[std_col]
+        # 删除临时统计列
+        df.drop(columns=[f'{feat}_{stat}' for feat in norm_cols for stat in ['mean', 'std']], inplace=True)            
+        # df_val = df[(df["datetime"]>=pd.to_datetime(str(val_range[0]))) & (df["datetime"]<pd.to_datetime(str(val_range[1])))]
+
         # 生成行业均值数据
         df = self.build_industry_mean(df,indus_info=indus_info)     
         df['industry'] = df['industry'].astype(int)          
