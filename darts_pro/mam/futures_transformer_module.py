@@ -16,6 +16,7 @@ from cus_utils.wise_corrcef import analyze_model_complexity
 from cus_utils.process import create_from_cls_and_kwargs
 from .mlp_module import MlpModule
 import cus_utils.global_var as global_var
+from cus_utils.visualization import plot_feature_heatmap,plot_sample_lines
 from darts_pro.act_model.union_transformer import UnionTransCombine
 from darts_pro.act_model.fur_industry_ts import FurIndustryMixer, FurStrategy
 from losses.mixer_loss import FuturesIndustryLoss
@@ -41,6 +42,29 @@ DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = [0]
 
+
+class FeatureExtractorHook:
+    def __init__(self, feature_dict, name,nodes_num=0):
+        self.features = feature_dict
+        self.name = name
+        self.nodes_num = nodes_num
+
+    def __call__(self, module, input, output):
+        """执行网络输入输出的变量记录"""
+        
+        name = self.name
+        S = self.nodes_num
+        B = input[0].shape[0]
+        if B>100:
+            B = int(B/S)
+        
+        input = input[0]
+        if module.training:
+            input = input.detach()
+            output = output.detach()
+        # 训练阶段和验证阶段关注不同的内容
+        self.features[name + "_input"] = input.reshape(B,S,-1)
+        self.features[name + "_output"] = output.reshape(B,S,-1)                
 
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
@@ -94,7 +118,7 @@ class FuturesTransformerModule(MlpModule):
         self.main_task_seq = main_task_seq
         self.time_encoder = None
         self.nhead = 4
-              
+
         super().__init__(output_dim, variables_meta_array, num_static_components, hidden_size, lstm_layers, num_attention_heads,
                                     full_attention, feed_forward, hidden_continuous_size,
                                     categorical_embedding_sizes, dropout, add_relative_index, norm_type, past_split=past_split,
@@ -205,8 +229,24 @@ class FuturesTransformerModule(MlpModule):
                 device=device,
             ).to(device)             
             self.embedding_size = input_dim
+            
+            ################# 植入钩子进行中间变量输出调试 #################
+            if seq==0:
+                self.reg_hook(model,combine_nodes_num)
+            
             return model
-
+    
+    def reg_hook(self,model,nodes_num):
+        self.features = {}
+        # 查看输入数据，以及经过变量选择层的输出
+        model.trans_model.transformer_encoder.register_forward_hook(FeatureExtractorHook(self.features, 'transformer_encoder',nodes_num=nodes_num))
+        # 查看主模型中解码层输出的前后数值
+        model.trans_model.tar_decoder.register_forward_hook(FeatureExtractorHook(self.features, 'decoder',nodes_num=nodes_num))
+        # 查看后置模型中基于注意力的特征输出的前后数值
+        model.top_selector[0].top_att_layer.score_head.register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
+        # 查看注意力层的前后数值
+        model.top_selector[0].top_att_layer.att_layer.attention_net.register_forward_hook(FeatureExtractorHook(self.features, 'attention_net',nodes_num=nodes_num))   
+                  
     def create_loss(self, model, device="cpu"):
         return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,output_chunk_length=self.output_chunk_length,
                                    opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, 
@@ -420,6 +460,8 @@ class FuturesTransformerModule(MlpModule):
                     print("cls loss 0")
                     continue
                 update_info = opt.step([cls_loss[i]])
+            # 记录梯度信息，后续统计可视化使用
+            self.features['total_gradients'] = update_info['total_gradients']
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
             self.lr_schedulers()[i].step() 
             task_weights = self.task_weights[i]
@@ -448,6 +490,37 @@ class FuturesTransformerModule(MlpModule):
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         return total_loss, detail_loss, output 
 
+    def on_train_epoch_end(self):
+        
+        # 可视化权重和梯度
+        for name,params in self.sub_models[0].named_parameters():
+            global_step = self.global_step
+            if not "top_selector" in name:
+                continue
+            if name.endswith("bias"):
+                continue
+            if params is not None:
+                self.logger.experiment.add_histogram('weights/' + name,params,global_step)
+            if params.grad is not None:
+                self.logger.experiment.add_histogram('grad/' + name,params.grad,global_step)
+        # 可视化中间特征输出      
+        for name,feat in self.features.items():
+            if name=='total_gradients':
+                continue
+            # 可视化重点层的输入输出数据
+            self.logger.experiment.add_histogram(f'Features/{name}', feat.flatten(), self.current_epoch)  
+        # 可视化梯度
+        total_gradients = self.features['total_gradients']
+        name_matches = ['trans_model.tar_decoder','top_att_layer.att_layer.attention_net','top_att_layer.score_head']
+        for grad_name in total_gradients.keys():
+            for item in name_matches:
+                if item in (grad_name):
+                    grad = total_gradients[grad_name]
+                    self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
+                    
+        # 可视化品种间的比较
+        self.viz_data_board(section="train")                                
+        
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -605,114 +678,135 @@ class FuturesTransformerModule(MlpModule):
             past_future_round_targets_total, long_diff_index_targets_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
         viz_total_size = 0
         
-        # 如果是测试模式，则在此进行可视化
-        if self.mode is not None and self.mode.startswith("pred_"):
-            print("all date:", coll_result['date'].unique())
-            coll_result.to_csv(self.coll_record_file_path, index=False)
-            self.log("date_total_num", date_total_num, prog_bar=True) 
-            # 生成进一步的结果指标
-            coll_result_output = coll_result.rename(columns={'trend_value':'pred_trend'})
-            # stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/05") 
-            # stat_result = stats.compute_val_result(coll_result.rename(columns={'trend_value':'pred_trend'}))
-            col_data_types = {"top_index":int, "instrument":str, "yield_rate":float, "result":int, "pred_trend":int, "date":int}               
-            if os.path.exists(self.result_view_file_path):
-                import_price_result_total = pd.read_csv(self.result_view_file_path, dtype=col_data_types)  
-                # 去重
-                date_min = coll_result_output["date"].min()
-                date_max = coll_result_output["date"].max()
-                import_price_result_total = import_price_result_total[(import_price_result_total['date'] < date_min) | (import_price_result_total['date'] > date_max)]
-                import_price_result_total = pd.concat([import_price_result_total, coll_result_output])
-                import_price_result_total.to_csv(self.result_view_file_path) 
-            else: 
-                coll_result_output.to_csv(self.result_view_file_path)                 
+        if self.mode is None or not self.mode.startswith("pred_"):
+            # 验证模式，进行board的可视化
+            self.viz_data_board(section="valid")
+            return
+        
+        # 测试模式，在此进行结果的可视化
+        print("all date:", coll_result['date'].unique())
+        coll_result.to_csv(self.coll_record_file_path, index=False)
+        self.log("date_total_num", date_total_num, prog_bar=True) 
+        # 生成进一步的结果指标
+        coll_result_output = coll_result.rename(columns={'trend_value':'pred_trend'})
+        # stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/05") 
+        # stat_result = stats.compute_val_result(coll_result.rename(columns={'trend_value':'pred_trend'}))
+        col_data_types = {"top_index":int, "instrument":str, "yield_rate":float, "result":int, "pred_trend":int, "date":int}               
+        if os.path.exists(self.result_view_file_path):
+            import_price_result_total = pd.read_csv(self.result_view_file_path, dtype=col_data_types)  
+            # 去重
+            date_min = coll_result_output["date"].min()
+            date_max = coll_result_output["date"].max()
+            import_price_result_total = import_price_result_total[(import_price_result_total['date'] < date_min) | (import_price_result_total['date'] > date_max)]
+            import_price_result_total = pd.concat([import_price_result_total, coll_result_output])
+            import_price_result_total.to_csv(self.result_view_file_path) 
+        else: 
+            coll_result_output.to_csv(self.result_view_file_path)                 
+        
+        viz_result = global_var.get_value("viz_result")
+        viz_result_ext = global_var.get_value("viz_result_ext")
+        viz_result_detail = global_var.get_value("viz_result_detail")
+        ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        indus_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
+        indus_rel_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+        main_index_rel = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        indus_names_all = FuturesMappingUtil.get_industry_names(sw_ins_mappings)
+        indus_names = indus_names_all[indus_rel_index]
+        indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+        industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+        dec_output = output_3d[-3]
+        cls_output = output_3d[2]     
+        sw_index = output_3d[3][0]       
+        batch_trend_data = output_3d[5]
+        predictions = batch_trend_data
+        price_targets_main = long_diff_index_targets_total.squeeze(-1)
+        
+        for index in range(target_class_3d.shape[0]):
+        
+            sw_index_cur = sw_index[index,0]
+            viz_total_size += 1
+            target_class_item = target_class_3d[index]
+            keep_index = np.where(target_class_item >= 0)[0]
+            round_targets = past_future_round_targets_total[index]
+            index_output = output_3d[3][0][index, -1]
+            ts_arr = target_info_3d[index]
+            date = int(ts_arr[keep_index][0]["future_start_datetime"])
+            if not date in TRACK_DATE:
+                continue    
+            coll_item = coll_result[coll_result['date'] == date]
+            instruments, k_idx, _ = np.intersect1d(ins_all, keep_index, return_indices=True)
+            ts_arr_ins = ts_arr[instruments]
+            price_diff_range_ins = np.array([(item['open_array'][-self.output_chunk_length + self.cut_len - 1] - item['open_array'][-self.output_chunk_length]) / item['open_array'][-self.output_chunk_length] * 100 for item in ts_arr_ins])
+            # index_price = long_diff_index_targets_total[index,0]
+            index_price = price_diff_range_ins.mean()        
+            price_diff = self.criterion.compute_diff_range_class(ts_arr[main_index], target_info_arr=ts_arr[instruments], is_main=True)[2]    
             
-            viz_result = global_var.get_value("viz_result")
-            viz_result_ext = global_var.get_value("viz_result_ext")
-            viz_result_detail = global_var.get_value("viz_result_detail")
-            ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
-            indus_index = FuturesMappingUtil.get_industry_data_index(sw_ins_mappings)
-            indus_rel_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
-            main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-            main_index_rel = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
-            indus_names_all = FuturesMappingUtil.get_industry_names(sw_ins_mappings)
-            indus_names = indus_names_all[indus_rel_index]
-            indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
-            industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-            dec_output = output_3d[-3]
-            cls_output = output_3d[2]     
-            sw_index = output_3d[3][0]       
-            batch_trend_data = output_3d[5]
-            predictions = batch_trend_data
-            price_targets_main = long_diff_index_targets_total.squeeze(-1)
-            
-            for index in range(target_class_3d.shape[0]):
-            
-                sw_index_cur = sw_index[index,0]
-                viz_total_size += 1
-                target_class_item = target_class_3d[index]
-                keep_index = np.where(target_class_item >= 0)[0]
-                round_targets = past_future_round_targets_total[index]
-                index_output = output_3d[3][0][index, -1]
-                ts_arr = target_info_3d[index]
-                date = int(ts_arr[keep_index][0]["future_start_datetime"])
-                if not date in TRACK_DATE:
-                    continue    
-                coll_item = coll_result[coll_result['date'] == date]
-                instruments, k_idx, _ = np.intersect1d(ins_all, keep_index, return_indices=True)
-                ts_arr_ins = ts_arr[instruments]
-                price_diff_range_ins = np.array([(item['open_array'][-self.output_chunk_length + self.cut_len - 1] - item['open_array'][-self.output_chunk_length]) / item['open_array'][-self.output_chunk_length] * 100 for item in ts_arr_ins])
-                # index_price = long_diff_index_targets_total[index,0]
-                index_price = price_diff_range_ins.mean()        
-                price_diff = self.criterion.compute_diff_range_class(ts_arr[main_index], target_info_arr=ts_arr[instruments], is_main=True)[2]    
-                
-                for j in range(1):
-                    inner_class_item = target_class_item[ins_all]
-                    inner_index = np.where(inner_class_item >= 0)[0]           
-                    ins_output = cls_output[j][index,:][:ins_all.shape[0]]
-                    ins_output = ins_output[inner_index]
-                    ins_output_mean = ins_output.mean()
-                    ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output, -1)).squeeze(-1)
-                    dec_output_item = dec_output[index,:,:, j]
-                    # dec_output_item = dec_output[index,inner_index,-1,j] 
-                    fur_round_target = round_targets[instruments, -self.output_chunk_length+self.cut_len-1, j]
-                    price_targets = price_targets_total[index, instruments]
-                    # 品种比对图
-                    if j in DRAW_SEQ_DETAIL:
-                        price_array_range = np.array([self.criterion.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
-                        price_array_range = price_array_range / 10
-                        name_arr = []
-                        for inner_index, item in enumerate(ts_arr[instruments]):
-                            match_item = coll_item[coll_item['instrument'] == item['instrument']]
-                            if match_item.shape[0] > 0:
-                                trend = match_item['trend_value'].values[0]
-                                name_arr.append(item["instrument"] + "_match_" + str(trend))
-                            else:
-                                name_arr.append(item["instrument"])
-                        # view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
-                        view_data = np.stack([ins_output, fur_round_target, price_array_range]).transpose(1, 0)
-                        # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
-                        win = "detail_target_{}_{}=".format(j, viz_total_size)
-                        index_target = round_targets[main_index, -1, j]
-                        index_output = dec_output_item[-1, -1]
-                        trend_value = ts_arr[main_index]['trend_value']
-                        target_title = "Detail_{}_{}_{},date:{}".format(round(index_price, 3), round(index_target, 3), round(trend_value, 3), date)  
-                        # target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(dec_output_mean,3),date)  
-                        viz_result_detail.viz_bar_compare(view_data, win=win, title=target_title, rownames=name_arr, legends=["pred_cls", "target", "price"])
-                    # 品种走势图,所有候选的目标走势和价格走势
-                    # if j in DRAW_SEQ_ITEM:
-                    #     price_diff = np.pad(price_diff,(1,0),'constant',constant_values=(0,0))
-                    #     win = "trend_line_{}_{}_{}".format(j,viz_total_size,date)
-                    #     target_title = "trend_line_{},date_{}".format(round(index_price,3),date)
-                    #     # output = sw_index[index]
-                    #     output = dec_output_item.squeeze(-1)
-                    #     output_value = np.pad(output,(self.input_chunk_length,0),'constant',constant_values=(0,0))
-                    #     past_target_values = past_target_3d[index,main_index,:,j]
-                    #     futures_round_targets = round_targets[main_index,:,j]
-                    #     target_values = np.concatenate([past_target_values,futures_round_targets[-self.output_chunk_length:]])
-                    #     view_data = np.stack([output_value,target_values,price_diff]).transpose(1,0)
-                    #     names = ['pred','target','price_diff']                              
-                    #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)                             
-                                    
+            for j in range(1):
+                inner_class_item = target_class_item[ins_all]
+                inner_index = np.where(inner_class_item >= 0)[0]           
+                ins_output = cls_output[j][index,:][:ins_all.shape[0]]
+                ins_output = ins_output[inner_index]
+                ins_output_mean = ins_output.mean()
+                ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output, -1)).squeeze(-1)
+                dec_output_item = dec_output[index,:,:, j]
+                # dec_output_item = dec_output[index,inner_index,-1,j] 
+                fur_round_target = round_targets[instruments, -self.output_chunk_length+self.cut_len-1, j]
+                price_targets = price_targets_total[index, instruments]
+                # 品种比对图
+                if j in DRAW_SEQ_DETAIL:
+                    price_array_range = np.array([self.criterion.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
+                    price_array_range = price_array_range / 10
+                    name_arr = []
+                    for inner_index, item in enumerate(ts_arr[instruments]):
+                        match_item = coll_item[coll_item['instrument'] == item['instrument']]
+                        if match_item.shape[0] > 0:
+                            trend = match_item['trend_value'].values[0]
+                            name_arr.append(item["instrument"] + "_match_" + str(trend))
+                        else:
+                            name_arr.append(item["instrument"])
+                    # view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
+                    view_data = np.stack([ins_output, fur_round_target, price_array_range]).transpose(1, 0)
+                    # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
+                    win = "detail_target_{}_{}=".format(j, viz_total_size)
+                    index_target = round_targets[main_index, -1, j]
+                    index_output = dec_output_item[-1, -1]
+                    trend_value = ts_arr[main_index]['trend_value']
+                    target_title = "Detail_{}_{}_{},date:{}".format(round(index_price, 3), round(index_target, 3), round(trend_value, 3), date)  
+                    # target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(dec_output_mean,3),date)  
+                    viz_result_detail.viz_bar_compare(view_data, win=win, title=target_title, rownames=name_arr, legends=["pred_cls", "target", "price"])
+                # 品种走势图,所有候选的目标走势和价格走势
+                # if j in DRAW_SEQ_ITEM:
+                #     price_diff = np.pad(price_diff,(1,0),'constant',constant_values=(0,0))
+                #     win = "trend_line_{}_{}_{}".format(j,viz_total_size,date)
+                #     target_title = "trend_line_{},date_{}".format(round(index_price,3),date)
+                #     # output = sw_index[index]
+                #     output = dec_output_item.squeeze(-1)
+                #     output_value = np.pad(output,(self.input_chunk_length,0),'constant',constant_values=(0,0))
+                #     past_target_values = past_target_3d[index,main_index,:,j]
+                #     futures_round_targets = round_targets[main_index,:,j]
+                #     target_values = np.concatenate([past_target_values,futures_round_targets[-self.output_chunk_length:]])
+                #     view_data = np.stack([output_value,target_values,price_diff]).transpose(1,0)
+                #     names = ['pred','target','price_diff']                              
+                #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)                             
+    
+    def viz_data_board(self,section="valid"):
+        """可视化验证集数据流"""
+        
+        for name,feat in self.features.items():
+            if name=='total_gradients':
+                continue
+            feat = feat.squeeze(-1)
+            # 针对验证结果，以品种为单位计算均值，并可视化
+            if len(feat.shape)==2:
+                ins_feat = feat
+            elif len(feat.shape)==3:
+                ins_feat = feat.mean(-1)    
+            ins_feat = ins_feat.cpu().numpy()
+            self.logger.experiment.add_figure('{}_heatmap_{}/'.format(section,name), plot_feature_heatmap(ins_feat), global_step=self.global_step)
+            fig = plot_sample_lines(ins_feat, sample_indices=range(8), title='Batch Sample Features')
+            self.logger.experiment.add_figure('{}_lines_{}/'.format(section,name), fig, global_step=self.global_step)     
+                                                 
     def dump_val_data(self, val_batch, outputs, batch_data):
     
         output, vr_class, price_outputs, past_future_round_targets = outputs
@@ -843,8 +937,6 @@ class FuturesTransformerModule(MlpModule):
             keep_index = np.where(target_class_list >= 0)[0]
             keep_index = np.intersect1d(keep_index, ins_all)              
             date = target_info_list[0]['future_start_datetime']
-            # if date==20250428:
-            #     print("ggg")
             ce_index = [item[i] for item in output_3d[3]]
             # 根据区间多段预测，取得关注段数值在整个区间的相对数值--Focus-lmx
             sw_index = output_3d[3][ref_output_index][i]

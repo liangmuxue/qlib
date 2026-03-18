@@ -193,7 +193,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         pred_index_short = torch.argwhere(topk_mask_weights==-1)[:,0]
         pred_index_short = tensor_intersect(pred_index_short,ins_rel_index)
         if pred_index_long.shape[0]==0 or pred_index_short.shape[0]==0:
-            return 0
+            return self.mse_loss(pred.unsqueeze(0),target.unsqueeze(0))
         top_pred = pred[pred_index_long]
         top_pred_inverse = pred[pred_index_short]        
         top_pred_data = torch.cat([top_pred,top_pred_inverse])
@@ -201,11 +201,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_target_inverse = torch.gather(target, 0, pred_index_short)
         top_target_data = torch.cat([top_target,top_target_inverse])
         
-        if all_elements_same(top_target_data) or all_elements_same(pred):
+        if all_elements_same(top_target_data) or all_elements_same(top_pred_data):
             top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
         else:
             top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
-        
         return top_loss
        
     def compute_gate_top_loss(self,pred,target,top_num=3,ins_rel_index=None):

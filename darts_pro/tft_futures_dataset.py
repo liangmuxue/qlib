@@ -129,7 +129,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
         norm_cols = self.get_past_columns()
         scaler_train.fit(df_train[norm_cols])
-        df[norm_cols] = scaler_train.transform(df[norm_cols])
+        # df[norm_cols] = scaler_train.transform(df[norm_cols])
         df_val = df[(df["datetime"]>=pd.to_datetime(str(val_range[0]))) & (df["datetime"]<pd.to_datetime(str(val_range[1])))]
         # 生成行业均值数据
         df = self.build_industry_mean(df,indus_info=indus_info)     

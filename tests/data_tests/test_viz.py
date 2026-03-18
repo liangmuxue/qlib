@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import time
 import warnings
 import torch
-import torch.nn.modules
-import torch.nn
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
+from torchvision.utils import make_grid
 import torch.nn.functional as F 
 from torch.nn.parameter import Parameter
 
@@ -74,8 +75,6 @@ def test_dbscan():
                  markeredgecolor='k', markersize=6)
     
     plt.title('Estimated number of clusters: %d' % n_clusters_)    
-
-
 
 def test_SpectralClustering():
     from sklearn import datasets
@@ -350,17 +349,166 @@ def test_bound():
     myNet.showBoundary()
     probabilitys=list(myNet.predict([3, 3]).data.numpy())
     print("class:{}".format(1+probabilitys.index(max(probabilitys))))
- 
- 
- 
-   
+
+
+# -------------------------- 2. 定义测试模型（CNN+MLP） --------------------------
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # 卷积层（处理图片输入）
+        self.conv = nn.Conv2d(1, 4, kernel_size=3, padding=1)
+        self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(2)
+        # 全连接层（特征降维）
+        self.fc = nn.Linear(4*14*14, 10)  # 输入28x28图片，池化后14x14
+        
+        # 存储每个样本的中间输出（用于批次内对比）
+        self.batch_features = []
+
+    def forward(self, x):
+        # 清空上一批次的特征
+        self.batch_features.clear()
+        
+        # 对批次内每个样本单独前向传播（便于提取单样本特征）
+        for i in range(x.shape[0]):
+            sample = x[i:i+1]  # 取第i个样本 [1, 1, 28, 28]
+            feat = self.conv(sample)
+            feat = self.relu(feat)
+            feat_pool = self.pool(feat)
+            feat_flat = feat_pool.flatten()
+            self.batch_features.append(feat_flat)  # 存储单样本特征向量
+            if i == 0:  # 仅第一个样本保留卷积特征图（可视化用）
+                self.sample_feat_map = feat  # [1, 4, 28, 28]
+        
+        # 批次整体前向（用于模型输出）
+        x = self.conv(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        x = x.flatten(1)
+        x = self.fc(x)
+        return x
+
+def test_tensorboard_viz():
+    # -------------------------- 1. 初始化TensorBoard --------------------------
+    writer = SummaryWriter("./runs/batch_sample_diff_demo")
+    # 初始化模型
+    model = SimpleModel()
+    # 生成带差异的批次数据
+    batch = generate_batch_with_diff()
+    # 前向传播（提取批次内样本特征）
+    output = model(batch)
+    # 可视化批次内差异
+    # visualize_batch_diff(model, batch, step=0,writer=writer)
+    visualize_single_sample_diff(writer)
+    # 关闭Writer
+    writer.close()
+    
+# -------------------------- 3. 生成带差异的批次数据（模拟真实场景） --------------------------
+def generate_batch_with_diff():
+    """
+    生成一个批次（8个样本），包含明显差异：
+    - 前4个样本：正常图片（均值0，方差1）
+    - 后4个样本：模糊图片（均值0.5，方差0.2，模拟噪声/低质量样本）
+    """
+    batch_size = 8
+    # 正常样本
+    normal_samples = torch.randn(batch_size//2, 1, 28, 28)  # [4, 1, 28, 28]
+    # 异常/差异样本（均值偏移+方差缩小）
+    diff_samples = torch.randn(batch_size//2, 1, 28, 28) * 0.2 + 0.5
+    
+    # 合并为一个批次
+    batch = torch.cat([normal_samples, diff_samples], dim=0)
+    # 标准化到[0,1]（便于可视化）
+    batch = (batch - batch.min()) / (batch.max() - batch.min() + 1e-8)
+    return batch
+
+# -------------------------- 4. 可视化批次内差异的核心函数 --------------------------
+def visualize_batch_diff(model, batch, step,writer=None):
+    batch_size = batch.shape[0]
+    
+    # -------------------------- 4.1 可视化批次内样本的输入差异 --------------------------
+    # 将批次样本拼接成网格（直观对比输入）
+    batch_grid = make_grid(batch, nrow=4, padding=2, normalize=True)
+    writer.add_image(f'Batch/Input_Samples', batch_grid, step)
+    print("✅ 批次输入样本对比已写入")
+
+    # -------------------------- 4.2 可视化每个样本的特征向量统计差异 --------------------------
+    # 计算每个样本特征向量的均值/方差（量化差异）
+    sample_means = [feat.mean().item() for feat in model.batch_features]
+    sample_vars = [feat.var().item() for feat in model.batch_features]
+    
+    # 用add_scalars对比批次内所有样本的均值/方差
+    # 键格式：指标/样本索引
+    mean_scalars = {f'Sample_{i}': sample_means[i] for i in range(batch_size)}
+    var_scalars = {f'Sample_{i}': sample_vars[i] for i in range(batch_size)}
+    writer.add_scalars(f'Batch_Features/Mean', mean_scalars, step)
+    writer.add_scalars(f'Batch_Features/Variance', var_scalars, step)
+    print("✅ 批次内特征均值/方差对比已写入")
+
+    # -------------------------- 4.3 可视化典型样本的特征图差异 --------------------------
+    # 取批次内第0个（正常）和第4个（差异）样本的特征图对比
+    normal_feat = model.batch_features[0].reshape(4,14,14)  # 正常样本特征
+    diff_feat = model.batch_features[4].reshape(4,14,14)    # 差异样本特征
+    
+    # 标准化特征图到[0,1]
+    normal_feat = (normal_feat - normal_feat.min()) / (normal_feat.max() - normal_feat.min() + 1e-8)
+    diff_feat = (diff_feat - diff_feat.min()) / (diff_feat.max() - diff_feat.min() + 1e-8)
+    
+    # 拼接成网格
+    normal_grid = make_grid(normal_feat.unsqueeze(1), nrow=2, padding=1)
+    diff_grid = make_grid(diff_feat.unsqueeze(1), nrow=2, padding=1)
+    writer.add_image(f'Batch_FeatureMap/Normal_Sample_0', normal_grid, step)
+    writer.add_image(f'Batch_FeatureMap/Diff_Sample_4', diff_grid, step)
+    print("✅ 典型样本特征图对比已写入")
+
+    # -------------------------- 4.4 量化批次内差异（整体统计） --------------------------
+    # 计算批次内特征均值的方差（越大说明样本差异越大）
+    batch_mean_var = np.var(sample_means)
+    # 计算正常/差异样本组的均值差
+    normal_mean = np.mean(sample_means[:4])
+    diff_mean = np.mean(sample_means[4:])
+    mean_diff = abs(normal_mean - diff_mean)
+    
+    writer.add_scalar(f'Batch_Stats/Mean_Variance', batch_mean_var, step)
+    writer.add_scalar(f'Batch_Stats/Normal_vs_Diff_MeanDiff', mean_diff, step)
+    print(f"📊 批次内特征均值方差：{batch_mean_var:.4f} | 正常/差异样本均值差：{mean_diff:.4f}")
+    
+def visualize_single_sample_diff(writer):
+    # 生成批次特征（32个样本，50维特征）
+    batch_feats = torch.randn(32, 50)
+    # 制造1个异常样本（特征值整体偏移）
+    batch_feats[10] = batch_feats[10] * 2 + 3.0  # 第10个样本为异常
+    
+    # 计算批次特征均值
+    batch_mean = batch_feats.mean(dim=0)
+    
+    # -------------------------- 1. 对比异常样本与批次均值的特征分布 --------------------------
+    abnormal_feat = batch_feats[10]  # 异常样本特征
+    normal_feat = batch_feats[0]     # 正常样本特征
+    
+    # 写入折线图（特征维度vs特征值）
+    writer.add_scalars(
+        "Feature_Value_Comparison",
+        {
+            "Abnormal_Sample_10": abnormal_feat.numpy(),
+            "Normal_Sample_0": normal_feat.numpy(),
+            "Batch_Mean": batch_mean.numpy()
+        },
+        global_step=0
+    )
+    
+    # -------------------------- 2. 直方图对比特征值分布 --------------------------
+    writer.add_histogram("Feature_Dist/Abnormal_Sample_10", abnormal_feat, 0)
+    writer.add_histogram("Feature_Dist/Normal_Sample_0", normal_feat, 0)
+    writer.add_histogram("Feature_Dist/Batch_Mean", batch_mean, 0)  
       
 if __name__ == "__main__":
     # test_dbscan()
     # test_SpectralClustering()
     # test_matirx_view()
-    test_bound()
-    
+    # test_bound()
+    test_tensorboard_viz()
+
         
     
     

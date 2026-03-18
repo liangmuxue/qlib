@@ -313,7 +313,8 @@ class MultiTaskOptimizer(Adam):
             'conflict_analysis': {'conflict_count':conflict_count,'similarity':similarity},
             'task_grad_norms': task_grad_norms if gradient_components else None,
             'auxiliary_weights': dynamic_weights_info['auxiliary_weights'], 
-            'helpfulness_scores': dynamic_weights_info['helpfulness_scores']   
+            'helpfulness_scores': dynamic_weights_info['helpfulness_scores'], 
+            'total_gradients': total_gradients
         }
     
     def compute_focus_grad_info(self,total_gradients):

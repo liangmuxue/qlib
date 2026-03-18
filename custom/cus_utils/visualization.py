@@ -3,10 +3,48 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+import seaborn as sns
 import matplotlib.pyplot as plt
 
 VIZ_ITEM_NUMBER = 3
 
+def plot_sample_lines(features, sample_indices=None, max_dim=100, title='Sample Feature Values'):
+    """
+    features: numpy array of shape (N, D)
+    sample_indices: list of indices to plot (if None, plot all)
+    max_dim: 最多显示的特征维度数（若 D 过大，可截取前 max_dim 维）
+    """
+    if sample_indices is not None:
+        features = features[sample_indices]
+    else:
+        features = features
+    
+    # 如果特征维度过大，只取前 max_dim 维
+    if features.shape[1] > max_dim:
+        features = features[:, :max_dim]
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for i, feat in enumerate(features):
+        ax.plot(feat, label=f'Sample {i}', linewidth=1.5)
+    
+    ax.set_xlabel('Feature Dimension')
+    ax.set_ylabel('Feature Value')
+    ax.set_title(title)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1))
+    ax.grid(True, alpha=0.3)
+    return fig
+
+def plot_feature_heatmap(features, sample_indices=None):
+    """features: numpy array of shape (N, D)"""
+    if sample_indices is not None:
+        features = features[sample_indices]
+    fig, ax = plt.subplots(figsize=(12, max(4, features.shape[0] * 0.4)))
+    sns.heatmap(features, cmap='viridis', cbar=True, ax=ax, 
+                xticklabels=False, yticklabels=[f'S{i}' for i in range(features.shape[0])])
+    ax.set_xlabel('Feature Dimension')
+    ax.set_ylabel('Sample')
+    ax.set_title('Feature Values per Sample')
+    return fig
 
 def clu_coords_viz(coords,imp_index=None,name="viz_coords_result",labels=None,save_path=None,att_data=None):
     """Viz for coords points"""

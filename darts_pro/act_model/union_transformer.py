@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
+from cus_utils.common_compute import normalization_standard
 
 from .cov_cnn import LinelessLayer
 
@@ -235,6 +236,7 @@ class DecoderLayer(nn.Module):
         # 融合历史总结+未来协变量（核心：历史指导未来预测）
         hist_summary_expanded = hist_summary.unsqueeze(1).repeat(1, P, 1)  # [B*S, P, hidden_dim]
         fusion_input = torch.cat([hist_summary_expanded, fut_proj], dim=-1)  # [B*S, P, 2*hidden_dim]
+        
         fusion_out = self.future_fusion(fusion_input)  # [B*S, P, hidden_dim]
         
         # ---------------------- 步骤：输出预测 ----------------------
@@ -313,8 +315,8 @@ class TFTWithFutureCovariates(nn.Module):
         self.obs_proj = nn.Linear(obs_dim + time_embed_dim, hidden_dim)
         
         # 4. 未来协变量投影（✨ 修正：输入维度新增静态特征维度）
-        self.fut_proj = nn.Linear(time_embed_dim + hidden_dim, hidden_dim)
-        self.fut_single_proj = nn.Linear(time_embed_dim + hidden_dim, hidden_dim)
+        self.fut_proj = nn.Linear(time_embed_dim, hidden_dim)
+        self.fut_single_proj = nn.Linear(time_embed_dim, hidden_dim)
         
         # 5. 变量选择网络（仅对历史观测变量）
         self.var_selection = VariableSelectionNetwork(hidden_dim, obs_dim, hidden_dim, dropout)
@@ -326,15 +328,18 @@ class TFTWithFutureCovariates(nn.Module):
             dim_feedforward=hidden_dim*4,
             dropout=dropout,
             batch_first=True,
+            norm_first=True,
             activation='gelu'
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        encoder_norm = nn.LayerNorm(hidden_dim)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers,norm=encoder_norm)
         
         # 分别定义完整预测序列的解码器，以及最终单独目标的解码器
         self.seq_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
                      dropout=dropout, pred_len=pred_len)
         self.tar_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
                      dropout=dropout, pred_len=1)        
+        
 
     def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None, time_embed_fut=None,time_embed_fut_single=None):
         """
@@ -419,8 +424,9 @@ class TFTWithFutureCovariates(nn.Module):
         # 静态特征广播到所有预测步：[B*S,1,hidden_dim] → [B*S,P,hidden_dim]
         static_broadcast = static_context_fut.repeat(1, P, 1)
         # 拼接未来协变量 + 静态特征
-        fut_input = torch.cat([time_embed_fut_flat, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
-        fut_single_input = torch.cat([time_embed_fut_singel_flat, static_context_fut.repeat(1, 1, 1)], dim=-1)  # [B*S,1,F_time+F_static]  
+        fut_input = time_embed_fut_flat #torch.cat([time_embed_fut_flat, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
+        # fut_single_input = torch.cat([time_embed_fut_singel_flat, static_context_fut.repeat(1, 1, 1)], dim=-1)  # [B*S,1,F_time+F_static]  
+        fut_single_input = time_embed_fut_singel_flat 
                   
         fut_proj = self.fut_proj(fut_input)  # [B*S, P, hidden_dim]
         fut_single_proj = self.fut_single_proj(fut_single_input)  # [B*S, P, hidden_dim]
@@ -436,19 +442,25 @@ class TFTWithFutureCovariates(nn.Module):
         return (pred_seq,pred_tar), sample_attn_weights
 
 class AttentionWithDualHighK(nn.Module):
-    def __init__(self, input_dim, hidden_dim=16, k=3,nor_scale=0.1,high_scale=1.0,low_scale=2.0):
+    def __init__(self, input_dim,node_num=0, hidden_dim=16, k=3,nor_scale=0.5,high_scale=1.0,low_scale=2.0):
         super(AttentionWithDualHighK, self).__init__()
         self.k = k
         self.nor_scale = nor_scale
         self.high_scale = high_scale
         self.low_scale = low_scale
         
-        # 注意力层：生成原始分数（无激活，避免提前进入Sigmoid饱和区）
+        # 注意力层：生成原始分数
         self.attention_net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.Tanh(),  # 先用Tanh把输入映射到(-1,1)，避免Sigmoid直接饱和
-            nn.Linear(hidden_dim, 1, bias=False)
+            nn.GELU(), 
+            nn.Dropout(p=0.1),
+            nn.Linear(hidden_dim, hidden_dim*2),
+            nn.GELU(),
+            nn.Linear(hidden_dim * 2, 1)
         )
+        # self.attention_net = nn.Linear(input_dim, 1)
+        # self.attention_net = LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_dim,
+        #                             layer_norm=True,batch_norm=False,dropout=0.1)     
         # 可学习的缩放因子：调整Sigmoid输入的范围，避免全趋近于1
         self.scale = nn.Parameter(torch.tensor(1.0))       
     
@@ -467,14 +479,14 @@ class AttentionWithDualHighK(nn.Module):
             raise ValueError(f"序列长度{seq_len}必须大于2*{self.k}={2*self.k}")
         
         # 计算注意力分数并归一化（softmax确保权重和为1）
-        raw_scores = self.attention_net(x).squeeze(-1)  # [batch_size, seq_len]
+        raw_scores = self.attention_net(x).reshape(batch_size,seq_len)  # [batch_size, seq_len]
         # 关键优化1：缩放分数，避免Sigmoid饱和（scale可学习）
         scaled_scores = raw_scores * self.scale     
         # 步骤2：Sigmoid激活（输出0~1）
-        sigmoid_weights = torch.sigmoid(scaled_scores)  # [batch, seq]
+        # sigmoid_weights = torch.sigmoid(scaled_scores)  # [batch, seq]
         # 关键优化2：L2归一化（核心！让权重区分高低，而非全接近1）
         # L2归一化：每个样本的权重除以其L2范数，保证权重有差异
-        attn_scores = F.normalize(sigmoid_weights, p=2, dim=-1)
+        attn_scores = F.normalize(scaled_scores, p=2, dim=-1)
                            
         # 筛选排序前k的索引（原本权重最高）
         _, topk_indices = torch.topk(attn_scores, self.k, dim=-1)
@@ -501,7 +513,7 @@ class AttentionWithDualHighK(nn.Module):
         topk_vals, topk_indices = torch.topk(scores, k=self.k, dim=-1)  # (batch, seq_len, k)
         
         # 筛选后K个低分位置和分数（通过取负实现bottomk）
-        bottomk_vals, bottomk_indices = torch.topk(-scores, k=self.k, dim=-1)  # (batch, seq_len, k)
+        bottomk_vals, bottomk_indices = torch.topk(scores, k=self.k,largest=False, dim=-1)  # (batch, seq_len, k)
         bottomk_vals = -bottomk_vals  # 还原为原始低分
         
         # 初始化掩码分数矩阵，软约束版本，其他位置保留10%分数
@@ -526,7 +538,7 @@ class RankAttention(nn.Module):
         
         # self.line_layer = LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_size,
         #                             layer_norm=True,batch_norm=False,dropout=dropout)    
-        self.att_layer = AttentionWithDualHighK(input_dim=input_dim,k=top_k)
+        self.att_layer = AttentionWithDualHighK(input_dim=input_dim,node_num=node_num,k=top_k)
         self.score_head =  LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_size,
                                     layer_norm=True,batch_norm=False,dropout=dropout)            
 
@@ -575,7 +587,6 @@ class SparseGateFeatureTopK(nn.Module):
         
         return features,normal_features,mask_scores_hard,attention_weights
 
-   
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
 
@@ -627,7 +638,10 @@ class UnionTransCombine(nn.Module):
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
         self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, hidden_dim=hidden_size,num_heads=4, dropout=0.1) for _ in range(self.target_feat_dim)])
-            
+
+        ############# 中间变量调试 #############
+        self.features = {}
+    
     def forward(
         self,static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb
     ):    
@@ -651,4 +665,5 @@ class UnionTransCombine(nn.Module):
         index_data_combine = pred_seq[:,0,:,0]
         
         return dec_out_combine,cls_out_combine,index_data_combine   
+
 
