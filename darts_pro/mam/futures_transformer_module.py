@@ -1156,12 +1156,12 @@ class FuturesTransformerModule(MlpModule):
         #     pre_index = long_index
         # else:
         #     pre_index = short_index   
-        if trend == 1:
-            pre_index = np.argsort(-pred_top)[:top_num]
-            pre_index = top_index[pre_index]
-        else:
-            pre_index = np.argsort(pred_top)[:top_num]
-            pre_index = top_index[pre_index] 
+        # if trend == 1:
+        #     pre_index = np.argsort(-pred_top)[:top_num]
+        #     pre_index = top_index[pre_index]
+        # else:
+        #     pre_index = np.argsort(pred_top)[:top_num]
+        #     pre_index = top_index[pre_index] 
         return pre_index.astype(int)
        
     def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):

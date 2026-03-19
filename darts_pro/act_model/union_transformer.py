@@ -298,6 +298,29 @@ class MultiScaleGlobalPool(nn.Module):
         final_out = global_pool + 0.1 * residual  # 残差缩放，避免主导
         
         return final_out
+
+class FeatureScaleBalancer(nn.Module):
+    """静态/动态特征尺度平衡层"""
+    def __init__(self, static_dim, temporal_dim, eps=1e-6):
+        super().__init__()
+        # 可学习的缩放因子（初始让静态/动态特征尺度相当）
+        self.static_scale = nn.Parameter(torch.ones(1, static_dim) * 0.3)  # 主动降低静态特征权重
+        self.temporal_scale = nn.Parameter(torch.ones(1, temporal_dim))
+        self.eps = eps
+
+    def forward(self, static_emb, temporal_feat):
+        # static_emb: [batch, static_dim] 静态Embedding
+        # temporal_feat: [batch, temporal_dim] 时序特征
+        
+        # 1. 标准化：让两类特征均值为0，方差为1
+        static_emb = (static_emb - static_emb.mean(dim=0, keepdim=True)) / (static_emb.std(dim=0, keepdim=True) + self.eps)
+        temporal_feat = (temporal_feat - temporal_feat.mean(dim=0, keepdim=True)) / (temporal_feat.std(dim=0, keepdim=True) + self.eps)
+        
+        # 2. 可学习缩放：平衡两者权重
+        static_emb = static_emb * self.static_scale
+        temporal_feat = temporal_feat * self.temporal_scale
+        
+        return static_emb, temporal_feat
            
 class TFTWithFutureCovariates(nn.Module):
     """带已知未来协变量+样本关联的TFT模型（无未来泄露）"""
@@ -335,6 +358,10 @@ class TFTWithFutureCovariates(nn.Module):
             self.static_embed_layers.append(nn.Embedding(num_classes, static_emb_dim))
         cate_static_num = len(self.static_embed_layers)
         cont_static_num = static_num - cate_static_num            
+        
+        # 可学习的缩放因子（初始让静态/动态特征尺度相当）
+        # self.static_balancer = FeatureScaleBalancer(hidden_dim, hidden_dim)
+                
         # 1. 连续静态特征的全连接层
         emb_dim = cont_static_num*static_emb_dim
         self.static_cont_mlp = nn.Sequential(
@@ -455,7 +482,9 @@ class TFTWithFutureCovariates(nn.Module):
         # 2.4 历史特征投影
         obs_proj = self.obs_proj(obs_input)  # [B*S, T, hidden_dim]
         if static_context_hist is not None:
-            obs_proj = obs_proj + static_context_hist
+            # static_balanced, temporal_balanced = self.static_balancer(static_context_hist, obs_proj)
+            # obs_proj = temporal_balanced + static_balanced
+            obs_proj = static_context_hist + obs_proj
         
         # 2.5 变量选择
         obs_proj, var_weights = self.var_selection(obs_proj)  # [B*S, T, hidden_dim]
