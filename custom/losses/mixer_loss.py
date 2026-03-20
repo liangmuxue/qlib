@@ -363,12 +363,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         attention_weights = sv_out_item_real[3*node_num:4*node_num]
                         cls_loss[i] += self.compute_main_loss(sv_out_item[ins_rel_index],price_diff_range)  
                         ce_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],price_diff_range)  
-                        fds_loss[i] += self.compute_att_top_loss(sv_out_item,price_diff_range_real,ins_rel_index=ins_rel_index,
-                                        top_num=top_num,topk_mask_weights=topk_mask_weights) 
+                        # fds_loss[i] += self.compute_att_top_loss(sv_out_item,price_diff_range_real,ins_rel_index=ins_rel_index,
+                        #                 top_num=top_num,topk_mask_weights=topk_mask_weights) 
                         # 计算双高权重损失函数：让前k和后k位置的权重都尽可能高
-                        topk_indices = torch.argwhere(topk_mask_weights==1)[:,0]
-                        bottomk_indices = torch.argwhere(topk_mask_weights==-1)[:,0]
-                        corr_loss[i] += self.dual_highk_loss(attention_weights.unsqueeze(0), topk_indices.unsqueeze(0), bottomk_indices.unsqueeze(0), top_num)
+                        # topk_indices = torch.argwhere(topk_mask_weights==1)[:,0]
+                        # bottomk_indices = torch.argwhere(topk_mask_weights==-1)[:,0]
+                        # corr_loss[i] += self.dual_highk_loss(attention_weights.unsqueeze(0), topk_indices.unsqueeze(0), bottomk_indices.unsqueeze(0), top_num)
                         # 计算top损失
                         # ce_loss[i] += self.compute_top_loss(sv_out_item, price_diff_range, top_num=top_num,no_real_dis=True)
                         target_item = target[j,ins_rel_index,:,ref_indicator2]

@@ -64,12 +64,12 @@ task:
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
             scheduler_config: 
-               # start_factor: 1
-               # end_factor: 0.05
-               # total_iters: 1.5e4
-               T_0: 10 # 初始周期
-               T_mult: 2  # 周期倍增
-               eta_min: 1e-6  # 最小学习率
+               start_factor: 1
+               end_factor: 0.05
+               total_iters: 1.5e4
+               # T_0: 10 # 初始周期
+               # T_mult: 2  # 周期倍增
+               # eta_min: 1e-6  # 最小学习率
             optimizer_kwargs:
                lr: 1e-3
                betas: [0.9,0.999]
@@ -80,14 +80,14 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transAttLossCosLr_2507"
+               model_name: "Futures_cleanDataAllCutlen2_transTopLossLineLr_2503"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
-               task_weights: [[0.5,0.5,0.5,0.5],[1.0]]
+               task_weights: [[0.5,0.5],[1.0]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[3],[0]]
+               main_task_seq: [[1],[0]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'

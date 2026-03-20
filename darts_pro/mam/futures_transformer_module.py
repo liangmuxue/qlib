@@ -32,8 +32,8 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-# TRACK_DATE = [item for item in range(20250825,20250905)]
-TRACK_DATE = [item for item in range(20250425,20250515)]
+TRACK_DATE = [item for item in range(20250825,20250905)]
+# TRACK_DATE = [item for item in range(20250425,20250515)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240428, 20260505]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
@@ -60,8 +60,11 @@ class FeatureExtractorHook:
         
         input = input[0]
         if module.training:
+            name = name + "_train"
             input = input.detach()
             output = output.detach()
+        else:
+            name = name + "_val"
         # 训练阶段和验证阶段关注不同的内容
         self.features[name + "_input"] = input.reshape(B,S,-1)
         self.features[name + "_output"] = output.reshape(B,S,-1)                
@@ -239,6 +242,7 @@ class FuturesTransformerModule(MlpModule):
     
     def reg_hook(self,model,nodes_num):
         self.features = {}
+        model.top_selector[0].ins_layer.register_forward_hook(FeatureExtractorHook(self.features, 'ins_layer',nodes_num=nodes_num))
         # 查看输入数据，以及经过变量选择层的输出
         model.trans_model.transformer_encoder.register_forward_hook(FeatureExtractorHook(self.features, 'transformer_encoder',nodes_num=nodes_num))
         # 查看主模型中解码层输出的前后数值
@@ -293,8 +297,10 @@ class FuturesTransformerModule(MlpModule):
         return optimizers, lr_schedulers     
     
     def create_lr_scheduler(self,lr_sched_kws,lr_monitor="val_loss"):
-        # 先预热5轮，再余弦退火
+        # 余弦退火
         lr_scheduler_cls = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+        # Linear Ls
+        lr_scheduler_cls = torch.optim.lr_scheduler.LinearLR
         lr_scheduler = create_from_cls_and_kwargs(
             lr_scheduler_cls, lr_sched_kws
         )
@@ -511,9 +517,6 @@ class FuturesTransformerModule(MlpModule):
                     grad = total_gradients[grad_name]
                     self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
                     
-        # 可视化品种间的比较
-        self.viz_data_board(section="train")                                
-        
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -673,7 +676,7 @@ class FuturesTransformerModule(MlpModule):
         
         if self.mode is None or not self.mode.startswith("pred_"):
             # 验证模式，进行board的可视化
-            self.viz_data_board(section="valid")
+            self.viz_data_board()
             return
         
         # 测试模式，在此进行结果的可视化
@@ -783,7 +786,7 @@ class FuturesTransformerModule(MlpModule):
                 #     names = ['pred','target','price_diff']                              
                 #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)                             
     
-    def viz_data_board(self,section="valid"):
+    def viz_data_board(self):
         """可视化验证集数据流"""
         
         for name,feat in self.features.items():
@@ -796,9 +799,9 @@ class FuturesTransformerModule(MlpModule):
             elif len(feat.shape)==3:
                 ins_feat = feat.mean(-1)    
             ins_feat = ins_feat.cpu().numpy()
-            self.logger.experiment.add_figure('{}_heatmap_{}/'.format(section,name), plot_feature_heatmap(ins_feat), global_step=self.global_step)
+            # self.logger.experiment.add_figure('{}_heatmap_{}/'.format(section,name), plot_feature_heatmap(ins_feat), global_step=self.global_step)
             fig = plot_sample_lines(ins_feat, sample_indices=range(8), title='Batch Sample Features')
-            self.logger.experiment.add_figure('{}_lines_{}/'.format(section,name), fig, global_step=self.global_step)     
+            self.logger.experiment.add_figure('lines_{}/'.format(name), fig, global_step=self.global_step)     
                                                  
     def dump_val_data(self, val_batch, outputs, batch_data):
     

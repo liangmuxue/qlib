@@ -371,7 +371,7 @@ class TFTWithFutureCovariates(nn.Module):
         )
         
         # 全局池化多尺度
-        self.pool_layer = MultiScaleGlobalPool(obs_dim, seq_len)
+        self.pool_layer = MultiScaleGlobalPool(obs_dim, seq_len,num_scales=4)
         
         # 1. 样本维度交互模块（仅作用于历史观测特征）
         self.sample_cross_attn = SampleCrossAttention(
@@ -393,7 +393,7 @@ class TFTWithFutureCovariates(nn.Module):
         
         # 4. 未来协变量投影（✨ 修正：输入维度新增静态特征维度）
         self.fut_proj = nn.Linear(time_embed_dim, hidden_dim)
-        self.fut_single_proj = nn.Linear(time_embed_dim, hidden_dim)
+        self.fut_single_proj = nn.Linear(time_embed_dim+hidden_dim, hidden_dim)
         
         # 5. 变量选择网络（仅对历史观测变量）
         self.var_selection = VariableSelectionNetwork(hidden_dim, obs_dim, hidden_dim, dropout)
@@ -505,8 +505,8 @@ class TFTWithFutureCovariates(nn.Module):
         # 拼接未来协变量 + 静态特征--未来不使用静态特征，静态特征固定比重会干扰网络传播
         # fut_input = torch.cat([time_embed_fut_flat, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
         fut_input = time_embed_fut_flat
-        # fut_single_input = torch.cat([time_embed_fut_singel_flat, static_context_fut.repeat(1, 1, 1)], dim=-1)  # [B*S,1,F_time+F_static]  
-        fut_single_input = time_embed_fut_singel_flat 
+        fut_single_input = torch.cat([time_embed_fut_singel_flat, static_context_fut.repeat(1, 1, 1)], dim=-1)  # [B*S,1,F_time+F_static]  
+        # fut_single_input = time_embed_fut_singel_flat 
                   
         fut_proj = self.fut_proj(fut_input)  # [B*S, P, hidden_dim]
         fut_single_proj = self.fut_single_proj(fut_single_input)  # [B*S, P, hidden_dim]
@@ -662,9 +662,12 @@ class SparseGateFeatureTopK(nn.Module):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
         
-        features,mask_scores_hard,attention_weights = self.top_att_layer(x)    
-        # normal_features = self.ins_layer(x.reshape(x.shape[0],-1))
-        normal_features = features  
+        # features,mask_scores_hard,attention_weights = self.top_att_layer(x)    
+        normal_features = self.ins_layer(x.reshape(x.shape[0],-1))
+        # normal_features = features  
+        features = normal_features
+        attention_weights = normal_features
+        mask_scores_hard = normal_features
         
         return features,normal_features,mask_scores_hard,attention_weights
 
