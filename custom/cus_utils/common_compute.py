@@ -13,6 +13,151 @@ from sklearn.preprocessing import MinMaxScaler
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 from pip._internal.models import candidate
 
+def weighted_signed_score_3d(score_3d, feature_weights=None):
+    """
+    3维数据仅对最后一维做加权求和（时间步无加权）
+    Args:
+        score_3d: 3维张量，shape=(batch_size, time_steps, feature_dim)
+        feature_weights: 最后一维的权重，shape=(feature_dim,) 或 list/tuple
+                         若为None，默认等权重求和（即普通sum）
+    Returns:
+        output_2d: 2维张量，shape=(batch_size, time_steps)
+    """
+    batch_size, time_steps, feature_dim = score_3d.shape
+    
+    # 1. 初始化最后一维的权重（默认等权重）
+    if feature_weights is None:
+        feature_weights = torch.ones(feature_dim, dtype=score_3d.dtype)
+    else:
+        # 转为张量并确保形状匹配
+        feature_weights = torch.tensor(feature_weights, dtype=score_3d.dtype)
+        if feature_weights.shape != (feature_dim,):
+            raise ValueError(f"feature_weights形状需为({feature_dim},)，当前是{feature_weights.shape}")
+    
+    # 2. 扩展权重维度，适配广播（关键！）
+    # feature_weights: (feature_dim,) → (1, 1, feature_dim)
+    # 这样能和3维输入 (batch, time, feature) 逐元素相乘
+    feature_weights = feature_weights.unsqueeze(0).unsqueeze(0)
+    feature_weights = feature_weights.to(score_3d.device)
+    # 3. 最后一维加权求和（保留正负特征）
+    # 先逐元素相乘，再对最后一维求和
+    output_2d = (score_3d * feature_weights).sum(dim=-1)
+    
+    return output_2d
+
+def get_outlier_bounds(df, column,range=2.0):
+    """获取异常值的上下边界（IQR法）"""
+    q1 = df[column].quantile(0.25)
+    q3 = df[column].quantile(0.75)
+    iqr = q3 - q1
+    lower_bound = q1 - range * iqr
+    upper_bound = q3 + range * iqr
+    return lower_bound, upper_bound
+
+def process_outliers_multi_cols(
+    df, 
+    cols,  # 需要处理的字段列表
+    range=2.0,
+    method='median_fill',  # 处理方式：median_fill/ truncate/ drop
+    detect_method='iqr'    # 异常值识别方式：iqr/ std
+):
+    """
+    批量处理多个字段的异常值
+    :param df: 原始DataFrame
+    :param cols: 待处理字段列表，如 ['销售额', '订单量', '利润']
+    :param method: 处理策略
+                   - median_fill: 中位数填充（默认）
+                   - truncate: 边界值截断
+                   - drop: 删除含异常值的行
+    :param detect_method: 异常值识别方式
+                          - iqr: 四分位数法（默认，推荐）
+                          - std: 3σ标准差法
+    :return: 处理后的DataFrame
+    """
+    df_processed = df.copy()  # 避免修改原数据
+    
+    # 遍历每个需要处理的字段
+    for col in cols:
+        # 步骤1：识别异常值，获取上下边界
+        if detect_method == 'iqr':
+            q1 = df_processed[col].quantile(0.25)
+            q3 = df_processed[col].quantile(0.75)
+            iqr = q3 - q1
+            lower_bound = q1 - range * iqr
+            upper_bound = q3 + range * iqr
+        elif detect_method == 'std':
+            mean = df_processed[col].mean()
+            std = df_processed[col].std()
+            lower_bound = mean - 3 * std
+            upper_bound = mean + 3 * std
+        else:
+            raise ValueError("detect_method仅支持 'iqr' 或 'std'")
+        
+        # 步骤2：标记异常值
+        outlier_mask = (df_processed[col] < lower_bound) | (df_processed[col] > upper_bound)
+        
+        # 步骤3：根据策略处理异常值
+        if method == 'median_fill':
+            median_val = df_processed[col].median()
+            df_processed.loc[outlier_mask, col] = median_val
+            print(f"字段【{col}】：用中位数{median_val:.2f}填充了{outlier_mask.sum()}个异常值")
+        
+        elif method == 'truncate':
+            # 低于下限→下限，高于上限→上限
+            df_processed.loc[df_processed[col] < lower_bound, col] = lower_bound
+            df_processed.loc[df_processed[col] > upper_bound, col] = upper_bound
+            print(f"字段【{col}】：截断了{outlier_mask.sum()}个异常值（下限{lower_bound:.2f}，上限{upper_bound:.2f}）")
+        
+        elif method == 'drop':
+            # 删除含异常值的行（注意：多字段时会删除任一字段有异常值的行）
+            df_processed = df_processed[~outlier_mask]
+            print(f"字段【{col}】：删除了{outlier_mask.sum()}个含异常值的行，剩余行数：{len(df_processed)}")
+        
+        else:
+            raise ValueError("method仅支持 'median_fill' / 'truncate' / 'drop'")
+    
+    return df_processed
+
+
+def to_2d_tuple_index(idx_1d,shape_of_2d):
+    """
+    将二维张量的一维索引（展平后的索引）转为二元组索引
+    或把分开的行/列索引转为二元组索引
+    
+    Args:
+        idx_1d: 可以是两种形式：
+                1. 展平后的一维索引（如 tensor([2,5,7])）
+                2. (行索引张量, 列索引张量) 元组
+    
+    Returns:
+        二元组 (rows, cols)，可直接用于二维张量索引
+    """
+    # 情况1：输入是展平后的一维索引（比如 torch.tensor([3,5,8])）
+    if isinstance(idx_1d, torch.Tensor) and idx_1d.dim() == 1:
+        # 先获取二维张量的形状（这里需要你替换成自己的张量shape）
+        # 假设你的二维张量是 arr，先执行 h, w = arr.shape
+        # 这里先留空，你替换成实际形状即可
+        h, w = shape_of_2d  # ！！！替换成你的二维张量形状，比如 4,5
+        if h is None or w is None:
+            raise ValueError("请先设置二维张量的形状 h, w = arr.shape")
+        
+        rows = idx_1d // w  # 计算行索引
+        cols = idx_1d % w   # 计算列索引
+        return (rows, cols)
+    
+    # 情况2：输入是分开的行/列索引（比如 (torch.tensor([0,1]), torch.tensor([2,3]))）
+    elif isinstance(idx_1d, tuple) and len(idx_1d) == 2:
+        rows, cols = idx_1d
+        # 确保是张量格式，方便直接索引
+        if not isinstance(rows, torch.Tensor):
+            rows = torch.tensor(rows)
+        if not isinstance(cols, torch.Tensor):
+            cols = torch.tensor(cols)
+        return (rows, cols)
+    
+    else:
+        raise TypeError("输入格式错误！请传入一维索引张量 或 (行索引, 列索引) 元组")
+    
 def tensor_intersect(t1, t2):
         indices = torch.zeros_like(t1, dtype = torch.bool, device = t1.device)
         for elem in t2:

@@ -256,6 +256,7 @@ class FuturesMappingUtil:
           第5列(instrument_code)： 当前行业分类下的期货代码数组，数组长度需要与第三列中的每个数组长度一致，数组元素类型为string
           第6列(instrument_name)： 当前行业分类下的期货名称数组，数组长度需要与第三列中的每个数组长度一致，数组元素类型为string
           第7列(industry_name)： 行业分类名称，数组长度需要与第1列中的数组长度一致，数组元素类型为string
+          第8列(exchange_id)： 对应的交易所编号，数组长度需要与第1列中的数组长度一致，数组元素类型为int
     """                   
     
     @staticmethod
@@ -318,6 +319,7 @@ class FuturesMappingUtil:
             industry_name = fur_indus_df[fur_indus_df['code']==fur_code]['name'].values[0]
             instrument_codes = group["code"].values
             instrument_names = group["name"].values
+            exchange_id = group["exchange_id"].values
             instrument_index = np.array([keep_index[keep_index[:,0]==ins_code][0,1] for ins_code in instrument_codes])
             # 品种编码数组长度和序号数组长度需要相等
             raise_if_not(
@@ -328,7 +330,7 @@ class FuturesMappingUtil:
             range_end_index =  total_begin_index + instrument_index.shape[0]     
             range_index = np.array([i for i in range(total_begin_index,range_end_index)])
             total_begin_index += instrument_index.shape[0]
-            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,range_index,instrument_codes,instrument_names,industry_name]
+            fur_ins_mapping = [industry_index,fur_code,group[g_col].values,range_index,instrument_codes,instrument_names,industry_name,exchange_id]
             fur_ins_mappings.append(fur_ins_mapping)
         
         # 添加整体指数数据
@@ -341,9 +343,9 @@ class FuturesMappingUtil:
                 break
         if total_index!=-1:
             fur_ins_mapping = [total_index,'ZS_ALL',combine_content[sort_index,0].astype(np.int),
-                        combine_content[sort_index,0].astype(np.int),combine_content[sort_index,3],combine_content[sort_index,1],'综合']
+                        combine_content[sort_index,0].astype(np.int),combine_content[sort_index,3],combine_content[sort_index,1],'综合',combine_content[sort_index,4]]
             fur_ins_mappings.append(fur_ins_mapping)
-        fur_ins_mappings = np.array(fur_ins_mappings)
+        fur_ins_mappings = np.array(fur_ins_mappings,dtype=object)
         # 根据编码进行排序
         sorted_indices = np.argsort(fur_ins_mappings[:, 1])
         fur_ins_mappings = fur_ins_mappings[sorted_indices]
@@ -447,7 +449,12 @@ class FuturesMappingUtil:
     @staticmethod
     def get_instrument_rel_index_within_industry(sw_ins_mappings,indus_index):
         return sw_ins_mappings[indus_index,2]
-            
+
+    @staticmethod
+    def get_exchange_ids(sw_ins_mappings):
+        main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        return sw_ins_mappings[main_index,7]
+                    
     @staticmethod
     def get_instrument_obj_in_industry(sw_ins_mappings,indus_index):
         ins_obj = []
@@ -470,13 +477,14 @@ class FuturesMappingUtil:
         ins_index = sw_ins_mappings[:,2]
         ins_names = sw_ins_mappings[:,5]
         ins_codes = sw_ins_mappings[:,4]
+        exchange_ids = sw_ins_mappings[:,7]
         combine_content = None
         for i in range(ins_index.shape[0]):
             indus_code = sw_ins_mappings[:,1][i]
             if indus_code=="ZS_ALL":
                 continue
             indus_code_arr = np.array([indus_code for _ in range(ins_index[i].shape[0])])
-            item_combine = np.stack([ins_index[i],ins_names[i],indus_code_arr,ins_codes[i]])
+            item_combine = np.stack([ins_index[i],ins_names[i],indus_code_arr,ins_codes[i],exchange_ids[i]])
             if combine_content is None:
                 combine_content = item_combine
             else:

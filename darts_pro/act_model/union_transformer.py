@@ -371,7 +371,7 @@ class TFTWithFutureCovariates(nn.Module):
         )
         
         # 全局池化多尺度
-        self.pool_layer = MultiScaleGlobalPool(obs_dim, seq_len,num_scales=4)
+        self.pool_layer = MultiScaleGlobalPool(obs_dim, seq_len,num_scales=3)
         
         # 1. 样本维度交互模块（仅作用于历史观测特征）
         self.sample_cross_attn = SampleCrossAttention(
@@ -522,7 +522,7 @@ class TFTWithFutureCovariates(nn.Module):
         return (pred_seq,pred_tar), sample_attn_weights
 
 class AttentionWithDualHighK(nn.Module):
-    def __init__(self, input_dim,node_num=0, hidden_dim=16, k=3,nor_scale=0.3,high_scale=1.0,low_scale=2.0):
+    def __init__(self, input_dim,node_num=0, hidden_dim=16, k=3,nor_scale=1.0,high_scale=1.0,low_scale=1.0):
         super(AttentionWithDualHighK, self).__init__()
         self.k = k
         self.nor_scale = nor_scale
@@ -566,20 +566,20 @@ class AttentionWithDualHighK(nn.Module):
         # sigmoid_weights = torch.sigmoid(scaled_scores)  # [batch, seq]
         # 关键优化2：L2归一化（核心！让权重区分高低，而非全接近1）
         # L2归一化：每个样本的权重除以其L2范数，保证权重有差异
-        attn_scores = F.normalize(scaled_scores, p=2, dim=-1)
+        # scaled_scores = F.normalize(scaled_scores, p=2, dim=-1)
                            
         # 筛选排序前k的索引（原本权重最高）
-        _, topk_indices = torch.topk(attn_scores, self.k, dim=-1)
+        _, topk_indices = torch.topk(scaled_scores, self.k, dim=-1)
         # 筛选排序后k的索引（原本权重最低）
-        _, bottomk_indices = torch.topk(attn_scores, self.k, dim=-1, largest=False)
+        _, bottomk_indices = torch.topk(scaled_scores, self.k, dim=-1, largest=False)
                 
         # 填充前K高分（并缩放增强）,填充后K低分（并缩放增强，避免权重消失）
-        mask_scores,mask_scores_hard = self.get_topk_bottomk_mask(attn_scores)    
+        mask_scores,mask_scores_hard = self.get_topk_bottomk_mask(scaled_scores)    
         # 权重归一化
         attention_weights = F.softmax(mask_scores.squeeze(-1), dim=-1)  # [batch_size, seq_len]
         
         # 返回权重，以及硬掩码用于后续topk索引定位
-        return attention_weights, mask_scores_hard
+        return raw_scores, mask_scores_hard
 
     def get_topk_bottomk_mask(self, scores):
         """
@@ -638,8 +638,9 @@ class RankAttention(nn.Module):
         attention_weights, mask_scores_hard = self.att_layer(batch_features)
         # 根据注意力权重加权生成加权特征值，并根据新特征值计算品种得分
         attention_weights_exp = attention_weights.unsqueeze(-1).repeat(1,1,fea_dim)
-        att_features = batch_features * attention_weights_exp
-        scores_with_att = self.score_head(att_features.reshape(batch_size,-1))
+        att_features = batch_features # * attention_weights_exp
+        # scores_with_att = self.score_head(att_features.reshape(batch_size,-1))
+        scores_with_att = attention_weights
         
         return scores_with_att,mask_scores_hard,attention_weights
              
@@ -652,24 +653,35 @@ class SparseGateFeatureTopK(nn.Module):
         super().__init__()
         self.sample_dim = sample_dim
         self.k = k
-        # 整合输出为结合topk选择的品类
-        # self.top_ins_layer = LinelessLayer(2*k*input_dim,k*2,hidden_size=hidden_dim,
-        #                             layer_norm=True,batch_norm=False,dropout=0.3)
         self.top_att_layer = RankAttention(input_dim,sample_dim,top_k=k,hidden_size=64)      
-        self.ins_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
-                                    layer_norm=True,batch_norm=False,dropout=0.3)    
+        # 注意力机制生成1维特征
+        self.top_att_layer = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(), 
+            nn.Dropout(p=0.1),
+            nn.Linear(hidden_dim, hidden_dim*2),
+            nn.GELU(),
+            nn.Linear(hidden_dim * 2, 1)
+        ) 
+        # 混合生成1维特征
+        self.score_head =  LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
+                                    layer_norm=True,batch_norm=False,dropout=dropout)             
+        # # 使用多头注意力，生成多个关注组合   
+        # self.top_att_layer = nn.MultiheadAttention(
+        #     embed_dim=feat_dim,
+        #     num_heads=num_heads,
+        #     dropout=dropout,
+        #     batch_first=True
+        # )        
+        # self.ins_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
+        #                             layer_norm=True,batch_norm=False,dropout=0.3)    
     def forward(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
-        
-        # features,mask_scores_hard,attention_weights = self.top_att_layer(x)    
-        normal_features = self.ins_layer(x.reshape(x.shape[0],-1))
-        # normal_features = features  
-        features = normal_features
-        attention_weights = normal_features
-        mask_scores_hard = normal_features
-        
-        return features,normal_features,mask_scores_hard,attention_weights
+        # 生成1维特征
+        features  = self.top_att_layer(x).squeeze(-1)    
+        att_features = self.score_head(x.reshape(batch_size,-1))
+        return features,att_features
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -744,8 +756,8 @@ class UnionTransCombine(nn.Module):
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features,normal_features,topk_mask_weights,attention_weights = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
-            cls_out_combine.append(torch.cat([features,topk_mask_weights,normal_features,attention_weights],1))
+            features,att_features = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
+            cls_out_combine.append(torch.cat([features,att_features],dim=-1))
         # 整体指数预测的网络输出
         # index_data_combine = self.index_combine_layer(y_pred_reshape)
         index_data_combine = pred_seq[:,0,:,0]

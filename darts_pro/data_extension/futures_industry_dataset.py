@@ -302,15 +302,27 @@ class FuturesIndustryDataset(GenericShiftedDataset):
     def get_variety_list_with_indus(self):       
         """取得期货品种列表,包含行业板块"""
         
-        sql = "select v.code,upper(concat('zs_',i.code)) as indus_code,v.name as name from trading_variety v left join futures_industry i on v.industry_id = i.id" \
+        sql = "select v.code,upper(concat('zs_',i.code)) as indus_code,v.name as name,v.exchange_id from trading_variety v " \
+            "left join futures_industry i on v.industry_id = i.id" \
             " order by v.code asc"
         result_rows = self.dbaccessor.do_query(sql)    
-        columns = ["code","indus_code","name"]
+        columns = ["code","indus_code","name","exchange_id"]
         result_rows = [[row[i] for i in range(len(row))]  for row in result_rows]
         result_rows = np.array(result_rows)
         result = pd.DataFrame(result_rows,columns=columns)
         return result
 
+    def get_variety_list_with_exchange(self):       
+        """按照交易所，取得期货品种列表"""
+        
+        sql = "select v.code,v.exchange_id from trading_variety v order by v.code asc"
+        result_rows = self.dbaccessor.do_query(sql)    
+        columns = ["code","exchange_id"]
+        result_rows = [[row[i] for i in range(len(row))]  for row in result_rows]
+        result_rows = np.array(result_rows)
+        result = pd.DataFrame(result_rows,columns=columns)
+        return result
+    
     def build_accord_instrument_mapping(self,target_series,dataset=None):
         """筛选出符合条件的品种，以及分类映射关系"""
 
@@ -322,6 +334,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         fur_indus_df = pd.concat([fur_indus_df,pd.DataFrame(np.array([['ZS_all','综合']]),columns=["code","name"])],ignore_index=True)
         # 生成继承映射关系对象
         sw_ins_mappings = FuturesMappingUtil.build_accord_mapping(target_series, fur_indus_df, instrument_df, dataset=dataset)
+        
         return sw_ins_mappings
     
     def get_fur_industry(self):       

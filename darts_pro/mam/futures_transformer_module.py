@@ -16,14 +16,14 @@ from cus_utils.wise_corrcef import analyze_model_complexity
 from cus_utils.process import create_from_cls_and_kwargs
 from .mlp_module import MlpModule
 import cus_utils.global_var as global_var
-from cus_utils.visualization import plot_feature_heatmap,plot_sample_lines
+from cus_utils.visualization import plot_feature_heatmap,plot_sample_lines,plot_grouped_bar
 from darts_pro.act_model.union_transformer import UnionTransCombine
 from darts_pro.act_model.fur_industry_ts import FurIndustryMixer, FurStrategy
 from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from darts_pro.act_model.union_transformer import TimeFeatureEncoder
 from .multiTask_optimizer import MultiTaskOptimizer
-from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,min_max_norm_reverse, normalization_axis
+from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,weighted_signed_score_3d, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
 
@@ -33,7 +33,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
 TRACK_DATE = [item for item in range(20250825,20250905)]
-# TRACK_DATE = [item for item in range(20250425,20250515)]
+TRACK_DATE = [item for item in range(20250425,20250515)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240428, 20260505]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
@@ -60,11 +60,11 @@ class FeatureExtractorHook:
         
         input = input[0]
         if module.training:
-            name = name + "_train"
+            name = "train_" + name
             input = input.detach()
             output = output.detach()
         else:
-            name = name + "_val"
+            name = "val_" + name
         # 训练阶段和验证阶段关注不同的内容
         self.features[name + "_input"] = input.reshape(B,S,-1)
         self.features[name + "_output"] = output.reshape(B,S,-1)                
@@ -186,9 +186,6 @@ class FuturesTransformerModule(MlpModule):
                 +past_covariates_shape
             )
             
-            combine_nodes = FuturesMappingUtil.get_industry_instrument(self.train_sw_ins_mappings, without_main=True)
-            combine_nodes_num = np.array([ins.shape[0] for ins in combine_nodes])
-            combine_nodes_num = torch.Tensor(combine_nodes_num).int().to(self.device)
             # 加入短期指标
             pred_len = self.output_chunk_length    
             combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
@@ -212,9 +209,10 @@ class FuturesTransformerModule(MlpModule):
                 # 记录时间字段
                 self.embed_cols = dataset.get_future_columns()
                 self.time_encoder = time_encoder
+            target_feat_dim = 2
             # 使用混合时间序列模型,TFT底座
             model = UnionTransCombine(
-                target_feat_dim=1,
+                target_feat_dim=target_feat_dim,
                 static_num=static_covariates.shape[-1]-1,
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
@@ -242,20 +240,28 @@ class FuturesTransformerModule(MlpModule):
     
     def reg_hook(self,model,nodes_num):
         self.features = {}
-        model.top_selector[0].ins_layer.register_forward_hook(FeatureExtractorHook(self.features, 'ins_layer',nodes_num=nodes_num))
-        # 查看输入数据，以及经过变量选择层的输出
-        model.trans_model.transformer_encoder.register_forward_hook(FeatureExtractorHook(self.features, 'transformer_encoder',nodes_num=nodes_num))
+        # self.inout_compare_names = ['pool_layer','encoder','decoder','ins_layer']
+        # self.inout_compare_names = ['pool_layer','encoder','decoder','attention_net','score_head']
+        self.inout_compare_names = ['pool_layer','encoder','decoder','top_att_layer']
+        
+        # 输入部分的全局池化
+        model.trans_model.pool_layer.register_forward_hook(FeatureExtractorHook(self.features, 'pool_layer',nodes_num=nodes_num))
+        # 查看编码器层的输入输出
+        model.trans_model.transformer_encoder.register_forward_hook(FeatureExtractorHook(self.features, 'encoder',nodes_num=nodes_num))
         # 查看主模型中解码层输出的前后数值
         model.trans_model.tar_decoder.register_forward_hook(FeatureExtractorHook(self.features, 'decoder',nodes_num=nodes_num))
         # 查看后置模型中基于注意力的特征输出的前后数值
-        model.top_selector[0].top_att_layer.score_head.register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
+        # model.top_selector[0].top_att_layer.score_head.register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
         # 查看注意力层的前后数值
-        model.top_selector[0].top_att_layer.att_layer.attention_net.register_forward_hook(FeatureExtractorHook(self.features, 'attention_net',nodes_num=nodes_num))   
-                  
+        # model.top_selector[0].top_att_layer.att_layer.attention_net.register_forward_hook(FeatureExtractorHook(self.features, 'attention_net',nodes_num=nodes_num))   
+        # 品种拟合部分
+        model.top_selector[0].top_att_layer.register_forward_hook(FeatureExtractorHook(self.features, 'top_att_layer',nodes_num=nodes_num))
+                          
     def create_loss(self, model, device="cpu"):
+        combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
         return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,output_chunk_length=self.output_chunk_length,
                                    opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, 
-                                   cut_len=self.cut_len, loss_weights=self.task_weights)       
+                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes)       
 
     def _construct_classify_layer(self, input_dim, output_dim, device=None):
         """新增策略选择模型"""
@@ -300,7 +306,7 @@ class FuturesTransformerModule(MlpModule):
         # 余弦退火
         lr_scheduler_cls = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
         # Linear Ls
-        lr_scheduler_cls = torch.optim.lr_scheduler.LinearLR
+        # lr_scheduler_cls = torch.optim.lr_scheduler.LinearLR
         lr_scheduler = create_from_cls_and_kwargs(
             lr_scheduler_cls, lr_sched_kws
         )
@@ -340,6 +346,8 @@ class FuturesTransformerModule(MlpModule):
             futures_convs = x_in[3]
             his_future_covs = x_in[2]
             static_covs = x_in[4]
+            # 暂存价格数据，用于可视化
+            self.cur_price_targets = x_in[5]
             target_class = x_in[8][:,instruments]
             # 根据优化器编号匹配计算,当编号超出模型数量时，也需要全部进行向前传播，此时没有梯度回传，主要用于生成二次模型输入数据
             if optimizer_idx == i or optimizer_idx >= sub_model_length or optimizer_idx == -1:
@@ -384,8 +392,16 @@ class FuturesTransformerModule(MlpModule):
             out_class_total.append(out_class)
         
         return out_total, vr_class, out_class_total  
-
+    
+    def on_train_start(self): 
+        super().on_train_start()
+        sw_ins_mappings = self.train_sw_ins_mappings
+        self.ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+            
     def on_validation_start(self): 
+        sw_ins_mappings = self.valid_sw_ins_mappings
+        self.ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        
         self.output_result = []
         if self.train_step_mode == 2:
             # 第二阶段，首先加载预存结果
@@ -487,6 +503,9 @@ class FuturesTransformerModule(MlpModule):
         
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
+        # 可视化中间输出和结果的比对
+        self.viz_in_out_data(mode="train") 
+                
         return total_loss, detail_loss, output 
 
     def on_train_epoch_end(self):
@@ -516,7 +535,8 @@ class FuturesTransformerModule(MlpModule):
                 if item in (grad_name):
                     grad = total_gradients[grad_name]
                     self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
-                    
+
+                   
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
@@ -573,15 +593,17 @@ class FuturesTransformerModule(MlpModule):
         for i in range(self.opt_size):
             task_weights = self.task_weights[i]
             if ce_loss[i] != 0 and len(task_weights) > 1:
-                self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+                self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
             if cls_loss[i] != 0:
-                self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)
+                self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
             if fds_loss[i] != 0 and len(task_weights) > 2:
-                self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)                
+                self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
             if corr_loss[i] != 0 and len(task_weights) > 3:
-                self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True)   
+                self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)   
 
         output_combine = (output, vr_class, price_targets, past_future_round_targets)
+        
+                
         return loss, detail_loss, output_combine       
 
     def _process_input_batch(
@@ -664,11 +686,11 @@ class FuturesTransformerModule(MlpModule):
         if rate_total is not None and rate_total.shape[0] > 0:
             for col in rate_total.columns:
                 if col != "total_cnt":
-                    self.log(col, rate_total[col].values[0], prog_bar=True)  
+                    self.log(col, rate_total[col].values[0], prog_bar=True,sync_dist=True)  
             
             dur_num = self.cut_len - 1
             anno_yield = rate_total['yield_rate'].values[0] * (240 / date_total_num) / (2 * self.pred_top_num * dur_num) 
-            self.log("anno_yield", anno_yield, prog_bar=True) 
+            self.log("anno_yield", anno_yield, prog_bar=True,sync_dist=True) 
         
         output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_total, \
             past_future_round_targets_total, long_diff_index_targets_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
@@ -677,12 +699,14 @@ class FuturesTransformerModule(MlpModule):
         if self.mode is None or not self.mode.startswith("pred_"):
             # 验证模式，进行board的可视化
             self.viz_data_board()
+            # 可视化中间输出
+            self.viz_in_out_data(mode="val")            
             return
         
         # 测试模式，在此进行结果的可视化
         print("all date:", coll_result['date'].unique())
         coll_result.to_csv(self.coll_record_file_path, index=False)
-        self.log("date_total_num", date_total_num, prog_bar=True) 
+        self.log("date_total_num", date_total_num, prog_bar=True,sync_dist=True) 
         # 生成进一步的结果指标
         coll_result_output = coll_result.rename(columns={'trend_value':'pred_trend'})
         # stats = DataStats(work_dir=RESULT_FILE_PATH,backtest_dir="/home/qdata/workflow/fur_backtest_flow/trader_data/05") 
@@ -797,12 +821,60 @@ class FuturesTransformerModule(MlpModule):
             if len(feat.shape)==2:
                 ins_feat = feat
             elif len(feat.shape)==3:
-                ins_feat = feat.mean(-1)    
+                ins_feat = weighted_signed_score_3d(feat)
             ins_feat = ins_feat.cpu().numpy()
             # self.logger.experiment.add_figure('{}_heatmap_{}/'.format(section,name), plot_feature_heatmap(ins_feat), global_step=self.global_step)
-            fig = plot_sample_lines(ins_feat, sample_indices=range(8), title='Batch Sample Features')
-            self.logger.experiment.add_figure('lines_{}/'.format(name), fig, global_step=self.global_step)     
-                                                 
+            range_num = 8 if ins_feat.shape[0]>8 else ins_feat.shape[0]
+            fig = plot_sample_lines(ins_feat, sample_indices=range(range_num), title='Batch Sample Features')
+            self.logger.experiment.add_figure('lines_{}/'.format(name), fig, global_step=self.global_step)    
+            
+    def viz_in_out_data(self,mode="train"): 
+        """可视化中间结果与实际目标的比较情况"""
+        
+        data_flow = {'data':{},'top_data':{}}
+        for name,feat in self.features.items():
+            if name=='total_gradients':
+                continue
+            name_prefix = name.split("_")[0]
+            if name_prefix!=mode:
+                continue
+            # if 'score_head_output' in name:
+            #     print("ggg")            
+            feat = feat.squeeze(-1)
+            # 以品种为单位计算L2
+            if len(feat.shape)==2:
+                ins_feat = feat
+            elif len(feat.shape)==3:
+                ins_feat = feat.mean(-1)
+            for ind_name in self.inout_compare_names:
+                if (ind_name+"_") in name and name.endswith("output"):
+                    # 与实际目标进行一致性比较
+                    price_targets = self.cur_price_targets[:,self.ins_all]
+                    ccc_dis = self.criterion.ccc_loss_comp(ins_feat, price_targets)
+                    # 同时进行top值的一致性比较
+                    top_pred, top_pred_index = torch.topk(ins_feat, k=self.top_num, dim=-1)
+                    top_pred_inverse, top_pred_inverse_index = torch.topk(ins_feat, k=self.top_num, largest=False, dim=-1)
+                    top_pred_data = torch.cat([top_pred,top_pred_inverse],-1)
+                    indices = torch.cat([top_pred_index,top_pred_inverse_index],-1).long()
+                    top_target_data = torch.gather(price_targets, 1, indices) 
+                    top_ccc_dis = self.criterion.ccc_loss_comp(top_pred_data, top_target_data)                    
+                    data_flow['data'][ind_name] = ccc_dis
+                    data_flow['top_data'][ind_name] = top_ccc_dis
+                    break
+            
+        metrics = np.zeros([len(self.inout_compare_names),2])
+        for i,name in enumerate(self.inout_compare_names):
+            metrics[i,0] = data_flow['data'][name]
+            metrics[i,1] = data_flow['top_data'][name]
+        category_labels = ['data','top_data']
+        group_labels = self.inout_compare_names
+        colors = ['#1f77b4', '#ff7f0e']
+        if mode=="train":
+            fig = plot_grouped_bar(metrics, group_labels, category_labels, ylabel='Value', title='InOut Features in Train',colors=colors)
+        else:
+            fig = plot_grouped_bar(metrics, group_labels, category_labels, ylabel='Value',title='InOut Features in Valid',colors=colors)
+        self.logger.experiment.add_figure('inoutCCC_{}/'.format(mode), fig, global_step=self.global_step)  
+                                                            
     def dump_val_data(self, val_batch, outputs, batch_data):
     
         output, vr_class, price_outputs, past_future_round_targets = outputs
@@ -1145,7 +1217,7 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         cls_main = cls[0][:node_num]
-        # cls_main = cls[0][2*node_num:3*node_num]
+        # cls_main = cls[0][1*node_num:2*node_num]
         topk_mask_weights = cls[0][node_num:2*node_num]
         long_index = np.argwhere(topk_mask_weights==1)[:,0][:top_num]
         short_index = np.argwhere(topk_mask_weights==-1)[:,0][:top_num]

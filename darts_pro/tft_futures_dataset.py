@@ -20,8 +20,7 @@ from datetime import datetime
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
-from cus_utils.data_filter import DataFilter
-from cus_utils.db_accessor import DbAccessor
+from cus_utils.common_compute import process_outliers_multi_cols
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -128,7 +127,14 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
         # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化,需要按照品种分组进行
         norm_cols = self.get_past_columns()[:15]
-        # 计算训练集每组的均值和标准差（针对所有特征列）
+        # 剔除超出范围的异常值
+        df = process_outliers_multi_cols(
+            df=df,
+            cols=norm_cols,
+            range=2.0,
+            method='median_fill',
+            detect_method='iqr'
+        )      
         group_stats = df_train.groupby('instrument')[norm_cols].agg(['mean', 'std']).reset_index()   
         # 处理标准差为 0 的情况（可选）
         for feat in norm_cols:
@@ -145,7 +151,14 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # 删除临时统计列
         df.drop(columns=[f'{feat}_{stat}' for feat in norm_cols for stat in ['mean', 'std']], inplace=True)            
         # df_val = df[(df["datetime"]>=pd.to_datetime(str(val_range[0]))) & (df["datetime"]<pd.to_datetime(str(val_range[1])))]
-
+        # # 针对个别异常数据，标准化后再次处理
+        # df = process_outliers_multi_cols(
+        #     df=df,
+        #     cols=['dom_basis_rate'],
+        #     range=2.0,
+        #     method='median_fill',
+        #     detect_method='iqr'
+        # )           
         # 生成行业均值数据
         df = self.build_industry_mean(df,indus_info=indus_info)     
         df['industry'] = df['industry'].astype(int)          

@@ -8,6 +8,35 @@ import matplotlib.pyplot as plt
 
 VIZ_ITEM_NUMBER = 3
 
+def plot_grouped_bar(data, group_labels, category_labels, ylabel='Value', title='Grouped Bar Chart',colors=[]):
+    """
+    data: 2D list/array, shape (n_groups, n_categories)
+    group_labels: list of group names (x-axis)
+    category_labels: list of category names (legend)
+    """
+    n_groups = len(group_labels)
+    n_cats = len(category_labels)
+    bar_width = 0.8 / n_cats
+    x = np.arange(n_groups)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for i, cat in enumerate(category_labels):
+        bars = ax.bar(x + i * bar_width, data[:, i], width=bar_width, label=cat,color=colors[i])
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                     f'{height:.2f}', ha='center', va='bottom', fontsize=9)
+
+    ax.set_xticks(x + bar_width * (n_cats - 1) / 2)
+    ax.set_xticklabels(group_labels)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+
 def plot_sample_lines(features, sample_indices=None, max_dim=100, title='Sample Feature Values'):
     """
     features: numpy array of shape (N, D)
