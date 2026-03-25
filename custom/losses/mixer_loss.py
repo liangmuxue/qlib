@@ -20,6 +20,11 @@ from .rank_loss import attention_approx_ndcg_loss
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
 from audioop import minmax
 
+def gaussian_loss(z):
+    mu = z.mean()
+    sigma = z.std()
+    return (mu **2 + (sigma - 1)**2).mean()
+    
 def attention_concentration_loss(attn_weights, top_k, loss_type="entropy"):
     """
     注意力集中度损失：约束权重向Top-K集中
@@ -98,7 +103,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
     def compute_top_loss(self,pred,target,top_num=3,no_real_dis=True):
         """计算top损失"""
-        
+
         top_pred, top_pred_index = torch.topk(pred, k=top_num, dim=0)
         top_pred_inverse, top_pred_inverse_index = torch.topk(pred, k=top_num, largest=False, dim=0)
         top_target = torch.gather(target, 0, top_pred_index)
@@ -125,7 +130,47 @@ class FuturesIndustryLoss(UncertaintyLoss):
         if not no_real_dis:
             top_loss = top_loss/2
         return top_loss
-    
+
+    def compute_tar_top_loss(self,pred,target,top_num=3,r=0.5):
+        """使用目标视角，计算top损失"""
+
+        # 尺度约束：[-1, 1]
+        pred = torch.tanh(pred)
+        # 分布匹配：标准正态
+        pred = (pred - pred.mean()) / (pred.std() + 1e-8)
+                
+        _, top_target_index = torch.topk(target, k=top_num, dim=0)
+        _, top_target_inverse_index = torch.topk(target, k=top_num, largest=False, dim=0)
+        _, top_pred_index = torch.topk(pred, k=top_num, dim=0)
+        _, top_pred_inverse_index = torch.topk(pred, k=top_num, largest=False, dim=0)        
+
+        def _compute_margin_loss(p_index,t_index,mode=0):
+            # 取得目标排名靠前的下标，并对照预测值进行比较
+            top_pred = torch.gather(pred, 0, t_index)
+            top_target = torch.gather(target, 0, t_index)
+            # 计算当前对应的预测值与实际最大预测值的差距，并使用名次加权
+            top_pred_real_norm = torch.gather(pred, 0, p_index)     
+            top_pred_norm = torch.gather(pred, 0, t_index)          
+            if mode==0:
+                magin_loss = top_target.mean() - top_pred.mean()     
+                pred_magin = top_pred_real_norm.mean() - top_pred_norm.mean()
+            else:
+                magin_loss = top_pred.mean() - top_target.mean()    
+                pred_magin = top_pred_norm.mean() - top_pred_real_norm.mean()      
+            magin_loss = torch.clamp(magin_loss, min=0.1)
+            # 需要强制输出服从先验分布，否则会全部集中到某个数值
+            pred_magin = pred_magin + gaussian_loss(pred)
+            # 根据名次是否匹配再次加权
+            match_num = tensor_intersect(top_pred_index,top_target_index).shape[0]
+            magin_loss = r * magin_loss +  (1-r) * (top_num - match_num) * pred_magin 
+            return magin_loss
+                    
+        magin_loss = _compute_margin_loss(top_pred_index,top_target_index,mode=0)
+        magin_loss_inverse = _compute_margin_loss(top_pred_inverse_index,top_target_inverse_index,mode=1)
+        loss = magin_loss + magin_loss_inverse
+        
+        return loss
+       
     def compute_indus_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照行业计算top损失"""
         
@@ -143,6 +188,24 @@ class FuturesIndustryLoss(UncertaintyLoss):
 
         return top_loss
 
+    def compute_nt_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
+        """按照是否包含夜盘计算top损失"""
+        
+        night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
+        flags = np.unique(night_flag)
+        top_real_index = []
+        for flag in flags:
+            instruments = np.where(night_flag==flag)[0]
+            instruments = torch.Tensor(instruments).to(pred.device).long()
+            pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=2)
+            top_real_index.append(instruments[pred_index_long])
+            top_real_index.append(instruments[pred_index_short])
+        top_real_index = torch.cat(top_real_index)
+        top_real_index = tensor_intersect(top_real_index,ins_rel_index)
+        top_loss = self._compute_top_loss(pred, target, top_real_index)
+        
+        return top_loss
+    
     def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
         """按照行业计算损失"""
         
@@ -163,7 +226,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_exchange_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照交易所计算top损失"""
     
-        # 按照行业取内部的最大和最小
         exchange_ids = FuturesMappingUtil.get_exchange_ids(sw_ins_mappings)
         u_exc_ids = np.unique(exchange_ids)
         top_real_index = []
@@ -296,7 +358,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
                         price_diff_range_all = price_targets[j,ins_all]  
-                        round_targets_item = future_round_targets[j,ins_rel_index,target_len,0]
+                        round_targets_item = future_round_targets[j,ins_all,target_len,0]
                         node_num = ins_all.shape[0]
                         sv_out_item = sv_out_item_real[:node_num]
                         sv_out_item_att = sv_out_item_real[node_num:2*node_num]
@@ -304,9 +366,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         target_item = target[j,ins_all,target_len,0]
                         target_item_att = target[j,ins_all,target_len,1]
                         # cls_loss[i] += self.compute_main_loss(attention_scores[ins_rel_index],target_item)  
-                        cls_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index])                          
+                        cls_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index])    
                         ce_loss[i] += self.compute_indus_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
-                        fds_loss[i] += self.compute_indus_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        fds_loss[i] += self.compute_nt_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        corr_loss[i] += self.compute_indus_loss(sv_out_item_att,round_targets_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
                         # fds_loss[i] += self.compute_top_loss(sv_out_item_normal[ins_rel_index],round_targets_item)  
                         
                         # 辅助目标的损失

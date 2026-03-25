@@ -273,7 +273,8 @@ class MultiScaleGlobalPool(nn.Module):
         self.residual_fc = nn.Linear(seq_len * feature_dim, feature_dim)
 
     def forward(self, x):
-        # x: [batch_size, seq_len, feature_dim] 原始历史特征
+        # x: [batch_size, node_num,seq_len, feature_dim] 原始历史特征
+        x = x.reshape(x.shape[0]*x.shape[1],x.shape[2],-1)
         batch_size = x.shape[0]
         
         # 步骤1：多尺度池化，保留不同时间粒度的信息
@@ -435,7 +436,7 @@ class TFTWithFutureCovariates(nn.Module):
         
         # ---------------------- 步骤1：样本维度交互（仅历史，无未来泄露） ----------------------
         # 1.1 历史特征全局池化
-        obs_global = self.pool_layer(obs_feat.reshape(B*S,T,-1)).reshape(B,S,-1)  # [B, S, obs_dim]
+        obs_global = self.pool_layer(obs_feat).reshape(B,S,-1)  # [B, S, obs_dim]
         time_hist_global = time_embed_hist.mean(dim=2)  # [B, S, time_embed_dim]
         sample_feat = torch.cat([obs_global, time_hist_global], dim=-1)  # [B, S, F]
         
@@ -688,8 +689,9 @@ class SparseGateFeatureTopK(nn.Module):
         batch_size, S, input_dim = x.shape
         # 生成1维特征
         features  = self.top_att_layer(x).squeeze(-1)    
-        att_features  = self.top_att2_layer(x).squeeze(-1)  
-        normal_features = features # self.score_head(x.reshape(batch_size,-1))
+        # att_features  = self.top_att2_layer(x).squeeze(-1)  
+        att_features  = self.score_head(x.reshape(batch_size,-1))
+        normal_features = features
         return features,att_features,normal_features
 
 class UnionTransCombine(nn.Module):

@@ -66,8 +66,11 @@ class FeatureExtractorHook:
         else:
             name = "val_" + name
         # 训练阶段和验证阶段关注不同的内容
-        self.features[name + "_input"] = input.reshape(B,S,-1)
-        self.features[name + "_output"] = output.reshape(B,S,-1)                
+        try:
+            self.features[name + "_input"] = input.reshape(B,S,-1)
+            self.features[name + "_output"] = output.reshape(B,S,-1)         
+        except Exception:
+            print("eee")       
 
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
@@ -504,7 +507,7 @@ class FuturesTransformerModule(MlpModule):
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
         # 可视化中间输出和结果的比对
-        self.viz_in_out_data(mode="train") 
+        # self.viz_in_out_data(mode="train") 
                 
         return total_loss, detail_loss, output 
 
@@ -850,6 +853,8 @@ class FuturesTransformerModule(MlpModule):
                 if (ind_name+"_") in name and name.endswith("output"):
                     # 与实际目标进行一致性比较
                     price_targets = self.cur_price_targets[:,self.ins_all]
+                    if ins_feat.shape[0]!=price_targets.shape[0]:
+                        return
                     ccc_dis = self.criterion.ccc_loss_comp(ins_feat, price_targets)
                     # 同时进行top值的一致性比较
                     top_pred, top_pred_index = torch.topk(ins_feat, k=self.top_num, dim=-1)
