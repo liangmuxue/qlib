@@ -663,6 +663,14 @@ class SparseGateFeatureTopK(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim * 2, 1)
         ) 
+        self.top_att2_layer = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(), 
+            nn.Dropout(p=0.1),
+            nn.Linear(hidden_dim, hidden_dim*2),
+            nn.GELU(),
+            nn.Linear(hidden_dim * 2, 1)
+        )         
         # 混合生成1维特征
         self.score_head =  LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
                                     layer_norm=True,batch_norm=False,dropout=dropout)             
@@ -680,8 +688,9 @@ class SparseGateFeatureTopK(nn.Module):
         batch_size, S, input_dim = x.shape
         # 生成1维特征
         features  = self.top_att_layer(x).squeeze(-1)    
-        att_features = self.score_head(x.reshape(batch_size,-1))
-        return features,att_features
+        att_features  = self.top_att2_layer(x).squeeze(-1)  
+        normal_features = features # self.score_head(x.reshape(batch_size,-1))
+        return features,att_features,normal_features
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -756,8 +765,8 @@ class UnionTransCombine(nn.Module):
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features,att_features = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
-            cls_out_combine.append(torch.cat([features,att_features],dim=-1))
+            features,att_features,normal_features = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
+            cls_out_combine.append(torch.cat([features,att_features,normal_features],dim=-1))
         # 整体指数预测的网络输出
         # index_data_combine = self.index_combine_layer(y_pred_reshape)
         index_data_combine = pred_seq[:,0,:,0]

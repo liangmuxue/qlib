@@ -127,14 +127,14 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
         # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化,需要按照品种分组进行
         norm_cols = self.get_past_columns()[:15]
-        # 剔除超出范围的异常值
-        df = process_outliers_multi_cols(
-            df=df,
-            cols=norm_cols,
-            range=2.0,
-            method='median_fill',
-            detect_method='iqr'
-        )      
+        # # 剔除超出范围的异常值
+        # df = process_outliers_multi_cols(
+        #     df=df,
+        #     cols=norm_cols,
+        #     range=2.0,
+        #     method='median_fill',
+        #     detect_method='iqr'
+        # )      
         group_stats = df_train.groupby('instrument')[norm_cols].agg(['mean', 'std']).reset_index()   
         # 处理标准差为 0 的情况（可选）
         for feat in norm_cols:

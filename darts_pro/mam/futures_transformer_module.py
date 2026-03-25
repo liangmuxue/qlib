@@ -1217,7 +1217,7 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         cls_main = cls[0][:node_num]
-        # cls_main = cls[0][1*node_num:2*node_num]
+        # cls_main = cls[0][node_num:2*node_num]
         topk_mask_weights = cls[0][node_num:2*node_num]
         long_index = np.argwhere(topk_mask_weights==1)[:,0][:top_num]
         short_index = np.argwhere(topk_mask_weights==-1)[:,0][:top_num]

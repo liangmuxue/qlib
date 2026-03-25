@@ -143,6 +143,23 @@ class FuturesIndustryLoss(UncertaintyLoss):
 
         return top_loss
 
+    def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
+        """按照行业计算损失"""
+        
+        indus_data_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
+        loss = 0
+        for index in indus_data_index:
+            instruments = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,index)
+            instruments = torch.Tensor(instruments).to(pred.device)
+            instruments = tensor_intersect(instruments,ins_rel_index).long()
+            if instruments.shape[0]<2 or all_elements_same(target[instruments]):
+                loss += self.mse_loss(pred[instruments].unsqueeze(0), target[instruments].unsqueeze(0))
+            else:
+                loss += self.ccc_loss_comp(pred[instruments], target[instruments])
+        loss = loss/len(indus_data_index)
+        
+        return loss
+    
     def compute_exchange_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照交易所计算top损失"""
     
@@ -278,17 +295,20 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         ref_indicator2 = 2                          
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
+                        price_diff_range_all = price_targets[j,ins_all]  
                         round_targets_item = future_round_targets[j,ins_rel_index,target_len,0]
                         node_num = ins_all.shape[0]
                         sv_out_item = sv_out_item_real[:node_num]
                         sv_out_item_att = sv_out_item_real[node_num:2*node_num]
+                        sv_out_item_normal = sv_out_item_real[2*node_num:3*node_num]
                         target_item = target[j,ins_all,target_len,0]
                         target_item_att = target[j,ins_all,target_len,1]
                         # cls_loss[i] += self.compute_main_loss(attention_scores[ins_rel_index],target_item)  
-                        cls_loss[i] += self.compute_top_loss(sv_out_item,target_item)                          
+                        cls_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index])                          
                         ce_loss[i] += self.compute_indus_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
-                        fds_loss[i] += self.compute_top_loss(sv_out_item_att[ins_rel_index],round_targets_item)  
-                        # fds_loss[i] += self.compute_exchange_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        fds_loss[i] += self.compute_indus_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        # fds_loss[i] += self.compute_top_loss(sv_out_item_normal[ins_rel_index],round_targets_item)  
+                        
                         # 辅助目标的损失
                         # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)    
                         # corr_loss[i] += self.compute_main_loss(sv_out_item_att,price_diff_range)    

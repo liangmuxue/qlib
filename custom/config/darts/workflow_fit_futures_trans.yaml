@@ -62,7 +62,7 @@ task:
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
-            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
+            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"   
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05
@@ -80,7 +80,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transAttTopLoss_2503"
+               model_name: "Futures_cleanDataAllCutlen2_transAttTarTopLoss_2503"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -148,8 +148,8 @@ task:
                                   ,'VSTD5','CORR5','BETA5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'VSTD5','CORR5','BETA5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ] 
-                static_covariate_col: ['industry','night_flag','exchange_id','price_range','limit_rate','magin_radio']   
-                static_cate_col: ['industry','night_flag','exchange_id']
+                static_covariate_col: ['industry','night_flag','exchange_id','price_range','create_year','limit_rate','magin_radio']   
+                static_cate_col: ['industry','night_flag','exchange_id','create_year']
                 static_cont_col: ['price_range','limit_rate','magin_radio']
                 
                  
