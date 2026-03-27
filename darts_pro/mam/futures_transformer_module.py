@@ -109,6 +109,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
+        self.scale_arr = self._build_scale_arr()
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
@@ -129,6 +130,7 @@ class FuturesTransformerModule(MlpModule):
                                     categorical_embedding_sizes, dropout, add_relative_index, norm_type, past_split=past_split,
                                     use_weighted_loss_func=use_weighted_loss_func, batch_file_path=batch_file_path,
                                     device=device, **kwargs)  
+        
         self.result_view_file_path = os.path.join(RESULT_FILE_PATH, RESULT_FILE_VIEW)
         self.coll_record_file_path = os.path.join(RESULT_FILE_PATH, "coll_record.csv")
         self.rate_file_path = os.path.join(RESULT_FILE_PATH, "rate.csv")
@@ -136,10 +138,25 @@ class FuturesTransformerModule(MlpModule):
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH, INTER_RS_FILEPATH)
         self.result_columns = ["date", "indus_index", "trend_flag", "price_inf", "ce_inf"]
         
+        
     def set_outer_params(self, params):
         for name in params:
             setattr(self, name, params[name])       
+    
+    def _build_scale_arr(self):
         
+        sw_ins_mappings = self.train_sw_ins_mappings
+        indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+        indus_scale_arr = indus_data_index.tolist()
+        magin_radio = FuturesMappingUtil.get_magin_radio_flags(sw_ins_mappings).astype(int)
+        threhold_bin = [[0,15],[15,18],[18,100]]
+        mr_scale_arr = [np.where((magin_radio>=threhold[0])&(magin_radio<threhold[1]))[0] for threhold in threhold_bin]
+        night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
+        nt_scale_arr =  [np.where(night_flag==i)[0] for i in range(2)]
+        scale_arr = (indus_scale_arr,nt_scale_arr,mr_scale_arr)
+        
+        return scale_arr
+    
     def create_real_model(self,
         output_dim: Tuple[int, int],
         variables_meta: Dict[str, Dict[str, List[str]]],
@@ -230,6 +247,7 @@ class FuturesTransformerModule(MlpModule):
                 sample_heads=4,
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
+                scale_arr=self.scale_arr,
                 device=device,
             ).to(device)             
             self.embedding_size = input_dim
@@ -257,13 +275,13 @@ class FuturesTransformerModule(MlpModule):
         # 查看注意力层的前后数值
         # model.top_selector[0].top_att_layer.att_layer.attention_net.register_forward_hook(FeatureExtractorHook(self.features, 'attention_net',nodes_num=nodes_num))   
         # 品种拟合部分
-        model.top_selector[0].top_att_layer[0].register_forward_hook(FeatureExtractorHook(self.features, 'top_att_layer',nodes_num=nodes_num))
+        model.top_selector[0].top_global_layer.register_forward_hook(FeatureExtractorHook(self.features, 'top_att_layer',nodes_num=nodes_num))
                           
     def create_loss(self, model, device="cpu"):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
         return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,output_chunk_length=self.output_chunk_length,
                                    opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, 
-                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes)       
+                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_arr=self.scale_arr)       
 
     def _construct_classify_layer(self, input_dim, output_dim, device=None):
         """新增策略选择模型"""
@@ -1222,7 +1240,7 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         cls_main = cls[0][:node_num]
-        cls_main = cls[0][1*node_num:2*node_num]
+        cls_main = cls[0][2*node_num:3*node_num]
         # cls_main = cls[0][3*node_num:4*node_num]
         if trend == 1:
             pre_index = np.argsort(-cls_main)[:top_num]

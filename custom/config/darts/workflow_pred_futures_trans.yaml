@@ -80,14 +80,14 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transMulTopLoss_2503"
+               model_name: "Futures_cleanDataAllCutlen2_transScaleTopLoss_2503"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
                task_weights: [[0.5,0.5,0.5,0.5],[1.0]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[3],[0]]
+               main_task_seq: [[2],[0]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
@@ -115,7 +115,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train: [2012-01-01, 2025-03-28]
-                valid: [2024-12-01, 2025-03-30]
+                valid: [2025-03-01, 2025-05-30]
                 test: [2025-07-01, 2025-09-30]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

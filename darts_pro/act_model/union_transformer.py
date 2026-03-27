@@ -522,150 +522,53 @@ class TFTWithFutureCovariates(nn.Module):
         
         return (pred_seq,pred_tar), sample_attn_weights
 
-class AttentionWithDualHighK(nn.Module):
-    def __init__(self, input_dim,node_num=0, hidden_dim=16, k=3,nor_scale=1.0,high_scale=1.0,low_scale=1.0):
-        super(AttentionWithDualHighK, self).__init__()
-        self.k = k
-        self.nor_scale = nor_scale
-        self.high_scale = high_scale
-        self.low_scale = low_scale
-        
-        # 注意力层：生成原始分数
-        self.attention_net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(), 
-            nn.Dropout(p=0.1),
-            nn.Linear(hidden_dim, hidden_dim*2),
-            nn.GELU(),
-            nn.Linear(hidden_dim * 2, 1)
-        )
-        # self.attention_net = nn.Linear(input_dim, 1)
-        # self.attention_net = LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_dim,
-        #                             layer_norm=True,batch_norm=False,dropout=0.1)     
-        # 可学习的缩放因子：调整Sigmoid输入的范围，避免全趋近于1
-        self.scale = nn.Parameter(torch.tensor(1.0))       
-    
-    def forward(self, x):
-        """
-        前向传播：计算注意力权重，筛选top-k（排序最高）和bottom-k（排序最低）的位置
-        :param x: 输入张量，shape=[batch_size, seq_len, input_dim]
-        :return: 
-            attention_weights: 原始注意力权重，shape=[batch_size, seq_len]
-            topk_indices: 排序前k的索引，shape=[batch_size, k]
-            bottomk_indices: 排序后k的索引，shape=[batch_size, k]
-        """
-        batch_size, seq_len, _ = x.shape
-        # 校验：序列长度必须大于2k，避免前k和后k索引重叠
-        if seq_len <= 2 * self.k:
-            raise ValueError(f"序列长度{seq_len}必须大于2*{self.k}={2*self.k}")
-        
-        # 计算注意力分数并归一化（softmax确保权重和为1）
-        raw_scores = self.attention_net(x).reshape(batch_size,seq_len)  # [batch_size, seq_len]
-        # 关键优化1：缩放分数，避免Sigmoid饱和（scale可学习）
-        scaled_scores = raw_scores * self.scale     
-        # 步骤2：Sigmoid激活（输出0~1）
-        # sigmoid_weights = torch.sigmoid(scaled_scores)  # [batch, seq]
-        # 关键优化2：L2归一化（核心！让权重区分高低，而非全接近1）
-        # L2归一化：每个样本的权重除以其L2范数，保证权重有差异
-        # scaled_scores = F.normalize(scaled_scores, p=2, dim=-1)
-                           
-        # 筛选排序前k的索引（原本权重最高）
-        _, topk_indices = torch.topk(scaled_scores, self.k, dim=-1)
-        # 筛选排序后k的索引（原本权重最低）
-        _, bottomk_indices = torch.topk(scaled_scores, self.k, dim=-1, largest=False)
-                
-        # 填充前K高分（并缩放增强）,填充后K低分（并缩放增强，避免权重消失）
-        mask_scores,mask_scores_hard = self.get_topk_bottomk_mask(scaled_scores)    
-        # 权重归一化
-        attention_weights = F.softmax(mask_scores.squeeze(-1), dim=-1)  # [batch_size, seq_len]
-        
-        # 返回权重，以及硬掩码用于后续topk索引定位
-        return raw_scores, mask_scores_hard
+class AttScaleFeature(nn.Module):
+    """按照指定尺度，实现特征处理"""
 
-    def get_topk_bottomk_mask(self, scores):
-        """
-        生成仅包含前K高分和后K低分位置的掩码分数矩阵
-        :param scores: 原始注意力分数 (batch, seq_len, seq_len)
-        :return: mask_scores: 仅前K+后K位置有有效分数，其余为极小值
-        """
-        batch_size, seq_len = scores.shape
-        
-        # 1. 筛选前K个高分位置和分数
-        topk_vals, topk_indices = torch.topk(scores, k=self.k, dim=-1)  # (batch, seq_len, k)
-        
-        # 筛选后K个低分位置和分数（通过取负实现bottomk）
-        bottomk_vals, bottomk_indices = torch.topk(scores, k=self.k,largest=False, dim=-1)  # (batch, seq_len, k)
-        bottomk_vals = -bottomk_vals  # 还原为原始低分
-        
-        # 初始化掩码分数矩阵，软约束版本，其他位置保留10%分数
-        mask_scores = scores * self.nor_scale  
-        mask_scores_hard = torch.zeros_like(scores)   
-        # 填充前K高分（并缩放增强）
-        batch_idx = torch.arange(batch_size).unsqueeze(1).expand(-1, self.k)
-        mask_scores[batch_idx, topk_indices] = topk_vals * self.high_scale
-        mask_scores_hard[batch_idx, topk_indices] = 1
-        # 填充后K低分（并缩放增强，避免权重消失）
-        mask_scores[batch_idx, bottomk_indices] = bottomk_vals * self.low_scale
-        mask_scores_hard[batch_idx, bottomk_indices] = -1
-        
-        return mask_scores,mask_scores_hard
-    
-class RankAttention(nn.Module):
-    
-    def __init__(self,input_dim, node_num,hidden_size=16, top_k=3,dropout=0.3):
+    def __init__(self,sample_dim,input_dim,scale_arr=None, hidden_dim=16, dropout=0.1,device=None):
         super().__init__()
-        self.top_k = top_k 
-        self.input_dim = input_dim      
-        
-        # self.line_layer = LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_size,
-        #                             layer_norm=True,batch_norm=False,dropout=dropout)    
-        self.att_layer = AttentionWithDualHighK(input_dim=input_dim,node_num=node_num,k=top_k)
-        self.score_head =  LinelessLayer(node_num*input_dim,node_num,hidden_size=hidden_size,
-                                    layer_norm=True,batch_norm=False,dropout=dropout)            
+        self.sample_dim = sample_dim
+        self.scale_arr = [torch.Tensor(s).long().to(device) for s in scale_arr]
+        ins_layer = []
+        for scaler in self.scale_arr:
+            sample_dim_inner = scaler.shape[0]
+            ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
+                                layer_norm=True,batch_norm=False,dropout=dropout)
+            ins_layer.append(ins_layer_inner)
+        self.ins_layer = nn.ParameterList(ins_layer)
 
-    def forward(self, batch_features):
-        """
-        批次前向传播
-        Args:
-            batch_features: (batch_size, node_num, input_dim)
-            batch_masks: (batch_size, node_num) - 掩码，避免 padding 参与计算
-        Returns:
-            batch_scores: (batch_size, node_num) - 每个文档的排序分数
-            batch_attention_weights: (batch_size, node_num) - 每个文档的注意力权重
-        """
-        batch_size, node_num, fea_dim = batch_features.shape
+    def forward(self, x):
+        # x: (batch_size, 品种S, 特征input_dim)
+        batch_size, S, _ = x.shape
         
-        # 根据分数计算注意力权重,其中注意力分数在权重里已经兼顾到得分靠前和靠后的K个候选
-        attention_weights, mask_scores_hard = self.att_layer(batch_features)
-        # 根据注意力权重加权生成加权特征值，并根据新特征值计算品种得分
-        attention_weights_exp = attention_weights.unsqueeze(-1).repeat(1,1,fea_dim)
-        att_features = batch_features # * attention_weights_exp
-        # scores_with_att = self.score_head(att_features.reshape(batch_size,-1))
-        scores_with_att = attention_weights
-        
-        return scores_with_att,mask_scores_hard,attention_weights
-             
+        output = torch.zeros([batch_size,S]).to(x.device)
+        # 针对自定义的品种范围数组，进行分尺度的特征处理
+        for i,scaler in enumerate(self.scale_arr):
+            x_part = x[:,scaler,:].reshape(batch_size,-1)
+            output[:,scaler] = self.ins_layer[i](x_part)
+           
+        return output
+                        
 class SparseGateFeatureTopK(nn.Module):
-    """
-    稀疏门控特征Top-K：基于注意力机制,并通过门控网络学习特征重要性，仅激活Top-K特征
-    优势：可随输入动态调整Top-K特征（不同样本选不同特征）
-    """
-    def __init__(self,sample_dim,input_dim,k=3, hidden_dim=16,num_heads=2, dropout=0.1):
+    """综合TOPK选取"""
+    
+    def __init__(self,sample_dim,input_dim,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
+                 indus_scale_arr=None,nt_scale_arr=None,mr_scale_arr=None,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.k = k
         self.num_heads = num_heads
            
         # 注意力机制生成1维特征
-        self.top_att_layer = nn.ParameterList([nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(), 
-            nn.Dropout(p=0.1),
-            nn.Linear(hidden_dim, hidden_dim*2),
-            nn.GELU(),
-            nn.Linear(hidden_dim * 2, 1)
-        ) for _ in range(num_heads)])
-      
+        # self.top_att_layer = nn.ParameterList([nn.Sequential(
+        #     nn.Linear(input_dim, hidden_dim),
+        #     nn.GELU(), 
+        #     nn.Dropout(p=0.1),
+        #     nn.Linear(hidden_dim, hidden_dim*2),
+        #     nn.GELU(),
+        #     nn.Linear(hidden_dim * 2, 1)
+        # ) for _ in range(num_heads)])
+              
         # # 使用多头注意力，生成多个关注组合   
         # self.top_att_layer = nn.MultiheadAttention(
         #     embed_dim=input_dim,
@@ -673,25 +576,40 @@ class SparseGateFeatureTopK(nn.Module):
         #     dropout=dropout,
         #     batch_first=True
         # )        
-        # 混合生成1维特征
-        self.score_head =  nn.ParameterList([nn.Linear(sample_dim,1) for _ in range(num_heads)])   
+        
+        # 分别按照夜盘类别、行业类别、保证金范围生成不同注意力尺度的网络计算
+        self.top_global_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
+                                    layer_norm=True,batch_norm=False,dropout=dropout).double()
+        self.top_indus_layer = AttScaleFeature(sample_dim,input_dim,scale_arr=indus_scale_arr,device=device)
+        self.top_nt_layer = AttScaleFeature(sample_dim,input_dim,scale_arr=nt_scale_arr,device=device)
+        self.top_mr_layer = AttScaleFeature(sample_dim,input_dim,scale_arr=mr_scale_arr,device=device)
+        self.score_head = nn.ParameterList([nn.Linear(sample_dim,sample_dim) for _ in range(4)])
             
     def forward(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
         features_list = []
-        # 生成1维特征
-        for j in range(self.num_heads):
-            layer = self.top_att_layer[j]
-            features = layer(x).squeeze(-1)    
-            features_list.append(features)
-        # # 使用多头注意力机制返回多个权重，用于多类特征
-        # out,weights = self.top_att_layer(x,x,x,need_weights=True,average_attn_weights=False)
+        # 分别根据不同的业务尺度，生成1维度特征
+        g_features = self.top_global_layer(x.reshape(batch_size,-1))  
+        indus_features = self.top_indus_layer(x)  
+        nt_features = self.top_nt_layer(x)  
+        mr_features = self.top_mr_layer(x)  
+        # 合并主体特征和分尺度特征
+        indus_features = self.score_head[1](g_features + indus_features)
+        nt_features = self.score_head[2](g_features + nt_features)
+        mr_features = self.score_head[3](g_features + mr_features)
+        g_features = self.score_head[0](g_features)
+        features_list.append(g_features)
+        features_list.append(indus_features)
+        features_list.append(nt_features)
+        features_list.append(mr_features)
+        
         # # 生成1维度特征
         # for j in range(self.num_heads):
         #     score_head = self.score_head[j]
         #     features = score_head(weights[:,j,:]).squeeze(-1)
-        #     features_list.append(features)        
+        #     features_list.append(features)     
+           
         return features_list
 
 class UnionTransCombine(nn.Module):
@@ -716,6 +634,7 @@ class UnionTransCombine(nn.Module):
         static_emb_dim=4,      # 离散特征嵌入维度
         static_cate_emb=None, # 静态离散特征嵌入
         top_num=3,            # topk数量
+        scale_arr=None,
         device='cuda'
     ):
         super().__init__()
@@ -746,7 +665,10 @@ class UnionTransCombine(nn.Module):
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
-        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, hidden_dim=hidden_size,num_heads=4, dropout=0.1) for _ in range(self.target_feat_dim)])
+        indus_scale_arr,nt_scale_arr,mr_scale_arr = scale_arr
+        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, 
+                        hidden_dim=hidden_size,num_heads=4, dropout=0.1,indus_scale_arr=indus_scale_arr,
+                        nt_scale_arr=nt_scale_arr,mr_scale_arr=mr_scale_arr,device=device) for _ in range(self.target_feat_dim)])
 
         ############# 中间变量调试 #############
         self.features = {}

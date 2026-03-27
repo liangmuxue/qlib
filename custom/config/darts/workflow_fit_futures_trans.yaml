@@ -80,14 +80,14 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transTopLoss_2503"
+               model_name: "Futures_cleanDataAllCutlen2_transScaleTopLoss_2503"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                task_weights: [[0.5,0.5,0.5,0.5],[1.0]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[1],[0]]
+               main_task_seq: [[2],[0]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
