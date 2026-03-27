@@ -650,49 +650,49 @@ class SparseGateFeatureTopK(nn.Module):
     稀疏门控特征Top-K：基于注意力机制,并通过门控网络学习特征重要性，仅激活Top-K特征
     优势：可随输入动态调整Top-K特征（不同样本选不同特征）
     """
-    def __init__(self,sample_dim,input_dim,k=3, hidden_dim=16,num_heads=4, dropout=0.1):
+    def __init__(self,sample_dim,input_dim,k=3, hidden_dim=16,num_heads=2, dropout=0.1):
         super().__init__()
         self.sample_dim = sample_dim
         self.k = k
-        self.top_att_layer = RankAttention(input_dim,sample_dim,top_k=k,hidden_size=64)      
+        self.num_heads = num_heads
+           
         # 注意力机制生成1维特征
-        self.top_att_layer = nn.Sequential(
+        self.top_att_layer = nn.ParameterList([nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.GELU(), 
             nn.Dropout(p=0.1),
             nn.Linear(hidden_dim, hidden_dim*2),
             nn.GELU(),
             nn.Linear(hidden_dim * 2, 1)
-        ) 
-        self.top_att2_layer = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(), 
-            nn.Dropout(p=0.1),
-            nn.Linear(hidden_dim, hidden_dim*2),
-            nn.GELU(),
-            nn.Linear(hidden_dim * 2, 1)
-        )         
-        # 混合生成1维特征
-        self.score_head =  LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
-                                    layer_norm=True,batch_norm=False,dropout=dropout)             
+        ) for _ in range(num_heads)])
+      
         # # 使用多头注意力，生成多个关注组合   
         # self.top_att_layer = nn.MultiheadAttention(
-        #     embed_dim=feat_dim,
+        #     embed_dim=input_dim,
         #     num_heads=num_heads,
         #     dropout=dropout,
         #     batch_first=True
         # )        
-        # self.ins_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
-        #                             layer_norm=True,batch_norm=False,dropout=0.3)    
+        # 混合生成1维特征
+        self.score_head =  nn.ParameterList([nn.Linear(sample_dim,1) for _ in range(num_heads)])   
+            
     def forward(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
+        features_list = []
         # 生成1维特征
-        features  = self.top_att_layer(x).squeeze(-1)    
-        # att_features  = self.top_att2_layer(x).squeeze(-1)  
-        att_features  = self.score_head(x.reshape(batch_size,-1))
-        normal_features = features
-        return features,att_features,normal_features
+        for j in range(self.num_heads):
+            layer = self.top_att_layer[j]
+            features = layer(x).squeeze(-1)    
+            features_list.append(features)
+        # # 使用多头注意力机制返回多个权重，用于多类特征
+        # out,weights = self.top_att_layer(x,x,x,need_weights=True,average_attn_weights=False)
+        # # 生成1维度特征
+        # for j in range(self.num_heads):
+        #     score_head = self.score_head[j]
+        #     features = score_head(weights[:,j,:]).squeeze(-1)
+        #     features_list.append(features)        
+        return features_list
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -767,8 +767,8 @@ class UnionTransCombine(nn.Module):
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features,att_features,normal_features = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
-            cls_out_combine.append(torch.cat([features,att_features,normal_features],dim=-1))
+            features_list = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
+            cls_out_combine.append(torch.cat(features_list,dim=-1))
         # 整体指数预测的网络输出
         # index_data_combine = self.index_combine_layer(y_pred_reshape)
         index_data_combine = pred_seq[:,0,:,0]

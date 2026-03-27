@@ -59,6 +59,8 @@ class FeatureExtractorHook:
             B = int(B/S)
         
         input = input[0]
+        # if 'top_att_layer' in name:
+        #     output = output[1]
         if module.training:
             name = "train_" + name
             input = input.detach()
@@ -66,11 +68,8 @@ class FeatureExtractorHook:
         else:
             name = "val_" + name
         # 训练阶段和验证阶段关注不同的内容
-        try:
-            self.features[name + "_input"] = input.reshape(B,S,-1)
-            self.features[name + "_output"] = output.reshape(B,S,-1)         
-        except Exception:
-            print("eee")       
+        self.features[name + "_input"] = input.reshape(B,S,-1)
+        self.features[name + "_output"] = output.reshape(B,S,-1)         
 
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
@@ -258,7 +257,7 @@ class FuturesTransformerModule(MlpModule):
         # 查看注意力层的前后数值
         # model.top_selector[0].top_att_layer.att_layer.attention_net.register_forward_hook(FeatureExtractorHook(self.features, 'attention_net',nodes_num=nodes_num))   
         # 品种拟合部分
-        model.top_selector[0].top_att_layer.register_forward_hook(FeatureExtractorHook(self.features, 'top_att_layer',nodes_num=nodes_num))
+        model.top_selector[0].top_att_layer[0].register_forward_hook(FeatureExtractorHook(self.features, 'top_att_layer',nodes_num=nodes_num))
                           
     def create_loss(self, model, device="cpu"):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
@@ -824,7 +823,8 @@ class FuturesTransformerModule(MlpModule):
             if len(feat.shape)==2:
                 ins_feat = feat
             elif len(feat.shape)==3:
-                ins_feat = weighted_signed_score_3d(feat)
+                # ins_feat = weighted_signed_score_3d(feat)
+                ins_feat = feat.mean(-1)
             ins_feat = ins_feat.cpu().numpy()
             # self.logger.experiment.add_figure('{}_heatmap_{}/'.format(section,name), plot_feature_heatmap(ins_feat), global_step=self.global_step)
             range_num = 8 if ins_feat.shape[0]>8 else ins_feat.shape[0]
@@ -1222,12 +1222,8 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         cls_main = cls[0][:node_num]
-        # cls_main = cls[0][node_num:2*node_num]
-        topk_mask_weights = cls[0][node_num:2*node_num]
-        long_index = np.argwhere(topk_mask_weights==1)[:,0][:top_num]
-        short_index = np.argwhere(topk_mask_weights==-1)[:,0][:top_num]
-        top_index = np.concatenate([long_index,short_index])
-        pred_top = cls_main[top_index]
+        cls_main = cls[0][1*node_num:2*node_num]
+        # cls_main = cls[0][3*node_num:4*node_num]
         if trend == 1:
             pre_index = np.argsort(-cls_main)[:top_num]
         else:

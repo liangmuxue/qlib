@@ -9,6 +9,7 @@ from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normal
 from tft.class_define import get_simple_class
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
+# import torchsort
 
 from cus_utils.common_compute import tensor_intersect,normalization_axis,pairwise_compare,normalization_standard,all_elements_same,is_same_elements
 from .feature_loss import AdaptiveSingleFeatureLoss
@@ -25,43 +26,66 @@ def gaussian_loss(z):
     sigma = z.std()
     return (mu **2 + (sigma - 1)**2).mean()
     
-def attention_concentration_loss(attn_weights, top_k, loss_type="entropy"):
+def softrank_ndcg_loss(scores, labels, k=None, sigma=0.1, gain_fn=None):
     """
-    注意力集中度损失：约束权重向Top-K集中
-    :param attn_weights: 注意力权重 (batch, n_head, seq_len, seq_len)
-    :param top_k: 目标Top-K数量
-    :param loss_type: 损失类型：
-        - "entropy": 熵损失（熵越小，分布越集中）
-        - "topk_ratio": Top-K占比损失（最大化Top-K权重占比）
-    :return: 标量损失值
+    scores: (batch, n) 预测得分
+    labels: (batch, n) 真实相关性（非负实数）
+    k: 截断位置，若为None则使用全部
+    sigma: 温度参数，控制排名的平滑程度（越小越接近硬排序）
+    gain_fn: 增益函数，默认取 labels 本身；若需指数增益可用 lambda x: 2**x - 1
     """
-    # 维度调整：合并batch和head维度，方便计算 (batch*n_head, seq_len, seq_len)
-    attn_flat = attn_weights.reshape(-1, attn_weights.size(-2), attn_weights.size(-1))
-    seq_len = attn_flat.size(-1)
+    batch_size, n = scores.shape
+    device = scores.device
     
-    if loss_type == "entropy":
-        """方案1：熵损失（推荐）
-        熵公式：H = -Σ(p_i * log(p_i + ε))
-        熵越小，分布越集中，因此损失目标是最小化熵
-        """
-        eps = 1e-8  # 避免log(0)
-        entropy = -torch.sum(attn_flat * torch.log(attn_flat + eps), dim=-1)  # (batch*n_head, seq_len)
-        # 对所有位置的熵取平均，作为最终损失
-        loss = torch.mean(entropy)
-        
-    elif loss_type == "topk_ratio":
-        """方案2：Top-K占比损失
-        计算每个位置Top-K权重的总和，目标是最大化这个总和（即最小化 1 - 总和）
-        """
-        # 取每个位置的Top-K权重 (batch*n_head, seq_len, top_k)
-        top_k_vals, _ = torch.topk(attn_flat, k=top_k, dim=-1)
-        # 计算Top-K权重占比 (batch*n_head, seq_len)
-        top_k_ratio = torch.sum(top_k_vals, dim=-1)
-        # 损失 = 1 - 占比 的平均值（占比越接近1，损失越小）
-        loss = torch.mean(1 - top_k_ratio)
+    if gain_fn is None:
+        gain_fn = lambda x: x
+    gains = gain_fn(labels)                 # (batch, n)
     
-    return loss
-
+    # 1. 计算两两比较概率
+    # p_ij = P(i 排在 j 前面)
+    diff = scores.unsqueeze(2) - scores.unsqueeze(1)   # (batch, n, n)
+    p_ij = torch.sigmoid(diff / sigma)                 # (batch, n, n)
+    # 对角线为0.5，不影响后续求和
+    
+    # 2. 计算每个文档的期望排名（从1开始）
+    # rank_i = 1 + sum_{j != i} p_{ji}
+    # p_{ji} 即 j 排在 i 前面的概率 = p_ij[j, i] 的转置
+    # 使用 sum_{j} p_ij[j, i] 但需要排除 i=j，但 p_ij[i,i]=0.5，故需要减去0.5
+    p_ji = p_ij.transpose(1, 2)            # (batch, n, n)
+    expected_ranks = 1 + p_ji.sum(dim=2)   # (batch, n)  注意包含了 i=j 时的0.5，实际正好是1+sum_{j!=i}p_ji
+    # 实际上，p_ji.sum(dim=2) 包含了 j=i 时 p_ji[i,i]=0.5，所以结果就是 1 + sum_{j!=i} p_ji
+    # 但为了更精确，也可以手动减去0.5，但效果差异不大
+    
+    # 3. 计算平滑 DCG
+    # 使用折扣函数 1 / log2(1 + rank)
+    disc = 1.0 / torch.log2(1.0 + expected_ranks)   # (batch, n)
+    # 对于超过 k 的位置，折扣设为0（只计算前k个）
+    if k is not None:
+        # 这里需要知道哪些文档排在前k位，但由于排名是连续的，我们直接用 soft top-k 近似
+        # 简单做法：使用 sigmoid 对排名进行截断，例如 mask = sigmoid((k+0.5 - expected_ranks) / tau)
+        # 但为了简洁，这里直接对期望排名小于等于 k 的文档计算 DCG
+        mask = (expected_ranks <= k).float()
+        dcg = (gains * disc * mask).sum(dim=1)
+    else:
+        dcg = (gains * disc).sum(dim=1)
+    
+    # 4. 计算 IDCG
+    # 按真实相关性降序排序，得到理想排名
+    sorted_labels, sorted_indices = torch.sort(labels, dim=1, descending=True)
+    ideal_gains = gain_fn(sorted_labels)
+    ideal_ranks = torch.arange(1, n+1, device=device).float().unsqueeze(0).expand(batch_size, -1)
+    ideal_disc = 1.0 / torch.log2(1.0 + ideal_ranks)
+    if k is not None:
+        ideal_mask = (ideal_ranks <= k).float()
+        idcg = (ideal_gains * ideal_disc * ideal_mask).sum(dim=1)
+    else:
+        idcg = (ideal_gains * ideal_disc).sum(dim=1)
+    
+    # 避免除零
+    idcg = torch.clamp(idcg, min=1e-8)
+    ndcg = dcg / idcg
+    loss = 1 - ndcg
+    return loss.mean()
 class FuturesIndustryLoss(UncertaintyLoss):
     """整合不同行业板块，并基于策略选取的损失"""
 
@@ -195,9 +219,31 @@ class FuturesIndustryLoss(UncertaintyLoss):
         flags = np.unique(night_flag)
         top_real_index = []
         for flag in flags:
+            if flag==0:
+                top_num = 1
+            else:
+                top_num = 2
             instruments = np.where(night_flag==flag)[0]
             instruments = torch.Tensor(instruments).to(pred.device).long()
-            pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=2)
+            pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=top_num)
+            top_real_index.append(instruments[pred_index_long])
+            top_real_index.append(instruments[pred_index_short])
+        top_real_index = torch.cat(top_real_index)
+        top_real_index = tensor_intersect(top_real_index,ins_rel_index)
+        top_loss = self._compute_top_loss(pred, target, top_real_index)
+        
+        return top_loss
+
+    def compute_mr_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
+        """按照交易保证金比率计算top损失"""
+        
+        magin_radio = FuturesMappingUtil.get_magin_radio_flags(sw_ins_mappings).astype(int)
+        threhold_bin = [[0,15],[15,18],[18,100]]
+        top_real_index = []
+        for threhold in threhold_bin:
+            instruments = np.where((magin_radio>=threhold[0])&(magin_radio<threhold[1]))[0]
+            instruments = torch.Tensor(instruments).to(pred.device).long()
+            pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=1)
             top_real_index.append(instruments[pred_index_long])
             top_real_index.append(instruments[pred_index_short])
         top_real_index = torch.cat(top_real_index)
@@ -206,6 +252,14 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss
     
+    def compute_rank_top_loss(self,pred,target,top_num=0,sigma=0.1):
+        """按照排序模式，计算top损失"""
+        
+        loss_long = softrank_ndcg_loss(pred, target, k=top_num, sigma=sigma, gain_fn=lambda x: 2**x - 1)
+        loss_short = softrank_ndcg_loss(-pred, target, k=top_num, sigma=sigma, gain_fn=lambda x: 2**x - 1)
+        loss = loss_long + loss_short
+        return loss
+       
     def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
         """按照行业计算损失"""
         
@@ -215,8 +269,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
             instruments = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,index)
             instruments = torch.Tensor(instruments).to(pred.device)
             instruments = tensor_intersect(instruments,ins_rel_index).long()
-            if instruments.shape[0]<2 or all_elements_same(target[instruments]):
-                loss += self.mse_loss(pred[instruments].unsqueeze(0), target[instruments].unsqueeze(0))
+            if instruments.shape[0]<2 or all_elements_same(pred[instruments]) or all_elements_same(target[instruments]):
+                loss += self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
             else:
                 loss += self.ccc_loss_comp(pred[instruments], target[instruments])
         loss = loss/len(indus_data_index)
@@ -362,14 +416,17 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         node_num = ins_all.shape[0]
                         sv_out_item = sv_out_item_real[:node_num]
                         sv_out_item_att = sv_out_item_real[node_num:2*node_num]
-                        sv_out_item_normal = sv_out_item_real[2*node_num:3*node_num]
+                        sv_out_item_att2 = sv_out_item_real[2*node_num:3*node_num]
+                        sv_out_item_att3 = sv_out_item_real[3*node_num:4*node_num]
                         target_item = target[j,ins_all,target_len,0]
                         target_item_att = target[j,ins_all,target_len,1]
                         # cls_loss[i] += self.compute_main_loss(attention_scores[ins_rel_index],target_item)  
                         cls_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index])    
-                        ce_loss[i] += self.compute_indus_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
-                        fds_loss[i] += self.compute_nt_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
-                        corr_loss[i] += self.compute_indus_loss(sv_out_item_att,round_targets_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        # ce_loss[i] += self.compute_rank_top_loss(sv_out_item[ins_rel_index].unsqueeze(0),target_item[ins_rel_index].unsqueeze(0),top_num=top_num)  
+                        ce_loss[i] += self.compute_nt_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        fds_loss[i] += self.compute_indus_top_loss(sv_out_item_att2,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        # corr_loss[i] += self.compute_indus_loss(sv_out_item_att2,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
+                        corr_loss[i] += self.compute_mr_top_loss(sv_out_item_att3,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
                         # fds_loss[i] += self.compute_top_loss(sv_out_item_normal[ins_rel_index],round_targets_item)  
                         
                         # 辅助目标的损失
@@ -399,9 +456,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     loss_sum = loss_sum + ce_loss[i]      
                            
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss,predictions]    
-
-
-
 
     ############################### Data Compute Relate ####################################
 
