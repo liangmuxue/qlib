@@ -553,7 +553,7 @@ class SparseGateFeatureTopK(nn.Module):
     """综合TOPK选取"""
     
     def __init__(self,sample_dim,input_dim,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
-                 indus_scale_arr=None,nt_scale_arr=None,mr_scale_arr=None,device=None):
+                 scales_arr=[],device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.k = k
@@ -580,10 +580,11 @@ class SparseGateFeatureTopK(nn.Module):
         # 分别按照夜盘类别、行业类别、保证金范围生成不同注意力尺度的网络计算
         self.top_global_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
                                     layer_norm=True,batch_norm=False,dropout=dropout).double()
-        self.top_indus_layer = AttScaleFeature(sample_dim,input_dim,scale_arr=indus_scale_arr,device=device)
-        self.top_nt_layer = AttScaleFeature(sample_dim,input_dim,scale_arr=nt_scale_arr,device=device)
-        self.top_mr_layer = AttScaleFeature(sample_dim,input_dim,scale_arr=mr_scale_arr,device=device)
-        self.score_head = nn.ParameterList([nn.Linear(sample_dim,sample_dim) for _ in range(4)])
+        scales_layer = []                          
+        for scale_arr in scales_arr:
+            scales_layer.append(AttScaleFeature(sample_dim,input_dim,scale_arr=scale_arr,device=device))
+        self.scales_layer = nn.ParameterList(scales_layer)
+        self.score_head = nn.ParameterList([nn.Linear(sample_dim,sample_dim) for _ in range(len(scales_arr)+1)])
             
     def forward(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
@@ -591,25 +592,14 @@ class SparseGateFeatureTopK(nn.Module):
         features_list = []
         # 分别根据不同的业务尺度，生成1维度特征
         g_features = self.top_global_layer(x.reshape(batch_size,-1))  
-        indus_features = self.top_indus_layer(x)  
-        nt_features = self.top_nt_layer(x)  
-        mr_features = self.top_mr_layer(x)  
-        # 合并主体特征和分尺度特征
-        indus_features = self.score_head[1](g_features + indus_features)
-        nt_features = self.score_head[2](g_features + nt_features)
-        mr_features = self.score_head[3](g_features + mr_features)
-        g_features = self.score_head[0](g_features)
-        features_list.append(g_features)
-        features_list.append(indus_features)
-        features_list.append(nt_features)
-        features_list.append(mr_features)
+        g_features_combine = self.score_head[0](g_features)
+        features_list.append(g_features_combine)
+        for i,scale_layer in enumerate(self.scales_layer):
+            scale_features = scale_layer(x)  
+            # 合并主体特征和分尺度特征
+            combine_features = self.score_head[(i+1)](g_features + scale_features)
+            features_list.append(combine_features)
         
-        # # 生成1维度特征
-        # for j in range(self.num_heads):
-        #     score_head = self.score_head[j]
-        #     features = score_head(weights[:,j,:]).squeeze(-1)
-        #     features_list.append(features)     
-           
         return features_list
 
 class UnionTransCombine(nn.Module):
@@ -665,10 +655,8 @@ class UnionTransCombine(nn.Module):
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
-        indus_scale_arr,nt_scale_arr,mr_scale_arr = scale_arr
         self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, 
-                        hidden_dim=hidden_size,num_heads=4, dropout=0.1,indus_scale_arr=indus_scale_arr,
-                        nt_scale_arr=nt_scale_arr,mr_scale_arr=mr_scale_arr,device=device) for _ in range(self.target_feat_dim)])
+                        hidden_dim=hidden_size,num_heads=4, dropout=0.1,scales_arr=scale_arr,device=device) for _ in range(self.target_feat_dim)])
 
         ############# 中间变量调试 #############
         self.features = {}

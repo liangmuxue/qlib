@@ -1013,9 +1013,9 @@ if __name__ == "__main__":
     # 导出到qlib
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
-    # extractor.build_cleandata_table()
+    extractor.build_cleandata_table()
     # qlib品种名单列表生成
-    extractor.build_qlib_instrument()
+    # extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################

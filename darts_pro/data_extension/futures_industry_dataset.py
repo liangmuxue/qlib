@@ -303,11 +303,11 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         """取得期货品种列表,包含行业板块"""
         
         sql = "select v.code,upper(concat('zs_',i.code)) as indus_code,v.name as name,v.exchange_id," \
-            "IF(length(night_time_range)>1,1,0) as night_flag,v.magin_radio from trading_variety v " \
+            "IF(length(night_time_range)>1,1,0) as night_flag,v.magin_radio,v.create_year from trading_variety v " \
             "left join futures_industry i on v.industry_id = i.id" \
             " order by v.code asc"
         result_rows = self.dbaccessor.do_query(sql)    
-        columns = ["code","indus_code","name","exchange_id","night_flag","magin_radio"]
+        columns = ["code","indus_code","name","exchange_id","night_flag","magin_radio","create_year"]
         result_rows = [[row[i] for i in range(len(row))]  for row in result_rows]
         result_rows = np.array(result_rows)
         result = pd.DataFrame(result_rows,columns=columns)

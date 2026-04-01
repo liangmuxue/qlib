@@ -125,12 +125,34 @@ def interact_grad_names(gradient_components,interact=True):
                 param_names = np.union1d(param_names,param_name)
     return param_names
 
-def analyze_gradient_conflicts(gradient_components):
+def analyze_similarity(gradient_components,task_grads_size=0):
+    
+    param_names = interact_grad_names(gradient_components,interact=True)
+    similarity_combine = torch.zeros(len(param_names), task_grads_size-1)
+    
+    for i,param_name in enumerate(param_names):
+        # 收集各任务在该参数上的梯度方向
+        task_grads = [comp[param_name].flatten() for comp in gradient_components]
+        
+        # 计算梯度余弦相似度矩阵
+        similarity_matrix = torch.zeros(len(task_grads), len(task_grads))
+        for i in range(len(task_grads)):
+            for j in range(len(task_grads)):
+                if i != j:
+                    cos_sim = torch.cosine_similarity(
+                        task_grads[i], task_grads[j], dim=0
+                    )
+                    similarity_matrix[i, j] = cos_sim
+        similarity_combine[i] = similarity_matrix[0,1:]   
+    similarity_mean = similarity_combine.mean(0)
+    return similarity_mean
+    
+def analyze_gradient_conflicts(gradient_components,multi_mode=False):
     """
     分析多任务间的梯度冲突
     """
     
-    param_names = interact_grad_names(gradient_components,interact=True)
+    param_names = interact_grad_names(gradient_components,)
     conflict_analysis = {}
     
     for param_name in param_names:
@@ -152,10 +174,10 @@ def analyze_gradient_conflicts(gradient_components):
         conflict_count = conflict_mask.sum().item()
         
         conflict_analysis[param_name] = {
-            'similarity_matrix': similarity_matrix,
-            'conflict_count': conflict_count,
-            'avg_similarity': similarity_matrix.mean().item()
-        }
+                'similarity_matrix': similarity_matrix,
+                'conflict_count': conflict_count,
+                'avg_similarity': similarity_matrix.mean().item()
+        }            
     
     return conflict_analysis
 
@@ -288,6 +310,7 @@ class MultiTaskOptimizer(Adam):
         conflict_analysis_total = analyze_gradient_conflicts(gradient_components)
         conflict_count,similarity = self.combine_conflict_analysis(conflict_analysis_total)    
            
+        gradient_components_ori = gradient_components.copy()
         # 应用梯度手术,合并梯度
         if self.use_pcgrad:
             pc_grad(gradient_components)
@@ -296,7 +319,7 @@ class MultiTaskOptimizer(Adam):
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
         # 计算重点层梯度参数数值情况
-        total_norm_tcn,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)
+        total_norm_trans,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)
                 
         # 手动设置梯度并更新参数
         self._set_gradients(total_gradients)
@@ -308,12 +331,13 @@ class MultiTaskOptimizer(Adam):
         return {
             'total_loss': show_loss,
             'total_grad_norm': self._compute_total_grad_norm(total_gradients),
-            'total_norm_tcn': total_norm_tcn,
+            'total_norm_trans': total_norm_trans,
             'total_norm_ins_layer': total_norm_ins_layer,
             'conflict_analysis': {'conflict_count':conflict_count,'similarity':similarity},
             'task_grad_norms': task_grad_norms if gradient_components else None,
             'auxiliary_weights': dynamic_weights_info['auxiliary_weights'], 
             'helpfulness_scores': dynamic_weights_info['helpfulness_scores'], 
+            'gradient_components_ori': gradient_components_ori,
             'total_gradients': total_gradients
         }
     

@@ -22,7 +22,7 @@ from darts_pro.act_model.fur_industry_ts import FurIndustryMixer, FurStrategy
 from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from darts_pro.act_model.union_transformer import TimeFeatureEncoder
-from .multiTask_optimizer import MultiTaskOptimizer
+from .multiTask_optimizer import MultiTaskOptimizer,analyze_similarity
 from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,weighted_signed_score_3d, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
@@ -33,7 +33,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
 TRACK_DATE = [item for item in range(20250825,20250905)]
-TRACK_DATE = [item for item in range(20250425,20250515)]
+# TRACK_DATE = [item for item in range(20250425,20250515)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240428, 20260505]
 # TRACK_DATE = [date for date in range(STAT_DATE[0],STAT_DATE[1]+1)]
@@ -49,16 +49,17 @@ class FeatureExtractorHook:
         self.name = name
         self.nodes_num = nodes_num
 
-    def __call__(self, module, input, output):
+    def __call__(self, module, input_ori, output):
         """执行网络输入输出的变量记录"""
         
         name = self.name
         S = self.nodes_num
-        B = input[0].shape[0]
-        if B>100:
-            B = int(B/S)
-        
-        input = input[0]
+        B = input_ori[0].shape[0]
+        if B>100 or B==S:
+            B = B//S
+        if B<3:
+            return
+        input = input_ori[0]
         # if 'top_att_layer' in name:
         #     output = output[1]
         if module.training:
@@ -69,7 +70,7 @@ class FeatureExtractorHook:
             name = "val_" + name
         # 训练阶段和验证阶段关注不同的内容
         self.features[name + "_input"] = input.reshape(B,S,-1)
-        self.features[name + "_output"] = output.reshape(B,S,-1)         
+        self.features[name + "_output"] = output.reshape(B,S,-1)      
 
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
@@ -144,16 +145,46 @@ class FuturesTransformerModule(MlpModule):
             setattr(self, name, params[name])       
     
     def _build_scale_arr(self):
+        """对品种按照不同业务范围进行分组"""
         
         sw_ins_mappings = self.train_sw_ins_mappings
         indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-        indus_scale_arr = indus_data_index.tolist()
+        # 按照行业分组
+        indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+        threhold_bin = [['ZS_NFFI','ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
+        indus_scale_arr = [[],[]]
+        for i in range(len(indus_code)):
+            if indus_code[i] in threhold_bin[0]:
+                indus_scale_arr[0].append(indus_data_index[i])
+            else:
+                indus_scale_arr[1].append(indus_data_index[i])
+        indus_scale_arr[0] = np.concatenate(indus_scale_arr[0])
+        indus_scale_arr[1] = np.concatenate(indus_scale_arr[1])
         magin_radio = FuturesMappingUtil.get_magin_radio_flags(sw_ins_mappings).astype(int)
-        threhold_bin = [[0,15],[15,18],[18,100]]
+        create_year = FuturesMappingUtil.get_create_year_flags(sw_ins_mappings).astype(int)
+        # 交易保证金比例按照18分为前后2组
+        threhold_bin = [[0,18],[18,100]]
         mr_scale_arr = [np.where((magin_radio>=threhold[0])&(magin_radio<threhold[1]))[0] for threhold in threhold_bin]
+        # 按照是否包含夜盘来分组
         night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
         nt_scale_arr =  [np.where(night_flag==i)[0] for i in range(2)]
-        scale_arr = (indus_scale_arr,nt_scale_arr,mr_scale_arr)
+        # 创建年份按照2019分为前后2组
+        threhold_bin = [[0,2018],[2018,2030]]
+        cy_scale_arr = [np.where((create_year>threhold[0])&(create_year<=threhold[1]))[0] for threhold in threhold_bin]
+        
+        # 统合分组
+        combine_scale_arr = [nt_scale_arr[0],[],[]]
+        for instrument_idx in nt_scale_arr[1]:
+            # 对包含夜盘的品种，再按照创建年份来分
+            if create_year[instrument_idx]<=2012:
+                combine_scale_arr[1].append(instrument_idx)
+            else:
+                combine_scale_arr[2].append(instrument_idx)
+                    
+        # scale_arr = (cy_scale_arr,nt_scale_arr,mr_scale_arr,indus_scale_arr)
+        scale_arr = [combine_scale_arr]
+        scale_arr = [nt_scale_arr,indus_scale_arr]
+        # scale_arr = {'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
         
         return scale_arr
     
@@ -496,7 +527,9 @@ class FuturesTransformerModule(MlpModule):
                     continue
                 update_info = opt.step([cls_loss[i]])
             # 记录梯度信息，后续统计可视化使用
-            self.features['total_gradients'] = update_info['total_gradients']
+            if 'total_gradients' in update_info:
+                self.features['total_gradients'] = update_info['total_gradients']
+                self.features['gradient_components_ori'] = update_info['gradient_components_ori']
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
             self.lr_schedulers()[i].step() 
             task_weights = self.task_weights[i]
@@ -512,20 +545,26 @@ class FuturesTransformerModule(MlpModule):
                         self.log("task_grad_norm_corr", update_info["task_grad_norms"][3], batch_size=train_batch[0].shape[0], prog_bar=False)                        
                     # self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
                     # self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
-                self.log("total_norm_tcn", update_info["total_norm_tcn"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                self.log("total_norm_trans", update_info["total_norm_trans"], batch_size=train_batch[0].shape[0], prog_bar=True)
                 self.log("total_norm_ins_layer", update_info["total_norm_ins_layer"], prog_bar=True) 
             else:
                 self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)           
                                        
-        self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
+        # self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("lr", self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  
         # self.log("lr_last",self.trainer.optimizers[-2].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=False)  
         
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
+        
         # 可视化中间输出和结果的比对
         # self.viz_in_out_data(mode="train") 
-                
+        if 'gradient_components_ori' in  self.features:
+            gradient_components_ori = self.features['gradient_components_ori']
+            similarity = analyze_similarity(gradient_components_ori,task_grads_size=len(self.task_weights[0]))     
+            for i in range(len(self.task_weights[0])-1):
+                self.log("grad_similarity_{}".format(i), similarity[i].item(),batch_size=train_batch[0].shape[0], prog_bar=False) 
+        
         return total_loss, detail_loss, output 
 
     def on_train_epoch_end(self):
@@ -543,18 +582,19 @@ class FuturesTransformerModule(MlpModule):
                 self.logger.experiment.add_histogram('grad/' + name,params.grad,global_step)
         # 可视化中间特征输出      
         for name,feat in self.features.items():
-            if name=='total_gradients':
+            if name=='total_gradients' or name=='gradient_components_ori':
                 continue
             # 可视化重点层的输入输出数据
             self.logger.experiment.add_histogram(f'Features/{name}', feat.flatten(), self.current_epoch)  
         # 可视化梯度
-        total_gradients = self.features['total_gradients']
-        name_matches = ['trans_model.tar_decoder','top_att_layer.att_layer.attention_net','top_att_layer.score_head']
-        for grad_name in total_gradients.keys():
-            for item in name_matches:
-                if item in (grad_name):
-                    grad = total_gradients[grad_name]
-                    self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
+        if 'total_gradients' in self.features:
+            total_gradients = self.features['total_gradients']
+            name_matches = ['trans_model.tar_decoder','top_att_layer.att_layer.attention_net','top_att_layer.score_head']
+            for grad_name in total_gradients.keys():
+                for item in name_matches:
+                    if item in (grad_name):
+                        grad = total_gradients[grad_name]
+                        self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
 
                    
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
@@ -761,6 +801,7 @@ class FuturesTransformerModule(MlpModule):
         batch_trend_data = output_3d[5]
         predictions = batch_trend_data
         price_targets_main = long_diff_index_targets_total.squeeze(-1)
+        node_num = ins_all.shape[0]
         
         for index in range(target_class_3d.shape[0]):
         
@@ -785,7 +826,8 @@ class FuturesTransformerModule(MlpModule):
             for j in range(1):
                 inner_class_item = target_class_item[ins_all]
                 inner_index = np.where(inner_class_item >= 0)[0]           
-                ins_output = cls_output[j][index,:][:ins_all.shape[0]]
+                ins_output = cls_output[j][index,:][2*node_num:3*node_num]
+                ins_output = cls_output[j][index,:][1*node_num:2*node_num]
                 ins_output = ins_output[inner_index]
                 ins_output_mean = ins_output.mean()
                 ins_output_scale = MinMaxScaler().fit_transform(np.expand_dims(ins_output, -1)).squeeze(-1)
@@ -834,7 +876,7 @@ class FuturesTransformerModule(MlpModule):
         """可视化验证集数据流"""
         
         for name,feat in self.features.items():
-            if name=='total_gradients':
+            if name=='total_gradients' or name=='gradient_components_ori':
                 continue
             feat = feat.squeeze(-1)
             # 针对验证结果，以品种为单位计算均值，并可视化
@@ -1240,22 +1282,25 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         cls_main = cls[0][:node_num]
-        # cls_main = cls[0][2*node_num:3*node_num]
+        cls_main = cls[0][1*node_num:2*node_num]
+        # cls_main = cls[0][3*node_num:4*node_num]
         # cls_main = cls[0][3*node_num:4*node_num]
         if trend == 1:
             pre_index = np.argsort(-cls_main)[:top_num]
         else:
             pre_index = np.argsort(cls_main)[:top_num]
-        # if trend == 1:
-        #     pre_index = long_index
-        # else:
-        #     pre_index = short_index   
-        # if trend == 1:
-        #     pre_index = np.argsort(-pred_top)[:top_num]
-        #     pre_index = top_index[pre_index]
-        # else:
-        #     pre_index = np.argsort(pred_top)[:top_num]
-        #     pre_index = top_index[pre_index] 
+        
+        # scale_arr = self.scale_arr[0]
+        # pre_index_rtn = []
+        # for ins_idx in scale_arr:
+        #     part_ins =  cls_main[ins_idx]     
+        #     if trend == 1:
+        #         p_index = ins_idx[np.argsort(-part_ins)[0]]
+        #     else:
+        #         p_index = ins_idx[np.argsort(part_ins)[0]]
+        #     pre_index_rtn.append(p_index)
+        # pre_index_rtn = np.array(pre_index_rtn)   
+        
         return pre_index.astype(int)
        
     def compute_arg_sort_by_index(self, cls, dec_out, mode='single', trend=1, top_num=2):

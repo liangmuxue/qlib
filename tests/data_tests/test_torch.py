@@ -194,12 +194,6 @@ def test_js():
     t2 = torch.Tensor([0.5,0.6])
     print(js_div(t1,t2))
 
-def test_cos():
-    input1 = torch.Tensor(np.array([0,2]))
-    input2 = torch.Tensor(np.array([1,30]))
-    
-    similarity = torch.cosine_similarity(input1, input2, dim=0)
-    print(similarity) 
 
 def test_slice():
     # x = torch.arange(15).reshape(3,-1)
@@ -326,6 +320,15 @@ def test_topk():
     a = torch.ones([2,8,10])
     b = torch.topk(a, k=3, dim=-1)
     b
+    
+def test_cos():
+    feat1 = torch.rand(64)
+    feat1_normalized = F.normalize(feat1, p=2, dim=-1)
+    print("cos:", feat1_normalized)       
+    # input1 = torch.Tensor(np.array([0,2]))
+    # input2 = torch.Tensor(np.array([1,30]))
+    # similarity = torch.cosine_similarity(input1, input2, dim=0)
+    # print(similarity) 
        
 if __name__ == "__main__":
     # test_slice()
@@ -337,7 +340,8 @@ if __name__ == "__main__":
     # test_corr()
     # test_pca()
     # test_multi_grad()
-    test_topk()
+    # test_topk()
+    test_cos()
     # test_js()
     # test_cos()
     # test_nor()
