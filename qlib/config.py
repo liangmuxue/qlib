@@ -134,7 +134,7 @@ _default_config = {
     # redis
     # in order to use cache
     "redis_host": "127.0.0.1",
-    "redis_port": 6379,
+    "redis_port": 6380,
     "redis_task_db": 1,
     # This value can be reset via qlib.init
     "logging_level": logging.INFO,
