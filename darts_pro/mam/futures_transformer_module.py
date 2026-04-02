@@ -183,8 +183,9 @@ class FuturesTransformerModule(MlpModule):
                     
         # scale_arr = (cy_scale_arr,nt_scale_arr,mr_scale_arr,indus_scale_arr)
         scale_arr = [combine_scale_arr]
-        scale_arr = [nt_scale_arr,indus_scale_arr]
-        # scale_arr = {'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
+        scale_arr = [nt_scale_arr,cy_scale_arr,indus_scale_arr]
+        scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
+        scale_arr = {'indus_scale':indus_scale_arr,'nt_scale':nt_scale_arr}
         
         return scale_arr
     
@@ -278,7 +279,7 @@ class FuturesTransformerModule(MlpModule):
                 sample_heads=4,
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
-                scale_arr=self.scale_arr,
+                scales_dict=self.scale_arr,
                 device=device,
             ).to(device)             
             self.embedding_size = input_dim
@@ -293,26 +294,26 @@ class FuturesTransformerModule(MlpModule):
         self.features = {}
         # self.inout_compare_names = ['pool_layer','encoder','decoder','ins_layer']
         # self.inout_compare_names = ['pool_layer','encoder','decoder','attention_net','score_head']
-        self.inout_compare_names = ['pool_layer','encoder','decoder','top_att_layer']
+        self.inout_compare_names = ['scales_layer','score_head']
         
-        # 输入部分的全局池化
-        model.trans_model.pool_layer.register_forward_hook(FeatureExtractorHook(self.features, 'pool_layer',nodes_num=nodes_num))
-        # 查看编码器层的输入输出
-        model.trans_model.transformer_encoder.register_forward_hook(FeatureExtractorHook(self.features, 'encoder',nodes_num=nodes_num))
-        # 查看主模型中解码层输出的前后数值
-        model.trans_model.tar_decoder.register_forward_hook(FeatureExtractorHook(self.features, 'decoder',nodes_num=nodes_num))
+        # # 输入部分的全局池化
+        # model.trans_model.pool_layer.register_forward_hook(FeatureExtractorHook(self.features, 'pool_layer',nodes_num=nodes_num))
+        # # 查看编码器层的输入输出
+        # model.trans_model.transformer_encoder.register_forward_hook(FeatureExtractorHook(self.features, 'encoder',nodes_num=nodes_num))
+        # # 查看主模型中解码层输出的前后数值
+        # model.trans_model.tar_decoder.register_forward_hook(FeatureExtractorHook(self.features, 'decoder',nodes_num=nodes_num))
         # 查看后置模型中基于注意力的特征输出的前后数值
         # model.top_selector[0].top_att_layer.score_head.register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
         # 查看注意力层的前后数值
-        # model.top_selector[0].top_att_layer.att_layer.attention_net.register_forward_hook(FeatureExtractorHook(self.features, 'attention_net',nodes_num=nodes_num))   
+        model.top_selector[0].scales_layer['nt_scale'].register_forward_hook(FeatureExtractorHook(self.features, 'scales_layer',nodes_num=nodes_num))   
         # 品种拟合部分
-        model.top_selector[0].top_global_layer.register_forward_hook(FeatureExtractorHook(self.features, 'top_att_layer',nodes_num=nodes_num))
+        model.top_selector[0].score_head[0].register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
                           
     def create_loss(self, model, device="cpu"):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
         return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,output_chunk_length=self.output_chunk_length,
                                    opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, 
-                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_arr=self.scale_arr)       
+                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_dict=self.scale_arr)       
 
     def _construct_classify_layer(self, input_dim, output_dim, device=None):
         """新增策略选择模型"""
@@ -572,10 +573,17 @@ class FuturesTransformerModule(MlpModule):
         # 可视化权重和梯度
         for name,params in self.sub_models[0].named_parameters():
             global_step = self.global_step
-            if not "top_selector" in name:
+            if not "top_selector.0" in name:
                 continue
             if name.endswith("bias"):
                 continue
+            ind_flag = False
+            for ind_name in self.inout_compare_names:
+                if ind_name in name:
+                    ind_flag = True
+                    break
+            if not ind_flag:
+                continue               
             if params is not None:
                 self.logger.experiment.add_histogram('weights/' + name,params,global_step)
             if params.grad is not None:
@@ -586,15 +594,15 @@ class FuturesTransformerModule(MlpModule):
                 continue
             # 可视化重点层的输入输出数据
             self.logger.experiment.add_histogram(f'Features/{name}', feat.flatten(), self.current_epoch)  
-        # 可视化梯度
-        if 'total_gradients' in self.features:
-            total_gradients = self.features['total_gradients']
-            name_matches = ['trans_model.tar_decoder','top_att_layer.att_layer.attention_net','top_att_layer.score_head']
-            for grad_name in total_gradients.keys():
-                for item in name_matches:
-                    if item in (grad_name):
-                        grad = total_gradients[grad_name]
-                        self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
+        # # 可视化梯度
+        # if 'total_gradients' in self.features:
+        #     total_gradients = self.features['total_gradients']
+        #     name_matches = ['trans_model.tar_decoder','top_att_layer.att_layer.attention_net','top_att_layer.score_head']
+        #     for grad_name in total_gradients.keys():
+        #         for item in name_matches:
+        #             if item in (grad_name):
+        #                 grad = total_gradients[grad_name]
+        #                 self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
 
                    
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
@@ -992,7 +1000,7 @@ class FuturesTransformerModule(MlpModule):
                 dec_out, sv_indus, comm_index = output_item 
                 dec_inner.append(dec_out.cpu().numpy())
                 # 合并列表中的品种维度部分
-                sv_indus = torch.cat(sv_indus, dim=1).squeeze(-1)
+                sv_indus = torch.cat(list(sv_indus[0].values()), dim=1).squeeze(-1)
                 if cls_total[i] is None:
                     cls_total[i] = sv_indus.cpu().numpy()
                 else:
@@ -1281,10 +1289,10 @@ class FuturesTransformerModule(MlpModule):
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
-        cls_main = cls[0][:node_num]
-        cls_main = cls[0][1*node_num:2*node_num]
-        # cls_main = cls[0][3*node_num:4*node_num]
-        # cls_main = cls[0][3*node_num:4*node_num]
+        match_col = 'nt_scale'
+        for i,key in enumerate(self.scale_arr.keys()):
+            if match_col==key:
+                cls_main = cls[0][(i+1)*node_num:(i+2)*node_num]
         if trend == 1:
             pre_index = np.argsort(-cls_main)[:top_num]
         else:

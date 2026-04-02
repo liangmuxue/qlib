@@ -90,7 +90,7 @@ def softrank_ndcg_loss(scores, labels, k=None, sigma=0.1, gain_fn=None):
 class FuturesIndustryLoss(UncertaintyLoss):
     """整合不同行业板块，并基于策略选取的损失"""
 
-    def __init__(self,ref_model=None,device=None,target_mode=None,embedding_size=16,lock_epoch_num=0,scale_arr=None
+    def __init__(self,ref_model=None,device=None,target_mode=None,embedding_size=16,lock_epoch_num=0,scale_dict=None
                  ,opt_size=1,num_mixtures=5,output_chunk_length=2,cut_len=2,loss_weights=None,combine_nodes=None):
         
         super(FuturesIndustryLoss, self).__init__(ref_model=ref_model,device=device)
@@ -108,7 +108,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         self.embedding_size = embedding_size
         self.opt_size = opt_size
         self.combine_nodes = combine_nodes
-        self.scale_arr = scale_arr
+        self.scale_dict = scale_dict
         
         # 整体及品种特征值回归损失函数
         self.index_feature_loss = AdaptiveSingleFeatureLoss(loss_type='welsch', device=self.device)
@@ -200,7 +200,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_indus_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照行业计算top损失"""
         
-        indus_scale_arr = self.scale_arr[1]
+        indus_scale_arr = self.scale_arr['indus_scale']
         # 按照行业取内部的最大和最小
         top_real_index = []
         for i,instruments in enumerate(indus_scale_arr):
@@ -221,7 +221,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_nt_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照是否包含夜盘计算top损失"""
         
-        nt_scale_arr = self.scale_arr[1]
+        nt_scale_arr = self.scale_dict['nt_scale']
         top_real_index = []
         for i,instruments in enumerate(nt_scale_arr):
             if i==0:
@@ -257,7 +257,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_mr_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照交易保证金比率计算top损失"""
         
-        mr_scale_arr = self.scale_arr[2]
+        mr_scale_arr = self.scale_arr['mr_scale']
         top_real_index = []
         for i,instruments in enumerate(mr_scale_arr):
             if i==0:
@@ -277,7 +277,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_cy_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照品种创建年份计算top损失"""
         
-        cy_scale_arr = self.scale_arr[0]
+        cy_scale_arr = self.scale_arr['cy_scale']
         top_real_index = []
         for i,instruments in enumerate(cy_scale_arr):
             if i==0:
@@ -419,7 +419,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     index_target_item = future_index_round_target[j,indus_rel_index,:,i]
                     indus_index = tensor_intersect(keep_index,indus_data_index).to(keep_index.device)
                     inner_class_item = target_class_item[indus_data_index]                            
-                    sv_out_item_batch = sv[0][j]
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     if ins_rel_index.shape[0]<3:
                         continue
@@ -433,7 +432,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     # 记录主指数的多个指标特征，后续计算对比损失
                     future_covs_main_total.append(future_covs_main)   
                     price_diff_range_real = price_targets[j][ins_all]
-                    sv_out_item_real = sv[0][j]
                     # price_diff_range = target_info_inbatch[main_index_abs]['diff_range'][-self.output_chunk_length:]
                     
                     # 不同模式的损失计算                          
@@ -450,26 +448,22 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         target_len = -self.output_chunk_length + self.cut_len - 1
                         # 借用其他目标作为整体走势衡量
                         ref_indicator = 0 
-                        ref_indicator2 = 2                          
                         # 使用价格指标作为主要指标
                         price_diff_range = price_targets[j,ins_rel_index]  
                         price_diff_range_all = price_targets[j,ins_all]  
                         round_targets_item = future_round_targets[j,ins_all,target_len,0]
                         node_num = ins_all.shape[0]
-                        sv_out_item = sv_out_item_real[:node_num]
-                        sv_out_item_att = sv_out_item_real[node_num:2*node_num]
-                        sv_out_item_att2 = sv_out_item_real[2*node_num:3*node_num]
-                        # sv_out_item_att3 = sv_out_item_real[3*node_num:4*node_num]
+                        sv_out_item_nt = sv[0]['nt_scale'][j]
+                        sv_out_item_indus = sv[0]['indus_scale'][j]
                         target_item = target[j,ins_all,target_len,0]
-                        target_item_att = target[j,ins_all,target_len,1]
                         # cls_loss[i] += self.compute_main_loss(attention_scores[ins_rel_index],target_item)  
                         # cls_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index])    
-                        cls_loss[i] += self.compute_nt_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)    
+                        cls_loss[i] += self.compute_nt_top_loss(sv_out_item_nt,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)    
                         # ce_loss[i] += self.compute_cy_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
                         # ce_loss[i] += self.compute_combine_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index)  
                         # corr_loss[i] += self.compute_indus_loss(sv_out_item_att2,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
                         # ce_loss[i] += self.compute_indus_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
-                        ce_loss[i] += self.compute_indus_loss(sv_out_item_att2,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
+                        ce_loss[i] += self.compute_indus_loss(sv_out_item_indus,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
                         
                         # 辅助目标的损失
                         # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)    
