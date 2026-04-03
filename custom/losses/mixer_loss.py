@@ -200,7 +200,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_indus_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照行业计算top损失"""
         
-        indus_scale_arr = self.scale_arr['indus_scale']
+        indus_scale_arr = self.scale_dict['indus_scale']
         # 按照行业取内部的最大和最小
         top_real_index = []
         for i,instruments in enumerate(indus_scale_arr):
@@ -210,8 +210,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 top_num = 1            
             instruments = torch.Tensor(instruments).to(pred.device).long()
             pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=top_num)
+            mid_index = self.filter_middle_index(pred[instruments], mid_num=top_num, ins_rel_index=ins_rel_index)
             top_real_index.append(instruments[pred_index_long])
             top_real_index.append(instruments[pred_index_short])
+            top_real_index.append(instruments[mid_index])
         top_real_index = torch.cat(top_real_index)
         top_real_index = tensor_intersect(top_real_index,ins_rel_index)
         top_loss = self._compute_top_loss(pred, target, top_real_index)
@@ -230,8 +232,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 top_num = 2
             instruments = torch.Tensor(instruments).to(pred.device).long()
             pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=top_num)
+            mid_index = self.filter_middle_index(pred[instruments], mid_num=top_num, ins_rel_index=ins_rel_index)
             top_real_index.append(instruments[pred_index_long])
             top_real_index.append(instruments[pred_index_short])
+            top_real_index.append(instruments[mid_index])
         top_real_index = torch.cat(top_real_index)
         top_real_index = tensor_intersect(top_real_index,ins_rel_index)
         top_loss = self._compute_top_loss(pred, target, top_real_index)
@@ -257,7 +261,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_mr_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照交易保证金比率计算top损失"""
         
-        mr_scale_arr = self.scale_arr['mr_scale']
+        mr_scale_arr = self.scale_dict['mr_scale']
         top_real_index = []
         for i,instruments in enumerate(mr_scale_arr):
             if i==0:
@@ -277,7 +281,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def compute_cy_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
         """按照品种创建年份计算top损失"""
         
-        cy_scale_arr = self.scale_arr['cy_scale']
+        cy_scale_arr = self.scale_dict['cy_scale']
         top_real_index = []
         for i,instruments in enumerate(cy_scale_arr):
             if i==0:
@@ -286,8 +290,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 top_num = 1
             instruments = torch.Tensor(instruments).to(pred.device).long()
             pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=top_num)
+            mid_index = self.filter_middle_index(pred[instruments], mid_num=top_num, ins_rel_index=ins_rel_index)
             top_real_index.append(instruments[pred_index_long])
             top_real_index.append(instruments[pred_index_short])
+            top_real_index.append(instruments[mid_index])
         top_real_index = torch.cat(top_real_index)
         top_real_index = tensor_intersect(top_real_index,ins_rel_index)
         top_loss = self._compute_top_loss(pred, target, top_real_index)
@@ -360,6 +366,17 @@ class FuturesIndustryLoss(UncertaintyLoss):
             
         return pred_index_long,pred_index_short
 
+    def filter_middle_index(self,pred,mid_num=2,ins_rel_index=None):
+        pred_index = torch.argwhere(pred!=0)[:,0]
+        sort_index = pred_index[torch.argsort(-pred[pred_index])]
+        mid_pos = pred.shape[0]//2
+        pred_index_middle = sort_index[mid_pos:mid_pos+mid_num]
+        # 当前可用品种的再次筛选
+        if ins_rel_index is not None:
+            pred_index_middle = tensor_intersect(pred_index_middle,ins_rel_index)
+            
+        return pred_index_middle
+    
     def filter_top_index(self,pred,top_num=3,ins_rel_index=None,mask_mode=False):
         # 数组中已经把非目标置零，因此通过下标还原实际目标
         if mask_mode:
@@ -453,17 +470,17 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         price_diff_range_all = price_targets[j,ins_all]  
                         round_targets_item = future_round_targets[j,ins_all,target_len,0]
                         node_num = ins_all.shape[0]
-                        sv_out_item_nt = sv[0]['nt_scale'][j]
-                        sv_out_item_indus = sv[0]['indus_scale'][j]
+                        # sv_out_item = sv[0]['nt_scale'][j]
+                        sv_out_item = sv[0]['cy_scale'][j]
+                        sv_out_item_att = sv[0]['indus_scale'][j]
                         target_item = target[j,ins_all,target_len,0]
                         # cls_loss[i] += self.compute_main_loss(attention_scores[ins_rel_index],target_item)  
                         # cls_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index])    
-                        cls_loss[i] += self.compute_nt_top_loss(sv_out_item_nt,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)    
-                        # ce_loss[i] += self.compute_cy_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        ce_loss[i] += self.compute_cy_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)    
                         # ce_loss[i] += self.compute_combine_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index)  
                         # corr_loss[i] += self.compute_indus_loss(sv_out_item_att2,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
-                        # ce_loss[i] += self.compute_indus_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
-                        ce_loss[i] += self.compute_indus_loss(sv_out_item_indus,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
+                        cls_loss[i] += self.compute_indus_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        # cls_loss[i] += self.compute_indus_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
                         
                         # 辅助目标的损失
                         # fds_loss[i] += self.ccc_loss_comp(dec_out_item,target_item)    

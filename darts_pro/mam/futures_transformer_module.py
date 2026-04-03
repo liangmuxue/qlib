@@ -185,7 +185,7 @@ class FuturesTransformerModule(MlpModule):
         scale_arr = [combine_scale_arr]
         scale_arr = [nt_scale_arr,cy_scale_arr,indus_scale_arr]
         scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
-        scale_arr = {'indus_scale':indus_scale_arr,'nt_scale':nt_scale_arr}
+        scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':nt_scale_arr}
         
         return scale_arr
     
@@ -305,7 +305,7 @@ class FuturesTransformerModule(MlpModule):
         # 查看后置模型中基于注意力的特征输出的前后数值
         # model.top_selector[0].top_att_layer.score_head.register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
         # 查看注意力层的前后数值
-        model.top_selector[0].scales_layer['nt_scale'].register_forward_hook(FeatureExtractorHook(self.features, 'scales_layer',nodes_num=nodes_num))   
+        model.top_selector[0].scales_layer['indus_scale'].register_forward_hook(FeatureExtractorHook(self.features, 'scales_layer',nodes_num=nodes_num))   
         # 品种拟合部分
         model.top_selector[0].score_head[0].register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
                           
@@ -594,15 +594,15 @@ class FuturesTransformerModule(MlpModule):
                 continue
             # 可视化重点层的输入输出数据
             self.logger.experiment.add_histogram(f'Features/{name}', feat.flatten(), self.current_epoch)  
-        # # 可视化梯度
-        # if 'total_gradients' in self.features:
-        #     total_gradients = self.features['total_gradients']
-        #     name_matches = ['trans_model.tar_decoder','top_att_layer.att_layer.attention_net','top_att_layer.score_head']
-        #     for grad_name in total_gradients.keys():
-        #         for item in name_matches:
-        #             if item in (grad_name):
-        #                 grad = total_gradients[grad_name]
-        #                 self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
+        # 可视化梯度
+        if 'total_gradients' in self.features:
+            total_gradients = self.features['total_gradients']
+            name_matches = self.inout_compare_names
+            for grad_name in total_gradients.keys():
+                for item in name_matches:
+                    if item in (grad_name):
+                        grad = total_gradients[grad_name]
+                        self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
 
                    
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
@@ -1289,7 +1289,7 @@ class FuturesTransformerModule(MlpModule):
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
-        match_col = 'nt_scale'
+        match_col = 'indus_scale'
         for i,key in enumerate(self.scale_arr.keys()):
             if match_col==key:
                 cls_main = cls[0][(i+1)*node_num:(i+2)*node_num]
