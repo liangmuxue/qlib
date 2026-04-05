@@ -765,7 +765,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_info_ins = np.array(target_info_total)[real_ins_index]
         open_diff_arr = np.array([item['open_diff'] for item in target_info_ins])
         open_diff_norm = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(np.expand_dims(open_diff_arr,-1)).squeeze(-1)
-        price_targets[real_ins_index] = open_diff_norm
+        price_targets[real_ins_index] = open_diff_arr
         # 使用均值作为整体指数参考
         long_diff_seq_targets = np.array([open_diff_arr.mean()])  
         # 记录涨跌品种数量比例，用于整体趋势损失

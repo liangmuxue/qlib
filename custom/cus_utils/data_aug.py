@@ -233,6 +233,7 @@ class CollResAna():
                      max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=False)  
             self.val_dataset = val_loader.dataset
             self.train_dataset = train_loader.dataset
+        self.tft_dataset = dataset
                 
     def build_match_results(self):
         """分别找出比较准的日期和不太准的日期"""
@@ -246,8 +247,9 @@ class CollResAna():
         self.prepare_data()
         # self.relative_stat()
         # self.normal_stat()
+        self.scale_info_stat()
         # self.price_range_stat()
-        self.target_corr_stat()
+        # self.target_corr_stat()
         # self.ins_index_stat()
 
     def target_corr_stat(self):
@@ -495,6 +497,18 @@ class CollResAna():
             print("{} eva info{}".format(title,normal_info))
             # print("{} eva mean:{},std:{}".format(title,normal_info['mean'].describe(),normal_info['std'].describe()))
 
+    def scale_info_stat(self):   
+        """根据预测评估数据，统计业务属性信息"""
+        
+        # 引入基础信息包括行业分类、创建年份等
+        result_data = self.coll_result_data.merge(self.tft_dataset.base_info, on='instrument', how='left')
+        result_data['industry'] = result_data['industry'].astype(int)
+        # 关注失败记录
+        fail_result = result_data[result_data['diff_range']<0]
+        suc_result = result_data[result_data['diff_range']>=0]
+        fail_result
+        
+            
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False,jump_mode=False):
         """根据实际涨跌数据计算类别"""
         
@@ -542,7 +556,7 @@ if __name__ == "__main__":
     # compare_dataset_consistence()
     # compare_clean_data_and_continus_data(match_date=20251009)
     # compare_clean_data_and_1min_cross_data(match_date=20251009)
-    coll_ana = CollResAna("custom/data/results/stats",yaml_file="custom/config/darts/workflow_pred_futures_bidi.yaml")
+    coll_ana = CollResAna("custom/data/results/stats",yaml_file="custom/config/darts/workflow_pred_futures_trans.yaml")
     coll_ana.comprisive_stat()
        
     

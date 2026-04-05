@@ -34,12 +34,13 @@ class TFTFuturesDataset(TFTSeriesDataset):
         indus_sql = "select code,industry_id,IF(length(night_time_range)>1,1,0) as night_flag,exchange_id,price_range,limit_rate," \
             "magin_radio,create_year from trading_variety where magin_radio is not null union " \
             "(select upper(concat('zs_',code)), id,0,0,0,0,0,0 from futures_industry where delete_flag=0)"   
-        indus_data = self.dbaccessor.do_query(indus_sql)
-        indus_info_arr = []
-        for item in indus_data:
-            indus_info_arr.append([item[i] for i in range(len(item))])     
-        indus_info = pd.DataFrame(np.array(indus_info_arr),columns=["instrument","industry","night_flag","exchange_id","price_range","limit_rate","magin_radio","create_year"]) \
-            .astype({"instrument":str,"industry":str,"night_flag":int,"exchange_id":int,"price_range":int,"limit_rate":int,"magin_radio":int,"create_year":int})                     
+        base_info_data = self.dbaccessor.do_query(indus_sql)
+        base_info_arr = []
+        for item in base_info_data:
+            base_info_arr.append([item[i] for i in range(len(item))])     
+        base_info = pd.DataFrame(np.array(base_info_arr),columns=["instrument","industry","night_flag","exchange_id","price_range","limit_rate","magin_radio","create_year"]) \
+            .astype({"instrument":str,"industry":str,"night_flag":int,"exchange_id":int,"price_range":int,"limit_rate":int,"magin_radio":int,"create_year":int})               
+        self.base_info = base_info      
         # 补充扩展数据
         ext_sql = "select CAST(date_format(e.date,'%Y%m%d') AS SIGNED),t.code,e.dom_basis_rate,e.near_basis_rate from " \
             "extension_trade_info e left join trading_variety t on e.var_id=t.id where e.var_id is not null"
@@ -72,7 +73,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df[time_column] = df[time_column] - df["min_time"]
         df = df.drop(['min_time'], axis=1)
         # 合并扩展数据
-        df = pd.merge(indus_info,df,on=["instrument"],how="left",validate="one_to_many")   
+        df = pd.merge(base_info,df,on=["instrument"],how="left",validate="one_to_many")   
         df = pd.merge(df,ext_info,on=["instrument","datetime_number"],how="left",validate="one_to_one")    
         df = pd.merge(df,outer_info,on=["instrument","datetime_number"],how="left",validate="one_to_one")
         # 消除nan数据
@@ -157,7 +158,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         #     detect_method='iqr'
         # )           
         # 生成行业均值数据
-        df = self.build_industry_mean(df,indus_info=indus_info)     
+        df = self.build_industry_mean(df,indus_info=base_info)     
         df['industry'] = df['industry'].astype(int)          
         df[time_column] = df[time_column].astype(int)          
         # 消除异常数据-Again

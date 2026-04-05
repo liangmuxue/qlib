@@ -471,15 +471,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         round_targets_item = future_round_targets[j,ins_all,target_len,0]
                         node_num = ins_all.shape[0]
                         # sv_out_item = sv[0]['nt_scale'][j]
-                        sv_out_item = sv[0]['cy_scale'][j]
+                        sv_out_item = sv[0]['global_feature'][j]
                         sv_out_item_att = sv[0]['indus_scale'][j]
                         target_item = target[j,ins_all,target_len,0]
                         # cls_loss[i] += self.compute_main_loss(attention_scores[ins_rel_index],target_item)  
-                        # cls_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index])    
-                        ce_loss[i] += self.compute_cy_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)    
-                        # ce_loss[i] += self.compute_combine_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index)  
+                        # ce_loss[i] += self.compute_top_loss(sv_out_item[ins_rel_index],target_item[ins_rel_index],top_num=top_num)    
+                        # ce_loss[i] += self.compute_nt_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)    
+                        cls_loss[i] += self.compute_cy_top_loss(sv_out_item,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)    
                         # corr_loss[i] += self.compute_indus_loss(sv_out_item_att2,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
-                        cls_loss[i] += self.compute_indus_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
+                        ce_loss[i] += self.compute_indus_top_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)  
                         # cls_loss[i] += self.compute_indus_loss(sv_out_item_att,target_item,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings) 
                         
                         # 辅助目标的损失

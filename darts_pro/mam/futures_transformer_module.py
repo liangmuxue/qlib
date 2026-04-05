@@ -72,6 +72,50 @@ class FeatureExtractorHook:
         self.features[name + "_input"] = input.reshape(B,S,-1)
         self.features[name + "_output"] = output.reshape(B,S,-1)      
 
+def build_scale_arr(sw_ins_mappings):
+    """对品种按照不同业务范围进行分组"""
+    
+    indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+    # 按照行业分组
+    indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+    threhold_bin = [['ZS_NFFI','ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
+    indus_scale_arr = [[],[]]
+    for i in range(len(indus_code)):
+        if indus_code[i] in threhold_bin[0]:
+            indus_scale_arr[0].append(indus_data_index[i])
+        else:
+            indus_scale_arr[1].append(indus_data_index[i])
+    indus_scale_arr[0] = np.concatenate(indus_scale_arr[0])
+    indus_scale_arr[1] = np.concatenate(indus_scale_arr[1])
+    magin_radio = FuturesMappingUtil.get_magin_radio_flags(sw_ins_mappings).astype(int)
+    create_year = FuturesMappingUtil.get_create_year_flags(sw_ins_mappings).astype(int)
+    # 交易保证金比例按照18分为前后2组
+    threhold_bin = [[0,18],[18,100]]
+    mr_scale_arr = [np.where((magin_radio>=threhold[0])&(magin_radio<threhold[1]))[0] for threhold in threhold_bin]
+    # 按照是否包含夜盘来分组
+    night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
+    nt_scale_arr =  [np.where(night_flag==i)[0] for i in range(2)]
+    # 创建年份按照2019分为前后2组
+    threhold_bin = [[0,2018],[2018,2030]]
+    cy_scale_arr = [np.where((create_year>threhold[0])&(create_year<=threhold[1]))[0] for threhold in threhold_bin]
+    
+    # 统合分组
+    combine_scale_arr = [nt_scale_arr[0],[],[]]
+    for instrument_idx in nt_scale_arr[1]:
+        # 对包含夜盘的品种，再按照创建年份来分
+        if create_year[instrument_idx]<=2012:
+            combine_scale_arr[1].append(instrument_idx)
+        else:
+            combine_scale_arr[2].append(instrument_idx)
+                
+    # scale_arr = (cy_scale_arr,nt_scale_arr,mr_scale_arr,indus_scale_arr)
+    scale_arr = [combine_scale_arr]
+    scale_arr = [nt_scale_arr,cy_scale_arr,indus_scale_arr]
+    scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
+    scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr}
+    
+    return scale_arr
+
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
 
@@ -110,7 +154,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = self._build_scale_arr()
+        self.scale_arr = build_scale_arr(train_sw_ins_mappings)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
@@ -143,51 +187,6 @@ class FuturesTransformerModule(MlpModule):
     def set_outer_params(self, params):
         for name in params:
             setattr(self, name, params[name])       
-    
-    def _build_scale_arr(self):
-        """对品种按照不同业务范围进行分组"""
-        
-        sw_ins_mappings = self.train_sw_ins_mappings
-        indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-        # 按照行业分组
-        indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
-        threhold_bin = [['ZS_NFFI','ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
-        indus_scale_arr = [[],[]]
-        for i in range(len(indus_code)):
-            if indus_code[i] in threhold_bin[0]:
-                indus_scale_arr[0].append(indus_data_index[i])
-            else:
-                indus_scale_arr[1].append(indus_data_index[i])
-        indus_scale_arr[0] = np.concatenate(indus_scale_arr[0])
-        indus_scale_arr[1] = np.concatenate(indus_scale_arr[1])
-        magin_radio = FuturesMappingUtil.get_magin_radio_flags(sw_ins_mappings).astype(int)
-        create_year = FuturesMappingUtil.get_create_year_flags(sw_ins_mappings).astype(int)
-        # 交易保证金比例按照18分为前后2组
-        threhold_bin = [[0,18],[18,100]]
-        mr_scale_arr = [np.where((magin_radio>=threhold[0])&(magin_radio<threhold[1]))[0] for threhold in threhold_bin]
-        # 按照是否包含夜盘来分组
-        night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
-        nt_scale_arr =  [np.where(night_flag==i)[0] for i in range(2)]
-        # 创建年份按照2019分为前后2组
-        threhold_bin = [[0,2018],[2018,2030]]
-        cy_scale_arr = [np.where((create_year>threhold[0])&(create_year<=threhold[1]))[0] for threhold in threhold_bin]
-        
-        # 统合分组
-        combine_scale_arr = [nt_scale_arr[0],[],[]]
-        for instrument_idx in nt_scale_arr[1]:
-            # 对包含夜盘的品种，再按照创建年份来分
-            if create_year[instrument_idx]<=2012:
-                combine_scale_arr[1].append(instrument_idx)
-            else:
-                combine_scale_arr[2].append(instrument_idx)
-                    
-        # scale_arr = (cy_scale_arr,nt_scale_arr,mr_scale_arr,indus_scale_arr)
-        scale_arr = [combine_scale_arr]
-        scale_arr = [nt_scale_arr,cy_scale_arr,indus_scale_arr]
-        scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
-        scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':nt_scale_arr}
-        
-        return scale_arr
     
     def create_real_model(self,
         output_dim: Tuple[int, int],
@@ -292,9 +291,9 @@ class FuturesTransformerModule(MlpModule):
     
     def reg_hook(self,model,nodes_num):
         self.features = {}
-        # self.inout_compare_names = ['pool_layer','encoder','decoder','ins_layer']
         # self.inout_compare_names = ['pool_layer','encoder','decoder','attention_net','score_head']
-        self.inout_compare_names = ['scales_layer','score_head']
+        self.inout_compare_names = ['indus_scale','nt_scale','cy_scale','score_head0','score_head1','score_head2','score_head3']
+        self.inout_compare_names = ['indus_scale','score_head0','score_head1']
         
         # # 输入部分的全局池化
         # model.trans_model.pool_layer.register_forward_hook(FeatureExtractorHook(self.features, 'pool_layer',nodes_num=nodes_num))
@@ -304,10 +303,12 @@ class FuturesTransformerModule(MlpModule):
         # model.trans_model.tar_decoder.register_forward_hook(FeatureExtractorHook(self.features, 'decoder',nodes_num=nodes_num))
         # 查看后置模型中基于注意力的特征输出的前后数值
         # model.top_selector[0].top_att_layer.score_head.register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
-        # 查看注意力层的前后数值
-        model.top_selector[0].scales_layer['indus_scale'].register_forward_hook(FeatureExtractorHook(self.features, 'scales_layer',nodes_num=nodes_num))   
-        # 品种拟合部分
-        model.top_selector[0].score_head[0].register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
+        
+        # 查看关注层的前后数值
+        model.top_selector[0].score_head[0].register_forward_hook(FeatureExtractorHook(self.features, 'score_head0',nodes_num=nodes_num))
+        for i,key in enumerate(self.scale_arr.keys()):
+            model.top_selector[0].scales_layer[key].register_forward_hook(FeatureExtractorHook(self.features, key,nodes_num=nodes_num))   
+            model.top_selector[0].score_head[i+1].register_forward_hook(FeatureExtractorHook(self.features, 'score_head{}'.format(i+1),nodes_num=nodes_num))
                           
     def create_loss(self, model, device="cpu"):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
@@ -490,7 +491,7 @@ class FuturesTransformerModule(MlpModule):
         ) = train_batch
                 
         inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
-               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class)     
+               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class,target_info)     
         past_target = train_batch[0]
         input_batch = self._process_input_batch(inp)
         future_covs = input_batch[1]
@@ -557,14 +558,16 @@ class FuturesTransformerModule(MlpModule):
         
         # 手动维护global_step变量  
         self.trainer.fit_loop.epoch_loop.batch_loop.manual_loop.optim_step_progress.increment_completed()
-        
-        # 可视化中间输出和结果的比对
+
+        # 可视化中间结果与实际目标的比较情况 
         # self.viz_in_out_data(mode="train") 
-        if 'gradient_components_ori' in  self.features:
-            gradient_components_ori = self.features['gradient_components_ori']
-            similarity = analyze_similarity(gradient_components_ori,task_grads_size=len(self.task_weights[0]))     
-            for i in range(len(self.task_weights[0])-1):
-                self.log("grad_similarity_{}".format(i), similarity[i].item(),batch_size=train_batch[0].shape[0], prog_bar=False) 
+                
+        # 可视化中间输出和结果的比对
+        # if 'gradient_components_ori' in  self.features:
+        #     gradient_components_ori = self.features['gradient_components_ori']
+        #     similarity = analyze_similarity(gradient_components_ori,task_grads_size=len(self.task_weights[0]))     
+        #     for i in range(len(self.task_weights[0])-1):
+        #         self.log("grad_similarity_{}".format(i), similarity[i].item(),batch_size=train_batch[0].shape[0], prog_bar=False) 
         
         return total_loss, detail_loss, output 
 
@@ -594,6 +597,8 @@ class FuturesTransformerModule(MlpModule):
                 continue
             # 可视化重点层的输入输出数据
             self.logger.experiment.add_histogram(f'Features/{name}', feat.flatten(), self.current_epoch)  
+            
+        
         # 可视化梯度
         if 'total_gradients' in self.features:
             total_gradients = self.features['total_gradients']
@@ -647,7 +652,7 @@ class FuturesTransformerModule(MlpModule):
         ) = val_batch
               
         inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
-               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class) 
+               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class,target_info) 
         input_batch = self._process_input_batch(inp)
         future_covs = input_batch[1]
         (output, vr_class, vr_class_list) = self(input_batch, optimizer_idx=-1)
@@ -689,7 +694,8 @@ class FuturesTransformerModule(MlpModule):
             price_targets,
             past_future_round_targets,
             index_round_targets,
-            target_class
+            target_class,
+            target_info
         ) = input_batch
         dim_variable = -1
 
@@ -728,9 +734,11 @@ class FuturesTransformerModule(MlpModule):
         past_index_targets = past_index_targets[:, indus_rel_index,:,:]
         # 切分单独的过去round数值
         past_round_targets = past_future_round_targets[:,:,:self.input_chunk_length,:]
+        
+        price_targets_real = price_targets # np.array([t['open_diff'] for t in target_info])
         # 整合相关数据，分为输入值和目标值两组
         return (x_past_array, x_future_array, historic_future_covariates, future_covariates, 
-                static_covariates, price_targets, past_round_targets, past_index_targets,target_class)
+                static_covariates, price_targets_real, past_round_targets, past_index_targets,target_class)
     
     def _compute_loss(self, output, target, optimizers_idx=0):
         """重载父类方法"""
@@ -766,9 +774,9 @@ class FuturesTransformerModule(MlpModule):
         
         if self.mode is None or not self.mode.startswith("pred_"):
             # 验证模式，进行board的可视化
-            self.viz_data_board()
-            # 可视化中间输出
-            self.viz_in_out_data(mode="val")            
+            # self.viz_data_board()
+            # 可视化中间结果与实际目标的比较情况
+            # self.viz_in_out_data(mode="val")            
             return
         
         # 测试模式，在此进行结果的可视化
@@ -901,8 +909,8 @@ class FuturesTransformerModule(MlpModule):
             
     def viz_in_out_data(self,mode="train"): 
         """可视化中间结果与实际目标的比较情况"""
-        
-        data_flow = {'data':{},'top_data':{}}
+
+        data_flow = {'long_yield':{},'short_yield':{},'win_rate':{}}
         for name,feat in self.features.items():
             if name=='total_gradients':
                 continue
@@ -918,36 +926,113 @@ class FuturesTransformerModule(MlpModule):
             elif len(feat.shape)==3:
                 ins_feat = feat.mean(-1)
             for ind_name in self.inout_compare_names:
-                if (ind_name+"_") in name and name.endswith("output"):
-                    # 与实际目标进行一致性比较
+                if (ind_name) in name and name.endswith("output"):
+                    # 取得排名数值
                     price_targets = self.cur_price_targets[:,self.ins_all]
-                    if ins_feat.shape[0]!=price_targets.shape[0]:
-                        return
-                    ccc_dis = self.criterion.ccc_loss_comp(ins_feat, price_targets)
-                    # 同时进行top值的一致性比较
+                    # 计算收益率和胜率
                     top_pred, top_pred_index = torch.topk(ins_feat, k=self.top_num, dim=-1)
                     top_pred_inverse, top_pred_inverse_index = torch.topk(ins_feat, k=self.top_num, largest=False, dim=-1)
-                    top_pred_data = torch.cat([top_pred,top_pred_inverse],-1)
-                    indices = torch.cat([top_pred_index,top_pred_inverse_index],-1).long()
-                    top_target_data = torch.gather(price_targets, 1, indices) 
-                    top_ccc_dis = self.criterion.ccc_loss_comp(top_pred_data, top_target_data)                    
-                    data_flow['data'][ind_name] = ccc_dis
-                    data_flow['top_data'][ind_name] = top_ccc_dis
+                    long_target_data = torch.gather(price_targets, -1, top_pred_index) 
+                    short_target_data = torch.gather(price_targets, -1, top_pred_inverse_index)           
+                    long_yield = long_target_data.mean()
+                    long_win = torch.sum(long_target_data>0)/long_target_data.flatten().shape[0]
+                    short_yield = -short_target_data.mean()
+                    short_win = torch.sum(short_target_data<0)/short_target_data.flatten().shape[0]
+                    data_flow['long_yield'][ind_name] = long_yield
+                    data_flow['short_yield'][ind_name] = short_yield
+                    data_flow['win_rate'][ind_name] = (long_win+short_win)/2
+                    # data_flow['short_win'][ind_name] = short_win
                     break
             
-        metrics = np.zeros([len(self.inout_compare_names),2])
+        metrics = np.zeros([len(self.inout_compare_names),3])
         for i,name in enumerate(self.inout_compare_names):
-            metrics[i,0] = data_flow['data'][name]
-            metrics[i,1] = data_flow['top_data'][name]
-        category_labels = ['data','top_data']
+            metrics[i,0] = data_flow['long_yield'][name]
+            metrics[i,1] = data_flow['short_yield'][name]
+            metrics[i,2] = data_flow['win_rate'][name]
+        category_labels = ['long_yield','short_yield','win_rate']
         group_labels = self.inout_compare_names
-        colors = ['#1f77b4', '#ff7f0e']
+        colors = ['#CDF022', '#541AC4', '#F02241']
         if mode=="train":
-            fig = plot_grouped_bar(metrics, group_labels, category_labels, ylabel='Value', title='InOut Features in Train',colors=colors)
+            fig = plot_grouped_bar(metrics, group_labels, category_labels, ylabel='Value', title='yield in Train',colors=colors)
         else:
-            fig = plot_grouped_bar(metrics, group_labels, category_labels, ylabel='Value',title='InOut Features in Valid',colors=colors)
-        self.logger.experiment.add_figure('inoutCCC_{}/'.format(mode), fig, global_step=self.global_step)  
-                                                            
+            fig = plot_grouped_bar(metrics, group_labels, category_labels, ylabel='Value',title='yield in Valid',colors=colors)
+        self.logger.experiment.add_figure('inoutRes_{}/'.format(mode), fig, global_step=self.global_step)  
+    
+    def viz_dig_info(self,dig_info,mode="val"): 
+        
+        indus_info,cy_info,win_rate_info,yield_rate_info = dig_info
+        
+        colors = ['#CDF022', '#541AC4']
+        category_labels = ["suc_cnt","fail_cnt"]
+        group_labels = indus_info['industry'].values
+        fig = plot_grouped_bar(indus_info[category_labels].values, group_labels, category_labels, ylabel='Number',title='industry dig',colors=colors)
+        self.logger.experiment.add_figure('indusInfo_{}/'.format(mode), fig, global_step=self.global_step)  
+        
+        group_labels = cy_info['create_year'].values
+        fig = plot_grouped_bar(cy_info[category_labels].values, group_labels, category_labels, ylabel='Number',title='createYear dig',colors=colors)
+        self.logger.experiment.add_figure('cyInfo_{}/'.format(mode), fig, global_step=self.global_step)    
+        
+        category_labels = ["suc_cnt","fail_cnt","fail_trend_cnt"]      
+        colors = ['#CDF022', '#541AC4', '#F02241']
+        group_labels = win_rate_info['mode'].values
+        fig = plot_grouped_bar(win_rate_info[category_labels].values.astype(int), group_labels, category_labels, ylabel='Number',title='win rate dig',colors=colors)
+        self.logger.experiment.add_figure('winRate_{}/'.format(mode), fig, global_step=self.global_step)  
+        
+        category_labels = ["suc_yield","fail_yield","fail_trend_yield"]     
+        group_labels = yield_rate_info['mode'].values
+        fig = plot_grouped_bar(yield_rate_info[category_labels].values.astype(float), group_labels, category_labels, ylabel='Number',title='yield rate dig',colors=colors)
+        self.logger.experiment.add_figure('yieldRate_{}/'.format(mode), fig, global_step=self.global_step)  
+                        
+    def dig_result_info(self,coll_results):
+        """对预测评判信息进一步挖掘，后续用于可视化"""
+        
+        tft_dataset = global_var.get_value("dataset") 
+        result_data = coll_results.merge(tft_dataset.base_info, on='instrument', how='left')
+        result_data['industry'] = result_data['industry'].astype(int)
+        result_data['create_year'] = result_data['create_year'].astype(int)
+        result_data['trend_value'] = result_data['trend_value'].astype(int)
+        
+        # 分别统计成功失败的情况
+        fail_result = result_data[result_data['diff_range']<0]
+        suc_result = result_data[result_data['diff_range']>=0]    
+        suc_fail_info = np.array([[0,suc_result.shape[0],fail_result.shape[0]]])
+        
+        # 按照行业统计收益率情况
+        indus_info = pd.DataFrame(suc_fail_info,columns=['industry',"suc_cnt","fail_cnt"])
+        suc_res = result_data.groupby("industry")['diff_range'].apply(lambda x: (x>0).sum()).to_frame(name='suc_cnt')
+        fail_res = result_data.groupby("industry")['diff_range'].apply(lambda x: (x<=0).sum()).to_frame(name='fail_cnt')
+        total_res = suc_res.merge(fail_res, on='industry', how='left').reset_index()
+        indus_info = pd.concat([indus_info,total_res])
+        
+        # 按照创建年份，统计收益率情况   
+        cy_info = pd.DataFrame(suc_fail_info,columns=['create_year',"suc_cnt","fail_cnt"])
+        suc_res = result_data.groupby("create_year")['diff_range'].apply(lambda x: (x>0).sum()).to_frame(name='suc_cnt')
+        fail_res = result_data.groupby("create_year")['diff_range'].apply(lambda x: (x<=0).sum()).to_frame(name='fail_cnt')
+        total_res = suc_res.merge(fail_res, on='create_year', how='left').reset_index()
+        cy_info = pd.concat([cy_info,total_res])   
+        cy_info['create_year'] = cy_info['create_year'].astype(int)    
+        
+        # 按照多空判断，统计收益率情况   
+        long_fail = result_data[(result_data['diff_range']<0)&(result_data['trend_value']==1)]
+        long_fail_withtrend = long_fail[(long_fail['real_trend_values']<0)]
+        long_suc = result_data[(result_data['diff_range']>0)&(result_data['trend_value']==1)]
+        short_fail = result_data[(result_data['diff_range']<0)&(result_data['trend_value']==0)]
+        short_fail_withtrend = short_fail[(short_fail['real_trend_values']>0)]
+        short_suc = result_data[(result_data['diff_range']>0)&(result_data['trend_value']==0)]   
+        total_fail_withtrend = pd.concat([long_fail_withtrend,short_fail_withtrend])
+        # Win Rate
+        data = [['total',suc_result.shape[0],fail_result.shape[0],total_fail_withtrend.shape[0]],
+                ['short',short_suc.shape[0],short_fail.shape[0],short_fail_withtrend.shape[0]],
+                ['long',long_suc.shape[0],long_fail.shape[0],long_fail_withtrend.shape[0]],]
+        win_rate_info = pd.DataFrame(np.array(data),columns=['mode',"suc_cnt","fail_cnt","fail_trend_cnt"])    
+        # Yield Rate
+        data = [['total',suc_result['diff_range'].sum(),-fail_result['diff_range'].sum(),-total_fail_withtrend['diff_range'].sum()],
+                ['short',short_suc['diff_range'].sum(),-short_fail['diff_range'].sum(),-short_fail_withtrend['diff_range'].sum()],
+                ['long',long_suc['diff_range'].sum(),-long_fail['diff_range'].sum(),-long_fail_withtrend['diff_range'].sum()]]
+        yield_rate_info = pd.DataFrame(np.array(data),columns=['mode',"suc_yield","fail_yield","fail_trend_yield"])            
+        return (indus_info,cy_info,win_rate_info,yield_rate_info)        
+        
+                                                         
     def dump_val_data(self, val_batch, outputs, batch_data):
     
         output, vr_class, price_outputs, past_future_round_targets = outputs
@@ -1181,12 +1266,16 @@ class FuturesTransformerModule(MlpModule):
 
             # 验证准确性
             coll_results = self.collect_result_compindex(date=date, target_info=target_info_list, result_list=result_list, keep_index=keep_index)  
+            
             # 把结果数据整合到预测记录中
             if result_total_list is None:
                 result_total_list = coll_results
             else:
                 result_total_list = pd.concat([result_total_list, coll_results])                
 
+        dig_info = self.dig_result_info(result_total_list)
+        self.viz_dig_info(dig_info)
+        
         if predict_mode:
             return result_date_list      
         
@@ -1290,9 +1379,12 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         match_col = 'indus_scale'
+        match_col = 'cy_scale'
         for i,key in enumerate(self.scale_arr.keys()):
             if match_col==key:
                 cls_main = cls[0][(i+1)*node_num:(i+2)*node_num]
+        # cls_main = cls[0][:node_num]
+        
         if trend == 1:
             pre_index = np.argsort(-cls_main)[:top_num]
         else:
@@ -1347,8 +1439,8 @@ class FuturesTransformerModule(MlpModule):
     def collect_result_compindex(self, date=None, target_info=None, result_list=None, keep_index=None):
  
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
-        industry_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
-        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
+        open_diff = np.array([t['open_diff'] for t in target_info])[keep_index]
+        real_trend_values = open_diff.mean()
         
         coll_results = []
         # 对于预测数据，生成对应涨跌幅类别
@@ -1370,6 +1462,7 @@ class FuturesTransformerModule(MlpModule):
         coll_results['diff_range'] = coll_results['diff_range'].astype(float)
         coll_results['target_class'] = coll_results['target_class'].astype(int)
         coll_results['date'] = date
+        coll_results['real_trend_values'] = real_trend_values
         
         return coll_results        
         
@@ -1432,7 +1525,7 @@ class FuturesTransformerModule(MlpModule):
         ) = batch
                
         inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
-               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class)     
+               static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class,target_info)     
         input_batch = self._process_input_batch(inp)
         (output, vr_class, vr_class_list) = self(input_batch, optimizer_idx=-1)
         choice_out, trend_value, combine_index = vr_class
