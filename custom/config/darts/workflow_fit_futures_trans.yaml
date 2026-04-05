@@ -58,7 +58,7 @@ task:
             n_jobs: 20
             log_every_n_steps: 5
             type: 'fit_futures_trans'
-            n_epochs : 100
+            n_epochs : 180
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
@@ -82,7 +82,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanDataAllCutlen2_transMulScaleTopLoss_CosLr_2411"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                task_weights: [[0.5,0.5],[1.0]]
                grad_limits: [5.0,3.0]

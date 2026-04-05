@@ -963,7 +963,7 @@ class FuturesTransformerModule(MlpModule):
         indus_info,cy_info,win_rate_info,yield_rate_info = dig_info
         
         colors = ['#CDF022', '#541AC4']
-        category_labels = ["suc_cnt","fail_cnt"]
+        category_labels = ["suc_yield","fail_yield"]
         group_labels = indus_info['industry'].values
         fig = plot_grouped_bar(indus_info[category_labels].values, group_labels, category_labels, ylabel='Number',title='industry dig',colors=colors)
         self.logger.experiment.add_figure('indusInfo_{}/'.format(mode), fig, global_step=self.global_step)  
@@ -995,20 +995,22 @@ class FuturesTransformerModule(MlpModule):
         # 分别统计成功失败的情况
         fail_result = result_data[result_data['diff_range']<0]
         suc_result = result_data[result_data['diff_range']>=0]    
-        suc_fail_info = np.array([[0,suc_result.shape[0],fail_result.shape[0]]])
+        # suc_fail_info = np.array([[0,suc_result.shape[0],fail_result.shape[0]]])
+        suc_fail_info = np.array([[0,suc_result['diff_range'].sum(),-fail_result['diff_range'].sum()]])
         
         # 按照行业统计收益率情况
-        indus_info = pd.DataFrame(suc_fail_info,columns=['industry',"suc_cnt","fail_cnt"])
-        suc_res = result_data.groupby("industry")['diff_range'].apply(lambda x: (x>0).sum()).to_frame(name='suc_cnt')
-        fail_res = result_data.groupby("industry")['diff_range'].apply(lambda x: (x<=0).sum()).to_frame(name='fail_cnt')
-        total_res = suc_res.merge(fail_res, on='industry', how='left').reset_index()
+        indus_info = pd.DataFrame(suc_fail_info,columns=['industry',"suc_yield","fail_yield"])
+        suc_res = suc_result.groupby("industry")['diff_range'].apply(lambda x: x.sum()).to_frame(name='suc_yield')
+        fail_res = -fail_result.groupby("industry")['diff_range'].apply(lambda x: x.sum()).to_frame(name='fail_yield')
+        total_res = suc_res.merge(fail_res, on='industry', how='left').reset_index().fillna(0)
         indus_info = pd.concat([indus_info,total_res])
+        indus_info['industry'] = indus_info['industry'].astype(int)    
         
         # 按照创建年份，统计收益率情况   
-        cy_info = pd.DataFrame(suc_fail_info,columns=['create_year',"suc_cnt","fail_cnt"])
-        suc_res = result_data.groupby("create_year")['diff_range'].apply(lambda x: (x>0).sum()).to_frame(name='suc_cnt')
-        fail_res = result_data.groupby("create_year")['diff_range'].apply(lambda x: (x<=0).sum()).to_frame(name='fail_cnt')
-        total_res = suc_res.merge(fail_res, on='create_year', how='left').reset_index()
+        cy_info = pd.DataFrame(suc_fail_info,columns=['create_year',"suc_yield","fail_yield"])
+        suc_res = suc_result.groupby("create_year")['diff_range'].apply(lambda x: x.sum()).to_frame(name='suc_yield')
+        fail_res = -fail_result.groupby("create_year")['diff_range'].apply(lambda x: x.sum()).to_frame(name='fail_yield')
+        total_res = suc_res.merge(fail_res, on='create_year', how='left').reset_index().fillna(0)
         cy_info = pd.concat([cy_info,total_res])   
         cy_info['create_year'] = cy_info['create_year'].astype(int)    
         
