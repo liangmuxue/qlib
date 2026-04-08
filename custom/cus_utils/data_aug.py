@@ -224,7 +224,7 @@ class CollResAna():
             process_model.init_env(dataset)
             self.output_chunk_length = process_model.optargs["forecast_horizon"]
             emb_size = dataset.get_emb_size()
-            model = process_model._build_model(dataset,emb_size=emb_size,use_model_name=False,mode=0) 
+            model = process_model._build_model(dataset,emb_size=emb_size,use_model_name=False,mode=1) 
             model.set_outer_params({'pred_weights':process_model.optargs["pred_weights"],'mode':process_model.type,'candidate_inverse':process_model.optargs['candidate_inverse']}) 
             model.mode = "predict"
             _,_,train_loader,val_loader= \

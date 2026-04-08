@@ -522,21 +522,50 @@ class TFTWithFutureCovariates(nn.Module):
         
         return (pred_seq,pred_tar), sample_attn_weights
 
+class ContinuousToDiscreteIndex(nn.Module):
+    def __init__(self, num_indices=3, hidden_dim=8):
+        super().__init__()
+        self.num_indices = num_indices
+        # 连续参考值 → 映射为离散索引的 logits
+        self.net = nn.Sequential(
+            nn.Linear(1, hidden_dim),  # 输入：1维连续参考值
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_indices)  # 输出：num_indices 个索引的分数
+        )
+
+    def forward(self, continuous_ref, tau=1.0):
+        """
+        continuous_ref: 连续参考值 [B, 1]
+        tau: 温度系数（越小越接近硬索引）
+        return: 可导的离散索引 one-hot / 软索引
+        """
+        logits = self.net(continuous_ref)
+        # 核心：Gumbel-Softmax → 连续值可导选择离散索引
+        soft_index = F.gumbel_softmax(logits, tau=tau, hard=False)
+        return soft_index  # [B, num_indices] 每一行代表选中每个离散索引的概率
+    
 class AttScaleFeature(nn.Module):
     """按照指定尺度，实现特征处理"""
 
-    def __init__(self,sample_dim,input_dim,scale_arr=None, hidden_dim=16, dropout=0.1,device=None):
+    def __init__(self,sample_dim,input_dim,scale_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.scale_arr = [torch.Tensor(s).long().to(device) for s in scale_arr]
+        self.num_indices = num_indices
+        
         ins_layer = []
+        # TOP值选取网络
         for scaler in self.scale_arr:
             sample_dim_inner = scaler.shape[0]
             ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
                                 layer_norm=True,batch_norm=False,dropout=dropout)
             ins_layer.append(ins_layer_inner)
         self.ins_layer = nn.ParameterList(ins_layer)
-
+        # 整体趋势计算网络
+        trend_num = len(self.scale_arr)
+        self.trend_layer =  LinelessLayer(sample_dim*input_dim,trend_num,hidden_size=sample_dim,
+                                layer_norm=False,batch_norm=True,dropout=0)
+        
     def forward(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, _ = x.shape
@@ -546,8 +575,11 @@ class AttScaleFeature(nn.Module):
         for i,scaler in enumerate(self.scale_arr):
             x_part = x[:,scaler,:].reshape(batch_size,-1)
             output[:,scaler] = self.ins_layer[i](x_part)
-           
-        return output
+        output2index_trend = torch.zeros([batch_size,len(self.scale_arr),self.num_indices]).to(x.device)
+        # 整体趋势网络计算
+        output_trend = self.trend_layer(x.reshape(batch_size,-1)) 
+            
+        return output,output_trend,output2index_trend
                         
 class SparseGateFeatureTopK(nn.Module):
     """综合TOPK选取"""
@@ -580,7 +612,9 @@ class SparseGateFeatureTopK(nn.Module):
         # 分别按照夜盘类别、行业类别、保证金范围生成不同注意力尺度的网络计算
         self.top_global_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
                                     layer_norm=True,batch_norm=False,dropout=dropout).double()
-        scales_layer = {}             
+        self.trend_global_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=hidden_dim,
+                                    layer_norm=False,batch_norm=False,dropout=dropout).double()                                    
+        scales_layer = {}         
         self.scales_dict = scales_dict         
         for key in scales_dict:
             scales_layer[key] = AttScaleFeature(sample_dim,input_dim,scale_arr=scales_dict[key],device=device)
@@ -591,17 +625,23 @@ class SparseGateFeatureTopK(nn.Module):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
         features_list = {}
+        trend_list = {}
+        trend_logits_list = {}
         # 分别根据不同的业务尺度，生成1维度特征
         g_features = self.top_global_layer(x.reshape(batch_size,-1))  
+        g_trend_features = self.trend_global_layer(x.reshape(batch_size,-1))  
         g_features_combine = self.score_head[0](g_features)
         features_list['global_feature'] = g_features_combine
+        trend_list['global_trend_feature'] = g_trend_features
         for i,key in enumerate(self.scales_layer.keys()):
-            scale_features = self.scales_layer[key](x)  
+            scale_features,trend_features,trend_index_logits = self.scales_layer[key](x)  
             # 合并主体特征和分尺度特征
             combine_features = self.score_head[(i+1)](g_features + scale_features)
             features_list[key] = combine_features
+            trend_list[key] = trend_features
+            trend_logits_list[key] = trend_index_logits
         
-        return features_list
+        return features_list,trend_list,trend_logits_list
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -673,16 +713,17 @@ class UnionTransCombine(nn.Module):
         y_pred_reshape = pred_seq.reshape(pred_seq.shape[0],-1)
         
         # dec_out_combine = self.dec_layer(y_pred_reshape).reshape(pred_seq.shape[0],self.sample_dim,self.pred_len,self.target_feat_dim)
-        dec_out_combine = pred_seq[:,:,:,:self.target_feat_dim]
+        dec_out_combine = []
         cls_out_combine = []    
+        index_data_combine = []
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features_list = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
+            features_list,trend_list,trend_logits_list = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
             cls_out_combine.append(features_list)
-        # 整体指数预测的网络输出
-        # index_data_combine = self.index_combine_layer(y_pred_reshape)
-        index_data_combine = pred_seq[:,0,:,0]
+            # 整体指数预测的网络输出
+            index_data_combine.append(trend_list)
+            dec_out_combine.append(trend_logits_list)
         
         return dec_out_combine,cls_out_combine,index_data_combine   
 
