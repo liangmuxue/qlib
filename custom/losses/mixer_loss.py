@@ -398,10 +398,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
     
     def build_scale_trend_output(self,sw_index,batch_no,trend_output=None):
 
-        if "global_trend_feature" not in trend_output:
-            trend_output["global_trend_feature"] = sw_index["global_trend_feature"][batch_no]
-        else:
-            trend_output["global_trend_feature"] = torch.cat([trend_output["global_trend_feature"],sw_index["global_trend_feature"][batch_no]])
+        # if "global_trend_feature" not in trend_output:
+        #     trend_output["global_trend_feature"] = sw_index["global_trend_feature"][batch_no]
+        # else:
+        #     trend_output["global_trend_feature"] = torch.cat([trend_output["global_trend_feature"],sw_index["global_trend_feature"][batch_no]])
         for key in self.scale_dict.keys():
             index_data = sw_index[key][batch_no].unsqueeze(0)
             if key not in trend_output:
@@ -410,21 +410,21 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 trend_output[key] = torch.cat([trend_output[key],index_data],dim=0)
         return trend_output        
 
-    def build_scale_trend_target(self,target,ins_rel_index=None,trend_target=None):
+    def build_scale_trend_target(self,target_info,ins_rel_index=None,trend_target=None):
 
-        if "global_trend_feature" not in trend_target:
-            trend_target["global_trend_feature"] = target[ins_rel_index].mean().unsqueeze(0)
-        else:
-            trend_target["global_trend_feature"] = torch.cat([trend_target["global_trend_feature"],target[ins_rel_index].mean().unsqueeze(0)])
         for key in self.scale_dict.keys():
             scale_arr = self.scale_dict[key]
             scale_target = []
-            for instruments in scale_arr:
+            scale_value = torch.Tensor(target_info['scale_arr'][key]).to(ins_rel_index.device)
+            for i,instruments in enumerate(scale_arr):
                 instruments = tensor_intersect(instruments,ins_rel_index)
                 if instruments.shape[0]==0:
-                    scale_target.append(torch.tensor(0).to(target.device))
+                    scale_target.append(torch.tensor(0).to(ins_rel_index.device))
                 else:
-                    scale_target_mean = target[instruments].mean()
+                    if scale_value.shape[0]<i+1:
+                        scale_target_mean = torch.tensor(0).to(ins_rel_index.device)
+                    else:
+                        scale_target_mean = scale_value[i]
                     scale_target.append(scale_target_mean)                    
             scale_target = torch.stack(scale_target).unsqueeze(0)
             if key not in trend_target:
@@ -481,9 +481,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     inner_class_item = target_class_item[indus_data_index]                            
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     target_item = target[j,ins_all,target_len,0]
+                    target_info_item = target_info[j][main_index_abs]
                     # 收集趋势业务数据
                     self.build_scale_trend_output(sw_index_data[0],j,trend_output=trend_output)
-                    self.build_scale_trend_target(target_item,trend_target=trend_target,ins_rel_index=ins_rel_index)   
+                    self.build_scale_trend_target(target_info_item,trend_target=trend_target,ins_rel_index=ins_rel_index)   
                                      
                     if ins_rel_index.shape[0]<3:
                         continue
@@ -513,26 +514,26 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 根据网络输出，生成针对性业务分支输出,并依次计算损失
                         scale_output = self.build_scale_output(sv[0],j)
                         # 业务分支top损失计算                      
-                        for sidx, key in enumerate(scale_output.keys()):
-                            sv_out_item = scale_output[key]
-                            # 参考趋势输出，作为top选取参数
-                            if sidx==0:
-                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_output[key][j])
-                            if sidx==1:
-                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_output[key][j])   
-                        batch_size += 1                    
+                        # for sidx, key in enumerate(scale_output.keys()):
+                        #     sv_out_item = scale_output[key]
+                        #     # 参考趋势输出，作为top选取参数
+                        #     if sidx==0:
+                        #         cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_output[key][j])
+                        #     if sidx==1:
+                        #         ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_output[key][j])   
+                        # batch_size += 1                    
                     elif target_mode==3:
                         ref_indicator = 1 
                         # 整体损失计算
-                        target_item = target[j,ins_rel_index,:,ref_indicator]
-                        cls_loss[i] += self.ccc_loss_comp(sw_index_data[j],target_item.mean(dim=0))
-                        batch_size += 1
+                        # target_item = target[j,ins_rel_index,:,ref_indicator]
+                        # cls_loss[i] += self.ccc_loss_comp(sw_index_data[j],target_item.mean(dim=0))
+                        # batch_size += 1
                         
                 if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]           
                 if target_mode in [2,3]:
-                    cls_loss[i] = cls_loss[i]/batch_size
-                    ce_loss[i] = ce_loss[i]/batch_size
+                    # cls_loss[i] = cls_loss[i]/batch_size
+                    # ce_loss[i] = ce_loss[i]/batch_size
                     # 批次内计算各个业务分支的整体损失
                     inner_batch = 0
                     scale_out_total = []
@@ -550,9 +551,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     scale_target_total = torch.cat(scale_target_total,-1).transpose(1,0)
                     # scale_out_norm = normalization_axis(scale_out_total,axis=-1)
                     # scale_target_norm = normalization_axis(scale_target_total,axis=-1)
-                    fds_loss[i] += self.ccc_loss_comp(scale_out_total, scale_target_total)
+                    cls_loss[i] += self.ccc_loss_comp(scale_out_total, scale_target_total)
                     
-                    corr_loss[i] = corr_loss[i]/batch_size
+                    # corr_loss[i] = corr_loss[i]/batch_size
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
                            
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss,predictions]    

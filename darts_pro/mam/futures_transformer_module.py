@@ -26,6 +26,7 @@ from .multiTask_optimizer import MultiTaskOptimizer,analyze_similarity
 from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,weighted_signed_score_3d, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
+from darts_pro.tft_futures_dataset import get_scale_conf
 
 from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
@@ -79,9 +80,11 @@ def build_scale_arr(sw_ins_mappings):
     
     indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
     # 按照行业分组
+    scale_conf = get_scale_conf()
     indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
-    threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
-    indus_scale_arr = [None,None,None]
+    threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]
+    # threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
+    indus_scale_arr = [None for _ in range(len(threhold_bin))]
     for i in range(len(indus_code)):
         for j in range(len(threhold_bin)):
             if indus_code[i] in threhold_bin[j]:
@@ -95,7 +98,8 @@ def build_scale_arr(sw_ins_mappings):
     night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
     nt_scale_arr =  [np.where(night_flag==i)[0] for i in range(2)]
     # 创建年份分组
-    threhold_bin = [[0,2012],[2012,2018],[2018,2030]]
+    threhold_bin = [[0,2013],[2013,2030]]
+    # threhold_bin = [[0,2012],[2012,2018],[2018,2030]]
     cy_scale_arr = [np.where((create_year>threhold[0])&(create_year<=threhold[1]))[0] for threhold in threhold_bin]
     
     # 统合分组
@@ -108,10 +112,9 @@ def build_scale_arr(sw_ins_mappings):
             combine_scale_arr[2].append(instrument_idx)
                 
     # scale_arr = (cy_scale_arr,nt_scale_arr,mr_scale_arr,indus_scale_arr)
-    scale_arr = [combine_scale_arr]
-    scale_arr = [nt_scale_arr,cy_scale_arr,indus_scale_arr]
-    scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
-    scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr}
+    scale_arr_total = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
+    scale_arr = {key:scale_arr_total[key] for key in scale_conf.keys()}
+    # scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr}
     
     return scale_arr
 

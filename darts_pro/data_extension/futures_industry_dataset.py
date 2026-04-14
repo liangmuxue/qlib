@@ -171,6 +171,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         self.scale_mode = scale_mode
         # 组建辅助数据
         load_ass_data = global_var.get_value("load_ass_data")
+        self.scale_dict = dataset.scale_dict
         if load_ass_data:
             # 如果配置为加载模式，则从全局变量透传数据
             self.ass_data = global_var.get_value("ass_data_{}".format(mode))
@@ -543,6 +544,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         sw_date_mapping = self.date_mappings_ext[idx]
         # 记录预测未来第一天的关联日期，用于后续数据对齐
         future_start_datetime = self.date_list[idx]
+
         for index,ser_idx_infer in enumerate(sw_date_mapping):
             # 取得原序列索引进行series取数,目前一致
             ori_index = index
@@ -660,7 +662,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_info_total_effect = np.array(target_info_total)[self.instrument_index][target_class_total[self.instrument_index]>=0]
         diff_range_all = np.stack([t['diff_range'] for t in target_info_total_effect])
         target_info_total[self.main_index]['diff_range'] = np.mean(diff_range_all,0)
-        
+        # 存储业务类别数据到整体数据中
+        scale_arr = self.scale_dict[future_start_datetime]
+        target_info_total[self.main_index]['scale_arr'] = scale_arr        
         ######### 分别对目标值和协变量，在个体范围层面进行归一化 #########
         
         real_index = np.where(target_class_total>=0)[0]

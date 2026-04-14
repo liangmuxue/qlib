@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import itertools
-
+from collections import defaultdict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,22 +25,44 @@ from cus_utils.common_compute import process_outliers_multi_cols
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
+
+def get_scale_conf():
+    indus_threhold_bin = [['cdifi','hsjs'],['abpi','yzyl','nffi']]
+    cy_threhold_bin = [[0,2013],[2013,2030]]
+    scale_conf = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin}
+    return scale_conf
+
 class TFTFuturesDataset(TFTSeriesDataset):
             
     def _pre_process_df(self,df,val_range=None):
         """数据预处理"""
  
         # 补充行业数据
-        indus_sql = "select code,industry_id,IF(length(night_time_range)>1,1,0) as night_flag,exchange_id,price_range,limit_rate," \
-            "magin_radio,create_year from trading_variety where magin_radio is not null union " \
-            "(select upper(concat('zs_',code)), id,0,0,0,0,0,0 from futures_industry where delete_flag=0)"   
+        indus_sql = "select v.code,industry_id,i.code as industry_code,IF(length(night_time_range)>1,1,0) as night_flag,v.exchange_id,price_range,limit_rate," \
+            "magin_radio,create_year from trading_variety v left join futures_industry i on v.industry_id=i.id  where magin_radio is not null union " \
+            "(select upper(concat('zs_',code)), id,upper(concat('zs_',code)),0,0,0,0,0,0 from futures_industry where delete_flag=0)"   
         base_info_data = self.dbaccessor.do_query(indus_sql)
         base_info_arr = []
         for item in base_info_data:
             base_info_arr.append([item[i] for i in range(len(item))])     
-        base_info = pd.DataFrame(np.array(base_info_arr),columns=["instrument","industry","night_flag","exchange_id","price_range","limit_rate","magin_radio","create_year"]) \
-            .astype({"instrument":str,"industry":str,"night_flag":int,"exchange_id":int,"price_range":int,"limit_rate":int,"magin_radio":int,"create_year":int})               
-        self.base_info = base_info      
+        base_info = pd.DataFrame(np.array(base_info_arr),columns=["instrument","industry","indus_code","night_flag",
+                                    "exchange_id","price_range","limit_rate","magin_radio","create_year"]) \
+            .astype({"instrument":str,"industry":str,"indus_code":str,"night_flag":int,
+                     "exchange_id":int,"price_range":int,"limit_rate":int,"magin_radio":int,"create_year":int})  
+        # 加入业务分片关联数据
+        scale_conf = get_scale_conf()
+        for key in scale_conf.keys():
+            threhold_bin = scale_conf[key]
+            if key.startswith("indus"):
+                for i,item in enumerate(threhold_bin):
+                    base_info.loc[base_info['indus_code'].isin(item),key] = i
+                base_info[key] = base_info[key].fillna(-1).astype(int)
+            if key.startswith("cy"):
+                for i,item in enumerate(threhold_bin):
+                    base_info.loc[(base_info['create_year']>=item[0])&(base_info['create_year']<item[1]),key] = i
+                base_info[key] = base_info[key].fillna(-1).astype(int)
+        self.base_info = base_info     
+         
         # 补充扩展数据
         ext_sql = "select CAST(date_format(e.date,'%Y%m%d') AS SIGNED),t.code,e.dom_basis_rate,e.near_basis_rate from " \
             "extension_trade_info e left join trading_variety t on e.var_id=t.id where e.var_id is not null"
@@ -65,7 +87,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # Ignore Data Clean--lmx
         # df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)  
         # 重置异常值      
-        df = self.reset_outlier(df)              
+        df = self.reset_outlier(df)        
         # 生成时间字段
         df['datetime'] = pd.to_datetime(df['datetime_number'].astype(str))
         logger.debug("begin group process")
@@ -114,6 +136,11 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("OPEN","diff_range",open_mode=True)
         compute_diff("OPEN","open_range",open_mode=True)
         compute_diff("CLOSE","close_range",open_mode=True)
+        
+        df['datetime_number'] = df['datetime_number'].astype(int)
+        # 生成业务分片均值数据
+        self.scale_dict = self.build_scale_mean(df,list(scale_conf.keys()),tar_col='open_diff',val_range=val_range)  
+                           
         # 剔除diff_range超出范围的异常值
         df['diff_range_norm'] = df['diff_range']
         df.loc[df['diff_range_norm']>5,'diff_range_norm'] = 5
@@ -125,14 +152,6 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
         # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化,需要按照品种分组进行
         norm_cols = self.get_past_columns()[:15]
-        # # 剔除超出范围的异常值
-        # df = process_outliers_multi_cols(
-        #     df=df,
-        #     cols=norm_cols,
-        #     range=2.0,
-        #     method='median_fill',
-        #     detect_method='iqr'
-        # )      
         group_stats = df_train.groupby('instrument')[norm_cols].agg(['mean', 'std']).reset_index()   
         # 处理标准差为 0 的情况（可选）
         for feat in norm_cols:
@@ -218,4 +237,41 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df_mean['time_idx'] = df_mean['time_idx'].astype(int) - 1
         df = pd.concat([df,df_mean])
         return df
+ 
+    def build_scale_mean(self,df,scale_columns,tar_col='open_diff',val_range=None):
+        """针对特定指标，生成平均值"""
+        
+        dict_list = {}
+        merged = defaultdict(lambda: np.array([]))
+        for scale_column in scale_columns:
+            group_cols = ['datetime_number',scale_column]
+            # 添加行并根据行业取平均值
+            df_mean = df.groupby(group_cols)[tar_col].mean().reset_index()
+            df_mean = df_mean[df_mean[scale_column]>=0].dropna()
+            # do normalization
+            norm_col = scale_column + "_norm"
+            df_mean_norm = []
+            for i in range(2):
+                df_mean_item = df_mean[df_mean[scale_column]==i]
+                df_train = df_mean_item[df_mean_item["datetime_number"]<int(val_range[0].strftime("%Y%m%d"))]
+                # 针对diff_range数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
+                scaler_train = StandardScaler()
+                scaler_train.fit(df_train[[tar_col]])
+                df_mean_item[[norm_col]] = scaler_train.transform(df_mean_item[[tar_col]])   
+                df_mean_norm.append(df_mean_item)         
+
+            df_mean_norm = pd.concat(df_mean_norm)
+            result_dict = df_mean_norm.groupby('datetime_number')[norm_col].apply(lambda x:{scale_column:np.array(x)}).to_dict()
+            nested_dict = {}
+            for (k1, k2), value in result_dict.items():
+                if k1 not in nested_dict:
+                    nested_dict[k1] = {}  
+                nested_dict[k1][k2] = value
+            merged = dict_list.copy()
+            for k, v in nested_dict.items():
+                merged[k] = {**merged.get(k, {}), **v}      
+            dict_list = merged         
+        
+        return dict_list
     
+        

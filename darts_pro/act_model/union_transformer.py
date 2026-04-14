@@ -563,7 +563,7 @@ class AttScaleFeature(nn.Module):
         self.ins_layer = nn.ParameterList(ins_layer)
         # 整体趋势计算网络
         trend_num = len(self.scale_arr)
-        self.trend_layer =  LinelessLayer(sample_dim*input_dim,trend_num,hidden_size=sample_dim,
+        self.trend_layer = LinelessLayer(sample_dim*input_dim,trend_num,hidden_size=sample_dim,
                                 layer_norm=False,batch_norm=True,dropout=0)
         
     def forward(self, x):
