@@ -27,6 +27,7 @@ from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
 from darts_pro.tft_futures_dataset import get_scale_conf
+import matplotlib.pyplot as plt
 
 from pandas.errors import SettingWithCopyWarning
 warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
@@ -74,7 +75,6 @@ class FeatureExtractorHook:
         self.features[name + "_input"] = input.reshape(B,S,-1)
         self.features[name + "_output"] = output.reshape(B,S,-1)    
           
-
 def build_scale_arr(sw_ins_mappings):
     """对品种按照不同业务范围进行分组"""
     
@@ -172,7 +172,7 @@ class FuturesTransformerModule(MlpModule):
         self.time_encoder = None
         self.nhead = 4
         # 趋势数值量级区间
-        self.trend_threhold = {'min':-1.0,'short':-0.45,'long':0.45,'max':1.0}
+        self.trend_threhold = None
 
         super().__init__(output_dim, variables_meta_array, num_static_components, hidden_size, lstm_layers, num_attention_heads,
                                     full_attention, feed_forward, hidden_continuous_size,
@@ -373,7 +373,11 @@ class FuturesTransformerModule(MlpModule):
             "monitor": lr_monitor if lr_monitor is not None else "val_loss",
         } 
         return  lr_scheduler_config       
-         
+
+    def get_scale_match_key(self):
+        rel_scale_key = list(self.scale_arr.keys())[0]
+        return rel_scale_key
+            
     def forward(
         self, x_in: Tuple[List[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
         optimizer_idx=-1
@@ -766,7 +770,7 @@ class FuturesTransformerModule(MlpModule):
             dur_num = self.cut_len - 1
             anno_yield = rate_total['yield_rate'].values[0] * (240 / date_total_num) / (2 * self.pred_top_num * dur_num) 
             self.log("anno_yield", anno_yield, prog_bar=True,sync_dist=True) 
-            self.log("trend_loss_rate", rate_total["trend_loss_rate"].values[0], prog_bar=True,sync_dist=True) 
+            self.log("trend_eva_diff", rate_total["trend_eva_diff"].values[0], prog_bar=True,sync_dist=True) 
         
         output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_total, \
             past_future_round_targets_total, long_diff_index_targets_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
@@ -880,8 +884,34 @@ class FuturesTransformerModule(MlpModule):
                 #     target_values = np.concatenate([past_target_values,futures_round_targets[-self.output_chunk_length:]])
                 #     view_data = np.stack([output_value,target_values,price_diff]).transpose(1,0)
                 #     names = ['pred','target','price_diff']                              
-                #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)                             
-    
+                #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)        
+                
+        # 整体趋势可视化
+        coll_result_output = coll_result_output.drop_duplicates(subset=['date','rel_scale_key','scale_idx'], keep='first', ignore_index=True)
+        coll_result_output['trend_match_flag'] = coll_result_output['trend_match_flag'].astype(int)
+        df_plot = coll_result_output.groupby(['date', 'scale_idx'])[['pred_trend_value','real_trend_values','real_trend_ref_values','trend_match_flag']].mean().unstack(level=1)
+        custom_labels = df_plot['trend_match_flag'].astype(int).values.tolist()
+        del df_plot['trend_match_flag']
+        # 直接画分组柱状图（多列自动并列）
+        df_plot.plot(kind='bar', figsize=(9, 5), width=0.7)
+        # ===================== 美化 =====================
+        name = "scale_trend"
+        # plt.figure(name,figsize=(12,9))
+        plt.subplots_adjust(bottom=0.2)
+        plt.xticks(rotation=45, ha='right', fontsize=8,ticks=range(len(custom_labels)),labels=custom_labels)  # 旋转+缩小字体
+        plt.subplots_adjust(bottom=0.3)                 # 底部留足空间
+        plt.tight_layout()                             # 自动适配
+        plt.gcf().set_size_inches(16, 6)               # 拉宽图       
+        plt.title('scale trend', fontsize=14)
+        plt.xlabel('date', fontsize=12)
+        plt.ylabel('trend value', fontsize=12)
+        plt.xticks(rotation=0)  # X轴文字不旋转
+        plt.legend(title='Date-ScareType', bbox_to_anchor=(1, 1))
+        plt.grid(axis='y', alpha=0.3)
+        plt.tight_layout()
+        plt.savefig("{}/{}".format(RESULT_FILE_PATH,name), dpi=300, bbox_inches='tight')
+        # plt.show()     
+        
     def viz_data_board(self):
         """可视化验证集数据流"""
         
@@ -1239,11 +1269,12 @@ class FuturesTransformerModule(MlpModule):
             return result_date_list      
 
         # 统合计算准确率数值
-        rate_columns = ["total_cnt", "yield_rate", "win_rate","trend_loss_rate"]    
+        rate_columns = ["total_cnt", "yield_rate", "win_rate","trend_eva_diff","trend_match_rate"]    
         rate_total = [result_total_list.shape[0],
                       round(result_total_list['diff_range'].sum(), 3),
                       round(np.sum(result_total_list['diff_range'] > 0) / result_total_list.shape[0], 3),
-                      result_total_list['trend_loss_rate'].mean()
+                      result_total_list['trend_eva_diff'].mean(),
+                      result_total_list['trend_match_rate'].mean()
                       ]
         rate_total = pd.DataFrame(np.array([rate_total]), columns=rate_columns)
         for i in range(4):
@@ -1260,29 +1291,19 @@ class FuturesTransformerModule(MlpModule):
         
         (features, trend_data,trend_logits_item) = output_data
         
-        import_index_list,pred_trend_value = self.strategy_top_bidi(features, trend_data, trend_logits_item,pred_top_num=pred_top_num, target=target, target_info=target_info,
+        import_index_list = self.strategy_top_bidi(features, trend_data,pred_top_num=pred_top_num, target=target, target_info=target_info,
                                             batch_no=batch_no)
         # self.strategy_main_index(ce_values, cls_values, dec_out, pred_top_num=pred_top_num, target=target, target_info=target_info,
         #                                     index_round_targets=index_round_targets, combine_instrument=combine_instrument)
  
         # 构建结果集
-        result_list = pd.DataFrame(np.array(import_index_list), columns=['top_index', 'top_flag'])
+        result_list = import_index_list
         result_list['date'] = date     
-        result_list['pred_trend_value'] = pred_trend_value    
-        
-        result_list = result_list.astype({'top_index':int,'top_flag':int,'date':int,'pred_trend_value':float})
+        result_list = result_list.astype({'top_index':int,'top_flag':int,'date':int,'rel_scale':int,'pred_trend_value':float})
         
         return result_list
 
-    def strategy_main_index(self, cls, sv_index, pred_top_num=2, target=None, target_info=None, index_round_targets=None, combine_instrument=None):
-        """衡量指数数据"""
-
-        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
-        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)        
-        main_index_feature = target_info[main_index]['trend_value']           
-        return main_index_feature
-
-    def strategy_top_bidi(self, features, combine_index, trend_logits_item,pred_top_num=2, target=None, target_info=None,batch_no=0):
+    def strategy_top_bidi(self, features, combine_index,pred_top_num=2, target=None, target_info=None,batch_no=0):
         """筛选品种明细,使用双向模式"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -1291,16 +1312,9 @@ class FuturesTransformerModule(MlpModule):
         cancidate_list = []
         mode = 'single'
         # 同时从正反2个方向选取品种
-        pre_index,pred_trend_value = self.compute_arg_sort_by_trend(features, combine_index,mode=mode, trend_flag=1, top_num=top_num,batch_no=batch_no)
-        for p_index in pre_index: 
-            import_index_real = ins_all[p_index]
-            cancidate_list.append([import_index_real, 1])    
-        pre_index,_ = self.compute_arg_sort_by_trend(features, combine_index,mode=mode, trend_flag=0, top_num=top_num,batch_no=batch_no)
-        for p_index in pre_index: 
-            import_index_real = ins_all[p_index]
-            cancidate_list.append([import_index_real, 0])                           
-        
-        return cancidate_list,pred_trend_value
+        cancidate_list = self.compute_arg_sort_by_trend(features, combine_index,top_num=top_num,batch_no=batch_no)      
+                          
+        return cancidate_list
 
     def compute_arg_sort(self, features, combine_index, trend_logits_item,mode='single', trend=1, top_num=2,batch_no=0):
         """根据输出进行排序"""
@@ -1321,47 +1335,58 @@ class FuturesTransformerModule(MlpModule):
             pre_index = np.argsort(features_main)[:top_num]
         
         return pre_index.astype(int)
-       
+    
     def compute_arg_sort_by_trend(self, features, combine_index,mode='single', trend_flag=1, top_num=2,batch_no=0):
         """根据输出进行排序"""
+        
+        match_key = self.get_scale_match_key()
+        batch_size = features[match_key].shape[0]
+        trend_ref = self.criterion.build_batch_trend_data(combine_index,batch_size=batch_size)
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
-        match_col = list(self.scale_arr.keys())[0]
-        for i,key in enumerate(self.scale_arr.keys()):
-            if match_col==key:
-                features_main = features[key][batch_no]
-                combine_index_item = combine_index[key][batch_no]
-                break
         
-        # 根据趋势预测，决定选取top的方式
-        def dy_top_num(cur_trend_flag,trend_value):
-            long_num,short_num = self.criterion.judge_topNum_from_trend(trend_value,top_num=top_num)
-            if cur_trend_flag==1:
-                return long_num
-            return short_num
+        # match_key = 'cy_scale'
+        features_main = features[match_key][batch_no]
+        combine_index_item = combine_index[match_key][batch_no]
+        ins_arr = self.scale_arr[match_key]
+        item_top_num = top_num//2
+        
+        pre_index_total = []
         # 根据趋势增减top数量
-        pred_trend_value = combine_index_item.mean()
-        dynamic_top_num = dy_top_num(trend_flag,pred_trend_value)
-        if trend_flag == 1:
-            pre_index = np.argsort(-features_main)[:dynamic_top_num]
-        else:
-            pre_index = np.argsort(features_main)[:dynamic_top_num]
+        for i,ins in enumerate(ins_arr):
+            features_item = features_main[ins]
+            pred_trend_value = trend_ref[match_key][batch_no,i]
+            long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
+            pre_index = np.argsort(-features_item)[:long_num]
+            pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
+            for index in pre_index:
+                pre_index_total.append([ins[index],1,pred_trend_value,pred_trend_flag,i])
+            pre_index = np.argsort(features_item)[:short_num]
+            for index in pre_index:
+                pre_index_total.append([ins[index],0,pred_trend_value,pred_trend_flag,i])
+        pre_index_total = np.array(pre_index_total)
+        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_flag','rel_scale'])
         
-        return pre_index.astype(int),pred_trend_value
-
+        return pre_index_total
+    
     def collect_result_compindex(self, date=None, target_info=None, result_list=None, keep_index=None):
  
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         open_diff = np.array([t['open_diff'] for t in target_info])[keep_index]
-        real_trend_values = open_diff.mean()
         
         coll_results = []
+        rel_scale_key = self.get_scale_match_key()
         # 对于预测数据，生成对应涨跌幅类别
         for row in result_list.itertuples():
             imp_idx = row.top_index
             overroll_trend = row.top_flag
+            scale_idx = row.rel_scale
+            ins = np.array(self.scale_arr[rel_scale_key][scale_idx])
+            real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
+            real_trend_ref_values = open_diff[ins].mean()
+            real_trend_flag = self.get_trend_flag_from_value(real_trend_values)
             ts = target_info[imp_idx]
             diff_range, p_taraget_class, _ = self.criterion.compute_diff_range_class(ts)
             # 根据多空判断取得实际对应的类别
@@ -1370,30 +1395,43 @@ class FuturesTransformerModule(MlpModule):
                 p_taraget_class = np.array([3, 2, 1, 0])[p_taraget_class]
             else:
                 diff_range_with_trend = diff_range
-            coll_results.append([imp_idx, ts["instrument"], diff_range_with_trend, p_taraget_class, overroll_trend])    
+            coll_results.append([imp_idx, scale_idx,ts["instrument"], diff_range_with_trend, p_taraget_class, overroll_trend,real_trend_values,real_trend_flag,real_trend_ref_values])    
         
         coll_results = np.array(coll_results)
-        coll_results = pd.DataFrame(coll_results, columns=['top_index', 'instrument', 'diff_range', 'target_class', 'trend_value'])
+        coll_results = pd.DataFrame(coll_results, columns=['top_index', 'scale_idx','instrument',
+                                 'diff_range', 'target_class', 'trend_value','real_trend_values','real_trend_flag','real_trend_ref_values'])
         coll_results['diff_range'] = coll_results['diff_range'].astype(float)
+        coll_results['scale_idx'] = coll_results['scale_idx'].astype(int)
         coll_results['target_class'] = coll_results['target_class'].astype(int)
+        coll_results['real_trend_values'] = coll_results['real_trend_values'].astype(float)
+        coll_results['real_trend_flag'] = coll_results['real_trend_flag'].astype(int)
         coll_results['date'] = date
         coll_results['pred_trend_value'] = result_list['pred_trend_value']
-        coll_results['real_trend_values'] = real_trend_values
+        coll_results['pred_trend_flag'] = result_list['pred_trend_flag'].astype(int)
+        coll_results['rel_scale_key'] = rel_scale_key
         
         self.eva_total_trend(coll_results)
         
-        return coll_results        
+        return coll_results          
+    
+    def get_trend_flag_from_value(self,trend_value):
         
+        long_num,short_num = self.criterion.judge_topNum_from_trend(trend_value,trend_threhold=self.trend_threhold)
+        if long_num>short_num:
+            trend_flag = 1
+        elif long_num==short_num:
+            trend_flag = 0   
+        else:
+            trend_flag = -1   
+                   
+        return trend_flag
+    
     def eva_total_trend(self, coll_results):
         """对整体趋势预测结果进行评估"""
         
-        pred_trend_value = coll_results['pred_trend_value'].values[0]
-        real_trend_values = coll_results['real_trend_values'].values[0]
-        long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=1)
-        real_long_num,real_short_num = self.criterion.judge_topNum_from_trend(real_trend_values,top_num=1)
-        loss_values = abs(long_num-real_long_num) + abs(short_num-real_short_num) 
-        loss_rate = loss_values/4
-        coll_results['trend_loss_rate'] = loss_rate
+        coll_results['trend_eva_diff'] = np.abs(coll_results['pred_trend_value'].values - coll_results['real_trend_values'].values)
+        coll_results['trend_match_flag'] = (coll_results['pred_trend_flag']==coll_results['real_trend_flag'])
+        coll_results['trend_match_rate'] = np.sum(coll_results['trend_match_flag'])/coll_results.shape[0]
     
     def compute_feature_target_trend_corr(self, main_index_feature, main_targets):
         """计算特征数据距离与实际目标值距离的相关性"""

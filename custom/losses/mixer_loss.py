@@ -60,21 +60,21 @@ class FuturesIndustryLoss(UncertaintyLoss):
         self.ins_feature_loss = AdaptiveSingleFeatureLoss(loss_type='cauchy', device=self.device)
         self.contrast_loss = WeightedSpearmanLoss()
     
-    def judge_topNum_from_trend(self,trend_value,top_num=1):
+    def judge_topNum_from_trend(self,trend_value,top_num=1,trend_threhold=None):
         """根据趋势数值，生成top选取数量"""
         
         long_top_num = top_num
         short_top_num = top_num
-        if trend_value<self.trend_threhold['min']:
+        if trend_value<trend_threhold['min']:
             long_top_num = 0
             short_top_num = top_num*2
-        elif trend_value>=self.trend_threhold['min'] and trend_value<self.trend_threhold['short']:
+        elif trend_value>=trend_threhold['min'] and trend_value<trend_threhold['short']:
             long_top_num = top_num - 1
             short_top_num = top_num + 1            
-        elif trend_value>=self.trend_threhold['short'] and trend_value<self.trend_threhold['long']:
+        elif trend_value>=trend_threhold['short'] and trend_value<trend_threhold['long']:
             long_top_num = top_num
             short_top_num = top_num
-        elif trend_value>=self.trend_threhold['long'] and trend_value<self.trend_threhold['max']:
+        elif trend_value>=trend_threhold['long'] and trend_value<trend_threhold['max']:
             long_top_num = top_num + 1
             short_top_num = top_num - 1
         else:
@@ -396,18 +396,26 @@ class FuturesIndustryLoss(UncertaintyLoss):
             scale_output[key] = sv_out_item
         return scale_output
     
-    def build_scale_trend_output(self,sw_index,batch_no,trend_output=None):
+    def build_scale_trend_output(self,sw_index,batch_no,trend_output=None,mode=1):
 
         # if "global_trend_feature" not in trend_output:
         #     trend_output["global_trend_feature"] = sw_index["global_trend_feature"][batch_no]
         # else:
         #     trend_output["global_trend_feature"] = torch.cat([trend_output["global_trend_feature"],sw_index["global_trend_feature"][batch_no]])
         for key in self.scale_dict.keys():
-            index_data = sw_index[key][batch_no].unsqueeze(0)
+            index_data = sw_index[key][batch_no]
+            if mode==1:
+                index_data = index_data.unsqueeze(0)
+            else:
+                index_data = np.expand_dims(index_data,0)
             if key not in trend_output:
                 trend_output[key] = index_data
             else:
-                trend_output[key] = torch.cat([trend_output[key],index_data],dim=0)
+                if mode==1:
+                    trend_output[key] = torch.cat([trend_output[key],index_data],dim=0)
+                else:
+                    trend_output[key] = np.concatenate([trend_output[key],index_data],axis=0)
+                    
         return trend_output        
 
     def build_scale_trend_target(self,target_info,ins_rel_index=None,trend_target=None):
@@ -472,6 +480,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 batch_size = 0
                 trend_output = {}
                 trend_target = {}
+                trend_ref = None
                 for j in range(target_class.shape[0]):
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
@@ -495,14 +504,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     target_info_total.append(target_info[j])             
                     
                     # 不同模式的损失计算                          
-                    if target_mode==0:
-                        if indus_index.shape[0]<2:
-                            continue
-                        # 板块整体损失计算
-                        ce_loss[i] += self.ccc_loss_comp(sw_index_data[j,ins_rel_index],index_target_item[:,-1])/10
-                        # if target_mode==1: 
-                        #     ce_loss[i] += self.mse_loss(sw_index_data[j].unsqueeze(-1),time_diff_targets.unsqueeze(-1))  
-                    elif target_mode==2:
+                    if target_mode==2:
                         # 比较全部品种，辅助整体指数比较
                         ref_indicator = 0 
                         # 使用价格指标作为主要指标
@@ -513,15 +515,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         sv_out_item = sv[0]['global_feature'][j]
                         # 根据网络输出，生成针对性业务分支输出,并依次计算损失
                         scale_output = self.build_scale_output(sv[0],j)
+                        if trend_ref is None:
+                            # 懒加载整体趋势判断
+                            sw_data_ref = output[0][2]
+                            trend_ref = self.build_batch_trend_data(sw_data_ref[0])
                         # 业务分支top损失计算                      
-                        # for sidx, key in enumerate(scale_output.keys()):
-                        #     sv_out_item = scale_output[key]
-                        #     # 参考趋势输出，作为top选取参数
-                        #     if sidx==0:
-                        #         cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_output[key][j])
-                        #     if sidx==1:
-                        #         ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_output[key][j])   
-                        # batch_size += 1                    
+                        for sidx, key in enumerate(scale_output.keys()):
+                            sv_out_item = scale_output[key]
+                            # 参考趋势输出，作为top选取参数
+                            if sidx==0:
+                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_ref[key][j])
+                            if sidx==1:
+                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_ref[key][j])   
+                        batch_size += 1                    
                     elif target_mode==3:
                         ref_indicator = 1 
                         # 整体损失计算
@@ -557,7 +563,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
                            
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss,predictions]    
-
+    
+    def build_batch_trend_data(self,sw_data,batch_size=32,mode=0):
+        """生成批次内的趋势数据"""
+        
+        trend_output = {}
+        for j in range(batch_size):
+            self.build_scale_trend_output(sw_data,j,trend_output=trend_output,mode=mode)   
+        # 批次内归一化
+        for key in trend_output.keys():
+            trend_output[key] = normalization_axis(trend_output[key], axis=0)
+             
+        return trend_output   
+        
     ############################### Data Compute Relate ####################################
 
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False):

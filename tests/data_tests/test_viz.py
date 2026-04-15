@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
+from matplotlib.font_manager import FontProperties
+import pandas as pd
 import time
 import warnings
 import torch
@@ -501,14 +502,46 @@ def visualize_single_sample_diff(writer):
     writer.add_histogram("Feature_Dist/Abnormal_Sample_10", abnormal_feat, 0)
     writer.add_histogram("Feature_Dist/Normal_Sample_0", normal_feat, 0)
     writer.add_histogram("Feature_Dist/Batch_Mean", batch_mean, 0)  
+ 
+def test_group_bar():
+
+    plt.rcParams['axes.unicode_minus'] = False 
+    plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC Light']
+    # my_font = FontProperties(fname='/path/to/SimHei.ttf')
+    
+    # ===================== 示例数据 =====================
+    df = pd.DataFrame({
+        '班级': ['一班', '一班', '二班', '二班', '三班', '三班'],
+        '语文': [85, 88, 78, 80, 92, 95],
+        '数学': [90, 92, 85, 88, 86, 89],
+        '英语': [75, 80, 65, 70, 88, 90]
+    })
+    
+    # ===================== 核心：分组 + 多字段展示 =====================
+    # 按【班级】分组，求【语文、数学、英语】的平均值
+    grouped = df.groupby('班级')[['语文', '数学', '英语']].mean()
+    
+    # 直接画分组柱状图（多列自动并列）
+    grouped.plot(kind='bar', figsize=(9, 5), width=0.7)
+    
+    # ===================== 美化 =====================
+    plt.title('各班各科平均分对比', fontsize=14)
+    plt.xlabel('班级', fontsize=12)
+    plt.ylabel('平均分', fontsize=12)
+    plt.xticks(rotation=0)  # X轴文字不旋转
+    plt.legend(title='科目')
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.show()  
+    a
       
 if __name__ == "__main__":
     # test_dbscan()
     # test_SpectralClustering()
     # test_matirx_view()
     # test_bound()
-    test_tensorboard_viz()
-
+    # test_tensorboard_viz()
+    test_group_bar()
         
     
     
