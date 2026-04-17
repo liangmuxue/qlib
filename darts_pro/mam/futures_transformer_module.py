@@ -316,7 +316,7 @@ class FuturesTransformerModule(MlpModule):
                           
     def create_loss(self, model, device="cpu"):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
-        return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,output_chunk_length=self.output_chunk_length,
+        return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,input_chunk_length=self.input_chunk_length,output_chunk_length=self.output_chunk_length,
                                    opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, trend_threhold=self.trend_threhold,
                                    cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_dict=self.scale_arr)       
 
@@ -508,7 +508,7 @@ class FuturesTransformerModule(MlpModule):
         for i in range(self.get_optimizer_size()):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
             loss, detail_loss = self._compute_loss((output, vr_class, tar_class),
-                            (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=i)
+                            (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, past_target, target_info), optimizers_idx=i)
             (corr_loss, ce_loss, fds_loss, cls_loss, _) = detail_loss 
             if cls_loss[i] != 0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
@@ -662,7 +662,7 @@ class FuturesTransformerModule(MlpModule):
         
         # 全部损失
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
-                    (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info), optimizers_idx=-1)
+                    (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, past_target, target_info), optimizers_idx=-1)
         (corr_loss, ce_loss, fds_loss, cls_loss, predictions) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
         preds_combine = []
@@ -746,12 +746,12 @@ class FuturesTransformerModule(MlpModule):
     def _compute_loss(self, output, target, optimizers_idx=0):
         """重载父类方法"""
 
-        (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info) = target 
+        (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, past_target, target_info) = target 
         # 只保留最后一天的数值，作为损失目标
         future_round_targets = past_future_round_targets[:,:,-self.output_chunk_length:,:]  
         # 根据阶段使用不同的映射集合
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
-        return self.criterion(output, (future_target, future_covs, target_class, future_round_targets, index_round_targets, price_targets, long_diff_index_targets, target_info),
+        return self.criterion(output, (future_target, future_covs, target_class, future_round_targets, index_round_targets, price_targets, past_target, target_info),
                     sw_ins_mappings=sw_ins_mappings, optimizers_idx=optimizers_idx, top_num=self.top_num, epoch_num=self.current_epoch)        
 
     def on_validation_epoch_end(self):
@@ -1228,8 +1228,8 @@ class FuturesTransformerModule(MlpModule):
             trend_data  = output_3d[3]
             features= output_3d[2]
             trend_logits = output_3d[4]
-            trend_logits_item = {key:trend_logits[key][i] for key in trend_logits}
-            output_list = [features, trend_data,trend_logits_item]
+            # trend_logits_item = {key:trend_logits[key][i] for key in trend_logits}
+            output_list = [features, trend_data,trend_logits]
             price_target_list = price_targets_3d[i]
             date = int(target_info_list[np.where(target_class_list >= 0)[0][0]]["future_start_datetime"])
             index_round_targets = index_round_targets_3d[i]
@@ -1291,7 +1291,7 @@ class FuturesTransformerModule(MlpModule):
         
         (features, trend_data,trend_logits_item) = output_data
         
-        import_index_list = self.strategy_top_bidi(features, trend_data,pred_top_num=pred_top_num, target=target, target_info=target_info,
+        import_index_list = self.strategy_top_bidi(features, trend_logits_item,pred_top_num=pred_top_num, target=target, target_info=target_info,
                                             batch_no=batch_no)
         # self.strategy_main_index(ce_values, cls_values, dec_out, pred_top_num=pred_top_num, target=target, target_info=target_info,
         #                                     index_round_targets=index_round_targets, combine_instrument=combine_instrument)
@@ -1312,7 +1312,7 @@ class FuturesTransformerModule(MlpModule):
         cancidate_list = []
         mode = 'single'
         # 同时从正反2个方向选取品种
-        cancidate_list = self.compute_arg_sort_by_trend(features, combine_index,top_num=top_num,batch_no=batch_no)      
+        cancidate_list = self.compute_arg_sort_by_trend(features, combine_index,top_num=top_num,batch_no=batch_no,past_target=target[:,:self.input_chunk_length])      
                           
         return cancidate_list
 
@@ -1336,7 +1336,7 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index.astype(int)
     
-    def compute_arg_sort_by_trend(self, features, combine_index,mode='single', trend_flag=1, top_num=2,batch_no=0):
+    def compute_arg_sort_by_trend(self, features, combine_index,mode='single',past_target=None, top_num=2,batch_no=0):
         """根据输出进行排序"""
         
         match_key = self.get_scale_match_key()
@@ -1357,7 +1357,10 @@ class FuturesTransformerModule(MlpModule):
         # 根据趋势增减top数量
         for i,ins in enumerate(ins_arr):
             features_item = features_main[ins]
-            pred_trend_value = trend_ref[match_key][batch_no,i]
+            # pred_trend_value = trend_ref[match_key][batch_no,i]
+            past_target_trend = past_target[ins,:,0].mean(0)
+            pred_trend_value_items = combine_index_item[i*self.input_chunk_length:(i+1)*self.input_chunk_length]
+            pred_trend_value = self.criterion.create_avg_trend_value(pred_trend_value_items, past_target_trend)
             long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
             pre_index = np.argsort(-features_item)[:long_num]
             pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)

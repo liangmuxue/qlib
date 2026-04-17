@@ -137,10 +137,13 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("OPEN","open_range",open_mode=True)
         compute_diff("CLOSE","close_range",open_mode=True)
         
+        # 做二次差分，为每个节点生成差分数组
+        self.build_past_roll_diff_data(df, group_column, 'open_range', 'open_diff_sec_norm')
+        
         df['datetime_number'] = df['datetime_number'].astype(int)
         # 生成业务分片均值数据
         self.scale_dict = self.build_scale_mean(df,list(scale_conf.keys()),tar_col='open_diff',val_range=val_range)  
-                           
+        # self.scale_diff_dict = self.build_scale_mean(df,list(scale_conf.keys()),tar_col='diff_range_sec',val_range=val_range)                    
         # 剔除diff_range超出范围的异常值
         df['diff_range_norm'] = df['diff_range']
         df.loc[df['diff_range_norm']>5,'diff_range_norm'] = 5
@@ -213,6 +216,48 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # Sort
         df = df.sort_values(by=["instrument","datetime_number"],ascending=True)
         return df    
+
+    def build_past_roll_diff_data(self,df,group_column,source_col,tar_col):
+        """针对指定数据，做多区段二次差分"""
+        
+        # 做二次差分，为每个节点生成差分数组
+        window = self.step_len
+        def group_rolling_diff(group_series, window_size):
+            diff_list = []
+            # 每组独立计算
+            for i in range(len(group_series)):
+                if i < window_size - 1:
+                    diff_list.append(np.nan)  # 窗口不足 → NaN
+                else:
+                    # 取窗口：前 n 个值 + 当前值
+                    window_vals = group_series.iloc[i - window_size + 1 : i + 1].values
+                    current = window_vals[-1]
+                    history = window_vals[:-1]
+                    # 差分：当前 - 前面每一个,取绝对值，后续最小化绝对距离
+                    diffs = np.abs(current - history).tolist()
+                    diff_list.append(diffs)
+            return diff_list
+        # 按 group 分组，每组独立计算差分数组
+        df['diff_range_sec'] = df.groupby(group_column)[source_col].transform(
+            lambda x: group_rolling_diff(x, window)
+        )
+        # 所有差分统一全局标准化
+        all_diffs = []
+        for arr in df['diff_range_sec'].dropna():
+            if any(np.isnan(arr)):
+                continue
+            all_diffs.extend(arr)
+        all_diffs = np.array(all_diffs)
+        # 全局均值、标准差
+        mean = all_diffs.mean()
+        std = all_diffs.std()
+        # 标准化函数
+        def normalize(arr):
+            if isinstance(arr, list):
+                return [(x - mean) / std for x in arr]
+            return np.nan
+        df[tar_col] = df['diff_range_sec'].apply(normalize)    
+        del df['diff_range_sec']   
     
     def get_cate_dict(self):
         return self.cate_static_dict
@@ -241,6 +286,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
     def build_scale_mean(self,df,scale_columns,tar_col='open_diff',val_range=None):
         """针对特定指标，生成平均值"""
         
+        step_len = self.step_len - 1
         dict_list = {}
         merged = defaultdict(lambda: np.array([]))
         for scale_column in scale_columns:
@@ -250,6 +296,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
             df_mean = df_mean[df_mean[scale_column]>=0].dropna()
             # do normalization
             norm_col = scale_column + "_norm"
+            norm_col_sec = norm_col+'_sec'
             df_mean_norm = []
             for i in range(2):
                 df_mean_item = df_mean[df_mean[scale_column]==i]
@@ -258,15 +305,34 @@ class TFTFuturesDataset(TFTSeriesDataset):
                 scaler_train = StandardScaler()
                 scaler_train.fit(df_train[[tar_col]])
                 df_mean_item[[norm_col]] = scaler_train.transform(df_mean_item[[tar_col]])   
+                self.build_past_roll_diff_data(df_mean_item, scale_column, tar_col,norm_col_sec)
                 df_mean_norm.append(df_mean_item)         
 
             df_mean_norm = pd.concat(df_mean_norm)
             result_dict = df_mean_norm.groupby('datetime_number')[norm_col].apply(lambda x:{scale_column:np.array(x)}).to_dict()
+            result_dict_sec = df_mean_norm.groupby('datetime_number')[norm_col_sec].apply(lambda x:{scale_column+'_sec':np.array(x)}).to_dict()
             nested_dict = {}
             for (k1, k2), value in result_dict.items():
                 if k1 not in nested_dict:
                     nested_dict[k1] = {}  
                 nested_dict[k1][k2] = value
+            for (k1, k2), value in result_dict_sec.items():
+                if k1 not in nested_dict:
+                    nested_dict[k1] = {}  
+                if value.shape[0]==1: 
+                    if isinstance(value[0],list):
+                        nested_dict[k1][k2] = np.stack([np.array(value[0]),np.zeros([step_len])])  
+                    else:
+                        nested_dict[k1][k2] = np.zeros([2,step_len])
+                else:
+                    if isinstance(value[0],list) and isinstance(value[1],list):
+                        nested_dict[k1][k2] = np.stack(value)
+                    elif isinstance(value[0],list):
+                        nested_dict[k1][k2] = np.stack([np.array(value[0]),np.zeros([step_len])])    
+                    elif isinstance(value[1],list):
+                        nested_dict[k1][k2] = np.stack([np.zeros([step_len]),np.array(value[1])])       
+                    else:
+                        nested_dict[k1][k2] = np.zeros([2,step_len])                             
             merged = dict_list.copy()
             for k, v in nested_dict.items():
                 merged[k] = {**merged.get(k, {}), **v}      

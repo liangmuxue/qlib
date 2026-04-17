@@ -547,35 +547,43 @@ class ContinuousToDiscreteIndex(nn.Module):
 class AttScaleFeature(nn.Module):
     """按照指定尺度，实现特征处理"""
 
-    def __init__(self,sample_dim,input_dim,scale_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
+    def __init__(self,sample_dim,input_dim,seq_len=28,scale_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.scale_arr = [torch.Tensor(s).long().to(device) for s in scale_arr]
         self.num_indices = num_indices
         
         ins_layer = []
+        past_trend_layer = []
         # TOP值选取网络
         for scaler in self.scale_arr:
             sample_dim_inner = scaler.shape[0]
             ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
                                 layer_norm=True,batch_norm=False,dropout=dropout)
             ins_layer.append(ins_layer_inner)
+            past_trend_layer_inner = LinelessLayer(sample_dim_inner*input_dim,seq_len,hidden_size=input_dim,
+                                layer_norm=True,batch_norm=False,dropout=dropout)            
+            past_trend_layer.append(past_trend_layer_inner)
         self.ins_layer = nn.ParameterList(ins_layer)
         # 整体趋势计算网络
         trend_num = len(self.scale_arr)
         self.trend_layer = LinelessLayer(sample_dim*input_dim,trend_num,hidden_size=sample_dim,
                                 layer_norm=False,batch_norm=True,dropout=0)
+        self.past_trend_layer = nn.ParameterList(past_trend_layer)
         
     def forward(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, _ = x.shape
         
         output = torch.zeros([batch_size,S]).to(x.device)
+        output2index_trend = []
         # 针对自定义的品种范围数组，进行分尺度的特征处理
         for i,scaler in enumerate(self.scale_arr):
             x_part = x[:,scaler,:].reshape(batch_size,-1)
             output[:,scaler] = self.ins_layer[i](x_part)
-        output2index_trend = torch.zeros([batch_size,len(self.scale_arr),self.num_indices]).to(x.device)
+            # 对过去值为锚点，进行趋势差分判断
+            output2index_trend.append(self.past_trend_layer[i](x_part))
+        output2index_trend = torch.cat(output2index_trend,-1)
         # 整体趋势网络计算
         output_trend = self.trend_layer(x.reshape(batch_size,-1)) 
             
@@ -584,30 +592,12 @@ class AttScaleFeature(nn.Module):
 class SparseGateFeatureTopK(nn.Module):
     """综合TOPK选取"""
     
-    def __init__(self,sample_dim,input_dim,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
+    def __init__(self,sample_dim,input_dim,seq_len=28,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
                  scales_dict=None,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.k = k
         self.num_heads = num_heads
-           
-        # 注意力机制生成1维特征
-        # self.top_att_layer = nn.ParameterList([nn.Sequential(
-        #     nn.Linear(input_dim, hidden_dim),
-        #     nn.GELU(), 
-        #     nn.Dropout(p=0.1),
-        #     nn.Linear(hidden_dim, hidden_dim*2),
-        #     nn.GELU(),
-        #     nn.Linear(hidden_dim * 2, 1)
-        # ) for _ in range(num_heads)])
-              
-        # # 使用多头注意力，生成多个关注组合   
-        # self.top_att_layer = nn.MultiheadAttention(
-        #     embed_dim=input_dim,
-        #     num_heads=num_heads,
-        #     dropout=dropout,
-        #     batch_first=True
-        # )        
         
         # 分别按照夜盘类别、行业类别、保证金范围生成不同注意力尺度的网络计算
         self.top_global_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
@@ -617,7 +607,7 @@ class SparseGateFeatureTopK(nn.Module):
         scales_layer = {}         
         self.scales_dict = scales_dict         
         for key in scales_dict:
-            scales_layer[key] = AttScaleFeature(sample_dim,input_dim,scale_arr=scales_dict[key],device=device)
+            scales_layer[key] = AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,scale_arr=scales_dict[key],device=device)
         self.scales_layer = nn.ModuleDict(scales_layer)
         self.score_head = nn.ParameterList([nn.Linear(sample_dim,sample_dim) for _ in range(len(scales_dict.keys())+1)])
             
@@ -696,7 +686,7 @@ class UnionTransCombine(nn.Module):
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
-        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, 
+        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, seq_len=seq_len,
                         hidden_dim=hidden_size,num_heads=4, dropout=0.1,scales_dict=scales_dict,device=device) for _ in range(self.target_feat_dim)])
 
         ############# 中间变量调试 #############
