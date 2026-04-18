@@ -1225,8 +1225,8 @@ class FuturesTransformerModule(MlpModule):
             keep_index = np.where(target_class_list >= 0)[0]
             # 去除指数整体及行业
             keep_index = np.intersect1d(keep_index, ins_all)  
-            trend_data  = output_3d[3]
-            features= output_3d[2]
+            trend_data = output_3d[3]
+            features = output_3d[2]
             trend_logits = output_3d[4]
             # trend_logits_item = {key:trend_logits[key][i] for key in trend_logits}
             output_list = [features, trend_data,trend_logits]
@@ -1291,7 +1291,7 @@ class FuturesTransformerModule(MlpModule):
         
         (features, trend_data,trend_logits_item) = output_data
         
-        import_index_list = self.strategy_top_bidi(features, trend_logits_item,pred_top_num=pred_top_num, target=target, target_info=target_info,
+        import_index_list = self.strategy_top_bidi(features, trend_data,pred_top_num=pred_top_num, target=target, target_info=target_info,
                                             batch_no=batch_no)
         # self.strategy_main_index(ce_values, cls_values, dec_out, pred_top_num=pred_top_num, target=target, target_info=target_info,
         #                                     index_round_targets=index_round_targets, combine_instrument=combine_instrument)

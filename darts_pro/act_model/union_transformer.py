@@ -552,6 +552,7 @@ class AttScaleFeature(nn.Module):
         self.sample_dim = sample_dim
         self.scale_arr = [torch.Tensor(s).long().to(device) for s in scale_arr]
         self.num_indices = num_indices
+        self.seq_len = seq_len
         
         ins_layer = []
         past_trend_layer = []

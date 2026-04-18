@@ -291,7 +291,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         merged = defaultdict(lambda: np.array([]))
         for scale_column in scale_columns:
             group_cols = ['datetime_number',scale_column]
-            # 添加行并根据行业取平均值
+            # 添加行并根据业务分区取平均值
             df_mean = df.groupby(group_cols)[tar_col].mean().reset_index()
             df_mean = df_mean[df_mean[scale_column]>=0].dropna()
             # do normalization

@@ -510,7 +510,19 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 print("no match for:",elem.dtype)
                 
         return tuple(aggregated) 
-         
+
+    def get_next_date(self,cur_date,dur=1):
+        """根据给定日期，取得数据集统一日期的下一交易日期"""
+        
+        idx = np.where(self.date_list==cur_date)[0][0]
+        next_idx = idx + dur
+        if next_idx < len(self.date_list):
+            next_val = self.date_list[next_idx]     
+        else:
+            next_val = None   
+     
+        return next_val
+             
     def __getitem__(self, idx):
         """兼容Sampler模式"""
         
@@ -662,8 +674,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_info_total_effect = np.array(target_info_total)[self.instrument_index][target_class_total[self.instrument_index]>=0]
         diff_range_all = np.stack([t['diff_range'] for t in target_info_total_effect])
         target_info_total[self.main_index]['diff_range'] = np.mean(diff_range_all,0)
-        # 存储业务类别数据到整体数据中
-        scale_arr = self.scale_dict[future_start_datetime]
+        # 存储业务类别分片数据到整体数据中,注意需要使用当前预测日期的下一日期作为取值依据
+        next_date = self.get_next_date(future_start_datetime,dur=(self.output_chunk_length-1))
+        scale_arr = self.scale_dict[next_date]
         target_info_total[self.main_index]['scale_arr'] = scale_arr        
         ######### 分别对目标值和协变量，在个体范围层面进行归一化 #########
         
@@ -768,7 +781,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 价格数据的归一化
         target_info_ins = np.array(target_info_total)[real_ins_index]
         open_diff_arr = np.array([item['open_diff'] for item in target_info_ins])
-        open_diff_norm = self.create_scaler(feature_range=(1e-5, 1)).fit_transform(np.expand_dims(open_diff_arr,-1)).squeeze(-1)
         price_targets[real_ins_index] = open_diff_arr
         # 使用均值作为整体指数参考
         long_diff_seq_targets = np.array([open_diff_arr.mean()])  
@@ -845,7 +857,8 @@ class FuturesInferenceDataset(FuturesIndustryDataset):
         date_mappings_ext[0] = date_mappings[0].copy()
         
         return date_mappings,date_mappings_ext       
-        
+    
+    
     def __getitem__(
         self, item_idx
     ):

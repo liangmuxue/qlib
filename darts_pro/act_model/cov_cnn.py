@@ -157,11 +157,11 @@ class PcaCnn(nn.Module):
 class LinelessLayer(nn.Module):
     """全连接加非线性"""
 
-    def __init__(self,input_num,output_num,shutcut_num=0,hidden_size=16,device=None,layer_norm=True,batch_norm=False,dropout=0,bias=False):   
+    def __init__(self,input_num,output_num,shutcut_num=0,hidden_size=16,device=None,layer_norm=True,batch_norm=False,dropout=0,bias=False,sigmoid=False):   
         super(LinelessLayer, self).__init__()
         
         self.bias = bias
-        
+        self.sigmoid = sigmoid
         self.linear_hidden = nn.Linear(input_num, hidden_size)
         self.linear_output = nn.Linear(hidden_size, output_num,bias=bias)
         self.relu = nn.GELU() 
@@ -199,6 +199,8 @@ class LinelessLayer(nn.Module):
             input_data = self.bn(input_data)             
         if res_data is not None:
             input_data = input_data + self.residual_layer(res_data)
+        if self.sigmoid:
+            input_data = torch.sigmoid(input_data)
         
         return input_data
         

@@ -82,7 +82,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanDataAllCutlen2_transMulScaleIndexLoss_CosLr_2411"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
                task_weights: [[0.5],[1.0]]
                grad_limits: [5.0,3.0]
@@ -105,7 +105,7 @@ task:
                filter_conv_index: -1
                loss_top_num: 1
                pred_top_num: 2
-               trend_threhold: {'min':0.0,'short':0.3,'long':0.7,'max':1.0}
+               trend_threhold: {'min':-1.0,'short':-0.5,'long':0.5,'max':1.0}
     dataset:
         class: TFTFuturesDataset
         module_path: darts_pro.tft_futures_dataset

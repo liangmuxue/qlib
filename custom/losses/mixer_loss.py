@@ -119,34 +119,28 @@ class FuturesIndustryLoss(UncertaintyLoss):
             main_loss = self.ccc_loss_comp(pred, target)
         return main_loss
         
-    def compute_top_loss(self,pred,target,top_num=3,no_real_dis=True):
+    def compute_top_loss(self,pred,target,top_num=3,need_mid=False):
         """计算top损失"""
 
         top_pred, top_pred_index = torch.topk(pred, k=top_num, dim=0)
         top_pred_inverse, top_pred_inverse_index = torch.topk(pred, k=top_num, largest=False, dim=0)
+        pred_index_mid = self.filter_middle_index(pred, mid_num=top_num)      
+        pred_mid = pred[pred_index_mid]  
         top_target = torch.gather(target, 0, top_pred_index)
         top_target_inverse = torch.gather(target, 0, top_pred_inverse_index)
-        top_pred_data = torch.cat([top_pred,top_pred_inverse])
-        top_target_data = torch.cat([top_target,top_target_inverse])
+        top_target_mid = torch.gather(target, 0, pred_index_mid)
+        if need_mid:
+            top_pred_data = torch.cat([top_pred,top_pred_inverse,pred_mid])
+            top_target_data = torch.cat([top_target,top_target_inverse,top_target_mid])
+        else:
+            top_pred_data = torch.cat([top_pred,top_pred_inverse])
+            top_target_data = torch.cat([top_target,top_target_inverse])            
         
         if all_elements_same(top_target_data) or all_elements_same(top_pred_data):
             top_loss = self.mse_loss(top_pred_data.unsqueeze(0), top_target_data.unsqueeze(0)) 
         else:
             top_loss = self.ccc_loss_comp(top_pred_data, top_target_data)
-        # 优化：对前k名候选的目标值进行比对，实现额外加权（强制区分核心候选）
-        top_real,target_topk_index = torch.topk(target, k=top_num, dim=0)
-        top_real_inverse,target_topk_insverse_index = torch.topk(target, k=top_num,largest=False, dim=0)
-        top_real_index = torch.cat([target_topk_index,target_topk_insverse_index])
-        top_pred_ref_data = torch.gather(pred, 0, top_real_index)
-        top_real_target_data = torch.cat([top_real,top_real_inverse])
-        # 使用当前索引对应的实际数据与实际排名靠前的数据作差，作为加权的权重
-        if all_elements_same(top_real_target_data) or no_real_dis:
-            real_dis_weights = 0
-        else:
-            real_dis_weights = self.ccc_loss_comp(top_target_data,top_real_target_data)
-        top_loss = top_loss + real_dis_weights
-        if not no_real_dis:
-            top_loss = top_loss/2
+        
         return top_loss
 
     def compute_tar_top_loss(self,pred,target,top_num=3,r=0.5):
@@ -266,9 +260,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
             top_loss = self.ccc_loss_comp(pred[top_real_index],target[top_real_index])  
         return top_loss    
 
-    def create_combine_index(self,pred,ins_rel_index=None):
+    def create_combine_index(self,pred,ins_rel_index=None,top_num=1):
         
-        pred_index_long,pred_index_short = self.filter_top_index_bidi(pred,top_num=1)
+        pred_index_long,pred_index_short = self.filter_top_index_bidi(pred,top_num=top_num)
         pred_index_mid = self.filter_middle_index(pred, mid_num=1)
         combine_index = torch.cat([pred_index_long,pred_index_mid,pred_index_short])
         
@@ -276,7 +270,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return combine_index
 
-    def compute_trend_loss(self,combine_trend_output,target_info,ins_rel_index=None):   
+    def compute_trend_loss(self,combine_trend_output,target,past_target,ins_rel_index=None):   
         """和过去的趋势数值做差分，进行损失比较"""
         
         # node_num = past_target.shape[1]
@@ -286,7 +280,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # combine_index = self.create_combine_index(global_trend_output,ins_rel_index=ins_rel_index)
         # loss = self._compute_top_loss(global_trend_output, global_trend_feature,combine_index)
         
-        loss = 0
+        cls_loss = 0
         cnt = 0
         for _,key in enumerate(list(self.scale_dict.keys())):
             scale_arr = self.scale_dict[key]
@@ -295,12 +289,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if instruments.shape[0]<2:
                     continue
                 scale_output = combine_trend_output[key][i*self.input_chunk_length:(i+1)*self.input_chunk_length]
-                scale_target_mean = torch.Tensor(target_info['scale_arr'][key+"_sec"][i,:self.input_chunk_length]).to(ins_rel_index.device)
-                combine_index = self.create_combine_index(scale_output,ins_rel_index=ins_rel_index)
-                loss += self._compute_top_loss(scale_output, scale_target_mean,combine_index)
+                scale_target_mean = target[instruments].mean() - past_target[instruments].mean(0)
+                scale_target_mean = normalization_axis(scale_target_mean)
+                cls_loss += self.compute_top_loss(scale_output,scale_target_mean,top_num=2,need_mid=True)
+                # ce_loss += self.ccc_loss_comp(scale_output, scale_target_mean)
                 cnt += 1
         
-        return loss/cnt   
+        return cls_loss/cnt
                 
     def filter_top_index_bidi(self,pred,top_num=3,ins_rel_index=None):
         pred_index = torch.argwhere(pred!=0)[:,0]
@@ -488,11 +483,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_ref=trend_ref[key][j])   
                         batch_size += 1                    
                     elif target_mode==3:
-                        ref_indicator = 1 
                         # 整体损失计算
                         combine_trend_output = self.build_scale_trend_output(sw_index_logits[0],j,trend_output=trend_past_output)
                         past_target_item = past_target[j,ins_all,:,0]
-                        cls_loss[i] += self.compute_trend_loss(combine_trend_output,target_info_item,ins_rel_index=ins_rel_index)  
+                        cls_loss[i] += self.compute_trend_loss(combine_trend_output,target_item,past_target_item,ins_rel_index=ins_rel_index)  
                         batch_size += 1
                         
                 if target_mode in [0]:
@@ -502,28 +496,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     ce_loss[i] = ce_loss[i]/batch_size
                     fds_loss[i] = fds_loss[i]/batch_size
                 if target_mode in [3]:
-                    cls_loss[i] = cls_loss[i]/batch_size
                     # 批次内计算各个业务分支的整体损失
-                    inner_batch = 0
-                    scale_out_total = []
-                    scale_target_total = []
-                    for key in trend_output.keys():
-                        scale_output = trend_output[key]
-                        scale_target = trend_target[key]
-                        if len(scale_output.shape)==1:
-                            scale_out_total.append(scale_output.unsqueeze(-1))
-                            scale_target_total.append(scale_target.unsqueeze(-1))
-                        else:
-                            scale_out_total.append(scale_output)
-                            scale_target_total.append(scale_target)
-                    scale_out_total = torch.cat(scale_out_total,-1).transpose(1,0)
-                    scale_target_total = torch.cat(scale_target_total,-1).transpose(1,0)
-                    # scale_out_norm = normalization_axis(scale_out_total,axis=-1)
-                    # scale_target_norm = normalization_axis(scale_target_total,axis=-1)
-                    # ce_loss[i] += self.ccc_loss_comp(scale_out_total, scale_target_total)
+                    cls_loss[i] = cls_loss[i]/batch_size
+                    ce_loss[i] = ce_loss[i]/batch_size
                     
-                    # corr_loss[i] = corr_loss[i]/batch_size
-                    loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
+                loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
                            
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss,predictions]    
     
@@ -533,9 +510,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
         trend_output = {}
         for j in range(batch_size):
             self.build_scale_trend_output(sw_data,j,trend_output=trend_output,mode=mode)   
-        # 批次内归一化
-        for key in trend_output.keys():
-            trend_output[key] = normalization_axis(trend_output[key], axis=0)
+        # # 批次内归一化
+        # for key in trend_output.keys():
+        #     trend_output[key] = normalization_axis(trend_output[key], axis=0)
              
         return trend_output   
         
