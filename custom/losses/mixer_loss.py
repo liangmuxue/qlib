@@ -64,20 +64,28 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def create_avg_trend_value(self,trend_value,past_target_trend,top_num = 2):
         """根据预测值生成趋势值"""
         
-        # sort_index = np.argsort(trend_value)
-        # mid_pos = trend_value.shape[0]//2
-        # pred_index_middle = sort_index[mid_pos:mid_pos+top_num]
-        # mid_value = past_target_trend[pred_index_middle]
-        # avg_value = mid_value.sum()/top_num  
+        sort_index = np.argsort(trend_value)
+        # 取最大和最小，把最靠近边界的作为参考索引
+        min_index = sort_index[:top_num]
+        max_index = sort_index[-top_num:]
+        mid_value = (0 - trend_value[min_index]).mean()
+        max_value = (trend_value[max_index] - 1).mean()
+        if mid_value > max_value:
+            pred_value = past_target_trend[min_index].mean() - 1
+        else:
+            pred_value = past_target_trend[max_index].mean() + 1
+        return pred_value
 
-        index = np.argsort(trend_value)
-        # 最小值代表最接近
-        mid_value = past_target_trend[index[:top_num]]
-        # 根据过去趋势值，判定当前趋势的多空程度           
-        avg_value = mid_value.sum()/top_num  
-                
-        return avg_value
-       
+    def create_trend_value(self,trend_value,past_target_trend,top_num=2):
+        """根据预测值生成趋势值,中间模式"""
+        
+        # 通过绝对值取得接近0的索引，以和过去数值匹配
+        sort_index = np.argsort(np.abs(trend_value))
+        ind_index = sort_index[:top_num]
+        pred_value = past_target_trend[ind_index].mean()
+        
+        return pred_value
+                       
     def judge_topNum_from_trend(self,trend_value,top_num=1,trend_threhold=None):
         """根据趋势数值，生成top选取数量"""
 
@@ -119,12 +127,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
             main_loss = self.ccc_loss_comp(pred, target)
         return main_loss
         
-    def compute_top_loss(self,pred,target,top_num=3,need_mid=False):
+    def compute_top_loss(self,pred,target,top_num=3,mid_num=3,need_mid=False):
         """计算top损失"""
 
         top_pred, top_pred_index = torch.topk(pred, k=top_num, dim=0)
         top_pred_inverse, top_pred_inverse_index = torch.topk(pred, k=top_num, largest=False, dim=0)
-        pred_index_mid = self.filter_middle_index(pred, mid_num=top_num)      
+        pred_index_mid = self.filter_middle_index(pred, mid_num=mid_num)      
         pred_mid = pred[pred_index_mid]  
         top_target = torch.gather(target, 0, top_pred_index)
         top_target_inverse = torch.gather(target, 0, top_pred_inverse_index)
@@ -290,8 +298,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     continue
                 scale_output = combine_trend_output[key][i*self.input_chunk_length:(i+1)*self.input_chunk_length]
                 scale_target_mean = target[instruments].mean() - past_target[instruments].mean(0)
-                scale_target_mean = normalization_axis(scale_target_mean)
-                cls_loss += self.compute_top_loss(scale_output,scale_target_mean,top_num=2,need_mid=True)
+                # scale_target_mean = normalization_axis(scale_target_mean)
+                cls_loss += self.compute_top_loss(scale_output,scale_target_mean,top_num=1,mid_num=3,need_mid=True)
                 # ce_loss += self.ccc_loss_comp(scale_output, scale_target_mean)
                 cnt += 1
         
@@ -311,10 +319,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
         return pred_index_long,pred_index_short
 
     def filter_middle_index(self,pred,mid_num=2,ins_rel_index=None):
+        
         pred_index = torch.argwhere(pred!=0)[:,0]
-        sort_index = pred_index[torch.argsort(-pred[pred_index])]
-        mid_pos = pred.shape[0]//2
-        pred_index_middle = sort_index[mid_pos:mid_pos+mid_num]
+        # 通过绝对值，取得接近0的索引作为中间值索引
+        sort_index = pred_index[torch.argsort(torch.abs(pred[pred_index]))]
+        pred_index_middle = sort_index[:mid_num]
         # 当前可用品种的再次筛选
         if ins_rel_index is not None:
             pred_index_middle = tensor_intersect(pred_index_middle,ins_rel_index)

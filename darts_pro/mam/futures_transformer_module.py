@@ -1291,7 +1291,7 @@ class FuturesTransformerModule(MlpModule):
         
         (features, trend_data,trend_logits_item) = output_data
         
-        import_index_list = self.strategy_top_bidi(features, trend_data,pred_top_num=pred_top_num, target=target, target_info=target_info,
+        import_index_list = self.strategy_top_bidi(features, trend_logits_item,pred_top_num=pred_top_num, target=target, target_info=target_info,
                                             batch_no=batch_no)
         # self.strategy_main_index(ce_values, cls_values, dec_out, pred_top_num=pred_top_num, target=target, target_info=target_info,
         #                                     index_round_targets=index_round_targets, combine_instrument=combine_instrument)
@@ -1312,7 +1312,8 @@ class FuturesTransformerModule(MlpModule):
         cancidate_list = []
         mode = 'single'
         # 同时从正反2个方向选取品种
-        cancidate_list = self.compute_arg_sort_by_trend(features, combine_index,top_num=top_num,batch_no=batch_no,past_target=target[:,:self.input_chunk_length])      
+        cancidate_list = self.compute_arg_sort_by_trend(features, combine_index,top_num=top_num,batch_no=batch_no,
+                                target=target,past_target=target[:,:self.input_chunk_length])      
                           
         return cancidate_list
 
@@ -1336,7 +1337,7 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index.astype(int)
     
-    def compute_arg_sort_by_trend(self, features, combine_index,mode='single',past_target=None, top_num=2,batch_no=0):
+    def compute_arg_sort_by_trend(self, features, combine_index,target=None,past_target=None, top_num=2,batch_no=0):
         """根据输出进行排序"""
         
         match_key = self.get_scale_match_key()
@@ -1360,7 +1361,7 @@ class FuturesTransformerModule(MlpModule):
             # pred_trend_value = trend_ref[match_key][batch_no,i]
             past_target_trend = past_target[ins,:,0].mean(0)
             pred_trend_value_items = combine_index_item[i*self.input_chunk_length:(i+1)*self.input_chunk_length]
-            pred_trend_value = self.criterion.create_avg_trend_value(pred_trend_value_items, past_target_trend)
+            pred_trend_value = self.criterion.create_trend_value(pred_trend_value_items, past_target_trend)
             long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
             pre_index = np.argsort(-features_item)[:long_num]
             pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
