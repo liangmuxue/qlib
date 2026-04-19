@@ -247,7 +247,8 @@ class CollResAna():
         self.prepare_data()
         # self.relative_stat()
         # self.normal_stat()
-        self.scale_info_stat()
+        # self.scale_info_stat()
+        self.trend_info_stat()
         # self.price_range_stat()
         # self.target_corr_stat()
         # self.ins_index_stat()
@@ -507,7 +508,14 @@ class CollResAna():
         fail_result = result_data[result_data['diff_range']<0]
         suc_result = result_data[result_data['diff_range']>=0]
         fail_result
+
+    def trend_info_stat(self):   
         
+        save_path = os.path.join(self.file_path,"trend_result.csv")
+        df = self.coll_result_data.drop_duplicates(subset=['date', 'pred_trend_value'])
+        df[['date', 'pred_trend_value', 'pred_trend_flag','real_trend_values','real_trend_ref_values', 
+                             'real_trend_flag','past_ind', 'ind_data', 'trend_eva_diff',
+                            'trend_match_flag']].to_csv(save_path, index=False)   
             
     def compute_diff_range_class(self,target_info,target_info_arr=None,is_main=False,jump_mode=False):
         """根据实际涨跌数据计算类别"""

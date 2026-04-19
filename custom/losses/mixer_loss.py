@@ -68,13 +68,18 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # 取最大和最小，把最靠近边界的作为参考索引
         min_index = sort_index[:top_num]
         max_index = sort_index[-top_num:]
-        mid_value = (0 - trend_value[min_index]).mean()
-        max_value = (trend_value[max_index] - 1).mean()
-        if mid_value > max_value:
-            pred_value = past_target_trend[min_index].mean() - 1
+        mid_value = (trend_value[min_index]).mean()
+        max_value = trend_value[max_index].mean()
+        
+        if (-mid_value) > max_value:
+            ind_data = mid_value
+            past_ind = past_target_trend[min_index].mean()
+            pred_value = past_ind + mid_value
         else:
-            pred_value = past_target_trend[max_index].mean() + 1
-        return pred_value
+            ind_data = max_value
+            past_ind = past_target_trend[max_index].mean()
+            pred_value = past_ind + max_value
+        return pred_value,past_ind,ind_data
 
     def create_trend_value(self,trend_value,past_target_trend,top_num=2):
         """根据预测值生成趋势值,中间模式"""
@@ -299,7 +304,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 scale_output = combine_trend_output[key][i*self.input_chunk_length:(i+1)*self.input_chunk_length]
                 scale_target_mean = target[instruments].mean() - past_target[instruments].mean(0)
                 # scale_target_mean = normalization_axis(scale_target_mean)
-                cls_loss += self.compute_top_loss(scale_output,scale_target_mean,top_num=1,mid_num=3,need_mid=True)
+                cls_loss += self.compute_top_loss(scale_output,scale_target_mean,top_num=2,mid_num=3,need_mid=False)
                 # ce_loss += self.ccc_loss_comp(scale_output, scale_target_mean)
                 cnt += 1
         
@@ -454,6 +459,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     target_item = target[j,ins_all,target_len,0]
                     target_info_item = target_info[j][main_index_abs]
+                    date = target_info_item['future_start_datetime']
                     # 收集趋势业务数据
                     self.build_scale_trend_output(sw_index_data[0],j,trend_output=trend_output)
                     self.build_scale_trend_target(target_info_item,trend_target=trend_target,ins_rel_index=ins_rel_index)   

@@ -1292,7 +1292,7 @@ class FuturesTransformerModule(MlpModule):
         (features, trend_data,trend_logits_item) = output_data
         
         import_index_list = self.strategy_top_bidi(features, trend_logits_item,pred_top_num=pred_top_num, target=target, target_info=target_info,
-                                            batch_no=batch_no)
+                                            batch_no=batch_no,date=date)
         # self.strategy_main_index(ce_values, cls_values, dec_out, pred_top_num=pred_top_num, target=target, target_info=target_info,
         #                                     index_round_targets=index_round_targets, combine_instrument=combine_instrument)
  
@@ -1303,7 +1303,7 @@ class FuturesTransformerModule(MlpModule):
         
         return result_list
 
-    def strategy_top_bidi(self, features, combine_index,pred_top_num=2, target=None, target_info=None,batch_no=0):
+    def strategy_top_bidi(self, features, combine_index,pred_top_num=2, target=None, target_info=None,batch_no=0,date=None):
         """筛选品种明细,使用双向模式"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -1312,7 +1312,7 @@ class FuturesTransformerModule(MlpModule):
         cancidate_list = []
         mode = 'single'
         # 同时从正反2个方向选取品种
-        cancidate_list = self.compute_arg_sort_by_trend(features, combine_index,top_num=top_num,batch_no=batch_no,
+        cancidate_list = self.compute_arg_sort_by_trend(features, combine_index,top_num=top_num,batch_no=batch_no,date=date,
                                 target=target,past_target=target[:,:self.input_chunk_length])      
                           
         return cancidate_list
@@ -1337,7 +1337,7 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index.astype(int)
     
-    def compute_arg_sort_by_trend(self, features, combine_index,target=None,past_target=None, top_num=2,batch_no=0):
+    def compute_arg_sort_by_trend(self, features, combine_index,target=None,date=None,past_target=None, top_num=2,batch_no=0):
         """根据输出进行排序"""
         
         match_key = self.get_scale_match_key()
@@ -1361,17 +1361,19 @@ class FuturesTransformerModule(MlpModule):
             # pred_trend_value = trend_ref[match_key][batch_no,i]
             past_target_trend = past_target[ins,:,0].mean(0)
             pred_trend_value_items = combine_index_item[i*self.input_chunk_length:(i+1)*self.input_chunk_length]
-            pred_trend_value = self.criterion.create_trend_value(pred_trend_value_items, past_target_trend)
+            # if date==20241230:
+            #     print("ggg")
+            pred_trend_value,past_ind,ind_data = self.criterion.create_avg_trend_value(pred_trend_value_items, past_target_trend)
             long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
             pre_index = np.argsort(-features_item)[:long_num]
             pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
             for index in pre_index:
-                pre_index_total.append([ins[index],1,pred_trend_value,pred_trend_flag,i])
+                pre_index_total.append([ins[index],1,pred_trend_value,pred_trend_flag,i,past_ind,ind_data])
             pre_index = np.argsort(features_item)[:short_num]
             for index in pre_index:
-                pre_index_total.append([ins[index],0,pred_trend_value,pred_trend_flag,i])
+                pre_index_total.append([ins[index],0,pred_trend_value,pred_trend_flag,i,past_ind,ind_data])
         pre_index_total = np.array(pre_index_total)
-        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_flag','rel_scale'])
+        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_flag','rel_scale','past_ind','ind_data'])
         
         return pre_index_total
     
@@ -1390,7 +1392,7 @@ class FuturesTransformerModule(MlpModule):
             ins = np.array(self.scale_arr[rel_scale_key][scale_idx])
             real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
             real_trend_ref_values = open_diff[ins].mean()
-            real_trend_flag = self.get_trend_flag_from_value(real_trend_values)
+            real_trend_flag = self.get_trend_flag_from_value(real_trend_ref_values)
             ts = target_info[imp_idx]
             diff_range, p_taraget_class, _ = self.criterion.compute_diff_range_class(ts)
             # 根据多空判断取得实际对应的类别
@@ -1413,6 +1415,8 @@ class FuturesTransformerModule(MlpModule):
         coll_results['pred_trend_value'] = result_list['pred_trend_value']
         coll_results['pred_trend_flag'] = result_list['pred_trend_flag'].astype(int)
         coll_results['rel_scale_key'] = rel_scale_key
+        coll_results['past_ind'] = result_list['past_ind'].astype(float)
+        coll_results['ind_data'] = result_list['ind_data'].astype(float)
         
         self.eva_total_trend(coll_results)
         
