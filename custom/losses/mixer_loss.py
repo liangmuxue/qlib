@@ -216,7 +216,27 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss        
         
-               
+    def compute_popu_weight_loss(self,pred,target,key=None,ins_rel_index=None,top_num=1):
+        """通用业务分支的WEIGHT损失"""
+
+        scale_arr = self.scale_dict[key]
+        loss = 0
+        count = 0
+        for i,instruments in enumerate(scale_arr):
+            instruments = torch.Tensor(instruments).to(pred.device).long()
+            instruments = tensor_intersect(instruments,ins_rel_index).long()
+            pred_item = pred[instruments]
+            target_item = target[instruments]
+            pred_weights = self.get_sample_weights(pred_item, -1.0, 1.0)
+            loss += self.criterion(pred_item, target_item,pred_weights)
+            target_weights = self.get_sample_weights(target_item, -1.0, 1.0)
+            loss += self.criterion(pred_item, target_item,target_weights)
+            count += 2
+        
+        loss = loss/count
+        
+        return loss      
+                  
     def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
         """按照行业计算损失"""
         
@@ -503,9 +523,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = scale_output[key]
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
-                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                # cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
                             if sidx==1:
-                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
                                 
                         batch_size += 1          
                                   
