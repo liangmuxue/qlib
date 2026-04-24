@@ -21,6 +21,7 @@ from data_extract.data_baseinfo_extractor import StockDataExtractor
 from darts_pro.tft_series_dataset import TFTSeriesDataset
 from darts_pro.data_extension.series_data_utils import get_pred_center_value
 from cus_utils.common_compute import process_outliers_multi_cols
+import cus_utils.global_var as global_var
 
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
@@ -138,12 +139,29 @@ class TFTFuturesDataset(TFTSeriesDataset):
         compute_diff("CLOSE","close_range",open_mode=True)
         
         # 做二次差分，为每个节点生成差分数组
-        self.build_past_roll_diff_data(df, group_column, 'open_range', 'open_diff_sec_norm')
+        # self.build_past_roll_diff_data(df, group_column, 'open_range', 'open_diff_sec_norm')
         
         df['datetime_number'] = df['datetime_number'].astype(int)
+        
+        # 剔除open_diff超出范围的异常值
+        df.loc[df['open_diff']>5,'open_diff'] = 5
+        df.loc[df['open_diff']<-5,'open_diff'] = -5            
         # 生成业务分片均值数据
-        self.scale_dict = self.build_scale_mean(df,list(scale_conf.keys()),tar_col='open_diff',val_range=val_range)  
-        # self.scale_diff_dict = self.build_scale_mean(df,list(scale_conf.keys()),tar_col='diff_range_sec',val_range=val_range)                    
+        scale_columns = list(scale_conf.keys())
+        self.scale_dict,df_mean_norm = self.build_scale_mean(df,scale_columns,tar_col='open_diff',val_range=val_range)  
+        # 根据分类信息得到分类权重
+        self.scale_class_weights = {}
+        for key in scale_columns:
+            class_col = key +"_class"
+            self.scale_class_weights[class_col] = []
+            for i in range(2):
+                df_mean_norm_item = df_mean_norm[key]
+                df_mean_norm_item = df_mean_norm_item[df_mean_norm_item[key]==i].dropna()
+                class_count = np.bincount(df_mean_norm_item[class_col].values) 
+                class_weights = 1.0 / class_count
+                class_weights = class_weights / class_weights.sum()
+                self.scale_class_weights[class_col].append(class_weights)
+            
         # 剔除diff_range超出范围的异常值
         df['diff_range_norm'] = df['diff_range']
         df.loc[df['diff_range_norm']>5,'diff_range_norm'] = 5
@@ -286,9 +304,14 @@ class TFTFuturesDataset(TFTSeriesDataset):
     def build_scale_mean(self,df,scale_columns,tar_col='open_diff',val_range=None):
         """针对特定指标，生成平均值"""
         
+        trend_threhold = global_var.get_value("trend_threhold")
+        bins = [trend_threhold['min'],trend_threhold['short'],trend_threhold['long'], trend_threhold['max']]
+        labels = [0,1,2]
+                             
         step_len = self.step_len - 1
         dict_list = {}
         merged = defaultdict(lambda: np.array([]))
+        df_mean_norm_total = {}
         for scale_column in scale_columns:
             group_cols = ['datetime_number',scale_column]
             # 添加行并根据业务分区取平均值
@@ -296,48 +319,35 @@ class TFTFuturesDataset(TFTSeriesDataset):
             df_mean = df_mean[df_mean[scale_column]>=0].dropna()
             # do normalization
             norm_col = scale_column + "_norm"
-            norm_col_sec = norm_col+'_sec'
+            norm_col_class = scale_column + '_class'
             df_mean_norm = []
             for i in range(2):
                 df_mean_item = df_mean[df_mean[scale_column]==i]
                 df_train = df_mean_item[df_mean_item["datetime_number"]<int(val_range[0].strftime("%Y%m%d"))]
                 # 针对diff_range数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
                 scaler_train = StandardScaler()
+                # scaler_train = MinMaxScaler()
                 scaler_train.fit(df_train[[tar_col]])
                 df_mean_item[[norm_col]] = scaler_train.transform(df_mean_item[[tar_col]])   
-                self.build_past_roll_diff_data(df_mean_item, scale_column, tar_col,norm_col_sec)
+                # 分类信息
+                df_mean_item[norm_col_class] = pd.cut(df_mean_item[norm_col], bins=bins, labels=labels, right=False) 
+                # self.build_past_roll_diff_data(df_mean_item, scale_column, tar_col,norm_col_sec)
                 df_mean_norm.append(df_mean_item)         
 
             df_mean_norm = pd.concat(df_mean_norm)
+            df_mean_norm_total[scale_column] = df_mean_norm
             result_dict = df_mean_norm.groupby('datetime_number')[norm_col].apply(lambda x:{scale_column:np.array(x)}).to_dict()
-            result_dict_sec = df_mean_norm.groupby('datetime_number')[norm_col_sec].apply(lambda x:{scale_column+'_sec':np.array(x)}).to_dict()
+            # result_dict_class = df_mean_norm.groupby('datetime_number')[norm_col_class].apply(lambda x:{scale_column+'_class':np.array(x)}).to_dict()
             nested_dict = {}
             for (k1, k2), value in result_dict.items():
                 if k1 not in nested_dict:
                     nested_dict[k1] = {}  
                 nested_dict[k1][k2] = value
-            for (k1, k2), value in result_dict_sec.items():
-                if k1 not in nested_dict:
-                    nested_dict[k1] = {}  
-                if value.shape[0]==1: 
-                    if isinstance(value[0],list):
-                        nested_dict[k1][k2] = np.stack([np.array(value[0]),np.zeros([step_len])])  
-                    else:
-                        nested_dict[k1][k2] = np.zeros([2,step_len])
-                else:
-                    if isinstance(value[0],list) and isinstance(value[1],list):
-                        nested_dict[k1][k2] = np.stack(value)
-                    elif isinstance(value[0],list):
-                        nested_dict[k1][k2] = np.stack([np.array(value[0]),np.zeros([step_len])])    
-                    elif isinstance(value[1],list):
-                        nested_dict[k1][k2] = np.stack([np.zeros([step_len]),np.array(value[1])])       
-                    else:
-                        nested_dict[k1][k2] = np.zeros([2,step_len])                             
             merged = dict_list.copy()
             for k, v in nested_dict.items():
                 merged[k] = {**merged.get(k, {}), **v}      
             dict_list = merged         
         
-        return dict_list
+        return dict_list,df_mean_norm_total
     
         

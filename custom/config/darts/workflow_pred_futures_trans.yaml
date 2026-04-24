@@ -5,9 +5,9 @@ market: &market clean_data
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2023-01-01
+    start_time: 2012-01-01
     end_time: 2025-12-31
-    fit_start_time: 2023-01-01
+    fit_start_time: 2012-01-01
     fit_end_time: 2025-12-31
     instruments: *market
     infer_processors:
@@ -62,7 +62,7 @@ task:
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
-            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"   
+            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"   
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05
@@ -80,22 +80,22 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transMulScaleIndexLoss_CosLr_2411"
+               model_name: "Futures_cleanDataAllCutlen2_transIndexLoss_2411"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               task_weights: [[0.5],[1.0]]
+               task_weights: [[0.5,0.5],[0.5,0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[],[0]]
+               main_task_seq: [[1],[0]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
-               wave_period : &wave_period 30
+               wave_period : &wave_period 33
                hidden_size: 16  
-               forecast_horizon: &forecast_horizon 2
+               forecast_horizon: &forecast_horizon 5
                cut_len: &cut_len 2
                dropout: 0.3
                opt_size: 1
@@ -105,7 +105,7 @@ task:
                filter_conv_index: -1
                loss_top_num: 1
                pred_top_num: 2
-               trend_threhold: {'min':-1.0,'short':-0.5,'long':0.5,'max':1.0}
+               trend_threhold: {'min':-1.0,'short':-0.7,'long':0.7,'max':1.0}
     dataset:
         class: TFTFuturesDataset
         module_path: darts_pro.tft_futures_dataset
@@ -115,7 +115,7 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2023-01-01, 2024-11-28]
+                train: [2012-01-01, 2024-11-28]
                 valid: [2024-11-01, 2025-02-28]
                 test: [2025-07-01, 2025-09-30]
             whole_data: False
@@ -149,7 +149,7 @@ task:
                                   ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ] 
-                static_covariate_col: ['industry','night_flag','exchange_id','price_range','create_year','limit_rate','magin_radio']   
+                static_covariate_col: ['industry','night_flag','exchange_id','create_year','limit_rate','magin_radio']   
                 static_cate_col: ['industry','night_flag','exchange_id','create_year']
                 static_cont_col: ['price_range','limit_rate','magin_radio']
                 

@@ -172,6 +172,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 组建辅助数据
         load_ass_data = global_var.get_value("load_ass_data")
         self.scale_dict = dataset.scale_dict
+        self.scale_class_weights = dataset.scale_class_weights
+        
         if load_ass_data:
             # 如果配置为加载模式，则从全局变量透传数据
             self.ass_data = global_var.get_value("ass_data_{}".format(mode))

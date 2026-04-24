@@ -547,7 +547,7 @@ class ContinuousToDiscreteIndex(nn.Module):
 class AttScaleFeature(nn.Module):
     """按照指定尺度，实现特征处理"""
 
-    def __init__(self,sample_dim,input_dim,seq_len=28,scale_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
+    def __init__(self,sample_dim,input_dim,seq_len=5,scale_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.scale_arr = [torch.Tensor(s).long().to(device) for s in scale_arr]
@@ -555,45 +555,48 @@ class AttScaleFeature(nn.Module):
         self.seq_len = seq_len
         
         ins_layer = []
-        past_trend_layer = []
+        trend_layer = []
+        trend_logits_layer = []
         # TOP值选取网络
         for scaler in self.scale_arr:
             sample_dim_inner = scaler.shape[0]
             ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
                                 layer_norm=True,batch_norm=False,dropout=dropout)
             ins_layer.append(ins_layer_inner)
-            past_trend_layer_inner = LinelessLayer(sample_dim_inner*input_dim,seq_len,hidden_size=input_dim,
+            trend_layer_inner = LinelessLayer(input_dim*seq_len,seq_len,hidden_size=input_dim,
                                 layer_norm=True,batch_norm=False,dropout=dropout)            
-            past_trend_layer.append(past_trend_layer_inner)
+            trend_layer.append(trend_layer_inner)
+            trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
+                                layer_norm=False,batch_norm=True,dropout=dropout)      
+            trend_logits_layer.append(trend_logits_layer_inner)          
         self.ins_layer = nn.ParameterList(ins_layer)
         # 整体趋势计算网络
-        trend_num = len(self.scale_arr)
-        self.trend_layer = LinelessLayer(sample_dim*input_dim,trend_num,hidden_size=sample_dim,
-                                layer_norm=False,batch_norm=True,dropout=0)
-        self.past_trend_layer = nn.ParameterList(past_trend_layer)
+        self.trend_layer = nn.ParameterList(trend_layer)
+        self.trend_logits_layer_inner = nn.ParameterList(trend_logits_layer)
         
-    def forward(self, x):
+    def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, _ = x.shape
         
         output = torch.zeros([batch_size,S]).to(x.device)
-        output2index_trend = []
+        output2index_trend = torch.zeros([batch_size,len(self.scale_arr)]).to(x.device)
+        output_trend = torch.zeros([batch_size,S,self.seq_len]).to(x.device)
         # 针对自定义的品种范围数组，进行分尺度的特征处理
         for i,scaler in enumerate(self.scale_arr):
-            x_part = x[:,scaler,:].reshape(batch_size,-1)
-            output[:,scaler] = self.ins_layer[i](x_part)
-            # 对过去值为锚点，进行趋势差分判断
-            output2index_trend.append(self.past_trend_layer[i](x_part))
-        output2index_trend = torch.cat(output2index_trend,-1)
-        # 整体趋势网络计算
-        output_trend = self.trend_layer(x.reshape(batch_size,-1)) 
-            
+            # x_part = x[:,scaler,:].reshape(batch_size,-1)
+            # output[:,scaler] = self.ins_layer[i](x_part)
+            # 整体序列趋势网络计算
+            x_seq_part = x_seq[:,scaler].reshape(batch_size,scaler.shape[0],-1)
+            output_trend[:,scaler,:] = self.trend_layer[i](x_seq_part)
+            # 整体趋势网络计算
+            x_l_part = x[:,scaler].reshape(batch_size,-1)
+            output2index_trend[:,i] = self.trend_logits_layer_inner[i](x_l_part).squeeze(-1) 
         return output,output_trend,output2index_trend
                         
 class SparseGateFeatureTopK(nn.Module):
     """综合TOPK选取"""
     
-    def __init__(self,sample_dim,input_dim,seq_len=28,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
+    def __init__(self,sample_dim,input_dim,seq_len=5,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
                  scales_dict=None,device=None):
         super().__init__()
         self.sample_dim = sample_dim
@@ -612,7 +615,7 @@ class SparseGateFeatureTopK(nn.Module):
         self.scales_layer = nn.ModuleDict(scales_layer)
         self.score_head = nn.ParameterList([nn.Linear(sample_dim,sample_dim) for _ in range(len(scales_dict.keys())+1)])
             
-    def forward(self, x):
+    def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
         features_list = {}
@@ -625,7 +628,7 @@ class SparseGateFeatureTopK(nn.Module):
         features_list['global_feature'] = g_features_combine
         trend_list['global_trend_feature'] = g_trend_features
         for i,key in enumerate(self.scales_layer.keys()):
-            scale_features,trend_features,trend_index_logits = self.scales_layer[key](x)  
+            scale_features,trend_features,trend_index_logits = self.scales_layer[key](x,x_seq)  
             # 合并主体特征和分尺度特征
             combine_features = self.score_head[(i+1)](g_features + scale_features)
             features_list[key] = combine_features
@@ -687,7 +690,7 @@ class UnionTransCombine(nn.Module):
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
-        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, seq_len=seq_len,
+        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, seq_len=pred_len,
                         hidden_dim=hidden_size,num_heads=4, dropout=0.1,scales_dict=scales_dict,device=device) for _ in range(self.target_feat_dim)])
 
         ############# 中间变量调试 #############
@@ -710,7 +713,7 @@ class UnionTransCombine(nn.Module):
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features_list,trend_list,trend_logits_list = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1))
+            features_list,trend_list,trend_logits_list = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1),pred_seq)
             cls_out_combine.append(features_list)
             # 整体指数预测的网络输出
             index_data_combine.append(trend_list)

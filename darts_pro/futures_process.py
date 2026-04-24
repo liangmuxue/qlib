@@ -295,6 +295,7 @@ class FuturesProcessModel(TftDataframeModel):
             os.mkdir(self.batch_file_path)
         
         # 生成tft时间序列数据集,包括目标数据、协变量等
+        global_var.set_value("trend_threhold",self.optargs["trend_threhold"])
         train_data,val_data = dataset.build_series_data()
         train_series_transformed,past_convariates_train,future_convariates_train = train_data
         val_series_transformed,past_convariates_val,future_convariates_val = val_data

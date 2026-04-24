@@ -50,6 +50,19 @@ def similarity_consistency_loss(pred, target):
     sim_loss = F.mse_loss(pred_sim, target_sim, reduction='mean')
     return sim_loss
 
+class HuberLoss(nn.Module):
+    def __init__(self, delta=1.0):
+        super().__init__()
+        self.delta = delta
+
+    def forward(self, pred, target):
+        residual = torch.abs(pred - target)
+        condition = residual < self.delta
+        loss = torch.where(condition,
+                           0.5 * residual ** 2,
+                           self.delta * (residual - 0.5 * self.delta))
+        return loss.mean()
+    
 class MinerLoss(_Loss):
     """具备挖掘功能的损失函数"""
 
@@ -261,6 +274,35 @@ class TripletLoss(_Loss):
         size = nag_index.shape[0] if nag_index.shape[0]<pos_index.shape[0] else pos_index.shape[0]
         return pos_index[:size],pos_index[:size],nag_index[:size]
 
+class WeightedHuberLoss(nn.Module):
+    def __init__(self, delta=1.0):
+        super().__init__()
+        self.delta = delta  # Huber 阈值，一般 1.0 即可
+
+    def forward(self, y_pred, y_true, weights=None):
+        """
+        y_pred: 模型预测 [B, 1]
+        y_true: 真实标签 [B, 1]
+        weights: 每个样本的权重 [B] 或 [B,1]，用于给超标样本加大权重
+        """
+        # 计算误差
+        err = y_pred - y_true
+        abs_err = torch.abs(err)
+        
+        # Huber 核心公式
+        huber_loss = torch.where(
+            abs_err <= self.delta,
+            0.5 * torch.square(err),          # 小误差：MSE
+            self.delta * (abs_err - 0.5 * self.delta)  # 大误差：L1
+        )
+
+        # ==================== 关键：加权 ====================
+        if weights is not None:
+            weights = weights.view_as(huber_loss)  # 维度对齐
+            huber_loss = huber_loss * weights      # 重点样本损失放大
+
+        return huber_loss.mean()
+    
 class UncertaintyLoss(nn.Module):
     """不确定损失,包括mse，corr以及分类交叉熵损失等"""
 
