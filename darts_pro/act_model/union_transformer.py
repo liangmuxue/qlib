@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from cus_utils.common_compute import normalization_standard
+import cus_utils.global_var as global_var
 
 from .cov_cnn import LinelessLayer
 
@@ -664,7 +665,24 @@ class UnionTransCombine(nn.Module):
         device='cuda'
     ):
         super().__init__()
-        self.time_encoder = time_encoder
+        time_encoder = TimeFeatureEncoder('datetime',device=device)   
+        # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
+        #               'month':df['datetime'].dt.month.unique().tolist(),
+        #               'day':df['datetime'].dt.day.unique().tolist(),
+        #               'dayofweek':df['datetime'].dt.dayofweek.unique().tolist(),
+        #             }
+        range_data = {'year':[i for i in range(2012,2026)],
+                      'month':[i for i in range(0,12)],
+                      'day':[i for i in range(1,32)],
+                      'dayofweek':[i for i in range(0,5)],
+                    }          
+        # dataset = global_var.get_value("dataset")   
+        time_encoder.fit_static(range_data) 
+        # self.time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
+        # 记录时间字段
+        # self.embed_cols = dataset.get_future_columns()
+        self.time_encoder = time_encoder        
+        
         self.trans_model = TFTWithFutureCovariates(
                 static_num=static_num,
                 obs_dim=obs_dim,

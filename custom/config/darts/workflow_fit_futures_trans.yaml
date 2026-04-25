@@ -82,7 +82,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanDataAllCutlen2_transIndexLoss_2411"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
                task_weights: [[0.5,0.5],[0.5,0.5]]
                grad_limits: [5.0,3.0]
