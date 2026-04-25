@@ -283,6 +283,7 @@ class FuturesTransformerModule(MlpModule):
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
                 scales_dict=self.scale_arr,
+                time_encoder=self.time_encoder,
                 device=device,
             ).to(device)             
             self.embedding_size = input_dim
@@ -431,7 +432,7 @@ class FuturesTransformerModule(MlpModule):
                             convs[nodata_idx,k,:,:] = convs[nodata_idx,0,:,:]
                         for k_idx,key in enumerate(self.embed_cols):
                             batch_data[key] = convs[:,k,:,k_idx].flatten().cpu()   
-                        emb_data = self.time_encoder.transform_inner(batch_data, device=self.device)
+                        emb_data = m.transform_inner(batch_data, device=self.device)
                         emb_data = emb_data.reshape(his_future_covs.shape[0],convs.shape[2],-1)
                         convs_emb.append(emb_data)
                     convs_emb = torch.stack(convs_emb).permute(1,0,2,3)

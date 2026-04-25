@@ -660,9 +660,11 @@ class UnionTransCombine(nn.Module):
         static_cate_emb=None, # 静态离散特征嵌入
         top_num=3,            # topk数量
         scales_dict=None,
+        time_encoder=None,
         device='cuda'
     ):
         super().__init__()
+        self.time_encoder = time_encoder
         self.trans_model = TFTWithFutureCovariates(
                 static_num=static_num,
                 obs_dim=obs_dim,
@@ -695,6 +697,9 @@ class UnionTransCombine(nn.Module):
 
         ############# 中间变量调试 #############
         self.features = {}
+    
+    def transform_inner(self, batch_data, device='cpu'):
+        return self.time_encoder.transform_inner(batch_data,device=device)
     
     def forward(
         self,static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb
