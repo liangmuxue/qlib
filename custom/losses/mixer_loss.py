@@ -234,7 +234,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             target_item = target[instruments]
             pred_item_norm = map_to_neg1_pos1_torch(pred_item)
             target_item_norm = map_to_neg1_pos1_torch(target_item)
-            pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold)
+            pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold,min_num=2)
             loss += self.compute_weight_top_loss(pred_item_norm, target_item_norm,pred_weights)
             count += 1
         
@@ -248,7 +248,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_index = torch.where(weights>1)
         pred_top = pred[top_index]
         target_top = target[top_index]
-        loss = self.ccc_loss_comp(pred_top, target_top)
+        if all_elements_same(target_top):
+            loss = self.mse_loss(pred_top.unsqueeze(0), target_top.unsqueeze(0))
+        else:
+            loss = self.ccc_loss_comp(pred_top, target_top)
         return loss
                     
     def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
@@ -612,11 +615,17 @@ class FuturesIndustryLoss(UncertaintyLoss):
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss,predictions]    
     
     
-    def get_sample_weights(self,y_true,min_threshold=-0.5,max_threshold=0.5, out_weight=10.0):
+    def get_sample_weights(self,y_true,min_threshold=-0.5,max_threshold=0.5, out_weight=10.0,min_num=2):
         
         weights = torch.ones_like(y_true)
         weights[y_true > max_threshold] = out_weight 
         weights[y_true < min_threshold] = out_weight 
+        
+        if torch.sum(weights>1)<min_num:
+            _, top_index = torch.topk(y_true, k=min_num, dim=0)
+            _, top_inverse_index = torch.topk(y_true, k=min_num, largest=False, dim=0)
+            weights[top_index] = out_weight 
+            weights[top_inverse_index] = out_weight 
         
         return weights        
     
