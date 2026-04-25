@@ -712,7 +712,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             pin_memory=True,
             drop_last=False,
             sampler=train_sampler,
-            collate_fn=self._batch_collate_filter,
+            collate_fn=self.create_collate(is_train=True),
         )
         
         val_sampler = self.create_sampler(val_dataset,batch_size=self.batch_size,shuffle=False)
@@ -732,7 +732,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 pin_memory=True,
                 drop_last=False,
                 sampler=val_sampler,
-                collate_fn=self._batch_collate_filter,
+                collate_fn=self.create_collate(is_train=False),
             )
         )
 

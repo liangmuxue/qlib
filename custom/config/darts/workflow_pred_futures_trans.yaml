@@ -116,7 +116,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train: [2012-01-01, 2024-11-28]
-                valid: [2024-11-01, 2025-02-28]
+                valid: [2024-11-01, 2025-06-28]
                 test: [2025-07-01, 2025-09-30]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

@@ -29,10 +29,13 @@ from darts.logging import raise_if_not,raise_if
 class FuturesModel(IndustryRollModel):    
 
     def create_sampler(self,dataset,batch_size=None,shuffle=True):
-        # self.sampler_mode = False
-        # return None
+        
         self.sampler_mode = True
-        return TemporalBatchSampler(dataset,batch_size=batch_size,shuffle=shuffle)
+        # 验证模式不使用sampler，训练模式使用
+        if not shuffle:
+            return None
+        else:
+            return TemporalBatchSampler(dataset,batch_size=batch_size,shuffle=shuffle)
     
     def _build_train_dataset(
         self,
@@ -296,54 +299,58 @@ class FuturesModel(IndustryRollModel):
     def after_create_model(self,model):
         model.set_outer_params(self.outer_params)
     
-    def _batch_collate_filter(self,batch):
-        """批次整合,包含批次内数据归一化"""
+    def create_collate(self,is_train=True):
         
-        if self.sampler_mode:
-            # 如果自定义采样器，则直接返回当前数据
-            return batch
+        def _batch_collate_filter(batch):
+            """批次整合,包含批次内数据归一化"""
+            
+            if self.sampler_mode and is_train:
+                # 如果自定义采样器，则直接返回当前数据
+                return batch
+            
+            aggregated = []
+            first_sample = batch[0]
+            sample_len = len(first_sample)
+            for i in range(sample_len):
+                elem = first_sample[i]
+                # 针对round数据，根据标志决定是否在批次内进行归一化
+                if i==sample_len-4:
+                    sample_list = [sample[i] for sample in batch]
+                    round_data = np.stack(sample_list, axis=0)
+                    for j in range(len(self.past_split)):
+                        if self.scale_mode[j] in [5]:
+                            round_data_item = round_data[...,j]   
+                            # round_past_data_item = round_data_item[:,:,:-1]
+                            # round_past_data_item_trans = round_past_data_item.transpose(0,2,1)
+                            # round_past_data_item = StandardScaler().fit_transform(
+                            #     round_past_data_item_trans.reshape(-1,round_past_data_item_trans.shape[-1])).reshape(round_past_data_item_trans.shape).transpose(0,2,1)
+                            round_future_data_item = round_data_item[:,:,-1]
+                            round_future_data_item = normalization_axis(round_future_data_item,axis=0)
+                            # round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)     
+                            round_data[:,:,-1,j] = round_future_data_item  
+                            # round_data[:,:,:-1,j] = round_past_data_item                   
+                    aggregated.append(
+                        torch.from_numpy(round_data)
+                    )                               
+                elif isinstance(elem, np.ndarray) and i!=(sample_len-4):
+                    sample_list = [sample[i] for sample in batch]
+                    aggregated.append(
+                        torch.from_numpy(np.stack(sample_list, axis=0))
+                    )
+                elif isinstance(elem, tuple):
+                    aggregated.append([sample[i] for sample in batch])                
+                elif isinstance(elem, Dict):
+                    aggregated.append([sample[i] for sample in batch])                
+                elif elem is None:
+                    aggregated.append(None)                
+                elif isinstance(elem, List):
+                    aggregated.append([sample[i] for sample in batch])
+                else:
+                    print("no match for:{},item:{}".format(elem.dtype,i))
+                              
+            return tuple(aggregated) 
         
-        aggregated = []
-        first_sample = batch[0]
-        sample_len = len(first_sample)
-        for i in range(sample_len):
-            elem = first_sample[i]
-            # 针对round数据，根据标志决定是否在批次内进行归一化
-            if i==sample_len-4:
-                sample_list = [sample[i] for sample in batch]
-                round_data = np.stack(sample_list, axis=0)
-                for j in range(len(self.past_split)):
-                    if self.scale_mode[j] in [5]:
-                        round_data_item = round_data[...,j]   
-                        # round_past_data_item = round_data_item[:,:,:-1]
-                        # round_past_data_item_trans = round_past_data_item.transpose(0,2,1)
-                        # round_past_data_item = StandardScaler().fit_transform(
-                        #     round_past_data_item_trans.reshape(-1,round_past_data_item_trans.shape[-1])).reshape(round_past_data_item_trans.shape).transpose(0,2,1)
-                        round_future_data_item = round_data_item[:,:,-1]
-                        round_future_data_item = normalization_axis(round_future_data_item,axis=0)
-                        # round_future_data_item = MinMaxScaler(feature_range=(1e-5, 1)).fit_transform(round_future_data_item)     
-                        round_data[:,:,-1,j] = round_future_data_item  
-                        # round_data[:,:,:-1,j] = round_past_data_item                   
-                aggregated.append(
-                    torch.from_numpy(round_data)
-                )                               
-            elif isinstance(elem, np.ndarray) and i!=(sample_len-4):
-                sample_list = [sample[i] for sample in batch]
-                aggregated.append(
-                    torch.from_numpy(np.stack(sample_list, axis=0))
-                )
-            elif isinstance(elem, tuple):
-                aggregated.append([sample[i] for sample in batch])                
-            elif isinstance(elem, Dict):
-                aggregated.append([sample[i] for sample in batch])                
-            elif elem is None:
-                aggregated.append(None)                
-            elif isinstance(elem, List):
-                aggregated.append([sample[i] for sample in batch])
-            else:
-                print("no match for:",elem.dtype)
-                          
-        return tuple(aggregated) 
+        return _batch_collate_filter
      
     def predict(self,series,past_covariates=None,future_covariates=None,pred_date_begin=None,batch_size=1,num_loader_workers=1):
         
