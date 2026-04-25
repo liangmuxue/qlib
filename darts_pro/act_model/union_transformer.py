@@ -583,8 +583,8 @@ class AttScaleFeature(nn.Module):
         output_trend = torch.zeros([batch_size,S,self.seq_len]).to(x.device)
         # 针对自定义的品种范围数组，进行分尺度的特征处理
         for i,scaler in enumerate(self.scale_arr):
-            # x_part = x[:,scaler,:].reshape(batch_size,-1)
-            # output[:,scaler] = self.ins_layer[i](x_part)
+            x_part = x[:,scaler,:].reshape(batch_size,-1)
+            output[:,scaler] = self.ins_layer[i](x_part)
             # 整体序列趋势网络计算
             x_seq_part = x_seq[:,scaler].reshape(batch_size,scaler.shape[0],-1)
             output_trend[:,scaler,:] = self.trend_layer[i](x_seq_part)

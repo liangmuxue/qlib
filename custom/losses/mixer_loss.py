@@ -235,16 +235,22 @@ class FuturesIndustryLoss(UncertaintyLoss):
             pred_item_norm = map_to_neg1_pos1_torch(pred_item)
             target_item_norm = map_to_neg1_pos1_torch(target_item)
             pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold)
-            loss += self.criterion(pred_item_norm, target_item_norm,pred_weights)
-            target_weights = self.get_sample_weights(target_item_norm, short_threhold, long_threhold)
-            loss += self.criterion(pred_item_norm, target_item_norm,target_weights)
-            count += 2
+            loss += self.compute_weight_top_loss(pred_item_norm, target_item_norm,pred_weights)
+            count += 1
         
         if count>0:
             loss = loss/count
         
         return loss      
-                  
+    
+    def compute_weight_top_loss(self,pred,target,weights=None):
+        
+        top_index = torch.where(weights>1)
+        pred_top = pred[top_index]
+        target_top = target[top_index]
+        loss = self.ccc_loss_comp(pred_top, target_top)
+        return loss
+                    
     def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
         """按照行业计算损失"""
         
@@ -556,7 +562,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     scale_out_total = []
                     scale_target_total = []
                     batch_size_inner = 0
-                    for key in trend_output.keys():
+                    for key_idx,key in enumerate(trend_output.keys()):
                         scale_output = trend_output[key]
                         scale_target = trend_target[key]
                         for h in range(2):
@@ -566,9 +572,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 continue
                             scale_output_norm = scale_value(scale_output[:,h],scale_output[:,h].min(),scale_output[:,h].max(),min_threhold,max_threhold)
                             pred_weights = self.get_sample_weights(scale_output_norm, short_threhold, long_threhold)
-                            cls_loss[i] += self.criterion(scale_output_norm, target_norm,pred_weights)
-                            target_weights = self.get_sample_weights(target_norm, short_threhold, long_threhold)
-                            ce_loss[i] += self.criterion(scale_output_norm, target_norm,target_weights)
+                            if key_idx==0:
+                                cls_loss[i] += self.compute_weight_top_loss(scale_output_norm, target_norm,pred_weights)
+                            else:
+                                ce_loss[i] += self.compute_weight_top_loss(scale_output_norm, target_norm,pred_weights)
+                            # target_weights = self.get_sample_weights(target_norm, short_threhold, long_threhold)
+                            # ce_loss[i] += self.criterion(scale_output_norm, target_norm,target_weights)
                             # scale_target_total.append(target)
                             # scale_out_total.append(scale_output[:,h])
                             # ce_loss[i] += HuberLoss()(scale_output_norm[-4:], target[-4:])

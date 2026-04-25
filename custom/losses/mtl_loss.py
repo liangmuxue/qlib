@@ -302,7 +302,7 @@ class WeightedHuberLoss(nn.Module):
             huber_loss = huber_loss * weights      # 重点样本损失放大
 
         return huber_loss.mean()
-    
+        
 class UncertaintyLoss(nn.Module):
     """不确定损失,包括mse，corr以及分类交叉熵损失等"""
 
