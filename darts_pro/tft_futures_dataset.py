@@ -30,7 +30,7 @@ logger = AppLogger()
 def get_scale_conf():
     indus_threhold_bin = [['cdifi','hsjs'],['abpi','yzyl','nffi']]
     cy_threhold_bin = [[0,2013],[2013,2030]]
-    scale_conf = {'cy_scale':cy_threhold_bin,'indus_scale':indus_threhold_bin}
+    scale_conf = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin}
     return scale_conf
 
 class TFTFuturesDataset(TFTSeriesDataset):

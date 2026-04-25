@@ -248,7 +248,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_index = torch.where(weights>1)
         pred_top = pred[top_index]
         target_top = target[top_index]
-        if all_elements_same(target_top):
+        # loss = self.criterion(pred,target,weights)
+        if all_elements_same(target_top) or all_elements_same(pred_top):
             loss = self.mse_loss(pred_top.unsqueeze(0), target_top.unsqueeze(0))
         else:
             loss = self.ccc_loss_comp(pred_top, target_top)
@@ -570,10 +571,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         scale_target = trend_target[key]
                         for h in range(2):
                             target = scale_target[:,h]
-                            target_norm = scale_value(target,target.min(),target.max(),min_threhold,max_threhold)
+                            target_norm = map_to_neg1_pos1_torch(target) # scale_value(target,target.min(),target.max(),min_threhold,max_threhold)
                             if torch.sum(target==0)/target.shape[0]>0.5:
-                                continue
-                            scale_output_norm = scale_value(scale_output[:,h],scale_output[:,h].min(),scale_output[:,h].max(),min_threhold,max_threhold)
+                                continue 
+                            scale_output_norm = scale_output[:,h] # scale_value(scale_output[:,h],scale_output[:,h].min(),scale_output[:,h].max(),min_threhold,max_threhold)
                             pred_weights = self.get_sample_weights(scale_output_norm, short_threhold, long_threhold)
                             if key_idx==0:
                                 cls_loss[i] += self.compute_weight_top_loss(scale_output_norm, target_norm,pred_weights)
@@ -587,7 +588,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             # pred_label = torch.max(scale_output[:,h],1)[1]
                             # pred_label_total.append(pred_label)
                             # scale_target_class_total.append(scale_target_class)
-                            batch_size_inner += 1
+                        batch_size_inner += 1
                     # scale_out_total = torch.stack(scale_out_total).transpose(1,0)
                     # scale_target_total = torch.stack(scale_target_total).transpose(1,0)
                     # cls_loss[i] = HuberLoss()(scale_out_total,scale_target_total)
