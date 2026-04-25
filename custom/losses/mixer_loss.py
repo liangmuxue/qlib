@@ -228,6 +228,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         for i,instruments in enumerate(scale_arr):
             instruments = torch.Tensor(instruments).to(pred.device).long()
             instruments = tensor_intersect(instruments,ins_rel_index).long()
+            if instruments.shape[0]<3:
+                continue
             pred_item = pred[instruments]
             target_item = target[instruments]
             pred_item_norm = map_to_neg1_pos1_torch(pred_item)
@@ -238,7 +240,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
             loss += self.criterion(pred_item_norm, target_item_norm,target_weights)
             count += 2
         
-        loss = loss/count
+        if count>0:
+            loss = loss/count
         
         return loss      
                   
