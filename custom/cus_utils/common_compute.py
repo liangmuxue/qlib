@@ -13,6 +13,56 @@ from sklearn.preprocessing import MinMaxScaler
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 from pip._internal.models import candidate
 
+def map_to_neg1_pos1_torch(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    PyTorch 实现：将张量映射到 [-1, 1] 区间，保留原最大正数/最小负数的比值
+    支持：CPU/GPU张量、任意维度、自动求导
+    :param tensor: 输入张量 (可包含正数、负数、0)
+    :return: 归一化到 [-1, 1] 的张量
+    """
+    # 克隆避免修改原张量
+    x = tensor.clone()
+    
+    # 1. 全局最大/最小值（支持任意维度张量）
+    max_val = x.max()
+    min_val = x.min()
+    
+    # 2. 计算缩放尺度：取正负极值绝对值的最大值
+    scale = torch.max(torch.abs(max_val), torch.abs(min_val))
+    
+    # 3. 安全处理：全0张量避免除以0
+    scale = torch.where(scale == 0, torch.tensor(1.0, device=x.device), scale)
+    
+    # 4. 核心映射公式
+    mapped_tensor = x / scale
+    
+    return mapped_tensor
+
+def map_to_neg1_pos1(arr):
+    """
+    将数组映射到 [-1, 1] 区间，保留正负极值的原始比值
+    :param arr: 输入数组（可包含正数、负数、0）
+    :return: 映射后的数组
+    """
+    # 转换为 numpy 数组（方便计算）
+    arr = np.asarray(arr, dtype=np.float32)
+    
+    # 1. 获取最大正数、最小负数
+    max_val = np.max(arr)
+    min_val = np.min(arr)
+    
+    # 2. 计算缩放尺度：取正负极值绝对值的更大值
+    scale = max(abs(max_val), abs(min_val))
+    
+    # 3. 安全判断：避免除以 0（全 0 数组）
+    if scale == 0:
+        return np.zeros_like(arr)
+    
+    # 4. 核心映射公式
+    mapped_arr = arr / scale
+    
+    return mapped_arr
+
 def weighted_signed_score_3d(score_3d, feature_weights=None):
     """
     3维数据仅对最后一维做加权求和（时间步无加权）

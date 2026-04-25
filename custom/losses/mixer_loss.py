@@ -5,14 +5,13 @@ from torch import nn
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss,WeightedSpearmanLoss,HuberLoss,WeightedHuberLoss
-from cus_utils.common_compute import batch_cov,batch_cov_comp,eps_rebuild,normalization
 from tft.class_define import get_simple_class
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from sklearn.metrics import f1_score
 # import torchsort
 
-from cus_utils.common_compute import tensor_intersect,normalization_axis,scale_value,normalization_standard,all_elements_same,is_same_elements
+from cus_utils.common_compute import tensor_intersect,normalization_axis,scale_value,normalization_standard,all_elements_same,map_to_neg1_pos1_torch
 from .feature_loss import AdaptiveSingleFeatureLoss
 from .triplet_loss import AdaptiveSemiHardTripletLoss,ContinuousSemiHardTripletLoss
 from .triplet_miner import ContinuousTripletLossWithMemory,ContinuousTripletConfig
@@ -216,7 +215,36 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss        
         
-               
+    def compute_popu_weight_loss(self,pred,target,key=None,ins_rel_index=None,top_num=1,trend_threhold=None):
+        """通用业务分支的WEIGHT损失"""
+
+        scale_arr = self.scale_dict[key]
+        loss = 0
+        count = 0
+        min_threhold = trend_threhold['min']
+        max_threhold = trend_threhold['max']       
+        short_threhold = -0.6 # trend_threhold['short']   
+        long_threhold = 0.6 # trend_threhold['long']          
+        for i,instruments in enumerate(scale_arr):
+            instruments = torch.Tensor(instruments).to(pred.device).long()
+            instruments = tensor_intersect(instruments,ins_rel_index).long()
+            if instruments.shape[0]<3:
+                continue
+            pred_item = pred[instruments]
+            target_item = target[instruments]
+            pred_item_norm = map_to_neg1_pos1_torch(pred_item)
+            target_item_norm = map_to_neg1_pos1_torch(target_item)
+            pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold)
+            loss += self.criterion(pred_item_norm, target_item_norm,pred_weights)
+            target_weights = self.get_sample_weights(target_item_norm, short_threhold, long_threhold)
+            loss += self.criterion(pred_item_norm, target_item_norm,target_weights)
+            count += 2
+        
+        if count>0:
+            loss = loss/count
+        
+        return loss      
+                  
     def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
         """按照行业计算损失"""
         
@@ -503,9 +531,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = scale_output[key]
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
-                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                # cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                             if sidx==1:
-                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                                 
                         batch_size += 1          
                                   
