@@ -244,25 +244,12 @@ class FuturesTransformerModule(MlpModule):
             pred_len = self.output_chunk_length    
             combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
             combine_nodes_num = combine_nodes.shape[0]
-            # 初始化时间编码器
+            
             dataset = global_var.get_value("dataset") 
-            if self.time_encoder is None:
-                time_encoder = TimeFeatureEncoder('datetime',device=device)   
-                # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
-                #               'month':df['datetime'].dt.month.unique().tolist(),
-                #               'day':df['datetime'].dt.day.unique().tolist(),
-                #               'dayofweek':df['datetime'].dt.dayofweek.unique().tolist(),
-                #             }
-                range_data = {'year':[i for i in range(2012,2026)],
-                              'month':[i for i in range(0,12)],
-                              'day':[i for i in range(1,32)],
-                              'dayofweek':[i for i in range(0,5)],
-                            }            
-                time_encoder.fit_static(range_data) 
-                self.time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
-                # 记录时间字段
-                self.embed_cols = dataset.get_future_columns()
-                self.time_encoder = time_encoder
+            # 记录时间字段
+            self.embed_cols = dataset.get_future_columns()
+            
+            
             target_feat_dim = 1
             # 使用混合时间序列模型,TFT底座
             model = UnionTransCombine(
@@ -270,7 +257,6 @@ class FuturesTransformerModule(MlpModule):
                 static_num=static_covariates.shape[-1]-1,
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
-                time_embed_dim=self.time_embed_dim,
                 hidden_dim=64,
                 hidden_size=16,
                 nhead=8,
@@ -283,9 +269,9 @@ class FuturesTransformerModule(MlpModule):
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
                 scales_dict=self.scale_arr,
-                time_encoder=self.time_encoder,
-                device=device,
-            ).to(device)             
+                device=self.device,
+            )         
+            self.time_embed_dim = model.time_embed_dim      
             self.embedding_size = input_dim
             
             ################# 植入钩子进行中间变量输出调试 #################
@@ -432,13 +418,13 @@ class FuturesTransformerModule(MlpModule):
                             convs[nodata_idx,k,:,:] = convs[nodata_idx,0,:,:]
                         for k_idx,key in enumerate(self.embed_cols):
                             batch_data[key] = convs[:,k,:,k_idx].flatten().cpu()   
-                        emb_data = m.transform_inner(batch_data, device=self.device)
+                        emb_data = m.transform_inner(batch_data)
                         emb_data = emb_data.reshape(his_future_covs.shape[0],convs.shape[2],-1)
                         convs_emb.append(emb_data)
                     convs_emb = torch.stack(convs_emb).permute(1,0,2,3)
                     return convs_emb
-                his_future_emb = transform_emb(his_future_covs)         
-                future_emb = transform_emb(futures_convs).double()    
+                his_future_emb = transform_emb(his_future_covs).to(self.device)        
+                future_emb = transform_emb(futures_convs).to(self.device).double()    
                 future_single_emb =  future_emb[:,:,target_len,:]   
                 out = m(static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
