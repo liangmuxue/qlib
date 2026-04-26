@@ -363,6 +363,7 @@ class FuturesTransformerModule(MlpModule):
 
     def get_scale_match_key(self):
         rel_scale_key = list(self.scale_arr.keys())[0]
+        # rel_scale_key = "cy_scale"
         return rel_scale_key
             
     def forward(
@@ -890,10 +891,10 @@ class FuturesTransformerModule(MlpModule):
         coll_result_output['trend_match_flag'] = coll_result_output['trend_match_flag'].astype(int)
         for i in range(2):
             coll_result_item = coll_result_output[coll_result_output['scale_idx']==i]
-            names = ['pred','target']  
+            names = ['pred','num_target','val_target']  
             win = "batch_trend_line_{}_{}".format(viz_total_size,i)
             title = "batch_trend_{}_{}".format(match_key,i)  
-            view_data = coll_result_item[['pred_trend_value','real_trend_ref_values']].values
+            view_data = coll_result_item[['pred_trend_value','real_trend_values','real_trend_ref_values']].values
             viz_result_ext.viz_matrix_var(view_data,win=win,title=title,names=names)
         
         # df_plot = coll_result_output.groupby(['date', 'scale_idx'])[['pred_trend_value','real_trend_values','real_trend_ref_values','trend_match_flag']].mean().unstack(level=1)
