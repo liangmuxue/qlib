@@ -199,6 +199,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         scale_arr = self.scale_dict[key]
         long_index_total = torch.Tensor([]).to(pred.device) 
         short_index_total = torch.Tensor([]).to(pred.device) 
+        target_norm = []
         for i,instruments in enumerate(scale_arr):
             instruments = torch.Tensor(instruments).to(pred.device).long()
             pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=top_num*2)
@@ -208,10 +209,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
             short_index = pred_index_short[:top_num]    
             long_index_total = torch.cat([long_index_total,long_index])
             short_index_total = torch.cat([short_index_total,short_index])
+            target_item_norm = normalization_standard(target[instruments])
+            target_norm.append(target_item_norm)
         
+        target_norm = torch.cat(target_norm)
         combine_index = torch.cat([long_index_total,short_index_total])   
         combine_index = tensor_intersect(combine_index,ins_rel_index).long()
-        top_loss = self._compute_top_loss(pred, target, combine_index)
+        top_loss = self._compute_top_loss(pred, target_norm, combine_index)
         
         return top_loss        
         
@@ -255,42 +259,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
             loss = self.ccc_loss_comp(pred_top, target_top)
         return loss
                     
-    def compute_indus_loss(self,pred,target,ins_rel_index=None,sw_ins_mappings=None):
-        """按照行业计算损失"""
-        
-        indus_data_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
-        loss = 0
-        for index in indus_data_index:
-            instruments = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,index)
-            instruments = torch.Tensor(instruments).to(pred.device)
-            instruments = tensor_intersect(instruments,ins_rel_index).long()
-            if instruments.shape[0]<2 or all_elements_same(pred[instruments]) or all_elements_same(target[instruments]):
-                loss += self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
-            else:
-                loss += self.ccc_loss_comp(pred[instruments], target[instruments])
-        loss = loss/len(indus_data_index)
-        
-        return loss
-    
-    def compute_exchange_top_loss(self,pred,target,sw_ins_mappings=None,ins_rel_index=None):
-        """按照交易所计算top损失"""
-    
-        exchange_ids = FuturesMappingUtil.get_exchange_ids(sw_ins_mappings)
-        u_exc_ids = np.unique(exchange_ids)
-        top_real_index = []
-        for exchange_id in u_exc_ids:
-            instruments = np.where(exchange_id==exchange_ids)[0]
-            pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[instruments],top_num=1)
-            top_real_index.append(instruments[pred_index_long])
-            top_real_index.append(instruments[pred_index_short])
-        top_real_index = torch.Tensor(np.array(top_real_index)).to(pred.device).long() 
-        top_real_index = tensor_intersect(top_real_index,ins_rel_index)
-        
-        top_loss = self._compute_top_loss(pred, target, top_real_index)
-        
-        return top_loss
-    
-    
     def  _compute_top_loss(self,pred,target,top_real_index):
         if top_real_index.shape[0]<2:
             return self.mse_loss(pred.unsqueeze(0),target.unsqueeze(0))
@@ -537,11 +505,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = scale_output[key]
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
-                                # cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
-                                cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
+                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                # cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                             if sidx==1:
-                                # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
-                                ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
+                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                # ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                                 
                         batch_size += 1          
                                   
