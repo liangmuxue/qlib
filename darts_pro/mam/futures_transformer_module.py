@@ -775,6 +775,8 @@ class FuturesTransformerModule(MlpModule):
         # 测试模式，在此进行结果的可视化
         print("all date:", coll_result['date'].unique())
         coll_result.to_csv(self.coll_record_file_path, index=False)
+        pred_data_path = os.path.join(RESULT_FILE_PATH, self.pred_index_data_path)
+        coll_result.to_csv(pred_data_path, index=False)
         self.log("date_total_num", date_total_num, prog_bar=True,sync_dist=True) 
         # 生成进一步的结果指标
         coll_result_output = coll_result.rename(columns={'trend_value':'pred_trend'})
@@ -1369,17 +1371,24 @@ class FuturesTransformerModule(MlpModule):
         item_top_num = top_num//2
         
         pre_index_total = []
+        # 根据配置，从指数预测结果中加载数据
+        if len(self.pred_index_data_path)>3:
+            pred_data_path = os.path.join(RESULT_FILE_PATH, self.pred_index_data_path)
+            pred_index_data = pd.read_csv(pred_data_path)
+        else:
+            pred_index_data = None
         # 根据趋势增减top数量
         for i,ins in enumerate(ins_arr):
             features_item = features_main[ins]
-            combine_index_scale = combine_index_all[:,i]
-            # pred_trend_value = features_item.mean()
-            # pred_trend_value = np.argmax(combine_index_item[i])
-            pred_trend_value = combine_index_all[batch_no,i]
-            pred_trend_value = scale_value(pred_trend_value,combine_index_scale.min(),combine_index_scale.max(),self.trend_threhold['min'],self.trend_threhold['max'])
+            if pred_index_data is None:
+                combine_index_scale = combine_index_all[:,i]
+                pred_trend_value = combine_index_all[batch_no,i]
+                pred_trend_value = scale_value(pred_trend_value,combine_index_scale.min(),
+                                    combine_index_scale.max(),self.trend_threhold['min'],self.trend_threhold['max'])
+            else:
+                pred_trend_value = pred_index_data[(pred_index_data['date']==date)&(pred_index_data['scale_idx']==i)]['pred_trend_value'].values[0]
             # if date==20241230:
             #     print("ggg")
-            # pred_trend_value = self.criterion.create_avg_trend_value(pred_trend_value)
             long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
             pre_index = np.argsort(-features_item)[:long_num]
             pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
