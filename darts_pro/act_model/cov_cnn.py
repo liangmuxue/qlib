@@ -173,7 +173,11 @@ class LinelessLayer(nn.Module):
             self.dropout = nn.Dropout(dropout)
         
         if batch_norm:
-            self.bn = nn.BatchNorm1d(output_num)        
+            if output_num==1:
+                # 使用纯实时归一化,不更新参数
+                self.bn = nn.BatchNorm1d(output_num,track_running_stats=False)   
+            else:
+                self.bn = nn.BatchNorm1d(output_num,momentum=0.1)       
         if output_num>1 and layer_norm:
             self.layer_norm = True
             self.ln = nn.LayerNorm(output_num)      
