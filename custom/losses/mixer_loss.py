@@ -232,7 +232,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 continue
             pred_item = pred[instruments]
             target_item = target[instruments]
-            pred_item_norm = map_to_neg1_pos1_torch(pred_item)
+            pred_item_norm = pred_item # map_to_neg1_pos1_torch(pred_item)
             target_item_norm = map_to_neg1_pos1_torch(target_item)
             pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold,min_num=2)
             loss += self.compute_weight_top_loss(pred_item_norm, target_item_norm,pred_weights)
