@@ -611,8 +611,8 @@ class SparseGateFeatureTopK(nn.Module):
         for i,key in enumerate(self.scales_layer.keys()):
             scale_features,trend_features,trend_index_logits = self.scales_layer[key](x,x_seq)  
             # 合并主体特征和分尺度特征
-            combine_features = self.score_head[(i+1)](g_features + scale_features)
-            features_list[key] = combine_features
+            # combine_features = self.score_head[(i+1)](g_features + scale_features)
+            features_list[key] = scale_features
             trend_list[key] = trend_features
             trend_logits_list[key] = trend_index_logits
         

@@ -53,7 +53,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         # 模拟初始化，实际未使用
         super().__init__(**kwargs)
         
-        self.to(device)
+        # self.to(device)
          
         self.train_sample = train_sample
         self.past_split = past_split

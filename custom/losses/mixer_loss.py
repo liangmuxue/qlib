@@ -223,8 +223,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         count = 0
         min_threhold = trend_threhold['min']
         max_threhold = trend_threhold['max']       
-        short_threhold = -0.6 # trend_threhold['short']   
-        long_threhold = 0.6 # trend_threhold['long']          
+        short_threhold = -1.0 # trend_threhold['short']   
+        long_threhold = 1.0 # trend_threhold['long']          
         for i,instruments in enumerate(scale_arr):
             instruments = torch.Tensor(instruments).to(pred.device).long()
             instruments = tensor_intersect(instruments,ins_rel_index).long()
@@ -232,8 +232,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 continue
             pred_item = pred[instruments]
             target_item = target[instruments]
-            pred_item_norm = map_to_neg1_pos1_torch(pred_item)
-            target_item_norm = map_to_neg1_pos1_torch(target_item)
+            pred_item_norm = pred_item # map_to_neg1_pos1_torch(pred_item)
+            target_item_norm = normalization_standard(target_item)
             pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold,min_num=2)
             loss += self.compute_weight_top_loss(pred_item_norm, target_item_norm,pred_weights)
             count += 1
@@ -519,10 +519,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                      
                     if ins_rel_index.shape[0]<3:
                         continue
-                    round_targets_item = future_round_targets_factor[j,ins_rel_index,self.cut_len-1]  
-                    # 样本太少则忽略
-                    if round_targets_item.shape[0]<=3:
-                        continue      
                     target_info_total.append(target_info[j])             
                     
                     # 不同模式的损失计算                          
