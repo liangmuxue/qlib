@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from cus_utils.common_compute import normalization_standard
+import cus_utils.global_var as global_var
 
 from .cov_cnn import LinelessLayer
 
@@ -73,27 +74,6 @@ class TimeFeatureEncoder:
     def to_device(self):
         self.embed_layers = self.embed_layers.to(self.device)
 
-    def fit(self, df):
-        """拟合时间特征编码器"""
-        df_time = pd.to_datetime(df[self.time_col])
-        self.time_features = {
-            'year': df_time.dt.year.values,
-            'month': df_time.dt.month.values,
-            'day': df_time.dt.day.values,
-            'dayofweek': df_time.dt.dayofweek.values,
-        }
-        
-        # 为离散时间特征创建LabelEncoder
-        for feat_name, feat_vals in self.time_features.items():
-            le = LabelEncoder()
-            le.fit(feat_vals)
-            self.encoders[feat_name] = le
-            num_classes = len(le.classes_)
-            # 创建嵌入层
-            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name]).to(self.device)
-        
-        return self
-
     def fit_static(self, range_data):
         """使用固定数值范围，拟合时间特征编码器"""
         
@@ -104,7 +84,7 @@ class TimeFeatureEncoder:
             self.encoders[feat_name] = le            
             num_classes = len(le.classes_)
             # 创建嵌入层
-            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name]).to(self.device)
+            self.embed_layers[feat_name] = nn.Embedding(num_classes, self.embed_dims[feat_name])
         
         return self
     
@@ -120,7 +100,7 @@ class TimeFeatureEncoder:
         
         embed_list = []
         for feat_name, feat_vals in time_feats.items():
-            encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals), device=device)
+            encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals), device=self.device)
             embed = self.embed_layers[feat_name](encoded)
             embed_list.append(embed)
         
@@ -128,13 +108,13 @@ class TimeFeatureEncoder:
         time_embed = torch.cat(embed_list, dim=-1)  # (n_samples, time_embed_dim)
         return time_embed
 
-    def transform_inner(self, batch_data, device='cpu'):
+    def transform_inner(self, batch_data):
         """批次内转换时间特征为嵌入向量"""
         
         embed_list = []
         for feat_name in batch_data.keys():
             feat_vals = batch_data[feat_name]
-            encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals.cpu()), device=device)
+            encoded = torch.tensor(self.encoders[feat_name].transform(feat_vals.cpu()), device=self.device)
             embed = self.embed_layers[feat_name](encoded)
             embed_list.append(embed)
         
@@ -491,7 +471,7 @@ class TFTWithFutureCovariates(nn.Module):
         obs_proj, var_weights = self.var_selection(obs_proj)  # [B*S, T, hidden_dim]
         
         # 2.6 Transformer编码（因果掩码，禁止看未来）
-        causal_mask = generate_causal_mask(T, self.device)
+        causal_mask = generate_causal_mask(T, obs_proj.device)
         hist_encoded = self.transformer_encoder(obs_proj, mask=causal_mask)  # [B*S, T, hidden_dim]
         
         # 2.7 取最后时间步的历史编码（历史信息总结）
@@ -583,6 +563,7 @@ class AttScaleFeature(nn.Module):
         output_trend = torch.zeros([batch_size,S,self.seq_len]).to(x.device)
         # 针对自定义的品种范围数组，进行分尺度的特征处理
         for i,scaler in enumerate(self.scale_arr):
+            scaler = scaler.to(x.device)
             x_part = x[:,scaler,:].reshape(batch_size,-1)
             output[:,scaler] = self.ins_layer[i](x_part)
             # 整体序列趋势网络计算
@@ -644,7 +625,6 @@ class UnionTransCombine(nn.Module):
         self,
         obs_dim=6,             # 历史观测特征维度（要预测的变量）
         fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
-        time_embed_dim=28,     # 时间特征嵌入维度（含节假日）
         hidden_dim=64,         # 隐藏层维度
         nhead=8,               # 注意力头数
         num_layers=2,          # Transformer层数
@@ -660,14 +640,34 @@ class UnionTransCombine(nn.Module):
         static_cate_emb=None, # 静态离散特征嵌入
         top_num=3,            # topk数量
         scales_dict=None,
+        time_encoder=None,
         device='cuda'
     ):
         super().__init__()
+        time_encoder = TimeFeatureEncoder('datetime')   
+        # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
+        #               'month':df['datetime'].dt.month.unique().tolist(),
+        #               'day':df['datetime'].dt.day.unique().tolist(),
+        #               'dayofweek':df['datetime'].dt.dayofweek.unique().tolist(),
+        #             }
+        range_data = {'year':[i for i in range(2012,2026)],
+                      'month':[i for i in range(0,12)],
+                      'day':[i for i in range(1,32)],
+                      'dayofweek':[i for i in range(0,5)],
+                    }          
+        dataset = global_var.get_value("dataset")   
+        time_encoder.fit_static(range_data) 
+        # self.time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
+        # 记录时间字段
+        # self.embed_cols = dataset.get_future_columns()
+        self.time_encoder = time_encoder        
+        self.time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1]).shape[-1] 
+        
         self.trans_model = TFTWithFutureCovariates(
                 static_num=static_num,
                 obs_dim=obs_dim,
                 fut_dim=fut_dim,
-                time_embed_dim=time_embed_dim,
+                time_embed_dim=self.time_embed_dim,
                 hidden_dim=hidden_dim,
                 nhead=nhead,
                 num_layers=num_layers,
@@ -695,6 +695,9 @@ class UnionTransCombine(nn.Module):
 
         ############# 中间变量调试 #############
         self.features = {}
+    
+    def transform_inner(self, batch_data):
+        return self.time_encoder.transform_inner(batch_data)
     
     def forward(
         self,static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb
