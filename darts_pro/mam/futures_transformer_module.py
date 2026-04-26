@@ -776,7 +776,8 @@ class FuturesTransformerModule(MlpModule):
         print("all date:", coll_result['date'].unique())
         coll_result.to_csv(self.coll_record_file_path, index=False)
         pred_data_path = os.path.join(RESULT_FILE_PATH, self.pred_index_data_path)
-        coll_result.to_csv(pred_data_path, index=False)
+        if len(self.pred_index_data_path)>3:    
+            coll_result.to_csv(pred_data_path, index=False)
         self.log("date_total_num", date_total_num, prog_bar=True,sync_dist=True) 
         # 生成进一步的结果指标
         coll_result_output = coll_result.rename(columns={'trend_value':'pred_trend'})
