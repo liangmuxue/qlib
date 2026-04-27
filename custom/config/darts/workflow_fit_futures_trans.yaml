@@ -63,8 +63,8 @@ task:
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
-            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"
-            pred_index_data_path: "pred_index_data.csv" 
+            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"
+            pred_index_data_path: "" 
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05
@@ -82,22 +82,22 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transTopLoss_2411"
+               model_name: "Futures_cleanDataAllCutlen2_transCombineLoss_2411"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
-               task_weights: [[0.5,0.5],[0.5,0.5]]
+               task_weights: [[0.5,0.5,0.5,0.5],[0.5,0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[1],[0]]
+               main_task_seq: [[2,3],[1]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
                step_mode: 1
                pretrain_model_name: 'MLP_PRETRAIN_1000_202110'
-               wave_period : &wave_period 33
+               wave_period : &wave_period 30
                hidden_size: 16  
-               forecast_horizon: &forecast_horizon 5
+               forecast_horizon: &forecast_horizon 2
                cut_len: &cut_len 2
                dropout: 0.3
                opt_size: 1

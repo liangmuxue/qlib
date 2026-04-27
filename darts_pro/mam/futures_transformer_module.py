@@ -893,7 +893,7 @@ class FuturesTransformerModule(MlpModule):
         for i in range(2):
             coll_result_item = coll_result_output[coll_result_output['scale_idx']==i]
             names = ['pred','num_target','val_target']  
-            win = "batch_trend_line_{}_{}".format(viz_total_size,i)
+            win = "batch_trend_line_{}_{}".format(match_key,i)
             title = "batch_trend_{}_{}".format(match_key,i)  
             view_data = coll_result_item[['pred_trend_value','real_trend_values','real_trend_ref_values']].values
             viz_result_ext.viz_matrix_var(view_data,win=win,title=title,names=names)
