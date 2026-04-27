@@ -215,7 +215,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         target_norm = torch.cat(target_norm)
         combine_index = torch.cat([long_index_total,short_index_total])   
         combine_index = tensor_intersect(combine_index,ins_rel_index).long()
-        top_loss = self._compute_top_loss(pred, target_norm, combine_index)
+        top_loss = self._compute_top_loss(pred, target, combine_index)
         
         return top_loss        
         

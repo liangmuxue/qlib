@@ -35,7 +35,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
 TRACK_DATE = [item for item in range(20250825,20250905)]
-TRACK_DATE = [item for item in range(20241225,20250105)]
+TRACK_DATE = [item for item in range(20241225,20241226)]
 # TRACK_DATE = [item for item in range(20241231,20250105)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240428, 20260505]
@@ -815,6 +815,7 @@ class FuturesTransformerModule(MlpModule):
         price_targets_main = long_diff_index_targets_total.squeeze(-1)
         node_num = ins_all.shape[0]
         match_key = self.get_scale_match_key()
+        ins_arr = self.scale_arr[match_key]
         
         for index in range(target_class_3d.shape[0]):
         
@@ -827,67 +828,64 @@ class FuturesTransformerModule(MlpModule):
             date = int(ts_arr[keep_index][0]["future_start_datetime"])
             if not date in TRACK_DATE:
                 continue    
-            coll_item = coll_result[coll_result['date'] == date]
-            instruments, k_idx, _ = np.intersect1d(ins_all, keep_index, return_indices=True)
+            instruments, _, _ = np.intersect1d(ins_all, keep_index, return_indices=True)
             ts_arr_ins = ts_arr[instruments]
             price_diff_range_ins = np.array([(item['open_array'][-self.output_chunk_length + self.cut_len - 1] - item['open_array'][-self.output_chunk_length]) / item['open_array'][-self.output_chunk_length] * 100 for item in ts_arr_ins])
-            # index_price = long_diff_index_targets_total[index,0]
-            index_price = price_diff_range_ins.mean()        
-            open_diff = np.array([t["diff_range"] for t in ts_arr_ins])[:,-self.output_chunk_length:]
-            
-            for j in range(1):
-                inner_class_item = target_class_item[ins_all]
-                inner_index = np.where(inner_class_item >= 0)[0]           
-                ins_output = features[match_key][index]
-                ins_output = ins_output[inner_index]
-                # dec_output_item = dec_output[index,inner_index,-1,j] 
-                fur_round_target = round_targets[instruments, -self.output_chunk_length+self.cut_len-1, j]
-                price_targets = price_targets_total[index, instruments]
-                # 品种比对图
-                if j in DRAW_SEQ_DETAIL:
-                    price_array_range = np.array([self.criterion.compute_diff_range_class(item)[0] for item in ts_arr[instruments]])
-                    price_array_range = price_array_range / 10
-                    name_arr = []
-                    for inner_index, item in enumerate(ts_arr[instruments]):
-                        match_item = coll_item[coll_item['instrument'] == item['instrument']]
-                        if match_item.shape[0] > 0:
-                            trend = match_item['trend_value'].values[0]
-                            name_arr.append(item["instrument"] + "_match_" + str(trend))
-                        else:
-                            name_arr.append(item["instrument"])
-                    # view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
-                    view_data = np.stack([ins_output, fur_round_target, price_array_range]).transpose(1, 0)
-                    # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
-                    win = "detail_target_{}_{}=".format(j, viz_total_size)
-                    index_target = round_targets[main_index, -1, j]
-                    pred_trend_value = coll_item['pred_trend_value'].values[0]
-                    real_trend_values = coll_item['real_trend_values'].values[0]
-                    target_title = "pred_{}/tar_{},date:{}".format(round(real_trend_values, 3), round(pred_trend_value, 3), date)  
-                    # target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(dec_output_mean,3),date)  
-                    viz_result_detail.viz_bar_compare(view_data, win=win, title=target_title, rownames=name_arr, legends=["pred_cls", "target", "price"])
-                    
-                    # 整体趋势图
-                    # trend_pred = trend_data[match_key][index]
-                    # for k in range(len(self.scale_arr[match_key])):
-                    #     win = "trend_line_{}_{}_{}".format(viz_total_size,date,k)
-                    #     target_title = "trend_{}_{},date_{}".format(match_key,k,date)
-                    #     ins = self.scale_arr[match_key][k]
-                    #     ins = np.intersect1d(instruments,ins)
-                    #     scale_targets = future_target[ins,:,0].mean(0)
-                    #     price_diff = open_diff[ins].mean(0)
-                    #     trend_pred_data = trend_pred[ins].mean(0)
-                    #     view_data = np.stack([trend_pred_data,scale_targets,price_diff]).transpose(1,0)
-                    #     names = ['pred','target','price_diff']                              
-                    #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)
-                        # for ins_item in ins:
-                        #     win = "trend_ins_{}_{}_{}".format(viz_total_size,date,ins_item)
-                        #     target_title = "trend_ins_{}_{},date_{}".format(match_key,ins_item,date)
-                        #     scale_targets = future_target[ins_item,:,0]
-                        #     price_diff = open_diff[ins_item]
-                        #     trend_pred_data = trend_pred[ins_item]
-                        #     view_data = np.stack([trend_pred_data,scale_targets,price_diff]).transpose(1,0)
-                        #     names = ['pred','target','price_diff']                              
-                        #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)                                                 
+            inner_class_item = target_class_item[ins_all]
+            inner_index = np.where(inner_class_item >= 0)[0]           
+            ins_output = features[match_key][index]
+            # dec_output_item = dec_output[index,inner_index,-1,j] 
+            price_targets = price_targets_total[index, instruments]
+            # 品种比对图
+            for k,ins in enumerate(ins_arr):
+                name_arr = []
+                ins_in_scale = np.intersect1d(ins,instruments)
+                ins_output_item = ins_output[ins_in_scale]
+                price_array_range = np.array([self.criterion.compute_diff_range_class(item)[0] for item in ts_arr[ins_in_scale]])
+                price_array_range = price_array_range / 10                
+                # fur_round_target = round_targets[ins_in_scale, -self.output_chunk_length+self.cut_len-1, 0]
+                fur_target = future_target[ins_in_scale, -self.output_chunk_length+self.cut_len-1, 0]
+                coll_item = coll_result[(coll_result['date']==date)&(coll_result['scale_idx']==k)]
+                for inner_index, item in enumerate(ts_arr[ins_in_scale]):
+                    match_item = coll_item[coll_item['instrument'] == item['instrument']]
+                    if match_item.shape[0] > 0:
+                        trend = match_item['trend_value'].values[0]
+                        name_arr.append(item["instrument"] + "_match_" + str(trend))
+                    else:
+                        name_arr.append(item["instrument"])
+                # view_data = np.stack([ins_output_scale,price_targets,price_array_range]).transpose(1,0)
+                view_data = np.stack([ins_output_item, fur_target, price_array_range]).transpose(1, 0)
+                # view_data = np.stack([ins_output,dec_output_item,fur_round_target,price_array_range]).transpose(1,0)
+                win = "detail_target_{}_{}".format(viz_total_size,k)
+                pred_trend_value = coll_item['pred_trend_value'].values[0]
+                real_trend_values = coll_item['real_trend_values'].values[0]
+                real_trend_ref_values = coll_item['real_trend_ref_values'].values[0]
+                target_title = "{}_{}_{}:pred_{}/tar_{}/ref_{}".format(date,match_key,k,round(pred_trend_value, 3),round(real_trend_values, 3),round(real_trend_ref_values, 3))  
+                # target_title = "Detail_{}_{}_{},date:{}".format(round(index_mean,3),round(index_target,3),round(dec_output_mean,3),date)  
+                viz_result_detail.viz_bar_compare(view_data, win=win, title=target_title, rownames=name_arr, legends=["pred_cls", "target", "price"])
+                
+            # 整体趋势图
+            # trend_pred = trend_data[match_key][index]
+            # for k in range(len(self.scale_arr[match_key])):
+            #     win = "trend_line_{}_{}_{}".format(viz_total_size,date,k)
+            #     target_title = "trend_{}_{},date_{}".format(match_key,k,date)
+            #     ins = self.scale_arr[match_key][k]
+            #     ins = np.intersect1d(instruments,ins)
+            #     scale_targets = future_target[ins,:,0].mean(0)
+            #     price_diff = open_diff[ins].mean(0)
+            #     trend_pred_data = trend_pred[ins].mean(0)
+            #     view_data = np.stack([trend_pred_data,scale_targets,price_diff]).transpose(1,0)
+            #     names = ['pred','target','price_diff']                              
+            #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)
+            # for ins_item in ins:
+            #     win = "trend_ins_{}_{}_{}".format(viz_total_size,date,ins_item)
+            #     target_title = "trend_ins_{}_{},date_{}".format(match_key,ins_item,date)
+            #     scale_targets = future_target[ins_item,:,0]
+            #     price_diff = open_diff[ins_item]
+            #     trend_pred_data = trend_pred[ins_item]
+            #     view_data = np.stack([trend_pred_data,scale_targets,price_diff]).transpose(1,0)
+            #     names = ['pred','target','price_diff']                              
+            #     viz_result_ext.viz_matrix_var(view_data,win=win,title=target_title,names=names)                                                 
                 
         # 整体趋势可视化
         coll_result_output = coll_result_output.drop_duplicates(subset=['date','rel_scale_key','scale_idx'], keep='first', ignore_index=True)
@@ -1406,12 +1404,12 @@ class FuturesTransformerModule(MlpModule):
     def collect_result_compindex(self, date=None, target_info=None, result_list=None, keep_index=None):
  
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
         open_diff = np.array([t['open_diff'] for t in target_info])[keep_index]
         rel_scale_key = self.get_scale_match_key()
-        dataset = global_var.get_value("dataset") 
-        scale_dict = dataset.scale_dict
-        scale_arr = scale_dict[date]
-        scale_values = scale_arr[rel_scale_key]
+        # dataset = global_var.get_value("dataset") 
+        # scale_dict = dataset.scale_dict
+        scale_values = target_info[main_index]['scale_arr'][rel_scale_key]
         coll_results = []
         
         # 对于预测数据，生成对应涨跌幅类别

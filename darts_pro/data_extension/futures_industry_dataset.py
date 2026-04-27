@@ -677,7 +677,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         diff_range_all = np.stack([t['diff_range'] for t in target_info_total_effect])
         target_info_total[self.main_index]['diff_range'] = np.mean(diff_range_all,0)
         # 存储业务类别分片数据到整体数据中,注意需要使用当前预测日期的下一日期作为取值依据
-        next_date = self.get_next_date(future_start_datetime,dur=(self.output_chunk_length-1))
+        next_date = self.get_next_date(future_start_datetime,dur=(self.cut_len-1))
         scale_arr = self.scale_dict[next_date]
         target_info_total[self.main_index]['scale_arr'] = scale_arr        
         ######### 分别对目标值和协变量，在个体范围层面进行归一化 #########
@@ -789,7 +789,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 记录涨跌品种数量比例，用于整体趋势损失
         target_info_total[self.main_index]['long_ins_num'] = np.sum(open_diff_arr>0)
         
-        # if future_start_datetime==20250512:
+        # if future_start_datetime==20241225:
         #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
         #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
