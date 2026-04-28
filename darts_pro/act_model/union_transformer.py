@@ -543,11 +543,11 @@ class AttScaleFeature(nn.Module):
             ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
                                 layer_norm=True,batch_norm=False,dropout=dropout)
             ins_layer.append(ins_layer_inner)
-            trend_layer_inner = LinelessLayer(input_dim*seq_len,seq_len,hidden_size=input_dim,
-                                layer_norm=True,batch_norm=False,dropout=dropout)            
+            trend_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=input_dim,
+                                layer_norm=False,batch_norm=True,dropout=dropout)            
             trend_layer.append(trend_layer_inner)
             trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
-                                layer_norm=False,batch_norm=True,dropout=dropout)      
+                                layer_norm=False,batch_norm=True,track_running_stats=False,dropout=dropout)      
             trend_logits_layer.append(trend_logits_layer_inner)          
         self.ins_layer = nn.ParameterList(ins_layer)
         # 整体趋势计算网络
@@ -560,15 +560,15 @@ class AttScaleFeature(nn.Module):
         
         output = torch.zeros([batch_size,S]).to(x.device)
         output2index_trend = torch.zeros([batch_size,len(self.scale_arr)]).to(x.device)
-        output_trend = torch.zeros([batch_size,S,self.seq_len]).to(x.device)
+        output_trend = torch.zeros([batch_size,S]).to(x.device)
         # 针对自定义的品种范围数组，进行分尺度的特征处理
         for i,scaler in enumerate(self.scale_arr):
             scaler = scaler.to(x.device)
             x_part = x[:,scaler,:].reshape(batch_size,-1)
             output[:,scaler] = self.ins_layer[i](x_part)
             # 整体序列趋势网络计算
-            x_seq_part = x_seq[:,scaler].reshape(batch_size,scaler.shape[0],-1)
-            output_trend[:,scaler,:] = self.trend_layer[i](x_seq_part)
+            x_part_trend = x[:,scaler,:].reshape(batch_size,-1)
+            output_trend[:,scaler] = self.trend_layer[i](x_part_trend)
             # 整体趋势网络计算
             x_l_part = x[:,scaler].reshape(batch_size,-1)
             output2index_trend[:,i] = self.trend_logits_layer_inner[i](x_l_part).squeeze(-1) 

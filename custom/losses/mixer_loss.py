@@ -219,7 +219,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss        
         
-    def compute_popu_weight_loss(self,pred,target,key=None,ins_rel_index=None,top_num=1,trend_threhold=None):
+    def compute_popu_weight_loss(self,pred,target,key=None,ins_rel_index=None,top_num=2,trend_threhold=None):
         """通用业务分支的WEIGHT损失"""
 
         scale_arr = self.scale_dict[key]
@@ -230,33 +230,36 @@ class FuturesIndustryLoss(UncertaintyLoss):
         short_threhold = -1.0 # trend_threhold['short']   
         long_threhold = 1.0 # trend_threhold['long']          
         for i,instruments in enumerate(scale_arr):
+            count += 1
             instruments = torch.Tensor(instruments).to(pred.device).long()
             instruments = tensor_intersect(instruments,ins_rel_index).long()
-            if instruments.shape[0]<3:
+            if instruments.shape[0]<top_num*2:
+                loss += self.mse_loss(pred[instruments].unsqueeze(0),target[instruments].unsqueeze(0))
                 continue
             pred_item = pred[instruments]
             target_item = target[instruments]
             pred_item_norm = pred_item # map_to_neg1_pos1_torch(pred_item)
-            target_item_norm = normalization_standard(target_item)
-            pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold,min_num=2)
+            target_item_norm = target_item # normalization_standard(target_item)
+            pred_weights = self.get_sample_weights(pred_item_norm, short_threhold, long_threhold,min_num=top_num)
             loss += self.compute_weight_top_loss(pred_item_norm, target_item_norm,pred_weights)
-            count += 1
         
         if count>0:
             loss = loss/count
         
         return loss      
     
-    def compute_weight_top_loss(self,pred,target,weights=None):
+    def compute_weight_top_loss(self,pred,target,weights=None,real_weight_huber=False):
         
         top_index = torch.where(weights>1)
         pred_top = pred[top_index]
         target_top = target[top_index]
-        # loss = self.criterion(pred,target,weights)
-        if all_elements_same(target_top) or all_elements_same(pred_top):
-            loss = self.mse_loss(pred_top.unsqueeze(0), target_top.unsqueeze(0))
+        if real_weight_huber:
+            loss = self.criterion(pred,target,weights)
         else:
-            loss = self.ccc_loss_comp(pred_top, target_top)
+            if all_elements_same(target_top) or all_elements_same(pred_top):
+                loss = self.mse_loss(pred_top.unsqueeze(0), target_top.unsqueeze(0))
+            else:
+                loss = self.ccc_loss_comp(pred_top, target_top)
         return loss
                     
     def  _compute_top_loss(self,pred,target,top_real_index):
@@ -353,12 +356,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def build_scale_data_output(self,sv_data,batch_no,scale_data_output=None):  
         
         for key in self.scale_dict.keys():
-            index_data = sv_data[key][batch_no]
-            index_data = index_data.unsqueeze(0)
+            scale_data = sv_data[key][batch_no].unsqueeze(0)
             if key not in scale_data_output:
-                scale_data_output[key] = index_data
+                scale_data_output[key] = scale_data
             else:
-                scale_data_output[key] = torch.cat([scale_data_output[key],index_data],dim=0)   
+                scale_data_output[key] = torch.cat([scale_data_output[key],scale_data],dim=0)   
                         
     def build_scale_data_target(self,target,scale_data_target=None,ins_rel_index=None):
         
@@ -462,26 +464,19 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 trend_output = {}
                 trend_target = {}
                 scale_data_output = {}
-                scale_data_target = []
                 price_diff_rate = torch.zeros(target_class.shape[0]).to(target_class.device)
-                trend_ref = None
+                scale_data_target = torch.zeros([target_class.shape[0],ins_all.shape[0]]).to(target_class.device)
                 for j in range(target_class.shape[0]):
+                    target_info_item = target_info[j][main_index_abs]
+                    date = target_info_item['future_start_datetime']
                     # 如果存在缺失值，则忽略，不比较
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
-                    index_target_item = future_index_round_target[j,indus_rel_index,:,i]
-                    indus_index = tensor_intersect(keep_index,indus_data_index).to(keep_index.device)
-                    inner_class_item = target_class_item[indus_data_index]                            
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     target_item = target[j,ins_all,target_len,0]
-                    target_seq_item = target[j,ins_all,:,0]
-                    target_info_item = target_info[j][main_index_abs]
-                    date = target_info_item['future_start_datetime']
                     # 收集数据用于批次比较
-                    self.build_scale_data_output(sv[0],j,scale_data_output=scale_data_output)   
-                    target_in_batch = torch.zeros([target_item.shape[0]]).to(ins_rel_index.device)
-                    target_in_batch[ins_rel_index] = target_item[ins_rel_index]
-                    scale_data_target.append(target_in_batch)
+                    self.build_scale_data_output(sw_index_data[0],j,scale_data_output=scale_data_output)                       
+                    scale_data_target[j] = target_item
                     # 收集趋势业务数据
                     self.build_scale_trend_output(sw_index_logits[0],j,trend_output=trend_output)
                     self.build_scale_trend_target(target_item,target_info=target_info_item,trend_target=trend_target,ins_rel_index=ins_rel_index)   
@@ -506,51 +501,42 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = scale_output[key]
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
-                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
-                                # cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
+                                # cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
+                                cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                             if sidx==1:
-                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
-                                # ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
-                                
+                                # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
+                                ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                         batch_size += 1          
-                                  
                     elif target_mode==3:
+                        price_diff_range = price_targets[j,ins_rel_index]  
+                        diff_rate = torch.sum(price_diff_range>0)/ins_rel_index.shape[0]
+                        price_diff_rate[j] = diff_rate                        
                         batch_size += 1
                         
                 if target_mode in [0]:
                     loss_sum = loss_sum + ce_loss[i]    
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
-                    ce_loss[i] = ce_loss[i]/batch_size
-                    min_threhold = trend_threhold['min']
-                    max_threhold = trend_threhold['max']       
+                    # ce_loss[i] = ce_loss[i]/batch_size
+
+                    # 业务分支top整合损失计算   
                     short_threhold = trend_threhold['short']   
-                    long_threhold = trend_threhold['long']                
-                    scale_out_total = []
-                    scale_target_total = []
-                    batch_size_inner = 0
-                    for key_idx,key in enumerate(trend_output.keys()):
-                        scale_output = trend_output[key]
-                        scale_target = trend_target[key]
-                        for h in range(2):
-                            inner_target = scale_target[:,h]
-                            target_norm = map_to_neg1_pos1_torch(inner_target) # scale_value(target,target.min(),target.max(),min_threhold,max_threhold)
-                            if torch.sum(inner_target==0)/inner_target.shape[0]>0.5:
-                                continue 
-                            scale_output_norm = scale_output[:,h] # scale_value(scale_output[:,h],scale_output[:,h].min(),scale_output[:,h].max(),min_threhold,max_threhold)
-                            pred_weights = self.get_sample_weights(scale_output_norm, short_threhold, long_threhold)
-                            if key_idx==0:
-                                fds_loss[i] += self.compute_weight_top_loss(scale_output_norm, target_norm,pred_weights)
-                            else:
-                                corr_loss[i] += self.compute_weight_top_loss(scale_output_norm, target_norm,pred_weights)
-                        batch_size_inner += 1
-                    fds_loss[i] = fds_loss[i]/batch_size_inner
-                    corr_loss[i] = corr_loss[i]/batch_size_inner
+                    long_threhold = trend_threhold['long']                     
+                    for b_sidx, b_key in enumerate(scale_data_output.keys()):
+                        sv_out_item = scale_data_output[b_key]
+                        # 参考趋势输出，作为top选取参数
+                        if b_sidx==0:
+                            inner_loss = 0
+                            for b_idx in range(sv_out_item.shape[-1]):
+                                sv_in_batch = sv_out_item[:,b_idx]
+                                target_in_batch = scale_data_target[:,b_idx]
+                                pred_weights = self.get_sample_weights(sv_in_batch, short_threhold, long_threhold,min_num=4)
+                                inner_loss += self.compute_weight_top_loss(sv_in_batch, target_in_batch,pred_weights,real_weight_huber=True)                            
+                            ce_loss[i] += inner_loss/sv_out_item.shape[-1]
+                        if b_sidx==1:
+                            corr_loss[i] += self.ccc_loss_comp(sv_out_item.transpose(1,0),scale_data_target.transpose(1,0))
+                        
                 if target_mode in [3]:
-                    price_diff_range = price_targets[j,ins_rel_index]  
-                    diff_rate = torch.sum(price_diff_range>0)/ins_rel_index.shape[0]                    
-                    price_diff_rate[j] = diff_rate
-                    
                     min_threhold = trend_threhold['min']
                     max_threhold = trend_threhold['max']       
                     short_threhold = trend_threhold['short']   
@@ -563,7 +549,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         scale_target = trend_target[key]
                         for h in range(2):
                             inner_target = scale_target[:,h]
-                            target_norm = price_diff_rate # map_to_neg1_pos1_torch(inner_target) # scale_value(target,target.min(),target.max(),min_threhold,max_threhold)
+                            target_norm = normalization_axis(price_diff_rate) # map_to_neg1_pos1_torch(inner_target) # scale_value(target,target.min(),target.max(),min_threhold,max_threhold)
                             if torch.sum(inner_target==0)/inner_target.shape[0]>0.5:
                                 continue 
                             scale_output_norm = scale_value(scale_output[:,h],scale_output[:,h].min(),scale_output[:,h].max(),min_threhold,max_threhold)
@@ -581,15 +567,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     #     f1 = f1_score(scale_target_class_total.cpu().numpy(), pred_label_total.cpu().numpy(), average='macro')
                     #     print(f"F1 score: {f1:.4f}")
                         
-                    # 业务分支top整合损失计算   
-                    # scale_data_target = torch.stack(scale_data_target,0)                   
-                    # for sidx, key in enumerate(scale_data_output.keys()):
-                    #     sv_out_item = scale_data_output[key]
-                    #     # 参考趋势输出，作为top选取参数
-                    #     if sidx==0:
-                    #         cls_loss[i] += self.ccc_loss_comp(sv_out_item,scale_data_target)
-                        # if sidx==1:
-                        #     ce_loss[i] += self.ccc_loss_comp(sv_out_item,scale_data_target)
                                                 
                 loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
                            

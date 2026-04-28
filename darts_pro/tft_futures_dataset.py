@@ -30,7 +30,9 @@ logger = AppLogger()
 def get_scale_conf():
     indus_threhold_bin = [['cdifi','hsjs'],['abpi','yzyl','nffi']]
     cy_threhold_bin = [[0,2013],[2013,2030]]
-    scale_conf = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin}
+    nt_threhold_bin = [[0],[1]]
+    # scale_conf = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin}
+    scale_conf = {'indus_scale':indus_threhold_bin}
     return scale_conf
 
 class TFTFuturesDataset(TFTSeriesDataset):
@@ -62,6 +64,10 @@ class TFTFuturesDataset(TFTSeriesDataset):
                 for i,item in enumerate(threhold_bin):
                     base_info.loc[(base_info['create_year']>=item[0])&(base_info['create_year']<item[1]),key] = i
                 base_info[key] = base_info[key].fillna(-1).astype(int)
+            if key.startswith("nt"):
+                for i,item in enumerate(threhold_bin):
+                    base_info.loc[base_info['night_flag']==item[0],key] = i
+                base_info[key] = base_info[key].fillna(-1).astype(int)                
         self.base_info = base_info     
          
         # 补充扩展数据
