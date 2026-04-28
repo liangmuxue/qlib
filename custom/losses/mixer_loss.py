@@ -209,7 +209,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             short_index = pred_index_short[:top_num]    
             long_index_total = torch.cat([long_index_total,long_index])
             short_index_total = torch.cat([short_index_total,short_index])
-            target_item_norm = normalization_standard(target[instruments])
+            target_item_norm = target[instruments] # normalization_standard(target[instruments])
             target_norm.append(target_item_norm)
         
         target_norm = torch.cat(target_norm)
@@ -463,6 +463,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 trend_target = {}
                 scale_data_output = {}
                 scale_data_target = []
+                price_diff_rate = torch.zeros(target_class.shape[0]).to(target_class.device)
                 trend_ref = None
                 for j in range(target_class.shape[0]):
                     # 如果存在缺失值，则忽略，不比较
@@ -505,10 +506,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = scale_output[key]
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
-                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
                                 # cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                             if sidx==1:
-                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
+                                ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
                                 # ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                                 
                         batch_size += 1          
@@ -546,6 +547,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     fds_loss[i] = fds_loss[i]/batch_size_inner
                     corr_loss[i] = corr_loss[i]/batch_size_inner
                 if target_mode in [3]:
+                    price_diff_range = price_targets[j,ins_rel_index]  
+                    diff_rate = torch.sum(price_diff_range>0)/ins_rel_index.shape[0]                    
+                    price_diff_rate[j] = diff_rate
+                    
                     min_threhold = trend_threhold['min']
                     max_threhold = trend_threhold['max']       
                     short_threhold = trend_threhold['short']   
@@ -558,10 +563,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         scale_target = trend_target[key]
                         for h in range(2):
                             inner_target = scale_target[:,h]
-                            target_norm = map_to_neg1_pos1_torch(inner_target) # scale_value(target,target.min(),target.max(),min_threhold,max_threhold)
+                            target_norm = price_diff_rate # map_to_neg1_pos1_torch(inner_target) # scale_value(target,target.min(),target.max(),min_threhold,max_threhold)
                             if torch.sum(inner_target==0)/inner_target.shape[0]>0.5:
                                 continue 
-                            scale_output_norm = scale_output[:,h] # scale_value(scale_output[:,h],scale_output[:,h].min(),scale_output[:,h].max(),min_threhold,max_threhold)
+                            scale_output_norm = scale_value(scale_output[:,h],scale_output[:,h].min(),scale_output[:,h].max(),min_threhold,max_threhold)
                             pred_weights = self.get_sample_weights(scale_output_norm, short_threhold, long_threhold)
                             if key_idx==0:
                                 cls_loss[i] += self.compute_weight_top_loss(scale_output_norm, target_norm,pred_weights)
