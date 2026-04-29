@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from losses.mtl_loss import UncertaintyLoss,WeightedSpearmanLoss,HuberLoss,WeightedHuberLoss
 from tft.class_define import get_simple_class
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
+from darts_pro.tft_futures_dataset import get_scale_conf
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from sklearn.metrics import f1_score
 # import torchsort
@@ -226,6 +227,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
         loss = 0
         count = 0
         exchange_ids = torch.Tensor(FuturesMappingUtil.get_exchange_ids(sw_ins_mappings).astype(int)).to(pred.device)
+        cy_ids = torch.Tensor(FuturesMappingUtil.get_create_year_flags(sw_ins_mappings).astype(int)).to(pred.device)
+        _,scale_conf = get_scale_conf()
+        cy_bins = scale_conf['cy_scale']
         for i,instruments in enumerate(scale_arr):
             instruments = tensor_intersect(instruments,ins_rel_index)
             # 根据所属交易所进行划片比较
@@ -245,10 +249,28 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     else:
                         loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
                 count += 1
-            
+            # 根据创建年份划片比较
+            cy_Inner_ids = cy_ids[instruments]
+            for i,item in enumerate(cy_bins):
+                idx = torch.where((cy_Inner_ids>=item[0])&(cy_Inner_ids<item[1]))
+                ins_inner = instruments[idx]
+                if ins_inner.shape[0]<3:
+                    loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
+                else:
+                    pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[ins_inner],top_num=top_num)
+                    pred_index_long = ins_inner[pred_index_long]
+                    pred_index_short = ins_inner[pred_index_short]       
+                    pred_index = torch.cat([pred_index_long,pred_index_short])                       
+                    if all_elements_same(target[pred_index]) or all_elements_same(pred[pred_index]):
+                        loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
+                    else:
+                        loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
+                count += 1
+                            
         if count>0:
             loss = loss/count
-        
+        if torch.isnan(loss):
+            print("nnn")
         return loss  
 
     def compute_batch_trunk_loss(self,pred,target,sec_num=4):

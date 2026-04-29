@@ -31,9 +31,9 @@ def get_scale_conf():
     indus_threhold_bin = [['cdifi','hsjs'],['abpi','yzyl','nffi']]
     cy_threhold_bin = [[0,2013],[2013,2030]]
     nt_threhold_bin = [[0],[1]]
-    # scale_conf = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin}
-    scale_conf = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin}
-    return scale_conf
+    scale_conf_all = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin,'nt_scale':nt_threhold_bin}
+    scale_conf = {'indus_scale':indus_threhold_bin}
+    return scale_conf,scale_conf_all
 
 class TFTFuturesDataset(TFTSeriesDataset):
             
@@ -53,7 +53,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
             .astype({"instrument":str,"industry":str,"indus_code":str,"night_flag":int,
                      "exchange_id":int,"price_range":int,"limit_rate":int,"magin_radio":int,"create_year":int})  
         # 加入业务分片关联数据
-        scale_conf = get_scale_conf()
+        scale_conf,_ = get_scale_conf()
         for key in scale_conf.keys():
             threhold_bin = scale_conf[key]
             if key.startswith("indus"):

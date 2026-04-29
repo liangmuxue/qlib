@@ -80,7 +80,7 @@ def build_scale_arr(sw_ins_mappings):
     
     indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
     # 按照行业分组
-    scale_conf = get_scale_conf()
+    scale_conf,_ = get_scale_conf()
     indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
     threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]
     # threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
