@@ -218,7 +218,72 @@ class FuturesIndustryLoss(UncertaintyLoss):
         top_loss = self._compute_top_loss(pred, target, combine_index)
         
         return top_loss        
+
+    def compute_trunk_loss(self,pred,target,key=None,ins_rel_index=None,sw_ins_mappings=None,top_num=1):
+        """按照不同业务属性，分片比较"""
+
+        scale_arr = self.scale_dict[key]
+        loss = 0
+        count = 0
+        exchange_ids = torch.Tensor(FuturesMappingUtil.get_exchange_ids(sw_ins_mappings).astype(int)).to(pred.device)
+        for i,instruments in enumerate(scale_arr):
+            instruments = tensor_intersect(instruments,ins_rel_index)
+            # 根据所属交易所进行划片比较
+            exchange_Inner_ids = exchange_ids[instruments]
+            for exc_id in exchange_Inner_ids.unique():
+                idx = torch.where(exchange_Inner_ids==exc_id)
+                ins_inner = instruments[idx]
+                if ins_inner.shape[0]<3:
+                    loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
+                else:
+                    pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[ins_inner],top_num=top_num)
+                    pred_index_long = ins_inner[pred_index_long]
+                    pred_index_short = ins_inner[pred_index_short]       
+                    pred_index = torch.cat([pred_index_long,pred_index_short])                       
+                    if all_elements_same(target[pred_index]) or all_elements_same(pred[pred_index]):
+                        loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
+                    else:
+                        loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
+                count += 1
+            
+        if count>0:
+            loss = loss/count
         
+        return loss  
+
+    def compute_batch_trunk_loss(self,pred,target,sec_num=4):
+        """批次内按照不同编号规则，分片比较"""
+
+        loss = 0
+        count = 0
+        seq = torch.arange(pred.shape[0]).to(pred.device) 
+        groups = seq.chunk(sec_num)
+        # 按照顺序前后分组比较
+        for seq_in_group in groups:
+            pred_inner = pred[seq_in_group]
+            target_inner = target[seq_in_group]
+            if all_elements_same(pred_inner) or all_elements_same(target_inner):
+                loss += self.mse_loss(pred_inner.unsqueeze(0), target_inner.unsqueeze(0))
+            else:
+                loss += self.ccc_loss_comp(pred_inner, target_inner)
+            count += 1
+        # 跳跃式分组
+        remainder = seq % sec_num  
+        groups = [seq[remainder == i] for i in range(4)]
+        for seq_in_group in groups:
+            pred_inner = pred[seq_in_group]
+            target_inner = target[seq_in_group]
+            if all_elements_same(pred_inner) or all_elements_same(target_inner):
+                loss += self.mse_loss(pred_inner.unsqueeze(0), target_inner.unsqueeze(0))
+            else:
+                loss += self.ccc_loss_comp(pred_inner, target_inner)
+            count += 1   
+                
+        if count>0:
+            loss = loss/count
+        
+        return loss  
+              
     def compute_popu_weight_loss(self,pred,target,key=None,ins_rel_index=None,top_num=2,trend_threhold=None):
         """通用业务分支的WEIGHT损失"""
 
@@ -502,10 +567,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
                                 # cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
-                                cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
+                                cls_loss[i] += self.compute_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)
+                                # cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                             if sidx==1:
                                 # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
-                                ce_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
+                                ce_loss[i] += self.compute_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)
                         batch_size += 1          
                     elif target_mode==3:
                         price_diff_range = price_targets[j,ins_rel_index]  
@@ -517,24 +583,28 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     loss_sum = loss_sum + ce_loss[i]    
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
-                    # ce_loss[i] = ce_loss[i]/batch_size
+                    ce_loss[i] = ce_loss[i]/batch_size
 
                     # 业务分支top整合损失计算   
-                    short_threhold = trend_threhold['short']   
-                    long_threhold = trend_threhold['long']                     
-                    for b_sidx, b_key in enumerate(scale_data_output.keys()):
-                        sv_out_item = scale_data_output[b_key]
-                        # 参考趋势输出，作为top选取参数
-                        if b_sidx==0:
-                            inner_loss = 0
-                            for b_idx in range(sv_out_item.shape[-1]):
-                                sv_in_batch = sv_out_item[:,b_idx]
-                                target_in_batch = scale_data_target[:,b_idx]
-                                pred_weights = self.get_sample_weights(sv_in_batch, short_threhold, long_threhold,min_num=4)
-                                inner_loss += self.compute_weight_top_loss(sv_in_batch, target_in_batch,pred_weights,real_weight_huber=True)                            
-                            ce_loss[i] += inner_loss/sv_out_item.shape[-1]
-                        if b_sidx==1:
-                            corr_loss[i] += self.ccc_loss_comp(sv_out_item.transpose(1,0),scale_data_target.transpose(1,0))
+                    # short_threhold = trend_threhold['short']   
+                    # long_threhold = trend_threhold['long']                     
+                    # for b_sidx, b_key in enumerate(scale_data_output.keys()):
+                    #     sv_out_item = scale_data_output[b_key]
+                    #     # 参考趋势输出，作为top选取参数
+                    #     if b_sidx==0:
+                    #         inner_loss = 0
+                    #         for b_idx in range(sv_out_item.shape[-1]):
+                    #             sv_in_batch = sv_out_item[:,b_idx]
+                    #             target_in_batch = scale_data_target[:,b_idx]
+                    #             # pred_weights = self.get_sample_weights(sv_in_batch, short_threhold, long_threhold,min_num=4)
+                    #             # inner_loss += self.compute_weight_top_loss(sv_in_batch, target_in_batch,pred_weights)   
+                    #             pred_index_long,pred_index_short = self.filter_top_index_bidi(sv_in_batch,top_num=4)
+                    #             pred_index = torch.cat([pred_index_long,pred_index_short])
+                    #             inner_loss += self._compute_top_loss(sv_in_batch, target_in_batch,pred_index)
+                    #
+                    #         # ce_loss[i] += inner_loss/sv_out_item.shape[-1]
+                    #     if b_sidx==1:
+                    #         corr_loss[i] += self.ccc_loss_comp(sv_out_item.transpose(1,0),scale_data_target.transpose(1,0))
                         
                 if target_mode in [3]:
                     min_threhold = trend_threhold['min']

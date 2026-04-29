@@ -33,6 +33,7 @@ class FuturesModel(IndustryRollModel):
         self.sampler_mode = True
         # 验证模式不使用sampler，训练模式使用
         if not shuffle:
+            # return TemporalBatchSampler(dataset,batch_size=batch_size,shuffle=shuffle)
             return None
         else:
             return TemporalBatchSampler(dataset,batch_size=batch_size,shuffle=shuffle)

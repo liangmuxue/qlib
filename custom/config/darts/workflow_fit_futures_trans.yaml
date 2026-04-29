@@ -145,14 +145,14 @@ task:
                 target_column: ['diff_range_norm','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['year','dayofweek','month','day']   
-                past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','create_year','limit_rate','magin_radio']   
                 static_cate_col: ['industry','night_flag','exchange_id','create_year']
-                static_cont_col: ['price_range','limit_rate','magin_radio']
+                static_cont_col: ['limit_rate','magin_radio']
                 
                  

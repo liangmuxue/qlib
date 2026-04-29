@@ -86,10 +86,10 @@ task:
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               task_weights: [[0.5,0.5,0.5,0.5],[0.5,0.5]]
+               task_weights: [[0.5,0.5],[0.5,0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[2,3],[1]]
+               main_task_seq: [[1],[1]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
@@ -105,8 +105,8 @@ task:
                target_mode: [2,2,2,1,3]
                scale_mode: [1,1,2,2,0]
                filter_conv_index: -1
-               loss_top_num: 2
-               pred_top_num: 4
+               loss_top_num: 1
+               pred_top_num: 2
                trend_threhold: {'min':-1.0,'short':-0.7,'long':0.7,'max':1.0}
     dataset:
         class: TFTFuturesDataset
@@ -145,14 +145,14 @@ task:
                 target_column: ['diff_range_norm','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['year','dayofweek','month','day']   
-                past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
+                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','KUP','KLOW'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','create_year','limit_rate','magin_radio']   
                 static_cate_col: ['industry','night_flag','exchange_id','create_year']
-                static_cont_col: ['price_range','limit_rate','magin_radio']
+                static_cont_col: ['limit_rate','magin_radio']
                 
                  
