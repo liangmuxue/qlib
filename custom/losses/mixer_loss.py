@@ -234,27 +234,29 @@ class FuturesIndustryLoss(UncertaintyLoss):
         cy_bins = scale_conf['cy_scale']
         for i,instruments in enumerate(scale_arr):
             instruments = tensor_intersect(instruments,ins_rel_index)
-            # 根据所属交易所进行划片比较
-            exchange_Inner_ids = exchange_ids[instruments]
-            for exc_id in exchange_Inner_ids.unique():
-                idx = torch.where(exchange_Inner_ids==exc_id)
-                ins_inner = instruments[idx]
-                if ins_inner.shape[0]==0:
-                    continue
-                if ins_inner.shape[0]<3:
-                    cls_loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
-                else:
-                    pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[ins_inner],top_num=top_num)
-                    pred_index_long = ins_inner[pred_index_long]
-                    pred_index_short = ins_inner[pred_index_short]       
-                    pred_index = torch.cat([pred_index_long,pred_index_short])                       
-                    if all_elements_same(target[pred_index]) or all_elements_same(pred[pred_index]):
-                        cls_loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
-                    else:
-                        cls_loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
-                cls_count += 1
+        #     # 根据所属交易所进行划片比较
+        #     exchange_Inner_ids = exchange_ids[instruments]
+        #     for exc_id in exchange_Inner_ids.unique():
+        #         idx = torch.where(exchange_Inner_ids==exc_id)
+        #         ins_inner = instruments[idx]
+        #         if ins_inner.shape[0]==0:
+        #             continue
+        #         if ins_inner.shape[0]<3:
+        #             cls_loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
+        #         else:
+        #             pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[ins_inner],top_num=top_num)
+        #             pred_index_long = ins_inner[pred_index_long]
+        #             pred_index_short = ins_inner[pred_index_short]       
+        #             pred_index = torch.cat([pred_index_long,pred_index_short])                       
+        #             if all_elements_same(target[pred_index]) or all_elements_same(pred[pred_index]):
+        #                 cls_loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
+        #             else:
+        #                 cls_loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
+        #         cls_count += 1
+                
             # 根据创建年份划片比较
             cy_Inner_ids = cy_ids[instruments]
+            pred_index_combine = []
             for i,item in enumerate(cy_bins):
                 idx = torch.where((cy_Inner_ids>=item[0])&(cy_Inner_ids<item[1]))
                 ins_inner = instruments[idx]
@@ -266,13 +268,29 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[ins_inner],top_num=top_num)
                     pred_index_long = ins_inner[pred_index_long]
                     pred_index_short = ins_inner[pred_index_short]       
-                    pred_index = torch.cat([pred_index_long,pred_index_short])                       
+                    pred_index = torch.cat([pred_index_long,pred_index_short])   
+                    pred_index_combine.append(pred_index)                    
                     if all_elements_same(target[pred_index]) or all_elements_same(pred[pred_index]):
                         ce_loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
                     else:
                         ce_loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
                 ce_count += 1
-                            
+                
+            # 统合后再次进行top比对
+            cls_count += 1
+            if len(pred_index_combine)<2:
+                cls_loss += self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
+                continue
+            pred_index_combine = torch.cat(pred_index_combine)
+            pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[pred_index_combine],top_num=top_num)
+            pred_index_long = pred_index_combine[pred_index_long]
+            pred_index_short = pred_index_combine[pred_index_short]    
+            pred_index = torch.cat([pred_index_long,pred_index_short])   
+            if all_elements_same(target[pred_index_combine]) or all_elements_same(pred[pred_index_combine]):
+                cls_loss += self.mse_loss(pred[pred_index_combine].unsqueeze(0), target[pred_index_combine].unsqueeze(0))
+            else:
+                cls_loss += self.ccc_loss_comp(pred[pred_index_combine], target[pred_index_combine])
+                                                  
         if cls_count>0:
             cls_loss = cls_loss/cls_count
         if ce_count>0:
@@ -297,7 +315,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             count += 1
         # 跳跃式分组
         remainder = seq % sec_num  
-        groups = [seq[remainder == i] for i in range(4)]
+        groups = [seq[remainder == i] for i in range(sec_num)]
         for seq_in_group in groups:
             pred_inner = pred[seq_in_group]
             target_inner = target[seq_in_group]
