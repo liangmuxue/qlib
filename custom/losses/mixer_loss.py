@@ -224,8 +224,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
         """按照不同业务属性，分片比较"""
 
         scale_arr = self.scale_dict[key]
-        loss = 0
-        count = 0
+        ce_loss = 0
+        cls_loss = 0
+        ce_count = 0
+        cls_count = 0
         exchange_ids = torch.Tensor(FuturesMappingUtil.get_exchange_ids(sw_ins_mappings).astype(int)).to(pred.device)
         cy_ids = torch.Tensor(FuturesMappingUtil.get_create_year_flags(sw_ins_mappings).astype(int)).to(pred.device)
         _,scale_conf = get_scale_conf()
@@ -237,41 +239,45 @@ class FuturesIndustryLoss(UncertaintyLoss):
             for exc_id in exchange_Inner_ids.unique():
                 idx = torch.where(exchange_Inner_ids==exc_id)
                 ins_inner = instruments[idx]
+                if ins_inner.shape[0]==0:
+                    continue
                 if ins_inner.shape[0]<3:
-                    loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
+                    cls_loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
                 else:
                     pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[ins_inner],top_num=top_num)
                     pred_index_long = ins_inner[pred_index_long]
                     pred_index_short = ins_inner[pred_index_short]       
                     pred_index = torch.cat([pred_index_long,pred_index_short])                       
                     if all_elements_same(target[pred_index]) or all_elements_same(pred[pred_index]):
-                        loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
+                        cls_loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
                     else:
-                        loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
-                count += 1
+                        cls_loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
+                cls_count += 1
             # 根据创建年份划片比较
             cy_Inner_ids = cy_ids[instruments]
             for i,item in enumerate(cy_bins):
                 idx = torch.where((cy_Inner_ids>=item[0])&(cy_Inner_ids<item[1]))
                 ins_inner = instruments[idx]
+                if ins_inner.shape[0]==0:
+                    continue                
                 if ins_inner.shape[0]<3:
-                    loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
+                    ce_loss += self.mse_loss(pred[ins_inner].unsqueeze(0), target[ins_inner].unsqueeze(0))
                 else:
                     pred_index_long,pred_index_short = self.filter_top_index_bidi(pred[ins_inner],top_num=top_num)
                     pred_index_long = ins_inner[pred_index_long]
                     pred_index_short = ins_inner[pred_index_short]       
                     pred_index = torch.cat([pred_index_long,pred_index_short])                       
                     if all_elements_same(target[pred_index]) or all_elements_same(pred[pred_index]):
-                        loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
+                        ce_loss += self.mse_loss(pred[pred_index].unsqueeze(0), target[pred_index].unsqueeze(0))
                     else:
-                        loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
-                count += 1
+                        ce_loss += self.ccc_loss_comp(pred[pred_index], target[pred_index])
+                ce_count += 1
                             
-        if count>0:
-            loss = loss/count
-        if torch.isnan(loss):
-            print("nnn")
-        return loss  
+        if cls_count>0:
+            cls_loss = cls_loss/cls_count
+        if ce_count>0:
+            ce_loss = ce_loss/ce_count            
+        return cls_loss,ce_loss  
 
     def compute_batch_trunk_loss(self,pred,target,sec_num=4):
         """批次内按照不同编号规则，分片比较"""
@@ -589,7 +595,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
                                 # cls_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
-                                cls_loss[i] += self.compute_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)
+                                loss1,loss2 = self.compute_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)
+                                cls_loss[i] += loss1
+                                ce_loss[i] += loss2
                                 # cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                             if sidx==1:
                                 # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
