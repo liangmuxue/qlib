@@ -236,9 +236,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
         for i,exc_id in enumerate(np.unique(nt_Inner_ids)):
             idx = np.where(nt_Inner_ids==exc_id)
             ins_inner = torch.Tensor(instruments[idx]).to(pred.device).long()          
-            ins_in_indus = tensor_intersect(ins_inner,ins_rel_index)
             if i==0:
-                if ins_inner.shape[0]<2:
+                ins_in_indus = tensor_intersect(ins_inner,ins_rel_index)
+                if ins_in_indus.shape[0]<2:
                     loss = self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
                 else:    
                     loss,pred_index = self.compute_top_loss(pred[ins_in_indus], target[ins_in_indus], top_num=1,return_index=True)
