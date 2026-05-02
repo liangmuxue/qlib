@@ -224,6 +224,42 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss        
 
+    def compute_multi_trunk_loss(self,pred,target,instruments=None,ins_rel_index=None,sw_ins_mappings=None,top_num=1):
+        """按照业务属性，分片比较"""
+
+        ce_loss = 0
+        cls_loss = 0
+        ce_count = 0
+        cls_count = 0
+        indus_ins = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+        nt_Inner_ids = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
+        for i,exc_id in enumerate(np.unique(nt_Inner_ids)):
+            idx = np.where(nt_Inner_ids==exc_id)
+            ins_inner = torch.Tensor(instruments[idx]).to(pred.device).long()          
+            ins_in_indus = tensor_intersect(ins_inner,ins_rel_index)
+            if i==0:
+                if ins_inner.shape[0]<2:
+                    loss = self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
+                else:    
+                    loss,pred_index = self.compute_top_loss(pred[ins_in_indus], target[ins_in_indus], top_num=1,return_index=True)
+                cls_loss += loss
+                cls_count += 1
+                continue         
+            for i,ins_in_indus in enumerate(indus_ins):   
+                ins_in_indus = tensor_intersect(torch.Tensor(ins_in_indus).to(pred.device),ins_inner).long()       
+                if ins_in_indus.shape[0]<2:
+                    loss = self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
+                else:    
+                    loss,pred_index = self.compute_top_loss(pred[ins_in_indus], target[ins_in_indus], top_num=1,return_index=True)                
+                cls_loss += loss
+                cls_count += 1
+                                       
+        if cls_count>0:
+            cls_loss = cls_loss/cls_count
+        # if ce_count>0:
+        #     ce_loss = ce_loss/ce_count            
+        return cls_loss  
+    
     def compute_nt_trunk_loss(self,pred,target,key=None,ins_rel_index=None,sw_ins_mappings=None,top_num=1):
         """按照NT业务属性，分片比较"""
 
@@ -261,8 +297,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         if ce_count>0:
             ce_loss = ce_loss/ce_count            
         return cls_loss,ce_loss  
-    
-    
+        
     def compute_trunk_loss(self,pred,target,key=None,ins_rel_index=None,sw_ins_mappings=None,top_num=1):
         """按照不同业务属性，分片比较"""
 
@@ -672,9 +707,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             # 参考趋势输出，作为top选取参数
                             if sidx==0:
                                 # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
-                                loss1,loss2 = self.compute_nt_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)
-                                cls_loss[i] += loss1
-                                ce_loss[i] += loss2
+                                # loss1,loss2 = self.compute_nt_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)
+                                cls_loss[i] += self.compute_multi_trunk_loss(sv_out_item,target_item,instruments=ins_all,
+                                                    ins_rel_index=ins_rel_index,sw_ins_mappings=sw_ins_mappings)
                                 # cls_loss[i] += self.compute_popu_weight_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,trend_threhold=trend_threhold)
                             if sidx==1:
                                 # ce_loss[i] += self.compute_popu_top_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index,top_num=top_num)
