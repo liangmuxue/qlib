@@ -605,8 +605,8 @@ class SparseGateFeatureTopK(nn.Module):
         # 分别根据不同的业务尺度，生成1维度特征
         g_features = self.top_global_layer(x.reshape(batch_size,-1))  
         g_trend_features = self.trend_global_layer(x.reshape(batch_size,-1))  
-        g_features_combine = self.score_head[0](g_features)
-        features_list['global_feature'] = g_features_combine
+        # g_features_combine = self.score_head[0](g_features)
+        features_list['global_feature'] = g_features
         trend_list['global_trend_feature'] = g_trend_features
         for i,key in enumerate(self.scales_layer.keys()):
             scale_features,trend_features,trend_index_logits = self.scales_layer[key](x,x_seq)  

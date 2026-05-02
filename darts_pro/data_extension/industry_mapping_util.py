@@ -462,6 +462,11 @@ class FuturesMappingUtil:
         return sw_ins_mappings[indus_index,2]
 
     @staticmethod
+    def get_indus_ids(sw_ins_mappings):
+        main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
+        return sw_ins_mappings[main_index,2]
+
+    @staticmethod
     def get_exchange_ids(sw_ins_mappings):
         main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
         return sw_ins_mappings[main_index,7]

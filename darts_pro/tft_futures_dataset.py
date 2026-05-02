@@ -33,6 +33,7 @@ def get_scale_conf():
     nt_threhold_bin = [[0],[1]]
     scale_conf_all = {'indus_scale':indus_threhold_bin,'cy_scale':cy_threhold_bin,'nt_scale':nt_threhold_bin}
     scale_conf = {'indus_scale':indus_threhold_bin}
+    scale_conf = {'nt_scale':nt_threhold_bin}
     return scale_conf,scale_conf_all
 
 class TFTFuturesDataset(TFTSeriesDataset):
