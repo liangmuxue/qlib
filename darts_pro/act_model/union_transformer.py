@@ -537,7 +537,7 @@ class AttScaleFeature(nn.Module):
         # TOP值选取网络
         sample_dim_inner = ins_arr.shape[0]
         ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
-                            layer_norm=True,batch_norm=False,dropout=dropout)
+                            layer_norm=True,elementwise_affine=False,batch_norm=False,dropout=dropout)
         trend_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=input_dim,
                             layer_norm=False,batch_norm=True,dropout=dropout)            
         trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,

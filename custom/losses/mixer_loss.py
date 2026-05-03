@@ -233,7 +233,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
         if ins_inner.shape[0]<2:
             loss = 0
         else:    
-            loss,pred_index = self.compute_top_loss(pred[inner_index], target[ins_inner], top_num=1,return_index=True)
+            target_norm = normalization_axis(target[ins_inner])
+            loss = self.ccc_loss_comp(pred[inner_index], target_norm)
+            # loss,pred_index = self.compute_top_loss(pred[inner_index], target[ins_inner], top_num=1,return_index=True)
             
         return loss  
 
@@ -459,7 +461,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     target_item = target[j,ins_all,target_len,0]
                     scale_data_target[j] = target_item
-                    sw_index_item = sw_index_data[j]                 
+                    # sw_index_item = sw_index_data[j]                 
                     if ins_rel_index.shape[0]<3:
                         continue
                     target_info_total.append(target_info[j])             
@@ -481,7 +483,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = scale_output[key][j]
                             ins_inner = torch.Tensor(item['instruments']).to(ins_rel_index.device)
                             cls_loss[i] += self.compute_multi_trunk_loss(sv_out_item,target_item,ins_inner=ins_inner,ins_rel_index=ins_rel_index)
-                            ce_loss[i] += self.compute_multi_trend_loss(sw_index_item,target_item,ins_rel_index=ins_rel_index)
+                            # ce_loss[i] += self.compute_multi_trend_loss(sw_index_item,target_item,ins_rel_index=ins_rel_index)
                             batch_size += 1          
                     elif target_mode==3:
                         price_diff_range = price_targets[j,ins_rel_index]  
