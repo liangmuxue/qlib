@@ -118,6 +118,30 @@ def build_scale_arr(sw_ins_mappings):
     
     return scale_arr
 
+def build_mul_scale_arr(sw_ins_mappings):
+    """对品种按照不同业务范围进行分组"""
+    
+    indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+    ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+    scale_data = []
+    # 按照是否包含夜盘来分组
+    night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
+    nt_scale_arr = [np.where(night_flag==i)[0] for i in range(2)]    
+    for i,instrument_idx in enumerate(nt_scale_arr):
+        item = {}
+        if i==0:
+            item = {'p0':'day','p1':'any','instruments':instrument_idx}
+            scale_data.append(item)
+        if i==1:
+            # 对包含夜盘的品种，再按照行业来分
+            industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+            indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+            for j,ins in enumerate(industry_instrument_index):
+                item = {'p0':'night','p1':indus_codes[j],'instruments':ins}
+                scale_data.append(item)
+                
+    return scale_data
+
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
 
@@ -156,7 +180,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_scale_arr(train_sw_ins_mappings)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
