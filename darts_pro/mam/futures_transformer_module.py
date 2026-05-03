@@ -292,7 +292,7 @@ class FuturesTransformerModule(MlpModule):
                 sample_heads=4,
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
-                scales_dict=self.scale_arr,
+                scales_arr=self.scale_arr,
                 device=self.device,
             )         
             self.time_embed_dim = model.time_embed_dim      
@@ -319,11 +319,11 @@ class FuturesTransformerModule(MlpModule):
         # 查看后置模型中基于注意力的特征输出的前后数值
         # model.top_selector[0].top_att_layer.score_head.register_forward_hook(FeatureExtractorHook(self.features, 'score_head',nodes_num=nodes_num))
         
-        # 查看关注层的前后数值
-        model.top_selector[0].score_head[0].register_forward_hook(FeatureExtractorHook(self.features, 'score_head0',nodes_num=nodes_num))
-        for i,key in enumerate(self.scale_arr.keys()):
-            model.top_selector[0].scales_layer[key].register_forward_hook(FeatureExtractorHook(self.features, key,nodes_num=nodes_num))   
-            model.top_selector[0].score_head[i+1].register_forward_hook(FeatureExtractorHook(self.features, 'score_head{}'.format(i+1),nodes_num=nodes_num))
+        # # 查看关注层的前后数值
+        # model.top_selector[0].score_head[0].register_forward_hook(FeatureExtractorHook(self.features, 'score_head0',nodes_num=nodes_num))
+        # for i,key in enumerate(self.scale_arr.keys()):
+        #     model.top_selector[0].scales_layer[key].register_forward_hook(FeatureExtractorHook(self.features, key,nodes_num=nodes_num))   
+        #     model.top_selector[0].score_head[i+1].register_forward_hook(FeatureExtractorHook(self.features, 'score_head{}'.format(i+1),nodes_num=nodes_num))
                           
     def create_loss(self, model, device="cpu"):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
@@ -386,8 +386,8 @@ class FuturesTransformerModule(MlpModule):
         return  lr_scheduler_config       
 
     def get_scale_match_key(self):
-        rel_scale_key = list(self.scale_arr.keys())[0]
-        # rel_scale_key = "cy_scale"
+        # rel_scale_key = list(self.scale_arr.keys())[0]
+        rel_scale_key = "nt_scale"
         return rel_scale_key
             
     def forward(
@@ -1380,17 +1380,12 @@ class FuturesTransformerModule(MlpModule):
     def compute_arg_sort_by_trend(self, features, combine_index,target=None,date=None,past_target=None, top_num=2,batch_no=0):
         """根据输出进行排序"""
         
-        match_key = self.get_scale_match_key()
-        batch_size = features[match_key].shape[0]
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         
-        # match_key = 'cy_scale'
-        features_main = features[match_key][batch_no]
-        combine_index_all = combine_index[match_key]
-        ins_arr = self.scale_arr[match_key]
+        ins_arr = self.scale_arr
         item_top_num = top_num//2
         
         pre_index_total = []
@@ -1401,18 +1396,21 @@ class FuturesTransformerModule(MlpModule):
         else:
             pred_index_data = None
         # 根据趋势增减top数量
-        for i,ins in enumerate(ins_arr):
-            features_item = features_main[ins]
+        for i,item in enumerate(ins_arr):
+            key = self.criterion.get_scale_key(item)
+            ins = item['instruments']
+            features_item = features[key][batch_no]
             if pred_index_data is None:
-                combine_index_scale = combine_index_all[:,i]
-                pred_trend_value = combine_index_all[batch_no,i]
+                combine_index_scale = combine_index[key]
+                pred_trend_value = combine_index_scale[batch_no]
                 pred_trend_value = scale_value(pred_trend_value,combine_index_scale.min(),
                                     combine_index_scale.max(),self.trend_threhold['min'],self.trend_threhold['max'])
             else:
                 pred_trend_value = pred_index_data[(pred_index_data['date']==date)&(pred_index_data['scale_idx']==i)]['pred_trend_value'].values[0]
             # if date==20241230:
             #     print("ggg")
-            long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
+            # long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
+            long_num,short_num = [1,1]
             pre_index = np.argsort(-features_item)[:long_num]
             pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
             for index in pre_index:
@@ -1441,9 +1439,9 @@ class FuturesTransformerModule(MlpModule):
             imp_idx = row.top_index
             overroll_trend = row.top_flag
             scale_idx = row.rel_scale
-            ins = np.array(self.scale_arr[rel_scale_key][scale_idx])
+            ins = np.array(self.scale_arr[scale_idx]['instruments'])
             real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
-            real_trend_ref_values = scale_values[scale_idx]
+            real_trend_ref_values = scale_values[0]
             # real_trend_ref_values = open_diff[ins].mean()
             ts = target_info[imp_idx]
             diff_range, p_taraget_class, _ = self.criterion.compute_diff_range_class(ts)

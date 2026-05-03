@@ -527,58 +527,46 @@ class ContinuousToDiscreteIndex(nn.Module):
 class AttScaleFeature(nn.Module):
     """按照指定尺度，实现特征处理"""
 
-    def __init__(self,sample_dim,input_dim,seq_len=5,scale_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
+    def __init__(self,sample_dim,input_dim,seq_len=5,ins_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
         super().__init__()
         self.sample_dim = sample_dim
-        self.scale_arr = [torch.Tensor(s).long().to(device) for s in scale_arr]
+        self.scale_arr = torch.Tensor(ins_arr).long().to(device)
         self.num_indices = num_indices
         self.seq_len = seq_len
         
-        ins_layer = []
-        trend_layer = []
-        trend_logits_layer = []
         # TOP值选取网络
-        for scaler in self.scale_arr:
-            sample_dim_inner = scaler.shape[0]
-            ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
-                                layer_norm=True,batch_norm=False,dropout=dropout)
-            ins_layer.append(ins_layer_inner)
-            trend_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=input_dim,
-                                layer_norm=False,batch_norm=True,dropout=dropout)            
-            trend_layer.append(trend_layer_inner)
-            trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
-                                layer_norm=False,batch_norm=True,track_running_stats=False,dropout=dropout)      
-            trend_logits_layer.append(trend_logits_layer_inner)          
-        self.ins_layer = nn.ParameterList(ins_layer)
+        sample_dim_inner = ins_arr.shape[0]
+        ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
+                            layer_norm=True,batch_norm=False,dropout=dropout)
+        trend_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=input_dim,
+                            layer_norm=False,batch_norm=True,dropout=dropout)            
+        trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
+                            layer_norm=False,batch_norm=True,track_running_stats=False,dropout=dropout)      
+        self.ins_layer = ins_layer_inner
         # 整体趋势计算网络
-        self.trend_layer = nn.ParameterList(trend_layer)
-        self.trend_logits_layer_inner = nn.ParameterList(trend_logits_layer)
+        self.trend_layer = trend_layer_inner
+        self.trend_logits_layer_inner = trend_logits_layer_inner
         
     def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, _ = x.shape
         
-        output = torch.zeros([batch_size,S]).to(x.device)
-        output2index_trend = torch.zeros([batch_size,len(self.scale_arr)]).to(x.device)
-        output_trend = torch.zeros([batch_size,S]).to(x.device)
-        # 针对自定义的品种范围数组，进行分尺度的特征处理
-        for i,scaler in enumerate(self.scale_arr):
-            scaler = scaler.to(x.device)
-            x_part = x[:,scaler,:].reshape(batch_size,-1)
-            output[:,scaler] = self.ins_layer[i](x_part)
-            # 整体序列趋势网络计算
-            x_part_trend = x[:,scaler,:].reshape(batch_size,-1)
-            output_trend[:,scaler] = self.trend_layer[i](x_part_trend)
-            # 整体趋势网络计算
-            x_l_part = x[:,scaler].reshape(batch_size,-1)
-            output2index_trend[:,i] = self.trend_logits_layer_inner[i](x_l_part).squeeze(-1) 
+        x_part = x[:,self.scale_arr,:].reshape(batch_size,-1)
+        output = self.ins_layer(x_part)
+        # 整体序列趋势网络计算
+        x_part_trend = x[:,self.scale_arr,:].reshape(batch_size,-1)
+        output_trend = self.trend_layer(x_part_trend)
+        # 整体趋势网络计算
+        x_l_part = x[:,self.scale_arr].reshape(batch_size,-1)
+        output2index_trend = self.trend_logits_layer_inner(x_l_part).squeeze(-1) 
+        
         return output,output_trend,output2index_trend
                         
 class SparseGateFeatureTopK(nn.Module):
     """综合TOPK选取"""
     
     def __init__(self,sample_dim,input_dim,seq_len=5,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
-                 scales_dict=None,device=None):
+                 scales_arr=None,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.k = k
@@ -589,12 +577,11 @@ class SparseGateFeatureTopK(nn.Module):
                                     layer_norm=True,batch_norm=False,dropout=dropout).double()
         self.trend_global_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=hidden_dim,
                                     layer_norm=False,batch_norm=False,dropout=dropout).double()                                    
-        scales_layer = {}         
-        self.scales_dict = scales_dict         
-        for key in scales_dict:
-            scales_layer[key] = AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,scale_arr=scales_dict[key],device=device)
-        self.scales_layer = nn.ModuleDict(scales_layer)
-        self.score_head = nn.ParameterList([nn.Linear(sample_dim,sample_dim) for _ in range(len(scales_dict.keys())+1)])
+        scales_layer = []       
+        self.scales_arr = scales_arr         
+        for item in scales_arr:
+            scales_layer.append(AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,ins_arr=item['instruments'],device=device))
+        self.scales_layer = nn.ModuleList(scales_layer)
             
     def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
@@ -608,10 +595,11 @@ class SparseGateFeatureTopK(nn.Module):
         # g_features_combine = self.score_head[0](g_features)
         features_list['global_feature'] = g_features
         trend_list['global_trend_feature'] = g_trend_features
-        for i,key in enumerate(self.scales_layer.keys()):
-            scale_features,trend_features,trend_index_logits = self.scales_layer[key](x,x_seq)  
+        for i,layer in enumerate(self.scales_layer):
+            scale_features,trend_features,trend_index_logits = layer(x,x_seq)  
+            scale_def = self.scales_arr[i]
+            key = scale_def['p0'] + "_" + scale_def['p1']
             # 合并主体特征和分尺度特征
-            # combine_features = self.score_head[(i+1)](g_features + scale_features)
             features_list[key] = scale_features
             trend_list[key] = trend_features
             trend_logits_list[key] = trend_index_logits
@@ -639,7 +627,7 @@ class UnionTransCombine(nn.Module):
         static_emb_dim=4,      # 离散特征嵌入维度
         static_cate_emb=None, # 静态离散特征嵌入
         top_num=3,            # topk数量
-        scales_dict=None,
+        scales_arr=None,
         time_encoder=None,
         device='cuda'
     ):
@@ -691,7 +679,7 @@ class UnionTransCombine(nn.Module):
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
         self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, seq_len=pred_len,
-                        hidden_dim=hidden_size,num_heads=4, dropout=0.1,scales_dict=scales_dict,device=device) for _ in range(self.target_feat_dim)])
+                        hidden_dim=hidden_size,num_heads=4, dropout=0.1,scales_arr=scales_arr,device=device) for _ in range(self.target_feat_dim)])
 
         ############# 中间变量调试 #############
         self.features = {}

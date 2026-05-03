@@ -207,6 +207,40 @@ def to_2d_tuple_index(idx_1d,shape_of_2d):
     
     else:
         raise TypeError("输入格式错误！请传入一维索引张量 或 (行索引, 列索引) 元组")
+
+def torch_intersect_indices(a, b):
+    """
+    兼容所有 PyTorch 版本
+    求两个一维张量的交集 + 各自原索引
+    返回：交集元素, a中的索引, b中的索引
+    """
+    a = a.flatten()
+    b = b.flatten()
+
+    # 找出在 a 里同时也在 b 里的元素 & 索引
+    mask_a = torch.zeros_like(a, dtype=torch.bool)
+    indices_a = []
+    for i, val in enumerate(a):
+        if (b == val).any():
+            mask_a[i] = True
+            indices_a.append(i)
+
+    # 找出在 b 里同时也在 a 里的元素 & 索引
+    mask_b = torch.zeros_like(b, dtype=torch.bool)
+    indices_b = []
+    for i, val in enumerate(b):
+        if (a == val).any():
+            mask_b[i] = True
+            indices_b.append(i)
+
+    # 交集元素（去重）
+    intersect = torch.unique(a[mask_a]).to(a.device)
+
+    # 转成 tensor
+    indices_a = torch.tensor(indices_a).to(a.device)
+    indices_b = torch.tensor(indices_b).to(a.device)
+
+    return intersect, indices_a, indices_b
     
 def tensor_intersect(t1, t2):
         indices = torch.zeros_like(t1, dtype = torch.bool, device = t1.device)
