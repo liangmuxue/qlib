@@ -118,30 +118,68 @@ def build_scale_arr(sw_ins_mappings):
     
     return scale_arr
 
-def build_mul_scale_arr(sw_ins_mappings):
+def build_mul_scale_arr(sw_ins_mappings,mode=0):
     """对品种按照不同业务范围进行分组"""
     
     indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
     ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
     scale_data = []
-    # 按照是否包含夜盘来分组
-    night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
-    nt_scale_arr = [np.where(night_flag==i)[0] for i in range(2)]    
-    for i,instrument_idx in enumerate(nt_scale_arr):
-        item = {}
-        if i==0:
-            item = {'p0':'day','p1':'any','instruments':instrument_idx}
-            scale_data.append(item)
-        if i==1:
-            # 对包含夜盘的品种，再按照行业来分
-            industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-            indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
-            for j,ins in enumerate(industry_instrument_index):
-                item = {'p0':'night','p1':indus_codes[j],'instruments':ins}
+    if mode==0:
+        # 按照是否包含夜盘来分组
+        night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
+        nt_scale_arr = [np.where(night_flag==i)[0] for i in range(2)]    
+        for i,instrument_idx in enumerate(nt_scale_arr):
+            item = {}
+            if i==0:
+                item = {'p0':'day','p1':'any','instruments':instrument_idx}
                 scale_data.append(item)
-                
+            if i==1:
+                # 对包含夜盘的品种，再按照行业来分
+                industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+                indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+                for j,ins in enumerate(industry_instrument_index):
+                    item = {'p0':'night','p1':indus_codes[j],'instruments':ins}
+                    scale_data.append(item)
+    if mode==1:
+        # 按照交易所以及行业类别分组
+        indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+        threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]
+        # threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
+        for i in range(len(indus_code)):
+            if indus_code[i] in threhold_bin[0]:
+                seq = 0
+            else:
+                seq = 1
+            key = "indus_{}".format(seq)
+            item = {'p0':key,'p1':indus_code[i],'instruments':indus_data_index[i]}
+            scale_data.append(item)
+        scale_data = pd.DataFrame(scale_data)                
     return scale_data
 
+def concat_scale_arr(scale_arr):
+    """把2级分片定义合并为1级，用于模型参数设置"""
+    
+    concat_data = []
+    df_group = scale_arr.groupby('p0', as_index=False)['instruments'].agg(lambda x: np.concatenate(list(x)))
+    df_group['p'] = df_group['p0']
+            
+    return df_group.to_dict('records')
+
+def emb_scale_arr(scale_arr):
+    """把2级分片定义合并为涵盖上下级关系的定义"""
+    
+    # nested_dict = scale_arr.groupby(['p0', 'p1'])['instruments'].first().unstack().to_dict('index')
+    # nested_dict = nested_dict.dropna()
+    
+    df_valid = scale_arr.dropna(subset=['p0', 'p1'])
+    
+    nested_dict = {}
+    for l1, g1 in df_valid.groupby('p0'):
+        inner = {row['p1']: row.to_dict() for _, row in g1.iterrows()}
+        nested_dict[l1] = inner  
+                
+    return nested_dict
+   
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
 
@@ -180,7 +218,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=1)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
@@ -275,6 +313,7 @@ class FuturesTransformerModule(MlpModule):
             
             
             target_feat_dim = 1
+            
             # 使用混合时间序列模型,TFT底座
             model = UnionTransCombine(
                 target_feat_dim=target_feat_dim,
@@ -292,7 +331,8 @@ class FuturesTransformerModule(MlpModule):
                 sample_heads=4,
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
-                scales_arr=self.scale_arr,
+                scales_arr=concat_scale_arr(self.scale_arr),
+                scales_trend_arr=emb_scale_arr(self.scale_arr),
                 device=self.device,
             )         
             self.time_embed_dim = model.time_embed_dim      
@@ -329,7 +369,7 @@ class FuturesTransformerModule(MlpModule):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
         return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,input_chunk_length=self.input_chunk_length,output_chunk_length=self.output_chunk_length,
                                    opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, trend_threhold=self.trend_threhold,
-                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_dict=self.scale_arr)       
+                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_dict=emb_scale_arr(self.scale_arr))       
 
     def _construct_classify_layer(self, input_dim, output_dim, device=None):
         """新增策略选择模型"""
@@ -633,7 +673,7 @@ class FuturesTransformerModule(MlpModule):
         """训练验证部分"""
         
         loss, detail_loss, output = self.validation_step_real(val_batch, batch_idx)
-        (corr_loss_combine, ce_loss, fds_loss, cls_loss, predictions) = detail_loss
+        (corr_loss_combine, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
         # 补充计算批次内指数数据评估
         sw_ins_mappings = self.valid_sw_ins_mappings
         indicator_idx = 0
@@ -675,7 +715,7 @@ class FuturesTransformerModule(MlpModule):
         # 全部损失
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
                     (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, past_target, target_info), optimizers_idx=-1)
-        (corr_loss, ce_loss, fds_loss, cls_loss, predictions) = detail_loss
+        (corr_loss, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
         preds_combine = []
         for i in range(self.opt_size):
@@ -684,6 +724,9 @@ class FuturesTransformerModule(MlpModule):
                 self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
             if cls_loss[i] != 0:
                 self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
+                if cls_detail is not None:
+                    for j in range(cls_detail.shape[0]):
+                        self.log("val_trunk_detail_{}".format(j), cls_detail[j], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)
             if fds_loss[i] != 0 and len(task_weights) > 2:
                 self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
             if corr_loss[i] != 0 and len(task_weights) > 3:
@@ -1385,7 +1428,7 @@ class FuturesTransformerModule(MlpModule):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         node_num = ins_all.shape[0]
         
-        ins_arr = self.scale_arr
+        ins_arr = concat_scale_arr(self.scale_arr)
         item_top_num = top_num//2
         
         pre_index_total = []
@@ -1395,22 +1438,24 @@ class FuturesTransformerModule(MlpModule):
             pred_index_data = pd.read_csv(pred_data_path)
         else:
             pred_index_data = None
+            
         # 根据趋势增减top数量
         for i,item in enumerate(ins_arr):
-            key = self.criterion.get_scale_key(item)
             ins = item['instruments']
+            key = item['p0']
             features_item = features[key][batch_no]
             if pred_index_data is None:
                 combine_index_scale = combine_index[key]
                 pred_trend_value = combine_index_scale[batch_no]
                 pred_trend_value = scale_value(pred_trend_value,combine_index_scale.min(),
                                     combine_index_scale.max(),self.trend_threhold['min'],self.trend_threhold['max'])
+                pred_trend_value = pred_trend_value.mean()
             else:
                 pred_trend_value = pred_index_data[(pred_index_data['date']==date)&(pred_index_data['scale_idx']==i)]['pred_trend_value'].values[0]
             # if date==20241230:
             #     print("ggg")
-            # long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
-            long_num,short_num = [1,1]
+            long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
+            # long_num,short_num = [1,1]
             pre_index = np.argsort(-features_item)[:long_num]
             pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
             for index in pre_index:
@@ -1433,13 +1478,13 @@ class FuturesTransformerModule(MlpModule):
         # scale_dict = dataset.scale_dict
         scale_values = target_info[main_index]['scale_arr'][rel_scale_key]
         coll_results = []
-        
+        scale_arr = concat_scale_arr(self.scale_arr)
         # 对于预测数据，生成对应涨跌幅类别
         for row in result_list.itertuples():
             imp_idx = row.top_index
             overroll_trend = row.top_flag
             scale_idx = row.rel_scale
-            ins = np.array(self.scale_arr[scale_idx]['instruments'])
+            ins = scale_arr[scale_idx]['instruments']
             real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
             real_trend_ref_values = scale_values[0]
             # real_trend_ref_values = open_diff[ins].mean()
