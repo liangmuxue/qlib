@@ -27,6 +27,31 @@ from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
 
+def concat_scale_arr(scale_arr):
+    """把2级分片定义合并为1级，用于模型参数设置"""
+    
+    df_group = scale_arr.groupby('p0', as_index=False)['instruments'].agg(lambda x: np.concatenate(list(x)))
+    df_group['p'] = df_group['p0']
+            
+    return df_group.to_dict('records')
+
+def emb_scale_arr(scale_arr):
+    """把2级分片定义合并为涵盖上下级关系的定义"""
+    
+    # nested_dict = scale_arr.groupby(['p0', 'p1'])['instruments'].first().unstack().to_dict('index')
+    # nested_dict = nested_dict.dropna()
+    
+    df_valid = scale_arr.dropna(subset=['p0', 'p1'])
+    
+    nested_dict = {}
+    for l1, g1 in df_valid.groupby('p0'):
+        inner = {row['p1']: row.to_dict() for _, row in g1.iterrows()}
+        nested_dict[l1] = inner  
+                
+    return nested_dict
+  
+  
+
 def get_scale_conf():
     indus_threhold_bin = [['cdifi','hsjs'],['abpi','yzyl','nffi']]
     cy_threhold_bin = [[0,2013],[2013,2030]]

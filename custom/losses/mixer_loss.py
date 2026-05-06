@@ -10,7 +10,7 @@ from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from darts_pro.tft_futures_dataset import get_scale_conf
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from sklearn.metrics import f1_score
-# import torchsort
+from darts_pro.tft_futures_dataset import concat_scale_arr,emb_scale_arr
 
 from cus_utils.common_compute import tensor_intersect,normalization_axis,scale_value,normalization_standard,all_elements_same,torch_intersect_indices
 from .feature_loss import AdaptiveSingleFeatureLoss
@@ -51,7 +51,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
         self.combine_nodes = combine_nodes
         self.trend_threhold = trend_threhold
         
-        self.scale_dict = scale_dict
+        
+        self.scale_dict = emb_scale_arr(scale_dict)
+        self.scale_dict_par = scale_dict
         
         # 整体及品种特征值回归损失函数
         self.index_feature_loss = AdaptiveSingleFeatureLoss(loss_type='welsch', device=self.device)
@@ -458,6 +460,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         loop_size = self.opt_size
         target_len = -self.output_chunk_length + self.cut_len - 1
         detail_loss = None
+        ins_in_scale = self.scale_dict_par['instruments'].values
+        ins_in_scale = [torch.Tensor(item).to(target.device).long() for item in ins_in_scale]
         
         for i in range(loop_size):
             target_mode = self.target_mode[i]
@@ -484,7 +488,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     keep_index = torch.where(target_class_item>=0)[0]
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     target_item = target[j,ins_all,target_len,0]
-                    # sw_index_item = sw_index_data[j]                 
                     if ins_rel_index.shape[0]<3:
                         continue
                     target_info_total.append(target_info[j])             
@@ -495,6 +498,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 根据网络输出，生成针对性业务分支输出,并依次计算损失
                         scale_output = sv[0]
                         # 业务分支top损失计算             
+                        loss_item = 0
                         for key in trend_output.keys():
                             trend_output[key][j] = sw_index_logits[0][key][j]
                             ins_arr = self.scale_dict[key]
@@ -510,11 +514,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             sv_out_item = scale_output[key][j]
                             loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
                             detail_trunk_loss_item.append(loss_detail)
-                            cls_loss[i] += loss
-                            # ce_loss[i] += self.compute_multi_trend_loss(sw_index_item,target_item,ins_rel_index=ins_rel_index)
-                            batch_size += 1   
+                            loss_item += loss
+                        loss_item = loss_item/len(trend_output.keys())
+                        cls_loss[i] += loss_item
                         detail_trunk_loss_item = torch.concat(detail_trunk_loss_item)  
                         detail_trunk_loss.append(detail_trunk_loss_item)
+                        # 分支趋势损失计算
+                        sw_index_item = sw_index_data[0][j]   
+                        branch_trend_target = torch.stack([target_item[ins].mean() for ins in ins_in_scale])          
+                        ce_loss[i] += self.ccc_loss_comp(sw_index_item, branch_trend_target)    
+                        batch_size += 1               
                     elif target_mode==3:
                         for key in trend_output.keys():
                             trend_output[key][j] = sw_index_logits[0][key][j]
@@ -533,14 +542,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     loss_sum = loss_sum + ce_loss[i]    
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
+                    ce_loss[i] = ce_loss[i]/batch_size  
                     detail_trunk_loss = torch.stack(detail_trunk_loss).to(target_class.device)
                     detail_loss = detail_trunk_loss.mean(0)
-                    loss = 0
-                    for key in trend_output:
-                        target_norm = normalization_standard(trend_target[key].transpose(1,0))
-                        trend_norm = trend_output[key].transpose(1,0)
-                        loss += self.ccc_loss_comp(trend_norm, target_norm)
-                    ce_loss[i] = loss/len(trend_output.keys())
+                    # loss = 0
+                    # for key in trend_output:
+                    #     target_norm = normalization_standard(trend_target[key].transpose(1,0))
+                    #     trend_norm = trend_output[key].transpose(1,0)
+                    #     loss += self.ccc_loss_comp(trend_norm, target_norm)
+                    # ce_loss[i] = loss/len(trend_output.keys())
                         
                 if target_mode in [3]:
                     loss = 0

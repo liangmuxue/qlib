@@ -26,7 +26,7 @@ from .multiTask_optimizer import MultiTaskOptimizer,analyze_similarity
 from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,scale_value, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
-from darts_pro.tft_futures_dataset import get_scale_conf
+from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr
 import matplotlib.pyplot as plt
 
 from pandas.errors import SettingWithCopyWarning
@@ -156,30 +156,6 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0):
         scale_data = pd.DataFrame(scale_data)                
     return scale_data
 
-def concat_scale_arr(scale_arr):
-    """把2级分片定义合并为1级，用于模型参数设置"""
-    
-    concat_data = []
-    df_group = scale_arr.groupby('p0', as_index=False)['instruments'].agg(lambda x: np.concatenate(list(x)))
-    df_group['p'] = df_group['p0']
-            
-    return df_group.to_dict('records')
-
-def emb_scale_arr(scale_arr):
-    """把2级分片定义合并为涵盖上下级关系的定义"""
-    
-    # nested_dict = scale_arr.groupby(['p0', 'p1'])['instruments'].first().unstack().to_dict('index')
-    # nested_dict = nested_dict.dropna()
-    
-    df_valid = scale_arr.dropna(subset=['p0', 'p1'])
-    
-    nested_dict = {}
-    for l1, g1 in df_valid.groupby('p0'):
-        inner = {row['p1']: row.to_dict() for _, row in g1.iterrows()}
-        nested_dict[l1] = inner  
-                
-    return nested_dict
-   
 class FuturesTransformerModule(MlpModule):
     """期货基于Transformer的双向判断的模型"""              
 
@@ -331,8 +307,7 @@ class FuturesTransformerModule(MlpModule):
                 sample_heads=4,
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
-                scales_arr=concat_scale_arr(self.scale_arr),
-                scales_trend_arr=emb_scale_arr(self.scale_arr),
+                scales_arr=self.scale_arr,
                 device=self.device,
             )         
             self.time_embed_dim = model.time_embed_dim      
@@ -369,7 +344,7 @@ class FuturesTransformerModule(MlpModule):
         combine_nodes = FuturesMappingUtil.get_all_instrument(self.train_sw_ins_mappings)
         return FuturesIndustryLoss(device=device, ref_model=model, lock_epoch_num=self.lock_epoch_num,input_chunk_length=self.input_chunk_length,output_chunk_length=self.output_chunk_length,
                                    opt_size=self.opt_size,embedding_size=self.embedding_size, target_mode=self.target_mode, trend_threhold=self.trend_threhold,
-                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_dict=emb_scale_arr(self.scale_arr))       
+                                   cut_len=self.cut_len, loss_weights=self.task_weights,combine_nodes=combine_nodes,scale_dict=self.scale_arr)       
 
     def _construct_classify_layer(self, input_dim, output_dim, device=None):
         """新增策略选择模型"""
@@ -1171,7 +1146,7 @@ class FuturesTransformerModule(MlpModule):
         x_bar_total = []
         sv_total = [[] for _ in range(len(self.past_split))]
         cls_total = {}
-        comm_index_total = {}
+        comm_index_total = []
         trend_logits_total = {}
         choice_total = []
         trend_total = []
@@ -1194,12 +1169,7 @@ class FuturesTransformerModule(MlpModule):
                     cls_total[key] = cur_data
                 else:
                     cls_total[key] = np.concatenate([cls_total[key],cur_data],0)
-            for key in comm_index.keys():
-                cur_data = comm_index[key].cpu().numpy()
-                if key not in comm_index_total:
-                    comm_index_total[key] = cur_data
-                else:
-                    comm_index_total[key] = np.concatenate([comm_index_total[key],cur_data],0)                    
+            comm_index_total.append(comm_index.cpu().numpy())
             for key in trend_logits.keys():
                 cur_data = trend_logits[key].cpu().numpy()
                 if key not in trend_logits_total:
@@ -1227,7 +1197,7 @@ class FuturesTransformerModule(MlpModule):
         choice_total = np.concatenate(choice_total)
         trend_total = np.concatenate(trend_total)
         combine_index_total = np.concatenate(combine_index_total)
-        
+        comm_index_total = np.concatenate(comm_index_total)
         target_class_total = np.concatenate(target_class_total)
         past_target_total = np.concatenate(past_target_total)
         future_target_total = np.concatenate(future_target_total)
