@@ -521,8 +521,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         detail_trunk_loss.append(detail_trunk_loss_item)
                         # 分支趋势损失计算
                         sw_index_item = sw_index_data[0][j]   
-                        branch_trend_target = torch.stack([target_item[ins].mean() for ins in ins_in_scale])          
-                        ce_loss[i] += self.ccc_loss_comp(sw_index_item, branch_trend_target)    
+                        branch_trend_target = torch.stack([target_item[ins].mean() for ins in ins_in_scale])    
+                        if all_elements_same(branch_trend_target) or all_elements_same(sw_index_item):     
+                            ce_loss[i] += self.mse_loss(sw_index_item.unsqueeze(0), branch_trend_target.unsqueeze(0))
+                        else:
+                            ce_loss[i] += self.ccc_loss_comp(sw_index_item, branch_trend_target)   
                         batch_size += 1               
                     elif target_mode==3:
                         for key in trend_output.keys():
