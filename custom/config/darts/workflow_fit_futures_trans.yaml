@@ -65,6 +65,7 @@ task:
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"
             pred_index_data_path: "" 
+            load_index_data: False
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05
@@ -86,10 +87,10 @@ task:
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
-               task_weights: [[0.5,0.5],[0.5,0.5]]
+               task_weights: [[0.5],[0.5,0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[1],[1]]
+               main_task_seq: [[],[1]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'

@@ -46,6 +46,13 @@ def emb_scale_arr(scale_arr):
     nested_dict = {}
     for l1, g1 in df_valid.groupby('p0'):
         inner = {row['p1']: row.to_dict() for _, row in g1.iterrows()}
+        cnt = 0
+        for j,key in enumerate(inner.keys()):
+            ins_size = inner[key]['instruments'].shape[0]
+            begin = cnt
+            end = cnt + ins_size
+            inner[key]['rel_ins'] = np.arange(begin,end)
+            cnt = end
         nested_dict[l1] = inner  
                 
     return nested_dict

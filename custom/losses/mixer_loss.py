@@ -233,7 +233,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         loss_detail = []
         loss = 0
         ins_all = np.concatenate([item['instruments'] for item in scale_arr])
-        target_norm = normalization_standard(target[ins_all])
+        ins_all = torch.Tensor(ins_all).to(pred.device).long()
+        target_norm = target[ins_all] # normalization_standard(target[ins_all])
         
         # 针对总体进行损失计算
         if all_elements_same(target_norm) or all_elements_same(pred):
@@ -245,13 +246,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
         # 针对每个小分类进行损失计算
         for item in scale_arr:
             ins = torch.Tensor(item['instruments']).to(pred.device).long() 
-            ins_inner,real_ins_index,_ = torch_intersect_indices(ins,ins_rel_index)
+            ins_inner,real_ins_index,_ = torch_intersect_indices(ins_all,ins)
             if ins_inner.shape[0]<2:
                 loss_detail.append(torch.tensor(0).to(pred.device))
                 continue     
-            real_ins_index = torch.where(torch.isin(ins, ins_inner))[0] 
-            pred_norm = pred[real_ins_index]
-            target_norm_item = target_norm[real_ins_index]
+            pred_norm = normalization_axis(pred[real_ins_index])
+            target_norm_item = normalization_axis(target_norm[real_ins_index])
             if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:
@@ -478,8 +478,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 trend_output = {}
                 trend_target = {}
                 for key in self.scale_dict:
-                    trend_output[key] = torch.zeros([target_class.shape[0],len(self.scale_dict[key].keys())]).to(target_class.device)
-                    trend_target[key] = torch.zeros([target_class.shape[0],len(self.scale_dict[key].keys())]).to(target_class.device)
+                    trend_output[key] = {}
+                    trend_target[key] = {}
+                    for inner_key in self.scale_dict[key]:
+                        item = self.scale_dict[key][inner_key]
+                        trend_output[key][inner_key] = torch.zeros([target_class.shape[0]]).to(target_class.device)
+                        trend_target[key][inner_key] = torch.zeros([target_class.shape[0]]).to(target_class.device)
                 for j in range(target_class.shape[0]):
                     target_info_item = target_info[j][main_index_abs]
                     date = target_info_item['future_start_datetime']
@@ -499,46 +503,38 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         scale_output = sv[0]
                         # 业务分支top损失计算             
                         loss_item = 0
+                        cnt = 0
                         for key in trend_output.keys():
-                            trend_output[key][j] = sw_index_logits[0][key][j]
                             ins_arr = self.scale_dict[key]
-                            for k,inner_key in enumerate(ins_arr.keys()):
-                                ins_inner = torch.Tensor(ins_arr[inner_key]['instruments']).to(target_class.device).long()
-                                ins_inner = tensor_intersect(ins_inner, ins_rel_index)
-                                price_diff_range = price_targets[j,ins_inner]  
-                                if ins_inner.shape[0]==0:
-                                    continue
-                                diff_rate = torch.sum(price_diff_range>0)/ins_inner.shape[0]
-                                trend_target[key][j,k] = diff_rate
-                                # trend_target[key][j,k] = target_item[ins_inner].mean()
                             sv_out_item = scale_output[key][j]
                             loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,target_item,key=key,ins_rel_index=ins_rel_index)
                             detail_trunk_loss_item.append(loss_detail)
                             loss_item += loss
-                        loss_item = loss_item/len(trend_output.keys())
+                            cnt += 1
+                        loss_item = loss_item/cnt
                         cls_loss[i] += loss_item
                         detail_trunk_loss_item = torch.concat(detail_trunk_loss_item)  
                         detail_trunk_loss.append(detail_trunk_loss_item)
-                        # 分支趋势损失计算
-                        sw_index_item = sw_index_data[0][j]   
-                        branch_trend_target = torch.stack([target_item[ins].mean() for ins in ins_in_scale])    
-                        if all_elements_same(branch_trend_target) or all_elements_same(sw_index_item):     
-                            ce_loss[i] += self.mse_loss(sw_index_item.unsqueeze(0), branch_trend_target.unsqueeze(0))
-                        else:
-                            ce_loss[i] += self.ccc_loss_comp(sw_index_item, branch_trend_target)   
+                        # # 分支趋势损失计算
+                        # sw_index_item = sw_index_data[0][j]   
+                        # branch_trend_target = torch.stack([target_item[ins].mean() for ins in ins_in_scale])    
+                        # if all_elements_same(branch_trend_target) or all_elements_same(sw_index_item):     
+                        #     ce_loss[i] += self.mse_loss(sw_index_item.unsqueeze(0), branch_trend_target.unsqueeze(0))
+                        # else:
+                        #     ce_loss[i] += self.ccc_loss_comp(sw_index_item, branch_trend_target)   
                         batch_size += 1               
                     elif target_mode==3:
                         for key in trend_output.keys():
-                            trend_output[key][j] = sw_index_logits[0][key][j]
                             ins_arr = self.scale_dict[key]
                             for k,inner_key in enumerate(ins_arr.keys()):
+                                trend_output[key][inner_key][j] = sw_index_logits[0][key][inner_key][j]
                                 ins_inner = torch.Tensor(ins_arr[inner_key]['instruments']).to(target_class.device).long()
                                 ins_inner = tensor_intersect(ins_inner, ins_rel_index)
                                 price_diff_range = price_targets[j,ins_inner]  
                                 if ins_inner.shape[0]==0:
                                     continue
                                 diff_rate = torch.sum(price_diff_range>0)/ins_inner.shape[0]
-                                trend_target[key][j,k] = diff_rate                        
+                                trend_target[key][inner_key][j] = diff_rate                        
                         batch_size += 1
                 
                 if target_mode in [0]:
@@ -557,12 +553,14 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         
                 if target_mode in [3]:
                     loss = 0
+                    cnt = 0
                     for key in trend_output:
-                        target_norm = normalization_standard(trend_target[key].transpose(1,0))
-                        trend_norm = trend_output[key].transpose(1,0)
-                        for j in range(trend_norm.shape[0]):
-                            loss += self.compute_top_loss(trend_norm[j], target_norm[j],top_num=3,mid_num=3,need_mid=True)
-                    cls_loss[i] = loss/len(trend_output.keys())/trend_norm.shape[0]
+                        for inner_key in trend_output[key]:
+                            target_norm = normalization_standard(trend_target[key][inner_key])
+                            trend_norm = trend_output[key][inner_key]
+                            loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
+                            cnt += 1
+                    cls_loss[i] = loss/cnt
                     # if optimizers_idx==-1:
                     #     scale_target_class_total = torch.cat(scale_target_class_total)
                     #     pred_label_total = torch.cat(pred_label_total)

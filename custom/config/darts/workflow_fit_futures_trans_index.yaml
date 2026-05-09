@@ -59,12 +59,13 @@ task:
             n_jobs: 20
             log_every_n_steps: 5
             type: 'fit_futures_trans'
-            n_epochs : 180
+            n_epochs : 180            # 统合计算准确率数值
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"
             pred_index_data_path: "" 
+            load_index_data: False
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05

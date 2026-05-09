@@ -154,7 +154,8 @@ class FuturesProcessModel(TftDataframeModel):
         outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
                         'top_num':self.optargs['loss_top_num'],'pred_top_num':self.optargs['pred_top_num'],
                         'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode'],
-                        'trend_threhold':self.optargs['trend_threhold'],'pred_index_data_path':self.kwargs["pred_index_data_path"]}
+                        'trend_threhold':self.optargs['trend_threhold'],'pred_index_data_path':self.kwargs["pred_index_data_path"],
+                        'load_index_data':self.kwargs["load_index_data"]}
         if load_weight:
             best_weight = self.optargs["best_weight"]    
             self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,

@@ -528,28 +528,27 @@ class ContinuousToDiscreteIndex(nn.Module):
 class AttScaleFeature(nn.Module):
     """按照指定尺度，实现特征处理"""
 
-    def __init__(self,sample_dim,input_dim,seq_len=5,ins_arr=None,ins_trend_arr=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
+    def __init__(self,sample_dim,input_dim,seq_len=5,ins_arr=None,ins_trend_dict=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.scale_arr = torch.Tensor(ins_arr).long().to(device)
-        self.ins_trend_arr = ins_trend_arr
-        self.instruments_arr = [torch.Tensor(item).long().to(device) for item in ins_trend_arr]
+        self.ins_trend_dict = ins_trend_dict
         self.num_indices = num_indices
         self.seq_len = seq_len
         
         # TOP值选取网络
         sample_dim_inner = ins_arr.shape[0]
         ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
-                            layer_norm=True,elementwise_affine=False,batch_norm=False,dropout=dropout)
+                            layer_norm=True,batch_norm=False,dropout=dropout)
         self.ins_layer = ins_layer_inner
         # 分支趋势计算网络
-        trend_logits_layer = []
-        for i in range(len(ins_trend_arr)):  
-            sample_dim_inner = ins_trend_arr[i].shape[0]
+        trend_logits_layer = {}
+        for key in ins_trend_dict.keys():  
+            sample_dim_inner = ins_trend_dict[key].shape[0]
             trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
                                 layer_norm=False,batch_norm=True,track_running_stats=False,dropout=dropout)      
-            trend_logits_layer.append(trend_logits_layer_inner)
-        self.trend_logits_layer = nn.ModuleList(trend_logits_layer)
+            trend_logits_layer[key] = trend_logits_layer_inner
+        self.trend_logits_layer = nn.ModuleDict(trend_logits_layer)
         # 整体趋势计算网络
         trend_layer_inner = []
         # for i in range(len(ins_trend_arr)):  
@@ -566,20 +565,13 @@ class AttScaleFeature(nn.Module):
         
         x_part = x[:,self.scale_arr,:].reshape(batch_size,-1)
         output = self.ins_layer(x_part)
-        # 分支趋势网络计算
-        output_trend = []
-        # for i,ins in enumerate(self.instruments_arr):
-        #     x_l_part = x[:,ins].reshape(batch_size,-1)
-        #     output_trend_inner = self.trend_layer[i](x_l_part).squeeze(-1) 
-        #     output_trend.append(output_trend_inner)
-        # output_trend = torch.stack(output_trend).transpose(1,0)            
         # 整体趋势网络计算
-        output2index_trend = []
-        for i,ins in enumerate(self.instruments_arr):
+        output2index_trend = {}
+        for key in self.ins_trend_dict.keys(): 
+            ins = self.ins_trend_dict[key]
             x_l_part = x[:,ins].reshape(batch_size,-1)
-            output_trend = self.trend_logits_layer[i](x_l_part).squeeze(-1) 
-            output2index_trend.append(output_trend)
-        output2index_trend = torch.stack(output2index_trend).transpose(1,0)
+            output_trend = self.trend_logits_layer[key](x_l_part).squeeze(-1) 
+            output2index_trend[key] = output_trend
         return output,output_trend,output2index_trend
                         
 class SparseGateFeatureTopK(nn.Module):
@@ -606,8 +598,8 @@ class SparseGateFeatureTopK(nn.Module):
         
         for i,item in enumerate(scales_arr):
             trend_arr = scales_trend_arr[item['p0']]
-            instruments = [item['instruments'] for item in trend_arr.values()]
-            scales_layer.append(AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,ins_arr=item['instruments'],ins_trend_arr=instruments,device=device))
+            instruments_dict = {key:torch.Tensor(trend_arr[key]['instruments']).to(device).long() for key in trend_arr.keys()}
+            scales_layer.append(AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,ins_arr=item['instruments'],ins_trend_dict=instruments_dict,device=device))
         self.scales_layer = nn.ModuleList(scales_layer)
         # 分支趋势网络
         branch_trend_layer = []
