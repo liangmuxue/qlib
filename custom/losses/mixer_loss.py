@@ -477,6 +477,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 price_diff_rate = torch.zeros(target_class.shape[0]).to(target_class.device)
                 trend_output = {}
                 trend_target = {}
+                ins_output_in_batch = torch.zeros([target_class.shape[0],ins_all.shape[0]]).to(target_class.device)
+                ins_target_in_batch = torch.zeros([target_class.shape[0],ins_all.shape[0]]).to(target_class.device)
                 for key in self.scale_dict:
                     trend_output[key] = {}
                     trend_target[key] = {}
@@ -487,18 +489,20 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 for j in range(target_class.shape[0]):
                     target_info_item = target_info[j][main_index_abs]
                     date = target_info_item['future_start_datetime']
-                    # 如果存在缺失值，则忽略，不比较
+                    # 如果存在缺失值，则忽略，不比较sw_index_data
                     target_class_item = target_class[j]
                     keep_index = torch.where(target_class_item>=0)[0]
                     ins_rel_index = torch.where(target_class_item[ins_all]>=0)[0].long()
                     target_item = target[j,ins_all,target_len,0]
-                    if ins_rel_index.shape[0]<3:
+                    ins_output_in_batch[j,ins_rel_index] = sw_index_data[0][j,ins_rel_index]
+                    ins_target_in_batch[j,ins_rel_index] = target_item[ins_rel_index]
+                    if ins_rel_index.shape[0]<2:
                         continue
                     target_info_total.append(target_info[j])             
                     detail_trunk_loss_item = []
                     price_diff_range = price_targets[j,ins_rel_index]  
                     # 不同模式的损失计算                          
-                    if target_mode==2:
+                    if target_mode in [2]:
                         # 根据网络输出，生成针对性业务分支输出,并依次计算损失
                         scale_output = sv[0]
                         # 业务分支top损失计算             
@@ -537,13 +541,18 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 trend_target[key][inner_key][j] = diff_rate                        
                         batch_size += 1
                 
-                if target_mode in [0]:
-                    loss_sum = loss_sum + ce_loss[i]    
+                if target_mode in [1]:
+                    ins_out = normalization_axis(ins_output_in_batch,axis=0)
+                    ins_target = normalization_axis(ins_target_in_batch,axis=0)
+                    for k in range(ins_output_in_batch.shape[1]):
+                        cls_loss[i] += self.compute_top_loss(ins_out[:,k], ins_target[:,k],top_num=3,mid_num=3,need_mid=True)
+                    cls_loss[i] = cls_loss[i]/ins_output_in_batch.shape[1]
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
-                    ce_loss[i] = ce_loss[i]/batch_size  
+                    # ce_loss[i] = ce_loss[i]/batch_size  
                     detail_trunk_loss = torch.stack(detail_trunk_loss).to(target_class.device)
                     detail_loss = detail_trunk_loss.mean(0)
+                    
                     # loss = 0
                     # for key in trend_output:
                     #     target_norm = normalization_standard(trend_target[key].transpose(1,0))

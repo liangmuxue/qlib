@@ -601,17 +601,17 @@ class SparseGateFeatureTopK(nn.Module):
             instruments_dict = {key:torch.Tensor(trend_arr[key]['instruments']).to(device).long() for key in trend_arr.keys()}
             scales_layer.append(AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,ins_arr=item['instruments'],ins_trend_dict=instruments_dict,device=device))
         self.scales_layer = nn.ModuleList(scales_layer)
-        # 分支趋势网络
-        branch_trend_layer = []
-        for i,row in scales_dict.iterrows():
-            instruments = row['instruments']
-            branch_trend_layer_inner = LinelessLayer(instruments.shape[0]*input_dim,1,hidden_size=input_dim,
-                                layer_norm=False,batch_norm=False,dropout=dropout)  
-            branch_trend_layer.append(branch_trend_layer_inner)                  
-        self.branch_trend_layer = nn.ModuleList(branch_trend_layer)
+        # # 分支趋势网络
+        # branch_trend_layer = []
+        # for i,row in scales_dict.iterrows():
+        #     instruments = row['instruments']
+        #     branch_trend_layer_inner = LinelessLayer(instruments.shape[0]*input_dim,1,hidden_size=input_dim,
+        #                         layer_norm=False,batch_norm=False,dropout=dropout)  
+        #     branch_trend_layer.append(branch_trend_layer_inner)                  
+        # self.branch_trend_layer = nn.ModuleList(branch_trend_layer)
         p1_count = scales_dict.shape[0]
-        self.branch_trend_combine_layer = LinelessLayer(p1_count,p1_count,hidden_size=input_dim,
-                                    layer_norm=True,elementwise_affine=False,batch_norm=False,dropout=0.1)  
+        self.branch_trend_combine_layer = LinelessLayer(input_dim,1,hidden_size=input_dim,
+                                layer_norm=False,batch_norm=False,track_running_stats=False,dropout=dropout)     
             
     def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
@@ -630,14 +630,7 @@ class SparseGateFeatureTopK(nn.Module):
             # 合并主体特征和分尺度特征
             features_list[key] = scale_features
             trend_logits_list[key] = trend_index_logits
-        # 分支趋势网络计算
-        branch_trend_data = []
-        for i,row in self.scales_dict.iterrows():
-            ins = row['instruments']
-            x_part = x[:,ins,:].reshape(batch_size,-1)
-            branch_trend_data.append(self.branch_trend_layer[i](x_part).squeeze(-1))
-        branch_trend_data = torch.stack(branch_trend_data).transpose(1,0)
-        trend_list = self.branch_trend_combine_layer(branch_trend_data)
+        trend_list = self.branch_trend_combine_layer(x).squeeze(-1)
         
         return features_list,trend_list,trend_logits_list
 
