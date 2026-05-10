@@ -367,6 +367,16 @@ class FuturesMappingUtil:
         return industry_codes
 
     @staticmethod
+    def get_industry_codes_combine_index(sw_ins_mappings):
+        
+        industry_codes = sw_ins_mappings[:,1]
+        indus_index = sw_ins_mappings[:,0].astype(np.int32)
+        code_index_mapping = {}
+        for i,code in enumerate(industry_codes):
+            code_index_mapping[code] = indus_index[i]        
+        return code_index_mapping
+    
+    @staticmethod
     def get_all_instrument_names(sw_ins_mappings,indus_index=0):
         """取得品种名称列表"""
         

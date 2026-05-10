@@ -57,8 +57,6 @@ def emb_scale_arr(scale_arr):
                 
     return nested_dict
   
-  
-
 def get_scale_conf():
     indus_threhold_bin = [['cdifi','hsjs'],['abpi','yzyl','nffi']]
     cy_threhold_bin = [[0,2013],[2013,2030]]
@@ -205,13 +203,17 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df['diff_range_norm'] = df['diff_range']
         df.loc[df['diff_range_norm']>5,'diff_range_norm'] = 5
         df.loc[df['diff_range_norm']<-5,'diff_range_norm'] = -5      
+        # 生成行业均值数据
+        df = self.build_industry_mean(df,indus_info=base_info)     
+        df['industry'] = df['industry'].astype(int)              
         df_train = df[df["datetime"]<pd.to_datetime(str(val_range[0].strftime("%Y-%m-%d")))]
         # 针对diff_range数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
-        scaler_train = StandardScaler()
-        scaler_train.fit(df_train[['diff_range_norm']])
-        df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
+        # scaler_train = StandardScaler()
+        # scaler_train.fit(df_train[['diff_range_norm']])
+        # df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
         # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化,需要按照品种分组进行
         norm_cols = self.get_past_columns()[:15]
+        norm_cols += ['diff_range_norm']
         group_stats = df_train.groupby('instrument')[norm_cols].agg(['mean', 'std']).reset_index()   
         # 处理标准差为 0 的情况（可选）
         for feat in norm_cols:
@@ -228,17 +230,6 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # 删除临时统计列
         df.drop(columns=[f'{feat}_{stat}' for feat in norm_cols for stat in ['mean', 'std']], inplace=True)            
         # df_val = df[(df["datetime"]>=pd.to_datetime(str(val_range[0]))) & (df["datetime"]<pd.to_datetime(str(val_range[1])))]
-        # # 针对个别异常数据，标准化后再次处理
-        # df = process_outliers_multi_cols(
-        #     df=df,
-        #     cols=['dom_basis_rate'],
-        #     range=2.0,
-        #     method='median_fill',
-        #     detect_method='iqr'
-        # )           
-        # 生成行业均值数据
-        df = self.build_industry_mean(df,indus_info=base_info)     
-        df['industry'] = df['industry'].astype(int)          
         df[time_column] = df[time_column].astype(int)          
         # 消除异常数据-Again
         df = df[df['industry']!='None']    

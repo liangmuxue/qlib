@@ -160,46 +160,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
     def get_scale_key(self,scale_def):
         return scale_def['p0'] + "_" + scale_def['p1']
     
-    def compute_tar_top_loss(self,pred,target,top_num=3,r=0.5):
-        """使用目标视角，计算top损失"""
-
-        # 尺度约束：[-1, 1]
-        pred = torch.tanh(pred)
-        # 分布匹配：标准正态
-        pred = (pred - pred.mean()) / (pred.std() + 1e-8)
-                
-        _, top_target_index = torch.topk(target, k=top_num, dim=0)
-        _, top_target_inverse_index = torch.topk(target, k=top_num, largest=False, dim=0)
-        _, top_pred_index = torch.topk(pred, k=top_num, dim=0)
-        _, top_pred_inverse_index = torch.topk(pred, k=top_num, largest=False, dim=0)        
-
-        def _compute_margin_loss(p_index,t_index,mode=0):
-            # 取得目标排名靠前的下标，并对照预测值进行比较
-            top_pred = torch.gather(pred, 0, t_index)
-            top_target = torch.gather(target, 0, t_index)
-            # 计算当前对应的预测值与实际最大预测值的差距，并使用名次加权
-            top_pred_real_norm = torch.gather(pred, 0, p_index)     
-            top_pred_norm = torch.gather(pred, 0, t_index)          
-            if mode==0:
-                magin_loss = top_target.mean() - top_pred.mean()     
-                pred_magin = top_pred_real_norm.mean() - top_pred_norm.mean()
-            else:
-                magin_loss = top_pred.mean() - top_target.mean()    
-                pred_magin = top_pred_norm.mean() - top_pred_real_norm.mean()      
-            magin_loss = torch.clamp(magin_loss, min=0.1)
-            # 需要强制输出服从先验分布，否则会全部集中到某个数值
-            pred_magin = pred_magin + gaussian_loss(pred)
-            # 根据名次是否匹配再次加权
-            match_num = tensor_intersect(top_pred_index,top_target_index).shape[0]
-            magin_loss = r * magin_loss +  (1-r) * (top_num - match_num) * pred_magin 
-            return magin_loss
-                    
-        magin_loss = _compute_margin_loss(top_pred_index,top_target_index,mode=0)
-        magin_loss_inverse = _compute_margin_loss(top_pred_inverse_index,top_target_inverse_index,mode=1)
-        loss = magin_loss + magin_loss_inverse
-        
-        return loss
-
     def compute_popu_top_loss(self,pred,target,key=None,ins_rel_index=None,top_num=1):
         """通用业务分支的TOP损失"""
 
@@ -451,6 +411,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
         # 行业分类排序号
         indus_data_index = FuturesMappingUtil.get_industry_data_index_without_main(sw_ins_mappings)
+        indus_codes_mapping = FuturesMappingUtil.get_industry_codes_combine_index(sw_ins_mappings)
         indus_rel_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
         # 总体指标序号
         main_index = FuturesMappingUtil.get_main_index_in_indus(sw_ins_mappings)
@@ -540,12 +501,20 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 diff_rate = torch.sum(price_diff_range>0)/ins_inner.shape[0]
                                 trend_target[key][inner_key][j] = diff_rate                        
                         batch_size += 1
-                
+                    elif target_mode==0:
+                        for key in trend_output.keys():
+                            ins_arr = self.scale_dict[key]
+                            for k,inner_key in enumerate(ins_arr.keys()):
+                                trend_output[key][inner_key][j] = sw_index_logits[0][key][inner_key][j]
+                                indus_index = indus_codes_mapping[inner_key]
+                                trend_target[key][inner_key][j] = target[j,indus_index,target_len,0]                     
+                        batch_size += 1
+                                        
                 if target_mode in [1]:
                     ins_out = normalization_axis(ins_output_in_batch,axis=0)
                     ins_target = normalization_axis(ins_target_in_batch,axis=0)
                     for k in range(ins_output_in_batch.shape[1]):
-                        cls_loss[i] += self.compute_top_loss(ins_out[:,k], ins_target[:,k],top_num=3,mid_num=3,need_mid=True)
+                        cls_loss[i] += self.compute_top_loss(ins_out[:,k], ins_target[:,k],top_num=4,mid_num=4,need_mid=True)
                     cls_loss[i] = cls_loss[i]/ins_output_in_batch.shape[1]
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
@@ -565,9 +534,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     cnt = 0
                     for key in trend_output:
                         for inner_key in trend_output[key]:
-                            target_norm = normalization_standard(trend_target[key][inner_key])
+                            target_norm = trend_target[key][inner_key] # normalization_standard(trend_target[key][inner_key])
                             trend_norm = trend_output[key][inner_key]
-                            loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
+                            loss += self.compute_top_loss(trend_norm, target_norm,top_num=4,mid_num=4,need_mid=True)
                             cnt += 1
                     cls_loss[i] = loss/cnt
                     # if optimizers_idx==-1:

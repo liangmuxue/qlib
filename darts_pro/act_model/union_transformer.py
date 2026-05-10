@@ -546,7 +546,7 @@ class AttScaleFeature(nn.Module):
         for key in ins_trend_dict.keys():  
             sample_dim_inner = ins_trend_dict[key].shape[0]
             trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
-                                layer_norm=False,batch_norm=True,track_running_stats=False,dropout=dropout)      
+                                layer_norm=False,batch_norm=True,track_running_stats=True,dropout=dropout)      
             trend_logits_layer[key] = trend_logits_layer_inner
         self.trend_logits_layer = nn.ModuleDict(trend_logits_layer)
         # 整体趋势计算网络
