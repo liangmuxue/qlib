@@ -511,11 +511,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         batch_size += 1
                                         
                 if target_mode in [1]:
-                    ins_out = normalization_standard(ins_output_in_batch,axis=0)
+                    ins_out = ins_output_in_batch # normalization_standard(ins_output_in_batch)
                     ins_target = ins_target_in_batch # normalization_axis(ins_target_in_batch,axis=0)
+                    cnt = 0
                     for k in range(ins_output_in_batch.shape[1]):
+                        if torch.sum(ins_target[:,k]==0)>ins_target.shape[0]-12:
+                            continue
                         cls_loss[i] += self.compute_top_loss(ins_out[:,k], ins_target[:,k],top_num=4,mid_num=4,need_mid=True)
-                    cls_loss[i] = cls_loss[i]/ins_output_in_batch.shape[1]
+                        cnt += 1
+                    cls_loss[i] = cls_loss[i]/cnt
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
                     # ce_loss[i] = ce_loss[i]/batch_size  
