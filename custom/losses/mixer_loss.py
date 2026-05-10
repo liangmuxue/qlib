@@ -210,8 +210,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if ins_inner.shape[0]<2:
                 loss_detail.append(torch.tensor(0).to(pred.device))
                 continue     
-            pred_norm = pred[real_ins_index] # normalization_axis(pred[real_ins_index])
-            target_norm_item = target_norm[real_ins_index] # normalization_axis(target_norm[real_ins_index])
+            pred_norm = normalization_axis(pred[real_ins_index])
+            target_norm_item = normalization_axis(target_norm[real_ins_index])
             if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:

@@ -83,9 +83,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transCombineLoss_2411"
+               model_name: "Futures_cleanDataAllCutlen2_transMulCombineLoss_2411"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                task_weights: [[0.5],[0.5]]
                grad_limits: [5.0,3.0]
