@@ -210,8 +210,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if ins_inner.shape[0]<2:
                 loss_detail.append(torch.tensor(0).to(pred.device))
                 continue     
-            pred_norm = normalization_axis(pred[real_ins_index])
-            target_norm_item = normalization_axis(target_norm[real_ins_index])
+            pred_norm = pred[real_ins_index] # normalization_axis(pred[real_ins_index])
+            target_norm_item = target_norm[real_ins_index] # normalization_axis(target_norm[real_ins_index])
             if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:
@@ -511,8 +511,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         batch_size += 1
                                         
                 if target_mode in [1]:
-                    ins_out = normalization_axis(ins_output_in_batch,axis=0)
-                    ins_target = normalization_axis(ins_target_in_batch,axis=0)
+                    ins_out = normalization_standard(ins_output_in_batch,axis=0)
+                    ins_target = ins_target_in_batch # normalization_axis(ins_target_in_batch,axis=0)
                     for k in range(ins_output_in_batch.shape[1]):
                         cls_loss[i] += self.compute_top_loss(ins_out[:,k], ins_target[:,k],top_num=4,mid_num=4,need_mid=True)
                     cls_loss[i] = cls_loss[i]/ins_output_in_batch.shape[1]
@@ -529,12 +529,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     #     loss += self.ccc_loss_comp(trend_norm, target_norm)
                     # ce_loss[i] = loss/len(trend_output.keys())
                         
-                if target_mode in [3]:
+                if target_mode in [0,3]:
                     loss = 0
                     cnt = 0
                     for key in trend_output:
                         for inner_key in trend_output[key]:
-                            target_norm = trend_target[key][inner_key] # normalization_standard(trend_target[key][inner_key])
+                            target_norm = normalization_standard(trend_target[key][inner_key])
                             trend_norm = trend_output[key][inner_key]
                             loss += self.compute_top_loss(trend_norm, target_norm,top_num=4,mid_num=4,need_mid=True)
                             cnt += 1

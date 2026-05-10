@@ -546,7 +546,7 @@ class AttScaleFeature(nn.Module):
         for key in ins_trend_dict.keys():  
             sample_dim_inner = ins_trend_dict[key].shape[0]
             trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
-                                layer_norm=False,batch_norm=True,track_running_stats=True,dropout=dropout)      
+                                layer_norm=False,batch_norm=True,track_running_stats=False,dropout=dropout)      
             trend_logits_layer[key] = trend_logits_layer_inner
         self.trend_logits_layer = nn.ModuleDict(trend_logits_layer)
         # 整体趋势计算网络
@@ -611,7 +611,7 @@ class SparseGateFeatureTopK(nn.Module):
         # self.branch_trend_layer = nn.ModuleList(branch_trend_layer)
         p1_count = scales_dict.shape[0]
         self.branch_trend_combine_layer = LinelessLayer(input_dim,1,hidden_size=input_dim,
-                                layer_norm=False,batch_norm=False,track_running_stats=False,dropout=dropout)     
+                                layer_norm=False,batch_norm=True,track_running_stats=True,dropout=dropout)     
             
     def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
