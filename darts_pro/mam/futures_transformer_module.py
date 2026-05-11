@@ -125,23 +125,34 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0):
     ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
     scale_data = []
     if mode==0:
-        # 按照是否包含夜盘来分组
+        # 按照是否包含夜盘以及交易所分组
+        exchange_ids = FuturesMappingUtil.get_exchange_ids(sw_ins_mappings)
+        exc_u_id = np.unique(exchange_ids)
         night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
         nt_scale_arr = [np.where(night_flag==i)[0] for i in range(2)]    
-        for i,instrument_idx in enumerate(nt_scale_arr):
-            item = {}
+        def check_in_exchange(ins_arr,exchange_ids):
+            rtn = {'exc_{}'.format(i):[] for i in range(exc_u_id.shape[0])}
+            for ins in ins_arr:
+                for j in range(exc_u_id.shape[0]):
+                    if exchange_ids[ins]==exc_u_id[j]:
+                        rtn['exc_{}'.format(j)].append(ins)
+            return rtn
+        
+        for i,instruments in enumerate(nt_scale_arr):
+            p0 = 'nt_{}'.format(i)
             if i==0:
-                item = {'p0':'day','p1':'any','instruments':instrument_idx}
+                item = {'p0':p0,'p1':p0,'instruments':instruments}
+                scale_data.append(item)      
+                continue          
+            items = check_in_exchange(instruments,exchange_ids)
+            for key in items.keys():
+                if len(items[key])<=2:
+                    continue
+                item = {'p0':p0,'p1':key,'instruments':np.array(items[key])}
                 scale_data.append(item)
-            if i==1:
-                # 对包含夜盘的品种，再按照行业来分
-                industry_instrument_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-                indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
-                for j,ins in enumerate(industry_instrument_index):
-                    item = {'p0':'night','p1':indus_codes[j],'instruments':ins}
-                    scale_data.append(item)
+        scale_data = pd.DataFrame(scale_data)   
     if mode==1:
-        # 按照行业类别分组
+        # 按照行业类别分组 in 
         indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
         threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]
         # threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
@@ -243,7 +254,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=3)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=0)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
