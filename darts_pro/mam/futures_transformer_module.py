@@ -141,7 +141,7 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0):
                     item = {'p0':'night','p1':indus_codes[j],'instruments':ins}
                     scale_data.append(item)
     if mode==1:
-        # 按照交易所以及行业类别分组
+        # 按照行业类别分组
         indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
         threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]
         # threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
@@ -153,6 +153,30 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0):
             key = "indus_{}".format(seq)
             item = {'p0':key,'p1':indus_code[i],'instruments':indus_data_index[i]}
             scale_data.append(item)
+        scale_data = pd.DataFrame(scale_data)           
+    if mode==2:
+        # 按照交易所以及行业类别分组
+        indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+        threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]        
+        exchange_ids = FuturesMappingUtil.get_exchange_ids(sw_ins_mappings)
+        u_exc_ids = np.unique(exchange_ids)
+        def check_in_indus(ins_arr):
+            rtn = {'indus_{}'.format(i):[] for i in range(indus_data_index.shape[0])}
+            for ins in ins_arr:
+                for j in range(indus_data_index.shape[0]):
+                    if ins in indus_data_index[j]:
+                        rtn['indus_{}'.format(j)].append(ins)
+            return rtn
+        
+        for i,exchange_id in enumerate(u_exc_ids):
+            p0 = 'ex_{}'.format(exchange_id)
+            instruments = np.where(exchange_id==exchange_ids)[0]    
+            items = check_in_indus(instruments)
+            for key in items.keys():
+                if len(items[key])<=2:
+                    continue
+                item = {'p0':p0,'p1':key,'instruments':np.array(items[key])}
+                scale_data.append(item)
         scale_data = pd.DataFrame(scale_data)                
     return scale_data
 
@@ -194,7 +218,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=1)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=2)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len

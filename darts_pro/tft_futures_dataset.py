@@ -208,12 +208,24 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df['industry'] = df['industry'].astype(int)              
         df_train = df[df["datetime"]<pd.to_datetime(str(val_range[0].strftime("%Y-%m-%d")))]
         # 针对diff_range数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化
-        # scaler_train = StandardScaler()
-        # scaler_train.fit(df_train[['diff_range_norm']])
-        # df[['diff_range_norm']] = scaler_train.transform(df[['diff_range_norm']])
+        scaler_train = StandardScaler()
+        scaler_train.fit(df_train[['diff_range_norm']])
+        # df = df[~df['instrument'].str.startswith('ZS_ALL')]
+        # 进行跨品种的标准化（不包括行业数据）
+        condi = ~df['instrument'].str.startswith('ZS_')
+        df.loc[condi,'diff_range_norm'] = scaler_train.transform(df[condi][['diff_range_norm']])
+        # 针对行业数据，分行业进行标准化
+        df_indus = df[df['instrument'].str.startswith('ZS_')]
+        df_indus_train = df_indus[df_indus["datetime"]<pd.to_datetime(str(val_range[0].strftime("%Y-%m-%d")))]
+        for indus in df_indus['instrument'].unique():
+            scaler_train = StandardScaler()
+            scaler_train.fit(df_indus_train[df_indus_train['instrument']==indus][['diff_range_norm']])
+            df_indus.loc[df_indus['instrument']==indus,'diff_range_norm'] = scaler_train.transform(df_indus[df_indus['instrument']==indus][['diff_range_norm']])
+        
+        df[df['instrument'].str.startswith('ZS_')] = df_indus
         # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化,需要按照品种分组进行
         norm_cols = self.get_past_columns()[:15]
-        norm_cols += ['diff_range_norm']
+        # norm_cols += ['diff_range_norm']
         group_stats = df_train.groupby('instrument')[norm_cols].agg(['mean', 'std']).reset_index()   
         # 处理标准差为 0 的情况（可选）
         for feat in norm_cols:
