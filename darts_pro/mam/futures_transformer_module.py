@@ -177,7 +177,32 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0):
                     continue
                 item = {'p0':p0,'p1':key,'instruments':np.array(items[key])}
                 scale_data.append(item)
-        scale_data = pd.DataFrame(scale_data)                
+        scale_data = pd.DataFrame(scale_data)     
+    if mode==3:
+        # 按照是否包含夜盘以及行业类别分组
+        night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
+        nt_scale_arr = [np.where(night_flag==i)[0] for i in range(2)]    
+        def check_in_indus(ins_arr):
+            rtn = {'indus_{}'.format(i):[] for i in range(indus_data_index.shape[0])}
+            for ins in ins_arr:
+                for j in range(indus_data_index.shape[0]):
+                    if ins in indus_data_index[j]:
+                        rtn['indus_{}'.format(j)].append(ins)
+            return rtn
+        
+        for i,instruments in enumerate(nt_scale_arr):
+            p0 = 'nt_{}'.format(i)
+            if i==0:
+                item = {'p0':p0,'p1':p0,'instruments':instruments}
+                scale_data.append(item)      
+                continue          
+            items = check_in_indus(instruments)
+            for key in items.keys():
+                if len(items[key])<=2:
+                    continue
+                item = {'p0':p0,'p1':key,'instruments':np.array(items[key])}
+                scale_data.append(item)
+        scale_data = pd.DataFrame(scale_data)                     
     return scale_data
 
 class FuturesTransformerModule(MlpModule):
@@ -218,7 +243,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=2)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=3)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len

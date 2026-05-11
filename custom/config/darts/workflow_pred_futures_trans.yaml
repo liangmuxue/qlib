@@ -65,8 +65,9 @@ task:
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"
             pred_index_data_path: "" 
+            load_index_data: False
             scheduler_config: 
-               # start_factor: 1
+               # start_factor: 1False
                # end_factor: 0.05
                # total_iters: 6e3
                T_0: 10 # 初始周期
@@ -86,10 +87,10 @@ task:
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               task_weights: [[0.5,0.5],[0.5,0.5]]
+               task_weights: [[0.5],[0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[1],[1]]
+               main_task_seq: [[],[]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
@@ -102,7 +103,7 @@ task:
                dropout: 0.3
                opt_size: 1
                past_split: [[0,15],[15,30]]
-               target_mode: [2,2,2,1,3]
+               target_mode: [2,1,2,1,3]
                scale_mode: [1,1,2,2,0]
                filter_conv_index: -1
                loss_top_num: 1
@@ -142,7 +143,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['diff_range_norm','RSV5','SUMD5','SUMD5','RSV5']
+                target_column: ['diff_range_norm','diff_range_norm','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['year','dayofweek','month','day']   
                 past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
