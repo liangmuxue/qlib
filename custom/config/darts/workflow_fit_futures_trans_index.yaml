@@ -67,12 +67,12 @@ task:
             pred_index_data_path: "" 
             load_index_data: False
             scheduler_config: 
-               # start_factor: 1
-               # end_factor: 0.05
-               # total_iters: 6e3
-               T_0: 10 # 初始周期
-               T_mult: 2  # 周期倍增
-               eta_min: 1e-6  # 最小学习率
+               start_factor: 1
+               end_factor: 0.05
+               total_iters: 6e3
+               # T_0: 10 # 初始周期
+               # T_mult: 2  # 周期倍增
+               # eta_min: 1e-6  # 最小学习率
             optimizer_kwargs:
                lr: 1e-3
                betas: [0.9,0.999]
