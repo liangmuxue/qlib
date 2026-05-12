@@ -181,7 +181,7 @@ class FuturesProcessModel(TftDataframeModel):
             trainer,model_inner,train_loader,val_loader= \
             self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0,seperate_mode=False)  
 
     def rebuild_model_params(self,model,model_name=None):
         
@@ -237,7 +237,7 @@ class FuturesProcessModel(TftDataframeModel):
                 lightning_callbacks.append(callback)          
                    
         pl_trainer_kwargs = {"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}    
-        pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}               
+        # pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}               
         if mode in [0,1,2]:  
             my_model = FuturesModel(
                     input_chunk_length=input_chunk_length,
