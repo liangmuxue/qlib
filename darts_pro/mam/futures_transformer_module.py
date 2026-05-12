@@ -446,9 +446,9 @@ class FuturesTransformerModule(MlpModule):
     
     def create_lr_scheduler(self,lr_sched_kws,lr_monitor="val_loss"):
         # 余弦退火
-        lr_scheduler_cls = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+        # lr_scheduler_cls = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
         # Linear Ls
-        # lr_scheduler_cls = torch.optim.lr_scheduler.LinearLR
+        lr_scheduler_cls = torch.optim.lr_scheduler.LinearLR
         lr_scheduler = create_from_cls_and_kwargs(
             lr_scheduler_cls, lr_sched_kws
         )
