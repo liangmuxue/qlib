@@ -506,8 +506,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             ins_arr = self.scale_dict[key]
                             for k,inner_key in enumerate(ins_arr.keys()):
                                 trend_output[key][inner_key][j] = sw_index_logits[0][key][inner_key][j]
-                                indus_index = indus_codes_mapping[inner_key]
-                                trend_target[key][inner_key][j] = target[j,indus_index,target_len,0]                     
+                                inner_ins = ins_arr[inner_key]['instruments']
+                                inner_ins = np.intersect1d(inner_ins, ins_rel_index.cpu().numpy())
+                                ins_diff = np.array([t['open_diff'] for t in np.array(target_info[j])[inner_ins]])
+                                target_mean = ins_diff.mean()
+                                trend_target[key][inner_key][j] = target_mean               
                         batch_size += 1
                                         
                 if target_mode in [1]:
