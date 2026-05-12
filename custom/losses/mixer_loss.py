@@ -462,7 +462,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     ins_diff = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info[j])])
                     ins_diff = torch.Tensor(ins_diff).to(target_class.device)                    
                     ins_output_in_batch[j,ins_rel_index] = sw_index_data[0][j,ins_rel_index]
-                    ins_target_in_batch[j,ins_rel_index] = target_item[ins_rel_index]
+                    ins_target_in_batch[j,ins_rel_index] = ins_diff[ins_rel_index]
                     if ins_rel_index.shape[0]<2:
                         continue
                     target_info_total.append(target_info[j])             
@@ -541,7 +541,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                         
                 if target_mode in [1]:
                     ins_out = normalization_standard(ins_output_in_batch)
-                    ins_target = normalization_standard(ins_target_in_batch,axis=0)
+                    ins_target = normalization_standard(ins_target_in_batch)
                     cnt = 0
                     for k in range(ins_output_in_batch.shape[1]):
                         if torch.sum(ins_target[:,k]==0)>ins_target.shape[0]-12:
