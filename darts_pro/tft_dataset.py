@@ -147,6 +147,7 @@ class TFTDataset(DatasetH):
         data["dayofweek"] = data.datetime.dt.dayofweek    
         data["day"] = data.datetime.dt.day  
         data["year"] = data.datetime.dt.year  
+        data["week"] = data.datetime.dt.isocalendar().week
         # 保留时间戳
         data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)     
         data["label"] = data["label"].astype("float64")

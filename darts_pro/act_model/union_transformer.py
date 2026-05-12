@@ -67,7 +67,7 @@ class TimeFeatureEncoder:
         # 默认嵌入维度
         if embed_dims is None:
             self.embed_dims = {
-                'year': 4, 'month': 4, 'day': 4,'dayofweek': 4  # 新增节假日特征
+                'year': 4, 'month': 4, 'day': 4,'dayofweek': 4,'week': 4  # 新增节假日特征
             }
         else:
             self.embed_dims = embed_dims
@@ -97,6 +97,7 @@ class TimeFeatureEncoder:
             'month': df_time.dt.month.values,
             'day': df_time.dt.day.values,
             'dayofweek': df_time.dt.dayofweek.values,
+            'week': np.array(df_time.dt.isocalendar().week.values).astype(int),
         }
         
         embed_list = []
@@ -672,6 +673,7 @@ class UnionTransCombine(nn.Module):
                       'month':[i for i in range(0,12)],
                       'day':[i for i in range(1,32)],
                       'dayofweek':[i for i in range(0,5)],
+                      'week':[i for i in range(0,55)],
                     }          
         dataset = global_var.get_value("dataset")   
         time_encoder.fit_static(range_data) 

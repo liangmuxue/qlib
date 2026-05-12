@@ -780,6 +780,7 @@ class TFTSeriesDataset(TFTDataset):
             df_expand["datetime"] = pd.to_datetime(df_expand["datetime_number"].astype(str),format="%Y%m%d")
             df_expand["month"] = df_expand.datetime.dt.month - 1
             df_expand["dayofweek"] = df_expand.datetime.dt.dayofweek    
+            df_expand["week"] = df_expand.datetime.dt.weekofyear 
             df_expand["dayofmonth"] = df_expand.datetime.dt.day              
             if df_expands is None:
                 df_expands = df_expand

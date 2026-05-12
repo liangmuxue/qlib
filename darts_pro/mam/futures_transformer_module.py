@@ -579,7 +579,7 @@ class FuturesTransformerModule(MlpModule):
             price_targets,
             past_future_round_targets,
             index_round_targets,
-            long_diff_index_targets,
+            future_week_info,
             target_info
         ) = train_batch
                 
@@ -595,7 +595,7 @@ class FuturesTransformerModule(MlpModule):
         for i in range(self.get_optimizer_size()):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
             loss, detail_loss = self._compute_loss((output, vr_class, tar_class),
-                            (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, past_target, target_info), optimizers_idx=i)
+                            (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, future_week_info,target_info), optimizers_idx=i)
             (corr_loss, ce_loss, fds_loss, cls_loss, _) = detail_loss 
             if cls_loss[i] != 0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
@@ -737,7 +737,7 @@ class FuturesTransformerModule(MlpModule):
             price_targets,
             past_future_round_targets,
             index_round_targets,
-            long_diff_index_targets,
+            future_week_info,
             target_info
         ) = val_batch
               
@@ -749,7 +749,7 @@ class FuturesTransformerModule(MlpModule):
         
         # 全部损失
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
-                    (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, past_target, target_info), optimizers_idx=-1)
+                    (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, future_week_info,target_info), optimizers_idx=-1)
         (corr_loss, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
         self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
         preds_combine = []
@@ -864,7 +864,7 @@ class FuturesTransformerModule(MlpModule):
             self.log("trend_eva_diff", rate_total["trend_eva_diff"].values[0], prog_bar=True,sync_dist=True) 
         
         output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_total, \
-            past_future_round_targets_total, long_diff_index_targets_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
+            past_future_round_targets_total, future_week_info_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
         viz_total_size = 0
         
         if self.mode is None or not self.mode.startswith("pred_"):
@@ -914,7 +914,7 @@ class FuturesTransformerModule(MlpModule):
         trend_logits = output_3d[4]  
         batch_trend_data = output_3d[5]
         predictions = batch_trend_data
-        price_targets_main = long_diff_index_targets_total.squeeze(-1)
+        price_targets_main = future_week_info_total.squeeze(-1)
         node_num = ins_all.shape[0]
         match_key = self.get_scale_match_key()
         
@@ -1170,7 +1170,7 @@ class FuturesTransformerModule(MlpModule):
         output, vr_class, price_outputs, past_future_round_targets = outputs
         choice_out, trend_value, combine_index = vr_class
         (past_target, past_covariates, historic_future_covariates, future_covariates,
-            static_covariates, past_future_covariates, future_target, target_class, price_targets, _, index_round_targets, long_diff_index_targets, target_info) = val_batch
+            static_covariates, past_future_covariates, future_target, target_class, price_targets, _, index_round_targets, future_week_info, target_info) = val_batch
         # 记录批次内价格涨跌幅，用于整体指数批次归一化数据的回溯
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
@@ -1185,7 +1185,7 @@ class FuturesTransformerModule(MlpModule):
         output_res = (output, choice_out.cpu().numpy(), batch_data, combine_index.cpu().numpy(), past_target.cpu().numpy(),
                       future_target.cpu().numpy(), target_class.cpu().numpy(),
                       price_targets.cpu().numpy(), past_future_round_targets.cpu().numpy(), whole_index_round_targets.cpu().numpy(),
-                      index_round_targets.cpu().numpy(), long_diff_index_targets.cpu().numpy(), target_info)
+                      index_round_targets.cpu().numpy(), future_week_info.cpu().numpy(), target_info)
         self.output_result.append(output_res)
 
     def combine_output_total(self, output_result):
@@ -1207,9 +1207,9 @@ class FuturesTransformerModule(MlpModule):
         trend_total = []
         combine_index_total = []
         index_round_targets_total = []
-        long_diff_index_targets_total = []
+        future_week_info_total = []
         for item in output_result:
-            (output, choice, batch_data, combine_index, past_target, future_target, target_class, price_targets, past_future_round_targets, whole_index_round_targets, index_round_targets, long_diff_index_targets, target_info) = item
+            (output, choice, batch_data, combine_index, past_target, future_target, target_class, price_targets, past_future_round_targets, whole_index_round_targets, index_round_targets, future_week_info, target_info) = item
             x_bar_inner = []
             dec_inner = []
             # 合并列表中的品种和整体趋势
@@ -1249,7 +1249,7 @@ class FuturesTransformerModule(MlpModule):
             past_future_round_targets_total.append(past_future_round_targets)
             whole_index_round_targets_total.append(whole_index_round_targets)
             index_round_targets_total.append(index_round_targets)
-            long_diff_index_targets_total.append(long_diff_index_targets)
+            future_week_info_total.append(future_week_info)
         
         x_bar_total = np.concatenate(x_bar_total)
         choice_total = np.concatenate(choice_total)
@@ -1264,11 +1264,11 @@ class FuturesTransformerModule(MlpModule):
         whole_index_round_targets_total = np.concatenate(whole_index_round_targets_total)
         index_round_targets_total = np.concatenate(index_round_targets_total)
         target_info_total = np.concatenate(target_info_total)
-        long_diff_index_targets_total = np.concatenate(long_diff_index_targets_total)
+        future_week_info_total = np.concatenate(future_week_info_total)
                     
         return (x_bar_total, sv_total, cls_total, comm_index_total, trend_logits_total, trend_total, combine_index_total), \
                     past_target_total, future_target_total, target_class_total, price_targets_total, past_future_round_targets_total, \
-                    long_diff_index_targets_total, index_round_targets_total, target_info_total        
+                    future_week_info_total, index_round_targets_total, target_info_total        
                            
     def combine_result_data(self, output_result=None, predict_mode=False, pred_top_num=2):
         """计算涨跌幅分类准确度以及相关数据"""
@@ -1277,7 +1277,7 @@ class FuturesTransformerModule(MlpModule):
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         # 使用全部验证结果进行统一比较
-        output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_3d, batch_trend_data, long_diff_index_targets_3d, \
+        output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_3d, batch_trend_data, future_week_info_3d, \
             index_round_targets_3d, target_info_3d = self.combine_output_total(output_result)
         total_imp_cnt = np.where(target_class_3d == 3)[0].shape[0]
         rate_total = []
@@ -1656,7 +1656,7 @@ class FuturesTransformerModule(MlpModule):
             price_targets,
             past_future_round_targets,
             index_round_targets,
-            long_diff_index_targets,
+            future_week_info,
             target_info
         ) = batch
                
@@ -1672,7 +1672,7 @@ class FuturesTransformerModule(MlpModule):
         output_res = (output, choice_out.cpu().numpy(), trend_value.cpu().numpy(), combine_index.cpu().numpy(), past_target.cpu().numpy(),
                       future_target.cpu().numpy(), target_class.cpu().numpy(),
                       price_targets.cpu().numpy(), past_future_round_targets.cpu().numpy(), whole_index_round_targets.cpu().numpy(),
-                      index_round_targets.cpu().numpy(), long_diff_index_targets.cpu().numpy(), target_info)
+                      index_round_targets.cpu().numpy(), future_week_info.cpu().numpy(), target_info)
         self.output_result.append(output_res)        
          
     def on_predict_epoch_end(self, args): 

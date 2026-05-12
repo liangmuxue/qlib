@@ -183,20 +183,20 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             for series in self.target_series:
                 code = int(series.static_covariates["instrument_rank"].values[0])
                 instrument = global_var.get_value("dataset").get_group_code_by_rank(code)
-                price_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["label_ori"].values
-                datetime_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["datetime_number"].values                                
-                diff_range = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["open_diff"].values        
-                open_array = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
-                                    &(df_data["instrument_rank"]==code)]["OPEN"].values      
+                df_item = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
+                                    &(df_data["instrument_rank"]==code)]
+                price_array = df_item["label_ori"].values
+                datetime_array = df_item["datetime_number"].values                                
+                diff_range = df_item["open_diff"].values        
+                open_array = df_item["OPEN"].values      
+                dayofweek = df_item["dayofweek"].values   
+                week = df_item["week"].values   
                 # 对于行业或者总体指标，需要计算下属所有品种的差值的平均
                 if series.instrument_code=="ZS_ALL":
                     df_zs_all = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                        &(~df_data['instrument'].str.startswith('ZS'))]
                     diff_range = df_zs_all.groupby("datetime_number")["diff_range"].mean().values                                                    
-                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array)
+                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array,dayofweek,week)
             # 保存到本地
             save_ass_data = global_var.get_value("save_ass_data")
             if save_ass_data:
@@ -277,7 +277,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             if col=='day':
                 s = pd.Series(date_container.dt.day,name='day')       
             if col=='month':
-                s = pd.Series(date_container.dt.month-1,name='month')                             
+                s = pd.Series(date_container.dt.month-1,name='month')      
+            if col=='week':
+                s = pd.Series(date_container.dt.isocalendar().week,name='week')                                          
             date_covs_list.append(s)
         self.date_covs_list = pd.concat(date_covs_list,axis=1,ignore_index=False)       
                 
@@ -558,6 +560,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         sw_date_mapping = self.date_mappings_ext[idx]
         # 记录预测未来第一天的关联日期，用于后续数据对齐
         future_start_datetime = self.date_list[idx]
+        # 生成周信息和日信息
+        future_week_info = None
 
         for index,ser_idx_infer in enumerate(sw_date_mapping):
             # 取得原序列索引进行series取数,目前一致
@@ -613,12 +617,16 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # rank数值就是当前索引加1
             code = ori_index + 1
             instrument = self.ass_data[code][0]
-            price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             diff_range = self.ass_data[code][1][past_start_ser:future_end_ser]
-            open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
+            price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
+            open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
+            # dayofweek_array = self.ass_data[code][5][past_start_ser:future_end_ser]
+            # week_array = self.ass_data[code][6][past_start_ser:future_end_ser]
             # 计算开盘价目标差值范围
             open_diff = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
+            # future_dayofweek = dayofweek_array[-self.output_chunk_length+self.cut_len-1]
+            # future_week = week_array[-self.output_chunk_length+self.cut_len-1]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"total_idx":idx,"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
@@ -657,8 +665,9 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             historic_future_covariate = f_conv_values[past_start_ser:past_end_ser]
             # 直接从映射数据中取得当前日期对应的未来协变量
             date_covs = self.date_covs_list.iloc[idx:idx+self.output_chunk_length]
+            if future_week_info is None:
+                future_week_info = date_covs[['dayofweek','week']].values[0].astype(int)
             future_covariate = date_covs[self.date_conv_columns].values
-                        
             past_target_total[keep_index] = past_target
             past_covariate_total[keep_index] = covariate
             target_info_total[keep_index] = target_info
@@ -784,8 +793,6 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         target_info_ins = np.array(target_info_total)[real_ins_index]
         open_diff_arr = np.array([item['open_diff'] for item in target_info_ins])
         price_targets[real_ins_index] = open_diff_arr
-        # 使用均值作为整体指数参考
-        long_diff_seq_targets = np.array([open_diff_arr.mean()])  
         # 记录涨跌品种数量比例，用于整体趋势损失
         target_info_total[self.main_index]['long_ins_num'] = np.sum(open_diff_arr>0)
         
@@ -804,7 +811,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         #     past_future_round_targets = time_series_augment(past_future_round_targets)
         
         return past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
-                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,long_diff_seq_targets,target_info_total 
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,index_round_targets,future_week_info,target_info_total 
                             
 
 class FuturesInferenceDataset(FuturesIndustryDataset):
