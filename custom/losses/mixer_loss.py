@@ -117,7 +117,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         #     scale_arr = [torch.Tensor(ins).to(self.device).long() for ins in scale_arr]
         #     self.scale_dict[key] = scale_arr        
     
-    def compute_batch_with_time_section_loss(self,pred,target,future_week_info=None,top_num=2,mid_num=2):
+    def compute_batch_with_time_section_loss(self,pred,target,future_week_info=None,top_num=3,mid_num=3):
         """批次内按照时间分片计算top损失"""
         
         dayofweek = future_week_info[:,0]
@@ -126,13 +126,21 @@ class FuturesIndustryLoss(UncertaintyLoss):
         loss = self.compute_top_loss(pred, target,top_num=top_num,mid_num=mid_num,need_mid=True)   
         # 分别按照周序号，以及星期内日期序号进行损失计算
         cnt = 1
-        for dayofweek_no in dayofweek.unique():
-            idx = torch.where(dayofweek==dayofweek_no)[0]
-            loss += self.compute_top_loss(pred[idx], target[idx],top_num=1,mid_num=1,need_mid=True)    
-            cnt += 1
+        # for dayofweek_no in dayofweek.unique():
+        #     idx = torch.where(dayofweek==dayofweek_no)[0]
+        #     # loss += self.compute_top_loss(pred[idx], target[idx],top_num=1,mid_num=1,need_mid=True)    
+        #     if all_elements_same(target[idx]) or all_elements_same(pred[idx]):
+        #         loss += self.mse_loss(pred[idx].unsqueeze(0), target[idx].unsqueeze(0))  
+        #     else:
+        #         loss += self.ccc_loss_comp(pred[idx], target[idx])  
+        #     cnt += 1
         for week_no in week.unique():
             idx = torch.where(week==week_no)[0]
-            loss += self.compute_top_loss(pred[idx], target[idx],top_num=1,mid_num=1,need_mid=True)    
+            # loss += self.compute_top_loss(pred[idx], target[idx],top_num=1,mid_num=1,need_mid=True)  
+            if all_elements_same(target[idx]) or all_elements_same(pred[idx]):
+                loss += self.mse_loss(pred[idx].unsqueeze(0), target[idx].unsqueeze(0))  
+            else:
+                loss += self.ccc_loss_comp(pred[idx], target[idx])  
             cnt += 1
         loss = loss/cnt
         
@@ -211,12 +219,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
             pred = pred_ori
         
         top_num = 2 if ins_all.shape[0]<16 else 3
-        # 针对总体进行损失计算
-        if all_elements_same(target_item) or all_elements_same(pred):
-            loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
-        else:
-            loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
-        loss_detail.append(loss)
+        # # 针对总体进行损失计算
+        # if all_elements_same(target_item) or all_elements_same(pred):
+        #     loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
+        # else:
+        #     loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
+        # loss_detail.append(loss)
         
         # 针对每个小分类进行损失计算
         for item in scale_arr:
@@ -551,13 +559,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         batch_size += 1
                                         
                 if target_mode in [1]:
-                    ins_out = normalization_standard(ins_output_in_batch)
-                    ins_target = normalization_standard(ins_target_in_batch)
+                    ins_out = normalization_standard(ins_output_in_batch,dim=0)
+                    ins_target = normalization_standard(ins_target_in_batch,dim=0)
                     cnt = 0
                     for k in range(ins_output_in_batch.shape[1]):
                         if torch.sum(ins_target[:,k]==0)>ins_target.shape[0]-12:
                             continue
-                        cls_loss[i] += self.compute_batch_with_time_section_loss(ins_out[:,k], ins_target[:,k],future_week_info,top_num=2,mid_num=2)
+                        cls_loss[i] += self.compute_batch_with_time_section_loss(ins_out[:,k], ins_target[:,k],future_week_info,top_num=3,mid_num=3)
                         cnt += 1
                     cls_loss[i] = cls_loss[i]/cnt
                 if target_mode in [2,5]:  

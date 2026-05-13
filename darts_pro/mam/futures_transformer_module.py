@@ -45,7 +45,6 @@ DRAW_SEQ = [0]
 DRAW_SEQ_ITEM = [0]
 DRAW_SEQ_DETAIL = [0]
 
-
 class FeatureExtractorHook:
     def __init__(self, feature_dict, name,nodes_num=0):
         self.features = feature_dict
@@ -152,7 +151,7 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0):
                 scale_data.append(item)
         scale_data = pd.DataFrame(scale_data)   
     if mode==1:
-        # 按照行业类别分组 in 
+        # 按照行业类别分组
         indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
         threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]
         # threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
@@ -254,7 +253,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=0)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=1)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
@@ -596,9 +595,12 @@ class FuturesTransformerModule(MlpModule):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
             loss, detail_loss = self._compute_loss((output, vr_class, tar_class),
                             (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, future_week_info,target_info), optimizers_idx=i)
-            (corr_loss, ce_loss, fds_loss, cls_loss, _) = detail_loss 
+            (corr_loss, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss 
             if cls_loss[i] != 0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
+                if cls_detail is not None:
+                    for j in range(cls_detail.shape[0]):
+                        self.log("train_trunk_detail_{}".format(j), cls_detail[j], batch_size=train_batch[0].shape[0], prog_bar=False,sync_dist=True)                
             if ce_loss[i] != 0:
                 self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             if fds_loss[i] != 0:
@@ -914,7 +916,6 @@ class FuturesTransformerModule(MlpModule):
         trend_logits = output_3d[4]  
         batch_trend_data = output_3d[5]
         predictions = batch_trend_data
-        price_targets_main = future_week_info_total.squeeze(-1)
         node_num = ins_all.shape[0]
         match_key = self.get_scale_match_key()
         
