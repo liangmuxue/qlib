@@ -836,8 +836,8 @@ class AkFuturesExtractor(FutureExtractor):
             begin = int(date_string_transfer(row['begin'],2))
             end = int(date_string_transfer(row['end'],2))
             # 日期太少的不要，没有近期数据的不要
-            if begin>20150101 or end<20250901:
-                continue
+            # if begin>20150101 or end<20250901:
+            #     continue
             exchange_code = self.get_exchange_from_instrument(code)
             if exchange_code in ['CFFEX','INE']:
                 continue
@@ -1013,9 +1013,9 @@ if __name__ == "__main__":
     # 导出到qlib
     # extractor.export_to_qlib()
     # extractor.load_item_day_data("CU2205", "2022-03-03")
-    extractor.build_cleandata_table()
+    # extractor.build_cleandata_table()
     # qlib品种名单列表生成
-    # extractor.build_qlib_instrument()
+    extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################

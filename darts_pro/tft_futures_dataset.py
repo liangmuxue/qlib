@@ -183,21 +183,21 @@ class TFTFuturesDataset(TFTSeriesDataset):
         # 剔除open_diff超出范围的异常值
         df.loc[df['open_diff']>5,'open_diff'] = 5
         df.loc[df['open_diff']<-5,'open_diff'] = -5            
-        # 生成业务分片均值数据
-        scale_columns = list(scale_conf.keys())
-        self.scale_dict,df_mean_norm = self.build_scale_mean(df,scale_columns,tar_col='open_diff',val_range=val_range)  
-        # 根据分类信息得到分类权重
-        self.scale_class_weights = {}
-        for key in scale_columns:
-            class_col = key +"_class"
-            self.scale_class_weights[class_col] = []
-            for i in range(2):
-                df_mean_norm_item = df_mean_norm[key]
-                df_mean_norm_item = df_mean_norm_item[df_mean_norm_item[key]==i].dropna()
-                class_count = np.bincount(df_mean_norm_item[class_col].values) 
-                class_weights = 1.0 / class_count
-                class_weights = class_weights / class_weights.sum()
-                self.scale_class_weights[class_col].append(class_weights)
+        # # 生成业务分片均值数据
+        # scale_columns = list(scale_conf.keys())
+        # self.scale_dict,df_mean_norm = self.build_scale_mean(df,scale_columns,tar_col='open_diff',val_range=val_range)  
+        # # 根据分类信息得到分类权重
+        # self.scale_class_weights = {}
+        # for key in scale_columns:
+        #     class_col = key +"_class"
+        #     self.scale_class_weights[class_col] = []
+        #     for i in range(2):
+        #         df_mean_norm_item = df_mean_norm[key]
+        #         df_mean_norm_item = df_mean_norm_item[df_mean_norm_item[key]==i].dropna()
+        #         class_count = np.bincount(df_mean_norm_item[class_col].values) 
+        #         class_weights = 1.0 / class_count
+        #         class_weights = class_weights / class_weights.sum()
+        #         self.scale_class_weights[class_col].append(class_weights)
             
         # 剔除diff_range超出范围的异常值
         df['diff_range_norm'] = df['diff_range']

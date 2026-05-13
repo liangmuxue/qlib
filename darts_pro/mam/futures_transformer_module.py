@@ -161,6 +161,8 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0):
             else:
                 seq = 1
             key = "indus_{}".format(seq)
+            if len(indus_data_index[i])<=2:
+                continue            
             item = {'p0':key,'p1':indus_code[i],'instruments':indus_data_index[i]}
             scale_data.append(item)
         scale_data = pd.DataFrame(scale_data)           
@@ -253,7 +255,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=0)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=2)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
@@ -845,7 +847,7 @@ class FuturesTransformerModule(MlpModule):
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         tft_dataset = global_var.get_value("dataset") 
         return self.criterion(output, (future_target, future_covs, target_class, future_round_targets, index_round_targets, price_targets, past_target, target_info),
-                    sw_ins_mappings=sw_ins_mappings, optimizers_idx=optimizers_idx, scale_class_weights=tft_dataset.scale_class_weights,top_num=self.top_num, trend_threhold=self.trend_threhold)        
+                    sw_ins_mappings=sw_ins_mappings, optimizers_idx=optimizers_idx, top_num=self.top_num, trend_threhold=self.trend_threhold)        
 
     def on_validation_epoch_end(self):
         """重载父类方法，修改指标计算部分"""
