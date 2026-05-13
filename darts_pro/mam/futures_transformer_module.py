@@ -253,7 +253,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=1)
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=0)
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len

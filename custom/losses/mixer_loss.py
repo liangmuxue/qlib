@@ -203,7 +203,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss        
 
-    def compute_multi_trunk_loss(self,pred_ori,target,key=None,norm_in_batch=False):
+    def compute_multi_trunk_loss(self,pred_ori,target,key=None,norm_in_batch=0):
         """按照业务属性，分片比较"""
 
         scale_arr = self.scale_dict[key].values()
@@ -211,7 +211,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
         loss = 0
         ins_all = np.concatenate([item['instruments'] for item in scale_arr])
         ins_all = torch.Tensor(ins_all).to(target.device).long()
-        if norm_in_batch:
+        if norm_in_batch==1:
             target_item = normalization_standard(target[ins_all])
             pred = normalization_standard(pred_ori)
         else:
@@ -219,28 +219,32 @@ class FuturesIndustryLoss(UncertaintyLoss):
             pred = pred_ori
         
         top_num = 2 if ins_all.shape[0]<16 else 3
-        # # 针对总体进行损失计算
-        # if all_elements_same(target_item) or all_elements_same(pred):
-        #     loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
-        # else:
-        #     loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
-        # loss_detail.append(loss)
+        # 针对总体进行损失计算
+        if all_elements_same(target_item) or all_elements_same(pred):
+            loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
+        else:
+            loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
+        loss_detail.append(loss)
         
-        # 针对每个小分类进行损失计算
-        for item in scale_arr:
-            ins = torch.Tensor(item['instruments']).to(pred.device).long() 
-            ins_inner,real_ins_index,_ = torch_intersect_indices(ins_all,ins)
-            if ins_inner.shape[0]<2:
-                loss_detail.append(torch.tensor(0).to(pred.device))
-                continue     
-            pred_norm = pred[real_ins_index]
-            target_norm_item = target_item[real_ins_index]
-            if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
-                loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
-            else:
-                loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=1,mid_num=1,need_mid=True)
-            loss_detail.append(loss_item)
-            loss = loss + loss_item
+        # # 针对每个小分类进行损失计算
+        # for item in scale_arr:
+        #     ins = torch.Tensor(item['instruments']).to(pred.device).long() 
+        #     ins_inner,real_ins_index,_ = torch_intersect_indices(ins_all,ins)
+        #     if ins_inner.shape[0]<2:
+        #         loss_detail.append(torch.tensor(0).to(pred.device))
+        #         continue     
+        #     if norm_in_batch==2:
+        #         pred_norm = normalization_standard(pred[real_ins_index])
+        #         target_norm_item = normalization_standard(target_item[real_ins_index])
+        #     else:
+        #         pred_norm = pred[real_ins_index]
+        #         target_norm_item = target_item[real_ins_index]                
+        #     if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
+        #         loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
+        #     else:
+        #         loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=1,mid_num=1,need_mid=True)
+        #     loss_detail.append(loss_item)
+        #     loss = loss + loss_item
         loss = loss/len(loss_detail)  
             
         return loss,torch.stack(loss_detail)
@@ -522,7 +526,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in trend_output.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=True)
+                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=1)
                             detail_trunk_loss_item.append(loss_detail)
                             loss_item += loss
                             cnt += 1
@@ -563,7 +567,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     ins_target = normalization_standard(ins_target_in_batch,dim=0)
                     cnt = 0
                     for k in range(ins_output_in_batch.shape[1]):
-                        if torch.sum(ins_target[:,k]==0)>ins_target.shape[0]-12:
+                        if (torch.sum(ins_target[:,k]==0)>ins_target.shape[0]-12) or (torch.sum(ins_out[:,k]==0)>ins_target.shape[0]-12):
                             continue
                         cls_loss[i] += self.compute_batch_with_time_section_loss(ins_out[:,k], ins_target[:,k],future_week_info,top_num=3,mid_num=3)
                         cnt += 1
