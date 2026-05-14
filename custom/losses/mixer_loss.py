@@ -598,11 +598,21 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     loss = 0
                     cnt = 0
                     for key in trend_output:
+                        target_all = []
+                        trend_all = []
                         for inner_key in trend_output[key]:
-                            target_norm = normalization_standard(trend_target[key][inner_key])
-                            trend_norm = normalization_standard(trend_output[key][inner_key])
-                            loss += self.compute_top_loss(trend_norm, target_norm,top_num=4,mid_num=4,need_mid=True)
-                            cnt += 1
+                            target_all.append(trend_target[key][inner_key])
+                            trend_all.append(trend_output[key][inner_key])
+                            # target_norm = normalization_standard(trend_target[key][inner_key])
+                            # trend_norm = normalization_standard(trend_output[key][inner_key])
+                            # loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
+                            # cnt += 1
+                        trend_all = torch.stack(trend_all).mean(0)
+                        target_all = torch.stack(target_all).mean(0)
+                        target_norm = normalization_standard(target_all)
+                        trend_norm = normalization_standard(trend_all)   
+                        loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
+                        cnt += 1                                             
                     cls_loss[i] = loss/cnt
                     # if optimizers_idx==-1:
                     #     scale_target_class_total = torch.cat(scale_target_class_total)

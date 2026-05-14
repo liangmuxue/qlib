@@ -69,7 +69,7 @@ task:
             scheduler_config: 
                start_factor: 1
                end_factor: 0.05
-               total_iters: 6e3
+               total_iters: 1e4
                # T_0: 10 # 初始周期
                # T_mult: 2  # 周期倍增
                # eta_min: 1e-6  # 最小学习率
@@ -145,7 +145,7 @@ task:
                 ext_column: ['near_basis_rate','dom_basis_rate']
                 target_column: ['diff_range_norm','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
-                future_covariate_col: ['year','dayofweek','month','day']   
+                future_covariate_col: ['year','dayofweek','month','day','week']   
                 past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
