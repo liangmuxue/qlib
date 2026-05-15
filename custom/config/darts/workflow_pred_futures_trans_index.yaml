@@ -59,17 +59,17 @@ task:
             n_jobs: 20
             log_every_n_steps: 5
             type: 'pred_futures_trans'
-            n_epochs : 180
+            n_epochs : 180            # 统合计算准确率数值
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"
-            pred_index_data_path: "pred_index_data.csv" 
+            pred_index_data_path: "" 
             load_index_data: False
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05
-               # total_iters: 6e3
+               # total_iters: 1e4
                T_0: 10 # 初始周期
                T_mult: 2  # 周期倍增
                eta_min: 1e-6  # 最小学习率
@@ -145,7 +145,7 @@ task:
                 ext_column: ['near_basis_rate','dom_basis_rate']
                 target_column: ['diff_range_norm','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
-                future_covariate_col: ['year','dayofweek','month','day']   
+                future_covariate_col: ['year','dayofweek','month','day','week']   
                 past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
                                   ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
