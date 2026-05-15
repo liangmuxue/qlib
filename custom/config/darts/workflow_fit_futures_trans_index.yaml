@@ -83,7 +83,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transMulIndexNumLoss_2411"
+               model_name: "Futures_cleanDataAllCutlen2_transMulIndexValLoss_2411"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -103,7 +103,7 @@ task:
                dropout: 0.3
                opt_size: 1
                past_split: [[0,15],[15,30]]
-               target_mode: [3,2,2,1,3]
+               target_mode: [0,2,2,1,3]
                scale_mode: [1,1,2,2,0]
                filter_conv_index: -1
                loss_top_num: 1

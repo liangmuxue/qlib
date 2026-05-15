@@ -1446,11 +1446,13 @@ class FuturesTransformerModule(MlpModule):
         mode = 'single'
         # 同时从正反2个方向选取品种
         cancidate_list = self.compute_arg_sort_by_branch_trend(features, trend_data,top_num=top_num,batch_no=batch_no,date=date,
-                                trend_result=trend_result)      
+                                trend_result=trend_result)     
+        # cancidate_list = self.compute_arg_sort_by_trend(features, trend_data,top_num=top_num,batch_no=batch_no,date=date,
+        #                         trend_result=trend_result)              
                           
         return cancidate_list
 
-    def compute_arg_sort_by_trend(self, features, combine_index,date=None, top_num=2,batch_no=0):
+    def compute_arg_sort_by_trend(self, features, combine_index,date=None,trend_result=None, top_num=2,batch_no=0):
         """根据输出进行排序"""
         
         
