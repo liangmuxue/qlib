@@ -139,14 +139,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
         #     cnt += 1
         for week_no in week.unique():
             idx = torch.where(week==week_no)[0]
-            # loss += self.compute_top_loss(pred[idx], target[idx],top_num=1,mid_num=1,need_mid=True)  
             if all_elements_same(target[idx]) or all_elements_same(pred[idx]):
                 loss += self.mse_loss(pred[idx].unsqueeze(0), target[idx].unsqueeze(0))  
             else:
-                loss += self.ccc_loss_comp(pred[idx], target[idx])  
+                # loss += self.ccc_loss_comp(pred[idx], target[idx])  
+                loss += self.compute_top_loss(pred[idx], target[idx],top_num=1,mid_num=1,need_mid=True)  
             cnt += 1
-        loss = loss/cnt
-        
+        if cnt>0:
+            loss = loss/cnt
+        else:
+            loss = self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
         return loss   
                             
     def compute_top_loss(self,pred,target,top_num=3,mid_num=3,need_mid=False,return_index=False):
@@ -609,8 +611,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             # cnt += 1
                         trend_all = torch.stack(trend_all).mean(0)
                         target_all = torch.stack(target_all).mean(0)
-                        target_norm = normalization_standard(target_all)
-                        trend_norm = normalization_standard(trend_all)   
+                        target_norm = target_all # normalization_standard(target_all)
+                        trend_norm = trend_all # normalization_standard(trend_all)   
                         loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
                         cnt += 1                                             
                     cls_loss[i] = loss/cnt

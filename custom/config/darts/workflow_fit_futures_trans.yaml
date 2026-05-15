@@ -67,12 +67,12 @@ task:
             pred_index_data_path: "" 
             load_index_data: False
             scheduler_config: 
-               start_factor: 1
-               end_factor: 0.05
-               total_iters: 1e4
-               # T_0: 10 # 初始周期
-               # T_mult: 2  # 周期倍增
-               # eta_min: 1e-6  # 最小学习率
+               # start_factor: 1
+               # end_factor: 0.05
+               # total_iters: 1e4
+               T_0: 10 # 初始周期
+               T_mult: 2  # 周期倍增
+               eta_min: 1e-6  # 最小学习率
             optimizer_kwargs:
                lr: 1e-3
                betas: [0.9,0.999]
@@ -83,7 +83,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transScaleLoss_2411"
+               model_name: "Futures_cleanDataAllCutlen2_transInBatchLoss_2411"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -103,7 +103,7 @@ task:
                dropout: 0.3
                opt_size: 1
                past_split: [[0,15],[15,30]]
-               target_mode: [5,1,2,1,3]
+               target_mode: [1,1,2,1,3]
                scale_mode: [1,1,2,2,0]
                filter_conv_index: -1
                loss_top_num: 1
