@@ -158,7 +158,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
         else:
             loss = self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
 
-        
         return loss   
                             
     def compute_top_loss(self,pred,target,top_num=3,mid_num=3,need_mid=False,return_index=False):
@@ -615,8 +614,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for inner_key in trend_output[key]:
                             target_all.append(trend_target[key][inner_key])
                             trend_all.append(trend_output[key][inner_key])
-                            target_norm = normalization_standard(trend_target[key][inner_key])
-                            trend_norm = normalization_standard(trend_output[key][inner_key])
+                            target_norm = trend_target[key][inner_key] # normalization_standard(trend_target[key][inner_key])
+                            trend_norm = trend_output[key][inner_key] # normalization_standard(trend_output[key][inner_key])
                             loss += self.compute_batch_with_time_section_loss(trend_norm, target_norm,future_week_info,top_num=3,mid_num=3)
                             # loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
                             cnt += 1
