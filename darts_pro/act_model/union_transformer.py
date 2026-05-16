@@ -540,7 +540,7 @@ class AttScaleFeature(nn.Module):
         # TOP值选取网络
         sample_dim_inner = ins_arr.shape[0]
         ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
-                            layer_norm=False,batch_norm=True,dropout=dropout)
+                            layer_norm=True,batch_norm=False,dropout=dropout)
         self.ins_layer = ins_layer_inner
         # 分支趋势计算网络
         trend_logits_layer = {}
@@ -633,7 +633,7 @@ class SparseGateFeatureTopK(nn.Module):
             features_list[key] = scale_features
             trend_logits_list[key] = trend_index_logits
         trend_list = self.branch_trend_combine_layer(x).squeeze(-1)
-        # trend_list = self.branch_trend_combine_layer_bn(trend_list)
+        trend_list = self.branch_trend_combine_layer_bn(trend_list)
         
         return features_list,trend_list,trend_logits_list
 
