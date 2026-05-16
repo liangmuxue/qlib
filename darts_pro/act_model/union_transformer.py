@@ -633,7 +633,7 @@ class SparseGateFeatureTopK(nn.Module):
             features_list[key] = scale_features
             trend_logits_list[key] = trend_index_logits
         trend_list = self.branch_trend_combine_layer(x).squeeze(-1)
-        trend_list = self.branch_trend_combine_layer_bn(trend_list)
+        # trend_list = self.branch_trend_combine_layer_bn(trend_list)
         
         return features_list,trend_list,trend_logits_list
 
