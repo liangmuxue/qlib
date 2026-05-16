@@ -432,7 +432,7 @@ class FuturesTransformerModule(MlpModule):
             mt_optimizer = MultiTaskOptimizer(nn.ModuleList(self.sub_models)[i].parameters(), optimizer_kws,
                             model=self.sub_models[i], task_weights=task_weights, main_task_seq=self.main_task_seq[i],grad_limits=self.grad_limits,
                             use_gradient_surgery=use_gradient_surgery_flag,
-                            use_adaptive_clip=False, use_pcgrad=self.use_pcgrad)  
+                            use_adaptive_clip=False, use_pcgrad=self.use_pcgrad,parent=self)  
             optimizers.append(mt_optimizer)
         # 对应优化器，生成多个学习率
         lr_schedulers = []

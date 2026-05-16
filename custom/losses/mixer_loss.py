@@ -531,7 +531,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in trend_output.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=0)
+                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2)
                             detail_trunk_loss_item.append(loss_detail)
                             loss_item += loss
                             cnt += 1
@@ -605,9 +605,9 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for inner_key in trend_output[key]:
                             target_all.append(trend_target[key][inner_key])
                             trend_all.append(trend_output[key][inner_key])
-                            target_norm = trend_target[key][inner_key] # normalization_standard(trend_target[key][inner_key])
-                            trend_norm = trend_output[key][inner_key] # normalization_standard(trend_output[key][inner_key])
-                            loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
+                            target_norm = normalization_standard(trend_target[key][inner_key])
+                            trend_norm = normalization_standard(trend_output[key][inner_key])
+                            loss += self.compute_top_loss(trend_norm, target_norm,top_num=1,mid_num=1,need_mid=True)
                             cnt += 1
                         # trend_all = torch.stack(trend_all).mean(0)
                         # target_all = torch.stack(target_all).mean(0)

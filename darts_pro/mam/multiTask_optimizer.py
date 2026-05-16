@@ -182,10 +182,11 @@ def analyze_gradient_conflicts(gradient_components,multi_mode=False):
     return conflict_analysis
 
 class MultiTaskGradientCalculator():
-    def __init__(self, model, task_weights=None,grad_limits=None):
+    def __init__(self, model, task_weights=None,grad_limits=None,parent=None):
         self.model = model
         self.task_weights = task_weights
         self.grad_limits = grad_limits
+        self.parent = parent
         
     def compute_gradients(self, task_losses: List[torch.Tensor],return_components: bool = True,epoch_num=0):
         """
@@ -214,7 +215,7 @@ class MultiTaskGradientCalculator():
                 
                 loss = self.task_weights[i] * loss   
                 loss_total = loss_total + loss        
-            loss_total.backward()          
+            self.parent.manual_backward(loss_total)        
             return self._get_parameter_gradients()
     
     def _compute_gradient_components(self, task_losses,epoch_num=0):
@@ -228,9 +229,9 @@ class MultiTaskGradientCalculator():
             # 计算单个任务的梯度，保留计算图，后续统一处理
             weighted_loss = task_loss
             if i==len(task_losses)-1:
-                weighted_loss.backward()     
+                self.parent.manual_backward(weighted_loss)  
             else:
-                weighted_loss.backward(retain_graph=True)  
+                self.parent.manual_backward(weighted_loss, retain_graph=True)
             loss_total.append(weighted_loss)
             # 获取该任务的梯度贡献
             task_grads = {}
@@ -253,15 +254,17 @@ class MultiTaskGradientCalculator():
 class MultiTaskOptimizer(Adam):
     
     def __init__(self, params, defaults_dict,model=None,task_weights=None,helpful_compute_step=10,grad_limits=None,use_gradient_surgery=True,
-                 use_adaptive_clip=False,main_task_seq=None,use_pcgrad=False,device=None):
+                 use_adaptive_clip=False,main_task_seq=None,use_pcgrad=False,device=None,parent=None):
         super().__init__(params, **defaults_dict)
+        
+        self.parent = parent
         self.model = model
         self.task_weights = task_weights
         self.grad_limits = grad_limits
         self.use_gradient_surgery = use_gradient_surgery
         self.use_adaptive_clip = use_adaptive_clip
         self.use_pcgrad = use_pcgrad
-        self.gradient_calculator = MultiTaskGradientCalculator(model, task_weights,grad_limits)
+        self.gradient_calculator = MultiTaskGradientCalculator(model, task_weights,grad_limits,parent=parent)
         self.accumulation_steps = 4
         self.gradients_recorder = []
         self.loss_recorder = []
@@ -455,12 +458,12 @@ class MultiTaskOptimizer(Adam):
         self.model.zero_grad() 
         # compute grad for two losses
         loss = task_losses[0] / self.accumulation_steps
-        loss.backward(retain_graph=True)
+        self.parent.manual_backward(loss,retain_graph=True)
         show_loss = show_loss + loss.item()
         gradients_cls = self.gradient_calculator._get_parameter_gradients()
         self.model.zero_grad() 
         loss = task_losses[1] / self.accumulation_steps
-        loss.backward(retain_graph=True)        
+        self.parent.manual_backward(loss,retain_graph=True)       
         show_loss = show_loss + loss.item()
         gradients_ce = self.gradient_calculator._get_parameter_gradients()
         # pc grad
@@ -498,7 +501,7 @@ class MultiTaskOptimizer(Adam):
             loss = loss / self.accumulation_steps
             loss = self.task_weights[loss_seq] * loss
             # 计算单个任务的梯度，保留计算图，后续统一处理
-            loss.backward(retain_graph=True)
+            self.parent.manual_backward(loss,retain_graph=True)
         # 获取该任务的梯度贡献
         task_grads = {}
         for name, param in self.model.named_parameters():
