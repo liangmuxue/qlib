@@ -124,15 +124,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
         week = future_week_info[:,1]
         loss = 0
         cnt = 0
-        # if all_elements_same(target) or all_elements_same(pred):
-        #     loss = self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
-        # else:
-        #     loss = self.compute_top_loss(pred, target,top_num=top_num,mid_num=mid_num,need_mid=True)
-        # cnt += 1
+        if all_elements_same(target) or all_elements_same(pred):
+            loss = self.mse_loss(pred.unsqueeze(0), target.unsqueeze(0))
+        else:
+            loss = self.compute_top_loss(pred, target,top_num=top_num,mid_num=mid_num,need_mid=True)
+        cnt += 1
         
         def _compute_item_loss(item_idx):
-            if item_idx.shape[0]<2:
-                return 0
+            if item_idx.shape[0]==1:
+                return torch.abs(target[item_idx] - pred[item_idx]).mean()
             target_item = target[item_idx]
             pred_item = pred[item_idx]
             target_item = normalization_standard(target_item)
@@ -150,7 +150,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             cnt += 1
         for week_no in week.unique():
             idx = torch.where(week==week_no)[0]
-            loss += _compute_item_loss(idx)
+            loss +=  _compute_item_loss(idx)
             cnt += 1
             
         if cnt>0:
@@ -617,7 +617,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             trend_all.append(trend_output[key][inner_key])
                             target_norm = normalization_standard(trend_target[key][inner_key])
                             trend_norm = normalization_standard(trend_output[key][inner_key])
-                            loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
+                            loss += self.compute_batch_with_time_section_loss(trend_norm, target_norm,future_week_info,top_num=3,mid_num=3)
+                            # loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
                             cnt += 1
                         # trend_all = torch.stack(trend_all).mean(0)
                         # target_all = torch.stack(target_all).mean(0)
