@@ -233,12 +233,12 @@ class FuturesIndustryLoss(UncertaintyLoss):
             pred = pred_ori
         
         top_num = 2
-        # # 针对总体进行损失计算
-        # if all_elements_same(target_item) or all_elements_same(pred):
-        #     loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
-        # else:
-        #     loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
-        # loss_detail.append(loss)
+        # 针对总体进行损失计算
+        if all_elements_same(target_item) or all_elements_same(pred):
+            loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
+        else:
+            loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
+        loss_detail.append(loss)
         
         # 针对每个小分类进行损失计算
         for item in scale_arr:
