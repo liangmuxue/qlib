@@ -73,7 +73,7 @@ class TensorViz(object):
                     )
             )               
         
-    def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None,x_range=None,ytickmin=None,ytickmax=None):
+    def viz_matrix_var(self,data,win="matrix",names=None,desc=None,title=None,xtickvals=None,xticklabels=None,x_range=None,ytickmin=None,ytickmax=None):
         length = data.shape[1]
         ts = data.shape[0]
         if x_range is None:
@@ -102,6 +102,9 @@ class TensorViz(object):
                 if ytickmin is not None:
                     opts["ytickmin"] = ytickmin
                     opts["ytickmax"] = ytickmax
+                if xticklabels is not None:
+                    opts["xticklabels"] = xticklabels 
+                    opts["xtickvals"] = xtickvals                     
                 self.viz.line(
                     X=x_range_in,
                     Y=viz_line_data,
@@ -118,7 +121,6 @@ class TensorViz(object):
                     name=line_name,
                     update='append',
                 )
-                
     def viz_bar_compare(self,data,win="compare",rownames=None,title=None,legends=None):    
         """柱状图（多柱并列）"""
 

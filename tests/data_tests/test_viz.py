@@ -533,7 +533,35 @@ def test_group_bar():
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
     plt.show()  
-    a
+
+def test_visdom():
+    import visdom
+    import numpy as np
+    
+    viz = visdom.Visdom()
+    
+    x = np.arange(0, 100, 1)
+    y = np.sin(x / 10)
+    
+    viz.line(
+        Y=y,
+        X=x,
+        win="custom_xaxis",
+        opts=dict(
+            title="X Cus",
+            xlabel="IterNum",
+            ylabel="Loss",
+            xtickmin=0,
+            xtickmax=100,
+            xtickstep=20,
+            # ����������+������
+            # xtickvals=[0, 20, 50, 100],
+            # xticklabels=["start", "20", "mid", "end"],
+            xtickfont=dict(size=11),
+            width=700,
+            height=400
+        )
+    )
       
 if __name__ == "__main__":
     # test_dbscan()
@@ -541,7 +569,8 @@ if __name__ == "__main__":
     # test_matirx_view()
     # test_bound()
     # test_tensorboard_viz()
-    test_group_bar()
+    # test_group_bar()
+    test_visdom()
         
     
     

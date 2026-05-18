@@ -392,4 +392,16 @@ class TFTFuturesDataset(TFTSeriesDataset):
         
         return dict_list,df_mean_norm_total
     
+    def get_exchange(self,exchange_id):
+        
+        sql = 'select code,short_name from futures_exchange where id={}'.format(exchange_id)
+        results = self.dbaccessor.do_query(sql)
+        return results[0]
+
+    def get_industry_by_code(self,indus_code):
+        
+        sql = 'select code,name from futures_industry where code=\'{}\''.format(indus_code)
+        results = self.dbaccessor.do_query(sql)
+        return results[0]
+            
         

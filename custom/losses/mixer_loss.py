@@ -232,7 +232,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             target_item = target[ins_all]
             pred = pred_ori
         
-        top_num = 2
+        top_num = 1
         # 针对总体进行损失计算
         if all_elements_same(target_item) or all_elements_same(pred):
             loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
