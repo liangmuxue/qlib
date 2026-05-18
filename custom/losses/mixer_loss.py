@@ -232,14 +232,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
             target_item = target[ins_all]
             pred = pred_ori
         
-        top_num = 1
-        # 针对总体进行损失计算
-        if all_elements_same(target_item) or all_elements_same(pred):
-            loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
-        else:
-            loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
-        loss_detail.append(loss)
         
+        # 针对总体进行损失计算
+        # if all_elements_same(target_item) or all_elements_same(pred):
+        #     loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
+        # else:
+        #     loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
+        # loss_detail.append(loss)
+        
+        detail_top_num = 2
         # 针对每个小分类进行损失计算
         for item in scale_arr:
             ins = torch.Tensor(item['instruments']).to(pred.device).long() 
@@ -256,7 +257,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:
-                loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=1,mid_num=1,need_mid=True)
+                loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=detail_top_num,mid_num=detail_top_num,need_mid=True)
             loss_detail.append(loss_item)
             loss = loss + loss_item
         loss = loss/len(loss_detail)  

@@ -226,7 +226,19 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0,dataset=None):
                     continue
                 item = {'p0':p0,'p1':key,'instruments':np.array(items[key])}
                 scale_data.append(item)
-        scale_data = pd.DataFrame(scale_data)                     
+        scale_data = pd.DataFrame(scale_data)    
+    if mode==5:
+        # 按照行业类别以及交易所分组
+        indus_codes = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
+        for i,indus_code in enumerate(indus_codes):
+            ins = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,i)
+            p0 = indus_code
+            p1 = indus_code
+            _,indus_name = dataset.get_industry_by_code(indus_code[3:].lower())
+            item = {'p0':indus_code,'p0_code':indus_code,'p0_name':indus_name,'p1':indus_code,'p1_name':indus_name,'p1_code':indus_code,'instruments':ins}
+            scale_data.append(item)
+        scale_data = pd.DataFrame(scale_data)   
+                                 
     return scale_data
 
 class FuturesTransformerModule(MlpModule):
@@ -267,7 +279,7 @@ class FuturesTransformerModule(MlpModule):
         self.mode = None
         self.train_sw_ins_mappings = train_sw_ins_mappings
         self.valid_sw_ins_mappings = valid_sw_ins_mappings
-        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=2,dataset=global_var.get_value("dataset"))
+        self.scale_arr = build_mul_scale_arr(train_sw_ins_mappings,mode=5,dataset=global_var.get_value("dataset"))
         self.target_mode = target_mode
         self.scale_mode = scale_mode
         self.cut_len = cut_len
