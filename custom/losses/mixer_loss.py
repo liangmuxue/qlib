@@ -217,11 +217,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss        
 
-    def compute_multi_trunk_loss(self,pred_ori,target,key=None,norm_in_batch=0):
+    def compute_multi_trunk_loss(self,pred_ori,target,key=None,norm_in_batch=0,detail_trunk_loss=None):
         """按照业务属性，分片比较"""
 
         scale_arr = self.scale_dict[key].values()
-        loss_detail = []
+        loss_detail = {}
         loss = 0
         ins_all = np.concatenate([item['instruments'] for item in scale_arr])
         ins_all = torch.Tensor(ins_all).to(target.device).long()
@@ -232,15 +232,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
             target_item = target[ins_all]
             pred = pred_ori
         
-        
-        # 针对总体进行损失计算
+        # top_num = 2
+        # # 针对总体进行损失计算
         # if all_elements_same(target_item) or all_elements_same(pred):
         #     loss += self.mse_loss(pred.unsqueeze(0), target_item.unsqueeze(0))
         # else:
         #     loss += self.compute_top_loss(pred, target_item,top_num=top_num,mid_num=top_num,need_mid=True)   
-        # loss_detail.append(loss)
+        # loss_detail[key] = loss
         
-        detail_top_num = 2
+        detail_top_num = 1
         # 针对每个小分类进行损失计算
         for item in scale_arr:
             ins = torch.Tensor(item['instruments']).to(pred.device).long() 
@@ -258,11 +258,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:
                 loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=detail_top_num,mid_num=detail_top_num,need_mid=True)
-            loss_detail.append(loss_item)
+            loss_key = item['p0_code'] + "_" + item['p1_code']
+            if loss_key in detail_trunk_loss:
+                loss_detail[loss_key] = torch.cat([loss_detail[loss_key],torch.Tensor([loss_item])])
+            else:
+                loss_detail[loss_key] = torch.Tensor([loss_item])
+                
             loss = loss + loss_item
-        loss = loss/len(loss_detail)  
+        loss = loss/len(loss_detail.keys())  
             
-        return loss,torch.stack(loss_detail)
+        return loss,loss_detail
 
     def compute_multi_trend_loss(self,pred,target,key=None,ins_inner=None,ins_rel_index=None):
 
@@ -476,7 +481,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 target_info_total = []
                 batch_size = 0
-                detail_trunk_loss = []
+                detail_trunk_loss = {}
                 price_diff_rate = torch.zeros(target_class.shape[0]).to(target_class.device)
                 trend_output = {}
                 trend_target = {}
@@ -541,14 +546,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in trend_output.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2)
-                            detail_trunk_loss_item.append(loss_detail)
+                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2,detail_trunk_loss=detail_trunk_loss)
                             loss_item += loss
                             cnt += 1
                         loss_item = loss_item/cnt
                         cls_loss[i] += loss_item
-                        detail_trunk_loss_item = torch.concat(detail_trunk_loss_item)  
-                        detail_trunk_loss.append(detail_trunk_loss_item)
                         batch_size += 1                                   
                     elif target_mode==3:
                         for key in trend_output.keys():
@@ -593,8 +595,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if target_mode in [2,5]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
                     # ce_loss[i] = ce_loss[i]/batch_size  
-                    detail_trunk_loss = torch.stack(detail_trunk_loss).to(target_class.device)
-                    detail_loss = detail_trunk_loss.mean(0)
+                    # detail_trunk_loss = torch.stack(detail_trunk_loss).to(target_class.device)
+                    detail_loss = {}
+                    for key in detail_trunk_loss.keys():
+                        detail_loss[key] = detail_trunk_loss[key].mean()
                     
                     # ins_out = normalization_standard(ins_output_in_batch)
                     # ins_target = normalization_standard(ins_target_in_batch)
@@ -609,6 +613,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if target_mode in [0,3]:
                     loss = 0
                     cnt = 0
+                    detail_loss = {}
                     for key in trend_output:
                         target_all = []
                         trend_all = []
@@ -617,7 +622,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             trend_all.append(trend_output[key][inner_key])
                             target_norm = trend_target[key][inner_key] # normalization_standard(trend_target[key][inner_key])
                             trend_norm = trend_output[key][inner_key] # normalization_standard(trend_output[key][inner_key])
-                            loss += self.compute_batch_with_time_section_loss(trend_norm, target_norm,future_week_info,top_num=3,mid_num=3)
+                            d_loss = self.compute_batch_with_time_section_loss(trend_norm, target_norm,future_week_info,top_num=3,mid_num=3)
+                            log_key = key + "_" + inner_key
+                            detail_loss[log_key] = d_loss
+                            loss += d_loss
                             # loss += self.compute_top_loss(trend_norm, target_norm,top_num=3,mid_num=3,need_mid=True)
                             cnt += 1
                         # trend_all = torch.stack(trend_all).mean(0)

@@ -252,14 +252,14 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0,dataset=None):
         
         for i,indus_code in enumerate(indus_codes):
             ins = FuturesMappingUtil.get_instrument_rel_index_within_industry(sw_ins_mappings,i)
-            p0 = indus_code
-            _,indus_name = dataset.get_industry_by_code(indus_code[3:].lower())
+            p0 = indus_code[3:].lower()
+            _,indus_name = dataset.get_industry_by_code(p0)
             items = check_in_exchange(ins)
             for key in items.keys():
                 if len(items[key])<=2:
                     continue
                 p1_code,p1_name = dataset.get_exchange(key)            
-                item = {'p0':indus_code,'p0_code':indus_code,'p0_name':indus_name,'p1':p1_code,'p1_name':p1_name,'p1_code':indus_code,'instruments':items[key]}
+                item = {'p0':p0,'p0_code':p0,'p0_name':indus_name,'p1':p1_code,'p1_name':p1_name,'p1_code':p1_code,'instruments':np.array(items[key])}
                 scale_data.append(item)
         scale_data = pd.DataFrame(scale_data) 
                                          
@@ -649,8 +649,8 @@ class FuturesTransformerModule(MlpModule):
             if cls_loss[i] != 0:
                 self.log("train_cls_loss_{}".format(i), cls_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
                 if cls_detail is not None:
-                    for j in range(cls_detail.shape[0]):
-                        self.log("train_trunk_detail_{}".format(j), cls_detail[j], batch_size=train_batch[0].shape[0], prog_bar=False,sync_dist=True)                
+                    for key in cls_detail.keys():
+                        self.log("train_trunk_detail_{}".format(key), cls_detail[key], batch_size=train_batch[0].shape[0], prog_bar=False,sync_dist=True)                
             if ce_loss[i] != 0:
                 self.log("train_ce_loss_{}".format(i), ce_loss[i], batch_size=train_batch[0].shape[0], prog_bar=False)
             if fds_loss[i] != 0:
@@ -812,8 +812,8 @@ class FuturesTransformerModule(MlpModule):
             if cls_loss[i] != 0:
                 self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
                 if cls_detail is not None:
-                    for j in range(cls_detail.shape[0]):
-                        self.log("val_trunk_detail_{}".format(j), cls_detail[j], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)
+                    for key in cls_detail.keys():
+                        self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)  
             if fds_loss[i] != 0 and len(task_weights) > 2:
                 self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
             if corr_loss[i] != 0 and len(task_weights) > 3:
