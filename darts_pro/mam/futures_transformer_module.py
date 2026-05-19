@@ -1070,6 +1070,7 @@ class FuturesTransformerModule(MlpModule):
         xtickvals = np.arange(0,len(xticklabels),5).tolist()
         xticklabels = [xticklabels[i] for i in xtickvals]
         x_range = pd.to_datetime(trend_result['date'].astype(str)).dt.strftime('%Y-%m-%d').unique() 
+        # 小类趋势
         for i,row in self.scale_arr.iterrows():
             p0 = row['p0']
             p1 = row['p1']
@@ -1079,7 +1080,7 @@ class FuturesTransformerModule(MlpModule):
             view_data = item[['pred_trend_value','real_trend_values','pred_trend_value_scale','real_trend_values_scale']].values
             # x_range = item['date'].values
             viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
-        
+        # 大类趋势
         names = ['pred_scale','target_scale'] 
         for p0 in self.scale_arr['p0'].unique():
             p0_name = self.scale_arr[self.scale_arr['p0']==p0]['p0_name'].values[0]
@@ -1088,6 +1089,12 @@ class FuturesTransformerModule(MlpModule):
             title = "bt_p0:{}".format(p0_name)              
             view_data = item.groupby('date')[['pred_trend_value_scale','real_trend_values_scale']].mean().values
             viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
+        # 整体趋势
+        win = "batch_trend_all_{}".format(date)
+        title = "bt_all:{}".format(date)          
+        view_data = trend_result.groupby('date')[['pred_trend_value_scale','real_trend_values_scale']].mean().values
+        viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)          
+        
 
     def draw_section_visdom(self,trend_result,date):
         """分类趋势比较可视化"""
