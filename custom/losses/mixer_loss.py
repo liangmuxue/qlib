@@ -557,9 +557,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             loss_item += self.mse_loss(normalization_standard(pred_data).unsqueeze(0),normalization_standard(p0_cate_target).unsqueeze(0))
                         else:
                             loss_item += self.ccc_loss_comp(normalization_standard(pred_data),normalization_standard(p0_cate_target))
-                        loss_item = loss_item/cnt
-                        cls_loss[i] += loss_item
-                        batch_size += 1      
+                        if cnt>0:
+                            loss_item = loss_item/cnt
+                            cls_loss[i] += loss_item
+                            batch_size += 1      
                     if target_mode in [5]:
                         # 根据网络输出，生成针对性业务分支输出,并依次计算损失
                         scale_output = sv[0]
