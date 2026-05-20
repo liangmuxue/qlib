@@ -523,7 +523,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         pred_data = sw_index_data[0][j]
                         loss_item = 0
                         cnt = 0
-                        p0_cate_target = []
+                        p0_cate_target = torch.zeros(pred_data.shape[0]).to(target_class.device)
                         data_idx = 0
                         for scale_item in self.scale_arr:
                             p0 = scale_item['p0']
@@ -538,29 +538,31 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 ins_p1 = torch.Tensor(p1_item['instruments']).to(target_class.device).long()
                                 ins_p1 = tensor_intersect(ins_p1, ins_rel_index)
                                 ins_diff_item = ins_diff[ins_p1]
-                                pred_data_item = pred_data[data_idx]         
-                                p0_cate_target.append(ins_diff_item.mean())                       
-                                p1_cate_pred.append(pred_data_item)
+                                p1_cate_pred.append(pred_data[data_idx])
+                                if ins_p1.shape[0]==0:
+                                    data_idx += 1  
+                                    continue
+                                p0_cate_target[data_idx] = ins_diff_item.mean()                      
                                 p1_cate_target.append(ins_diff_item.mean())
-                                data_idx += 1
+                                data_idx += 1  
+                                
                             if len(p1_cate_target)>1:
                                 p1_cate_target = torch.stack(p1_cate_target)    
-                                p1_cate_pred = torch.stack(p1_cate_pred)   
+                                p1_cate_pred = torch.stack(p1_cate_pred) 
                                 if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
                                     loss_item += self.mse_loss(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
                                 else:
                                     loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
                                 cnt += 1                               
                         # 比较大类
-                        p0_cate_target = torch.stack(p0_cate_target)
-                        if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
+                        if all_elements_same(p0_cate_target) or all_elements_same(pred_data):
                             loss_item += self.mse_loss(normalization_standard(pred_data).unsqueeze(0),normalization_standard(p0_cate_target).unsqueeze(0))
                         else:
                             loss_item += self.ccc_loss_comp(normalization_standard(pred_data),normalization_standard(p0_cate_target))
-                        if cnt>0:
-                            loss_item = loss_item/cnt
-                            cls_loss[i] += loss_item
-                            batch_size += 1      
+                        cnt += 1
+                        loss_item = loss_item/cnt
+                        cls_loss[i] += loss_item
+                        batch_size += 1                        
                     if target_mode in [5]:
                         # 根据网络输出，生成针对性业务分支输出,并依次计算损失
                         scale_output = sv[0]
@@ -570,7 +572,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in trend_output.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2,detail_trunk_loss=detail_trunk_loss)
+                            loss,loss_detail = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=1,detail_trunk_loss=detail_trunk_loss)
                             loss_item += loss
                             cnt += 1
                         loss_item = loss_item/cnt
