@@ -538,27 +538,27 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 ins_p1 = torch.Tensor(p1_item['instruments']).to(target_class.device).long()
                                 ins_p1 = tensor_intersect(ins_p1, ins_rel_index)
                                 ins_diff_item = ins_diff[ins_p1]
-                                p1_cate_pred.append(pred_data[data_idx])
                                 if ins_p1.shape[0]==0:
                                     data_idx += 1  
                                     continue
                                 p0_cate_target[data_idx] = ins_diff_item.mean()                      
                                 p1_cate_target.append(ins_diff_item.mean())
+                                p1_cate_pred.append(pred_data[data_idx])
                                 data_idx += 1  
                                 
-                            if len(p1_cate_target)>1:
-                                p1_cate_target = torch.stack(p1_cate_target)    
-                                p1_cate_pred = torch.stack(p1_cate_pred) 
-                                if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
-                                    loss_item += self.mse_loss(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
-                                else:
-                                    loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
-                                cnt += 1                               
+                            # if len(p1_cate_target)>1:
+                            #     p1_cate_target = torch.stack(p1_cate_target)    
+                            #     p1_cate_pred = torch.stack(p1_cate_pred) 
+                            #     if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
+                            #         loss_item += self.mse_lossreturn_index(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
+                            #     else:
+                            #         loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
+                            #     cnt += 1                               
                         # 比较大类
                         if all_elements_same(p0_cate_target) or all_elements_same(pred_data):
                             loss_item += self.mse_loss(normalization_standard(pred_data).unsqueeze(0),normalization_standard(p0_cate_target).unsqueeze(0))
                         else:
-                            loss_item += self.ccc_loss_comp(normalization_standard(pred_data),normalization_standard(p0_cate_target))
+                            loss_item += self.compute_top_loss(normalization_standard(pred_data),normalization_standard(p0_cate_target), top_num=1, mid_num=1, need_mid=True)
                         cnt += 1
                             
                         if cnt>0:
