@@ -1461,11 +1461,12 @@ class FuturesTransformerModule(MlpModule):
                     coll_results.append([imp_idx, ts["instrument"], overroll_trend])                    
                 continue
 
-            # 验证准确性
+            # 验证趋势预测准确度
+            trend_result = self.eva_total_trend(trend_result,trend_target,batch_no=i)
+            # 验证品种预测准确性
             coll_results = self.collect_result_compindex(date=date, target_info=target_info_list, 
                                     result_list=result_list,trend_target=trend_target, keep_index=keep_index)  
-            # 统合计算准确率数值
-            trend_result = self.eva_total_trend(trend_result,trend_target,batch_no=i)     
+  
             # 把趋势数据同步到品种选择结果中
             coll_results['trend_eva_diff'] = np.abs(coll_results['pred_trend_value'].values - coll_results['real_trend_values'].values)
             for i,row in coll_results.iterrows():
@@ -1512,8 +1513,18 @@ class FuturesTransformerModule(MlpModule):
         """生成涨幅达标的预测数据下标"""
         
         (features, trend_data,trend_logits_item) = output_data
-        
-        trend_result = self.compute_branch_trend(trend_logits_item, date=date,batch_no=batch_no)
+
+        # 根据配置，从指数预测结果中加载数据
+        if len(self.pred_index_data_path)>3 and self.load_index_data:
+            pred_data_path = os.path.join(RESULT_FILE_PATH, self.pred_index_data_path)
+            trend_result = pd.read_csv(pred_data_path)
+        else:
+            pred_data_path = os.path.join(RESULT_FILE_PATH, self.pred_index_data_path)
+            trend_result = self.compute_branch_trend(trend_logits_item, date=date,batch_no=batch_no)
+            # 对候选类别进行筛选
+            trend_result = self.sumup_trend(trend_result)            
+            trend_result.to_csv(pred_data_path)
+            
         import_index_list = self.strategy_top_bidi(features, trend_logits_item,pred_top_num=pred_top_num, trend_result=trend_result,
                                             batch_no=batch_no,date=date)
         # self.strategy_main_index(ce_values, cls_values, dec_out, pred_top_num=pred_top_num, target=target, target_info=target_info,
@@ -1539,10 +1550,16 @@ class FuturesTransformerModule(MlpModule):
                 pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
                 result.append([key,inner_key,date,trend_item,pred_trend_value,pred_trend_flag])
         result = pd.DataFrame(result,columns=columns)
+        # 汇总所有类别数据
+        total_pred_value = result[['pred_trend_value','pred_trend_value_scale']].mean().values
+        pred_trend_flag = self.get_trend_flag_from_value(total_pred_value[1])
+        total_row = {'p0':'total','p1':'total','date':result['date'].values[0],
+                     'pred_trend_value':total_pred_value[0],'pred_trend_value_scale':total_pred_value[1],'pred_trend_flag':pred_trend_flag}
+        result = pd.concat([result,pd.DataFrame(total_row, index=[0])])
         
         return result
             
-    def strategy_top_bidi(self, features, trend_data,pred_top_num=2, trend_result=None,batch_no=0,date=None):
+    def strategy_top_bidi(self, features, trend_data,pred_top_num=2,trend_result=None,batch_no=0,date=None):
         """筛选品种明细,使用双向模式"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -1550,75 +1567,84 @@ class FuturesTransformerModule(MlpModule):
         top_num = pred_top_num
         cancidate_list = []
         mode = 'single'
-        # 同时从正反2个方向选取品种
-        cancidate_list = self.compute_arg_sort_by_branch_trend(features, trend_data,top_num=top_num,batch_no=batch_no,date=date)     
-        cancidate_list['is_can'] = 0
         
-        ###### 对候选使用综合策略再次筛选 ######
-        p0_trend,strategy_flag = self.sumup_trend(trend_result)
-        # 根据整体趋势标志，确定候选大类
-        if strategy_flag==2:
-            can_p0 = np.stack([p0_trend.iloc[-2:]['p0'].values,np.array([1,1])])
-        elif strategy_flag==0:
-            can_p0 = np.stack([p0_trend.iloc[:2]['p0'].values,np.array([-1,-1])])            
-        else:
-            can_p0 = np.array([[p0_trend.iloc[-1]['p0'],p0_trend.iloc[0]['p0']],[1,-1]])   
-        can_p0 = pd.DataFrame(can_p0.transpose(1,0),columns=['p0','trend_flag'])
-        can_p0['trend_flag'] = can_p0['trend_flag'].astype(int)
-        # 依据候选大类，进一步筛选品种
-        can_ins_cnt = 0
-        can_ins = []
-        for i,row in can_p0.iterrows():
-            p0 = row['p0']
-            trend_flag = row['trend_flag']
-            # 分别从大类下的不同小类中选取品种
-            trend_result_p0 = trend_result[(trend_result['p0']==p0)].sort_values(by='pred_trend_value')
-            if trend_result_p0.shape[0]==1:
-                can_p1 = trend_result_p0['p1'].values
-            else:    
-                if trend_flag==1:
-                    can_p1 = trend_result_p0.iloc[-2:]['p1'].values
-                else:
-                    can_p1 = trend_result_p0.iloc[:2]['p1'].values 
-            # 从候选品种中选取趋势和大类一致的    
-            ins_trend_flag = 1 if trend_flag==1 else 0
-            match_ins = cancidate_list[(cancidate_list['p0']==p0)&(cancidate_list['p1'].isin(can_p1))&(cancidate_list['top_flag']==ins_trend_flag)]
-            if match_ins.shape[0]>top_num:
-                match_ins = match_ins.groupby("p1").first().reset_index()
-            for j,item in match_ins.iterrows():
-                can_ins.append([item['top_index'],ins_trend_flag])
-                can_ins_cnt += 1
-        can_ins = pd.DataFrame(can_ins,columns=['top_index','trend_flag'])
-        can_ins = can_ins.astype(int) 
-            
-        cancidate_list.loc[cancidate_list['top_index'].isin(can_ins['top_index'].values),'is_can'] = 1
-        cancidate_list_res = cancidate_list[cancidate_list['is_can']==1]
-        if cancidate_list_res.shape[0]==0:
-            print("ggg")
-        return cancidate_list_res
+        # 同时从正反2个方向选取品种
+        trend_result_can = trend_result[trend_result['is_can']==1]
+        cancidate_list = self.compute_arg_sort_by_trend(features, trend_data,trend_result=trend_result_can,batch_no=batch_no,date=date)     
+        
+        return cancidate_list
     
     def sumup_trend(self,trend_result):
+        """对类别趋势结果进行筛选，获取类别候选"""
         
-        p0_trend = []
-        for p0 in self.scale_arr['p0'].unique():
-            trend_result_item = trend_result[trend_result['p0']==p0]
-            p0_trend.append([p0,trend_result_item['pred_trend_value_scale'].mean()])
-        p0_trend = pd.DataFrame(np.array(p0_trend),columns=['p0','value'])
-        p0_trend['value'] = p0_trend['value'].astype(float)
-        p0_trend = p0_trend.sort_values(by='value')
-        # 取得一级分类趋势的最大最小候选
-        p0_min = p0_trend['value'].min()
-        p0_max = p0_trend['value'].max()
-        # 根据数值判断整体趋势
-        if p0_min>self.trend_threhold['long']:
-            strategy_flag = 2
-        elif p0_max<self.trend_threhold['short']:
-            strategy_flag = 0
+        trend_result['is_can'] = 0
+        trend_result['can_trend_flag'] = 0
+        trend_result['can_ins_num'] = 0
+        total_trend_flag = trend_result[trend_result['p0']=='total']['pred_trend_flag'].values[0]
+        trend_result = trend_result.sort_values(by='pred_trend_value_scale').reset_index()
+        # 211模式：如果总体趋势为多方，则取得2个多方小类（内部品种2+1），1个空方小类（内部品种1）。空方则反过来。趋势为平，则类别2+2，品种1+1+1+1
+        if total_trend_flag==1:
+            trend_result.loc[trend_result.index[-2:],'is_can'] = 1
+            trend_result.loc[trend_result.index[-2:],'can_trend_flag'] = 1
+            trend_result.loc[trend_result.index[-1],'can_ins_num'] = 2
+            trend_result.loc[trend_result.index[-2],'can_ins_num'] = 1
+            trend_result.loc[trend_result.index[0],'is_can'] = 1
+            trend_result.loc[trend_result.index[0],'can_trend_flag'] = 0
+            trend_result.loc[trend_result.index[0],'can_ins_num'] = 1
+        elif total_trend_flag==-1:
+            trend_result.loc[trend_result.index[:2],'is_can'] = 1
+            trend_result.loc[trend_result.index[:2],'can_trend_flag'] = 0
+            trend_result.loc[trend_result.index[0],'can_ins_num'] = 2
+            trend_result.loc[trend_result.index[1],'can_ins_num'] = 1
+            trend_result.loc[trend_result.index[-1],'is_can'] = 1        
+            trend_result.loc[trend_result.index[-1],'can_trend_flag'] = 1  
+            trend_result.loc[trend_result.index[-1],'can_ins_num'] = 1   
         else:
-            strategy_flag = 1
-               
-        return p0_trend,strategy_flag
-    
+            trend_result.loc[trend_result.index[0],'is_can'] = 1
+            trend_result.loc[trend_result.index[0],'can_trend_flag'] = 0
+            trend_result.loc[trend_result.index[0],'can_ins_num'] = 2
+            trend_result.loc[trend_result.index[-1],'is_can'] = 1   
+            trend_result.loc[trend_result.index[-1],'can_trend_flag'] = 1
+            trend_result.loc[trend_result.index[-1],'can_ins_num'] = 2         
+                
+        
+        trend_result = trend_result.astype({'is_can':int,'can_trend_flag':int,'can_ins_num':int})  
+        return trend_result
+
+    def compute_arg_sort_by_trend(self, features,combine_index,trend_result=None,date=None,batch_no=0):
+        """根据输出进行排序,参照整体及分支输出趋势"""
+        
+        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
+        node_num = ins_all.shape[0]
+        
+        pre_index_total = []
+        
+        scale_arr = emb_scale_arr(self.scale_arr)
+        # 根据趋势增减top数量
+        for i,row in trend_result.iterrows():
+            p0 = row['p0']
+            p1 = row['p1']
+            can_trend_flag = row['can_trend_flag']
+            can_ins_num = row['can_ins_num']     
+            pred_trend_value = row['pred_trend_value'] 
+            pred_trend_value_scale = row['pred_trend_value_scale']
+            rel_ins = scale_arr[p0][p1]['rel_ins']
+            features_item = features[p0][batch_no][rel_ins]
+            if can_trend_flag==1:
+                pre_index = np.argsort(-features_item)[:can_ins_num]
+            else:
+                pre_index = np.argsort(features_item)[:can_ins_num]            
+            for index in pre_index:
+                real_index = scale_arr[p0][p1]['instruments'][index]
+                pre_index_total.append([real_index,can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
+        pre_index_total = np.array(pre_index_total)
+        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
+        pre_index_total['top_index'] = pre_index_total['top_index'].astype(int)
+        pre_index_total['top_flag'] = pre_index_total['top_flag'].astype(int)
+        
+        return pre_index_total
+        
     def compute_arg_sort_by_branch_trend(self, features, combine_index,date=None,top_num=2,batch_no=0):
         """根据输出进行排序,参照分支输出趋势"""
         
@@ -1672,7 +1698,9 @@ class FuturesTransformerModule(MlpModule):
         return pre_index_total
     
     def scale_branch_trend_target(self,target_info_list):
+        
         scale_data = []
+        total_mean_data = []
         for i,row in self.scale_arr.iterrows():
             p0 = row['p0']
             p1 = row['p1']
@@ -1681,9 +1709,13 @@ class FuturesTransformerModule(MlpModule):
             for target_info_arr in target_info_list:
                 data_mean = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_arr)[ins]]).mean()
                 scale_data_item.append(data_mean)
+                total_mean = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_arr)]).mean()
+                total_mean_data.append(total_mean)
             scale_data_item = np.array(scale_data_item)
             scale_data.append([p0,p1,scale_data_item])
-        scale_data = pd.DataFrame(np.stack(scale_data),columns=['p0','p1','value'])
+            scale_data.append(['total','total',np.array(total_mean_data)])
+        scale_data = pd.DataFrame(scale_data,columns=['p0','p1','value'])
+        
         return scale_data
     
     def collect_result_compindex(self, date=None, target_info=None, result_list=None,trend_target=None, keep_index=None):
@@ -1720,11 +1752,8 @@ class FuturesTransformerModule(MlpModule):
             coll_results.append([imp_idx,p0, p1,ts["instrument"], diff_range_with_trend, p_taraget_class, overroll_trend,real_trend_values,real_trend_values_scale])    
         
         coll_results = np.array(coll_results)
-        try:
-            coll_results = pd.DataFrame(coll_results, columns=['top_index', 'p0', 'p1','instrument',
+        coll_results = pd.DataFrame(coll_results, columns=['top_index', 'p0', 'p1','instrument',
                                      'diff_range', 'target_class', 'trend_value','real_trend_values','real_trend_values_scale'])
-        except Exception as e:
-            print("eee")
         coll_results['diff_range'] = coll_results['diff_range'].astype(float)
         coll_results['target_class'] = coll_results['target_class'].astype(int)
         coll_results['real_trend_values'] = coll_results['real_trend_values'].astype(float)
@@ -1757,7 +1786,7 @@ class FuturesTransformerModule(MlpModule):
         trend_result_new = []
         for i,row in trend_result.iterrows():
             p0 = row['p0']
-            p1 = row['p1']            
+            p1 = row['p1']       
             trend_target_item = trend_target[(trend_target['p0']==p0)&(trend_target['p1']==p1)]['value'].values[0]
             # ins = scale_arr[(scale_arr['p0']==p0)&(scale_arr['p1']==p1)]['instruments']
             # real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
