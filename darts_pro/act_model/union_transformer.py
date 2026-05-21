@@ -612,7 +612,7 @@ class SparseGateFeatureTopK(nn.Module):
         # self.branch_trend_layer = nn.ModuleList(branch_trend_layer)
         p1_count = scales_dict.shape[0]
         self.branch_trend_combine_layer = LinelessLayer(sample_dim*input_dim,scales_dict.shape[0],hidden_size=input_dim,
-                                layer_norm=True,batch_norm=False,dropout=dropout)     
+                                layer_norm=False,batch_norm=False,dropout=dropout)     
         # self.branch_trend_combine_layer_bn = nn.BatchNorm1d(sample_dim,track_running_stats=True)
             
     def forward(self, x,x_seq):

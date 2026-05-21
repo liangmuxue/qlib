@@ -1347,11 +1347,14 @@ class FuturesTransformerModule(MlpModule):
             x_bar_inner = []
             dec_inner = []
             # 合并列表中的品种和整体趋势
-            trend_logits,sv_indus, _ = output[0]
-            _,_, comm_index = output[1]
+            if self.opt_size>1:
+                _,sv_indus, comm_index = output[0]
+                trend_logits,_,_  = output[1]
+            else:
+                trend_logits,sv_indus, comm_index = output[0]
             sv_indus = sv_indus[0]
             comm_index = comm_index[0]
-            trend_logits = trend_logits[0]
+            trend_logits = trend_logits[0]                
             for key in sv_indus.keys():
                 cur_data = sv_indus[key].cpu().numpy()
                 if key not in cls_total:
@@ -1486,6 +1489,8 @@ class FuturesTransformerModule(MlpModule):
                 # trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)         
             else:
                 trend_result_item = trend_result[trend_result['date']==date]
+            if trend_result_item.shape[0]==0:
+                continue                 
             # 生成目标索引
             result_list = self.build_import_index(output_data=output_list, trend_result=trend_result_item,
                                                   cate_result=cate_compare_result,pred_top_num=pred_top_num,date=date,batch_no=i)
