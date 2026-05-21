@@ -529,7 +529,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             p0 = scale_item['p0']
                             ins_arr = torch.Tensor(scale_item['instruments']).to(target_class.device).long()
                             ins_arr = tensor_intersect(ins_arr, ins_rel_index)
-                            # 比较小类
                             ins_diff_item = ins_diff[ins_arr]
                             p1_cate_pred = []
                             p1_cate_target = []
@@ -545,7 +544,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 p1_cate_target.append(ins_diff_item.mean())
                                 p1_cate_pred.append(pred_data[data_idx])
                                 data_idx += 1  
-                                
+                            # 比较小类
                             # if len(p1_cate_target)>1:
                             #     p1_cate_target = torch.stack(p1_cate_target)    
                             #     p1_cate_pred = torch.stack(p1_cate_pred) 
