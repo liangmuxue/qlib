@@ -554,10 +554,11 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             #         loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
                             #     cnt += 1                               
                         # 比较大类
+                        
                         if all_elements_same(p0_cate_target) or all_elements_same(pred_data):
-                            loss_item += self.mse_loss(normalization_standard(pred_data).unsqueeze(0),normalization_standard(p0_cate_target).unsqueeze(0))
+                            loss_item += self.mse_loss(pred_data.unsqueeze(0),p0_cate_target.unsqueeze(0))
                         else:
-                            loss_item += self.compute_top_loss(normalization_standard(pred_data),normalization_standard(p0_cate_target), top_num=1, mid_num=1, need_mid=True)
+                            loss_item += self.compute_top_loss(pred_data,p0_cate_target, top_num=2, mid_num=2, need_mid=True)
                         cnt += 1
                         loss_item = loss_item/cnt
                         cls_loss[i] += loss_item
