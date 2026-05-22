@@ -1672,6 +1672,7 @@ class FuturesTransformerModule(MlpModule):
         trend_result['can_trend_flag'] = 0
         trend_result['can_ins_num'] = 0
         total_trend_flag = trend_result[trend_result['p0']=='total']['pred_trend_flag'].values[0]
+        trend_result = trend_result[~(trend_result['p0']=='total')]
         trend_result = trend_result.sort_values(by='pred_trend_value_scale').reset_index()
         # 211模式：如果总体趋势为多方，则取得2个多方小类（内部品种2+1），1个空方小类（内部品种1）。空方则反过来。趋势为平，则类别2+2，品种1+1+1+1
         if total_trend_flag==1:

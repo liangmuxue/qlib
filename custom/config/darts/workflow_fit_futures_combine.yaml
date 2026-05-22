@@ -64,9 +64,9 @@ task:
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"
-            pred_index_data_path: "pred_index_data.csv" 
+            pred_index_data_path: "" 
             pred_cate_data_path: "" 
-            load_index_data: True
+            load_index_data: False
             load_cate_data: False
             scheduler_config: 
                # start_factor: 1
@@ -87,7 +87,7 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanDataAllCutlen2_transScaleLoss_2412"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                task_weights: [[0.5],[0.5]]
                grad_limits: [5.0,3.0]
