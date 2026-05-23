@@ -572,8 +572,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in trend_output.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            loss,_ = self.compute_multi_trunk_loss(sv_out_item,target_item,key=key,norm_in_batch=0,detail_trunk_loss=detail_trunk_loss)
-                            # loss,_ = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=0,detail_trunk_loss=detail_trunk_loss)
+                            # loss,_ = self.compute_multi_trunk_loss(sv_out_item,target_item,key=key,norm_in_batch=0,detail_trunk_loss=detail_trunk_loss)
+                            loss,_ = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2,detail_trunk_loss=detail_trunk_loss)
                             loss_item += loss
                             cnt += 1
                         loss_item = loss_item/cnt

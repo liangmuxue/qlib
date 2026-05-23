@@ -65,7 +65,7 @@ task:
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"
             pred_index_data_path: "pred_index_data.csv" 
-            pred_cate_data_path: "pred_cate_data.csv" 
+            pred_cate_data_path: "" 
             load_index_data: True
             load_cate_data: False
             scheduler_config: 
@@ -85,7 +85,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transCateLoss_2411"
+               model_name: "Futures_cleanDataAllCutlen2_transScaleMoreLoss_2411"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
@@ -145,7 +145,7 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['diff_range_norm','diff_range_norm','SUMD5','SUMD5','RSV5']
+                target_column: ['RSV5','diff_range_norm','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['year','dayofweek','month','day','week']   
                 past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
