@@ -34,8 +34,8 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-TRACK_DATE = [item for item in range(20250825,20250905)]
-TRACK_DATE = [item for item in range(20241226,20241227)]
+TRACK_DATE = [item for item in range(20250401,20250402)]
+# TRACK_DATE = [item for item in range(20241226,20241227)]
 # TRACK_DATE = [item for item in range(20241231,20250105)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240428, 20260505]
@@ -1090,16 +1090,16 @@ class FuturesTransformerModule(MlpModule):
         xtickvals = np.arange(0,len(xticklabels),5).tolist()
         xticklabels = [xticklabels[i] for i in xtickvals]
         x_range = pd.to_datetime(trend_result['date'].astype(str)).dt.strftime('%Y-%m-%d').unique() 
-        # # 小类趋势
-        # for i,row in self.scale_arr.iterrows():
-        #     p0 = row['p0']
-        #     p1 = row['p1']
-        #     win = "batch_trend_line_{}_{}".format(date,i)
-        #     title = "bt_{}/{}".format(row['p0_name'],row['p1_name'])  
-        #     item = trend_result[(trend_result['p0']==p0)&(trend_result['p1']==p1)]
-        #     view_data = item[['pred_trend_value','real_trend_values','pred_trend_value_scale','real_trend_values_scale']].values
-        #     # x_range = item['date'].values
-        #     viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
+        # 小类趋势
+        for i,row in self.scale_arr.iterrows():
+            p0 = row['p0']
+            p1 = row['p1']
+            win = "batch_trend_line_{}_{}".format(date,i)
+            title = "bt_{}/{}".format(row['p0_name'],row['p1_name'])  
+            item = trend_result[(trend_result['p0']==p0)&(trend_result['p1']==p1)]
+            view_data = item[['pred_trend_value','real_trend_values','pred_trend_value_scale','real_trend_values_scale']].values
+            # x_range = item['date'].values
+            viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
         # 大类趋势
         names = ['pred_scale','target_scale'] 
         for p0 in self.scale_arr['p0'].unique():
@@ -1839,7 +1839,7 @@ class FuturesTransformerModule(MlpModule):
  
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         main_index = FuturesMappingUtil.get_main_index(sw_ins_mappings)
-        open_diff = np.array([t['open_diff'] for t in target_info])[keep_index]
+        open_diff = np.array([t['open_diff'] if t is not None else 0 for t in target_info])
         
         # dataset = global_var.get_value("dataset") 
         # scale_dict = dataset.scale_dict
@@ -1853,6 +1853,7 @@ class FuturesTransformerModule(MlpModule):
             p0 = row.p0
             trend_target_item = trend_target[(trend_target['p0']==p0)&(trend_target['p1']==p1)]['value'].values[0]
             ins = scale_arr[p0][p1]['instruments']
+            ins = np.intersect1d(ins,keep_index)
             # real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
             real_trend_values = open_diff[ins].mean()
             # Do Target Scale
