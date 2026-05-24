@@ -611,9 +611,14 @@ class SparseGateFeatureTopK(nn.Module):
         #     branch_trend_layer.append(branch_trend_layer_inner)                  
         # self.branch_trend_layer = nn.ModuleList(branch_trend_layer)
         p1_count = scales_dict.shape[0]
-        self.branch_trend_combine_layer = LinelessLayer(sample_dim*input_dim,scales_dict.shape[0],hidden_size=input_dim,
-                                layer_norm=False,batch_norm=False,dropout=dropout)     
-        # self.branch_trend_combine_layer_bn = nn.BatchNorm1d(sample_dim,track_running_stats=True)
+        trend_layer = [] 
+        for i,item in scales_dict.iterrows():
+            inner_sample_dim = item['instruments'].shape[0]
+            branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=input_dim,
+                                    layer_norm=False,batch_norm=False,dropout=dropout)     
+            trend_layer.append(branch_trend_combine_layer)
+        self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
+        self.branch_trend_combine_layer_bn = nn.BatchNorm1d(scales_dict.shape[0],track_running_stats=True)
             
     def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
@@ -632,7 +637,13 @@ class SparseGateFeatureTopK(nn.Module):
             # 合并主体特征和分尺度特征
             features_list[key] = scale_features
             trend_logits_list[key] = trend_index_logits
-        trend_list = self.branch_trend_combine_layer(x.reshape([batch_size,-1]))
+        trend_list = []
+        for i,item in self.scales_dict.iterrows():
+            ins = torch.Tensor(item['instruments']).to(x.device).long()
+            x_part = x[:,ins,:]
+            cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1)).squeeze(-1)
+            trend_list.append(cate_data)     
+        trend_list = torch.stack(trend_list).transpose(1,0)    
         # trend_list = self.branch_trend_combine_layer_bn(trend_list)
         
         return features_list,trend_list,trend_logits_list
