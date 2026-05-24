@@ -35,7 +35,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
 TRACK_DATE = [item for item in range(20250401,20250402)]
-# TRACK_DATE = [item for item in range(20241226,20241227)]
+TRACK_DATE = [item for item in range(20250526,20250605)]
 # TRACK_DATE = [item for item in range(20241231,20250105)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240428, 20260505]
@@ -1027,8 +1027,8 @@ class FuturesTransformerModule(MlpModule):
             # self.draw_ins_visdom(ins_in_scale_total, ins_output_total, fur_target_total, ts_arr,coll_item=coll_item,
             #             trend_result=trend_result_item, date=date, iter_num='{}_all'.format(date), key='total')                    
             # 分类趋势比较可视化
-            self.draw_section_visdom(trend_result, date)
-            # self.draw_cate_visdom(cate_result, date)
+            # self.draw_section_visdom(trend_result, date)
+            self.draw_cate_visdom(cate_result, date)
         # 整体趋势可视化      
         self.draw_trend_visdom(trend_result,first_date)
                  
@@ -1485,8 +1485,8 @@ class FuturesTransformerModule(MlpModule):
             if trend_result is None:
                 trend_result_item = self.compute_branch_trend(trend_logits_item, date=date,batch_no=i)
                 # 对候选类别进行筛选
-                trend_result_item = self.sumup_trend(trend_result_item)   
-                # trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)         
+                # trend_result_item = self.sumup_trend(trend_result_item)   
+                trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)         
             else:
                 trend_result_item = trend_result[trend_result['date']==date]
             if trend_result_item.shape[0]==0:

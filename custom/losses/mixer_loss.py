@@ -540,16 +540,18 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 p1_cate_target.append(ins_diff_item.mean())
                                 p1_cate_pred.append(pred_data[data_idx])
                                 data_idx += 1  
-                            # 比较小类
-                            if len(p1_cate_target)>1:
-                                p1_cate_target = normalization_standard(torch.stack(p1_cate_target))
-                                p1_cate_pred = normalization_standard(torch.stack(p1_cate_pred))
-                                if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
-                                    loss_item += self.mse_loss(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
-                                else:
-                                    loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
-                                cnt += 1                               
+                            # # 比较小类
+                            # if len(p1_cate_target)>1:
+                            #     p1_cate_target = normalization_standard(torch.stack(p1_cate_target))
+                            #     p1_cate_pred = normalization_standard(torch.stack(p1_cate_pred))
+                            #     if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
+                            #         loss_item += self.mse_loss(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
+                            #     else:
+                            #         loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
+                            #     cnt += 1                               
                         # 比较大类
+                        p0_cate_target = normalization_standard(p0_cate_target)
+                        pred_data = normalization_standard(pred_data)
                         if all_elements_same(p0_cate_target) or all_elements_same(pred_data):
                             loss_item += self.mse_loss(pred_data.unsqueeze(0),p0_cate_target.unsqueeze(0))
                         else:
