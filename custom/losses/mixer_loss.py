@@ -12,7 +12,7 @@ from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from sklearn.metrics import f1_score
 from darts_pro.tft_futures_dataset import concat_scale_arr,emb_scale_arr
 
-from cus_utils.common_compute import tensor_intersect,normalization_axis,scale_value,normalization_standard,all_elements_same,torch_intersect_indices
+from cus_utils.common_compute import tensor_intersect,standardize_dict_tensor,scale_value,normalization_standard,all_elements_same,torch_intersect_indices
 from .feature_loss import AdaptiveSingleFeatureLoss
 from .triplet_loss import AdaptiveSemiHardTripletLoss,ContinuousSemiHardTripletLoss
 from .triplet_miner import ContinuousTripletLossWithMemory,ContinuousTripletConfig
@@ -519,15 +519,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         pred_data = sw_index_data[0][j]
                         loss_item = 0
                         cnt = 0
-                        p0_cate_target = torch.zeros(pred_data.shape[0]).to(target_class.device)
                         data_idx = 0
+                        cate_pred_data = {}
+                        cate_target_data = {}
                         for scale_item in self.scale_arr:
                             p0 = scale_item['p0']
                             ins_arr = torch.Tensor(scale_item['instruments']).to(target_class.device).long()
                             ins_arr = tensor_intersect(ins_arr, ins_rel_index)
                             ins_diff_item = ins_diff[ins_arr]
-                            p1_cate_pred = []
-                            p1_cate_target = []
+                            p1_target = []
+                            p1_pred = []
                             for key in self.scale_dict[p0].keys():
                                 p1_item = self.scale_dict[p0][key]
                                 ins_p1 = torch.Tensor(p1_item['instruments']).to(target_class.device).long()
@@ -536,29 +537,39 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 if ins_p1.shape[0]==0:
                                     data_idx += 1  
                                     continue
-                                p0_cate_target[data_idx] = ins_diff_item.mean()                      
-                                p1_cate_target.append(ins_diff_item.mean())
-                                p1_cate_pred.append(pred_data[data_idx])
-                                data_idx += 1  
-                            # # 比较小类
-                            # if len(p1_cate_target)>1:
-                            #     p1_cate_target = normalization_standard(torch.stack(p1_cate_target))
-                            #     p1_cate_pred = normalization_standard(torch.stack(p1_cate_pred))
-                            #     if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
-                            #         loss_item += self.mse_loss(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
-                            #     else:
-                            #         loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
-                            #     cnt += 1                               
+                                p1_pred.append(pred_data[data_idx])
+                                data_idx += 1
+                                p1_target.append(ins_diff_item.mean())
+                            if len(p1_pred)>0:
+                                p1_pred = torch.stack(p1_pred)
+                                p1_target = torch.stack(p1_target)
+                                cate_pred_data[p0] = p1_pred                   
+                                cate_target_data[p0] = p1_target
+                        
+                        cate_target_norm = standardize_dict_tensor(cate_target_data)
+                        cate_pred_norm = standardize_dict_tensor(cate_pred_data)
+                           
+                        # 比较小类
+                        for key in cate_target_norm:
+                            p1_cate_target = cate_target_norm[key]
+                            p1_cate_pred = cate_pred_norm[key]
+                            if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
+                                loss_item += self.mse_loss(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
+                            else:
+                                loss_item += self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
+                            cnt += 1                               
                         # 比较大类
-                        p0_cate_target = normalization_standard(p0_cate_target)
-                        pred_data = normalization_standard(pred_data)
-                        if all_elements_same(p0_cate_target) or all_elements_same(pred_data):
-                            loss_item += self.mse_loss(pred_data.unsqueeze(0),p0_cate_target.unsqueeze(0))
-                        else:
-                            loss_item += self.compute_top_loss(pred_data,p0_cate_target, top_num=2, mid_num=2, need_mid=True)
-                        cnt += 1
-                        loss_item = loss_item/cnt
-                        cls_loss[i] += loss_item
+                        p0_cate_target = torch.cat([cate_target_norm[key] for key in cate_target_norm.keys()])
+                        p0_cate_pred = torch.cat([cate_pred_norm[key] for key in cate_pred_norm.keys()])
+                        if p0_cate_target.shape[0]>2:
+                            if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
+                                loss_item += self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
+                            else:
+                                loss_item += self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=1, mid_num=1, need_mid=True)
+                            cnt += 1
+                        if cnt>0:
+                            loss_item = loss_item/cnt
+                            cls_loss[i] += loss_item
                         batch_size += 1                        
                     if target_mode in [5]:
                         # 根据网络输出，生成针对性业务分支输出,并依次计算损失

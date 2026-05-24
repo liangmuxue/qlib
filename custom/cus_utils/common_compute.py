@@ -13,6 +13,55 @@ from sklearn.preprocessing import MinMaxScaler
 from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAKE,SLOPE_SHAPE_SMOOTH,get_simple_class
 from pip._internal.models import candidate
 
+
+def standardize_dict_tensor(original_dict):
+    """
+    对字典中所有PyTorch张量进行全局标准化，并映射回原字典
+    :param original_dict: 输入字典，value为torch.Tensor
+    :return: 标准化后的新字典（结构、key、形状完全一致）
+    """
+    # ---------------------- 步骤1：保存每个tensor的形状和长度 ----------------------
+    tensor_info = []  # 存储 (key, 原始形状, 元素总数)
+    all_tensors = []  # 存储所有展平后的tensor
+    
+    for key, tensor in original_dict.items():
+        # 保存原始信息
+        shape = tensor.shape
+        numel = tensor.numel()  # 总元素个数
+        tensor_info.append((key, shape, numel))
+        
+        # 展平并收集
+        all_tensors.append(tensor.reshape(-1))
+
+    # ---------------------- 步骤2：拼接所有张量 ----------------------
+    concatenated = torch.cat(all_tensors)
+
+    # ---------------------- 步骤3：全局标准化（均值0，方差1） ----------------------
+    mean = concatenated.mean()
+    std = concatenated.std()
+    
+    # 防止标准差为0
+    std = std if std > 1e-6 else torch.tensor(1.0)
+    standardized = (concatenated - mean) / std
+
+    # ---------------------- 步骤4：按原始长度切分并映射回字典 ----------------------
+    result_dict = {}
+    start_idx = 0
+    
+    for key, shape, numel in tensor_info:
+        # 截取当前key对应的标准化数据
+        end_idx = start_idx + numel
+        part = standardized[start_idx:end_idx]
+        
+        # 恢复原始形状
+        part = part.reshape(shape)
+        result_dict[key] = part
+        
+        # 更新起始索引
+        start_idx = end_idx
+
+    return result_dict
+
 def map_to_neg1_pos1_torch(tensor: torch.Tensor) -> torch.Tensor:
     """
     PyTorch 实现：将张量映射到 [-1, 1] 区间，保留原最大正数/最小负数的比值
