@@ -1101,7 +1101,6 @@ class FuturesTransformerModule(MlpModule):
         xticklabels = trend_result['date'].unique().tolist()
         xtickvals = np.arange(0,len(xticklabels),5).tolist()
         xticklabels = [xticklabels[i] for i in xtickvals]
-        x_range = pd.to_datetime(trend_result['date'].astype(str)).dt.strftime('%Y-%m-%d').unique() 
         # # 小类趋势
         # for i,row in self.scale_arr.iterrows():
         #     p0 = row['p0']
@@ -1123,12 +1122,10 @@ class FuturesTransformerModule(MlpModule):
         #     viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
         # 整体趋势
         win = "batch_trend_all_{}".format(date)
-        title = "bt_all:{}".format(date)          
-        # view_data = trend_result.groupby('date')[['pred_trend_value_scale','real_trend_values_scale']].mean().values
+        title = "bt_all:{}".format(date)   
         view_data = trend_result[(trend_result['p0']=='total')&(trend_result['p1']=='total')][['pred_trend_value','real_trend_values','pred_trend_value_scale','real_trend_values_scale']].values
         viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)          
         
-
     def draw_section_visdom(self,trend_result,date):
         """分类趋势比较可视化"""
         
@@ -1634,15 +1631,17 @@ class FuturesTransformerModule(MlpModule):
         for key in scale_arr: 
             for inner_key in scale_arr[key]:
                 proc_item(key,inner_key)
-        proc_item('total','total')
-        result = pd.DataFrame(result,columns=columns)
-        # # 汇总所有类别数据
-        # result_total = result[(result['p0']=='total')&(result['p1']=='total')]
-        # total_pred_value = result_total[['pred_trend_value','pred_trend_value_scale']].values[0]
-        # pred_trend_flag = self.get_trend_flag_from_value(total_pred_value[1])
-        # total_row = {'p0':'total','p1':'total','date':result['date'].values[0],
-        #              'pred_trend_value':total_pred_value[0],'pred_trend_value_scale':total_pred_value[1],'pred_trend_flag':pred_trend_flag}
-        # result = pd.concat([result,pd.DataFrame(total_row, index=[0])])
+        # 汇总所有类别数据
+        if self.target_mode[0]==3:
+            proc_item('total','total')
+            result = pd.DataFrame(result,columns=columns)
+        else:
+            result_total = result[(result['p0']=='total')&(result['p1']=='total')]
+            total_pred_value = result_total[['pred_trend_value','pred_trend_value_scale']].values[0]
+            pred_trend_flag = self.get_trend_flag_from_value(total_pred_value[1])
+            total_row = {'p0':'total','p1':'total','date':result['date'].values[0],
+                         'pred_trend_value':total_pred_value[0],'pred_trend_value_scale':total_pred_value[1],'pred_trend_flag':pred_trend_flag}
+            result = pd.concat([result,pd.DataFrame(total_row, index=[0])])
         
         return result
             
