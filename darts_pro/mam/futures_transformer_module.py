@@ -11,7 +11,7 @@ import warnings
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from cus_utils.wise_corrcef import analyze_model_complexity
 from cus_utils.process import create_from_cls_and_kwargs
 from .mlp_module import MlpModule
@@ -34,8 +34,8 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-TRACK_DATE = [item for item in range(20250401,20250402)]
-TRACK_DATE = [item for item in range(20250316,20250415)]
+TRACK_DATE = [item for item in range(20250403,20250405)]
+# TRACK_DATE = [item for item in range(20250328,20250329)]
 # TRACK_DATE = [item for item in range(20241231,20250105)]
 # TRACK_DATE = [20250312, 20250328, 20250322]
 STAT_DATE = [20240428, 20260505]
@@ -915,6 +915,8 @@ class FuturesTransformerModule(MlpModule):
             anno_yield = rate_total['yield_rate'].values[0] * (240 / date_total_num) / (2 * self.pred_top_num * dur_num) 
             self.log("anno_yield", anno_yield, prog_bar=True,sync_dist=True) 
             self.log("trend_eva_diff", rate_total["trend_eva_diff"].values[0], prog_bar=True,sync_dist=True) 
+            # self.log("cate_corr_rate", rate_total["cate_corr_rate"].values[0], prog_bar=True,sync_dist=True)
+            # self.log("cate_yield", rate_total["cate_yield"].values[0], prog_bar=True,sync_dist=True)  
         
         output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_total, \
             past_future_round_targets_total, future_week_info_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
@@ -1016,7 +1018,8 @@ class FuturesTransformerModule(MlpModule):
                     fur_target_total.append(fur_target)
                     coll_item = coll_result[(coll_result['date']==date)&(coll_result['p1']==key_p1)]
                     trend_result_item = trend_result[(trend_result['date']==date)&(trend_result['p0']==p0)&(trend_result['p1']==key_p1)]
-                    self.draw_ins_visdom(ins_in_scale, ins_output_item, fur_target, ts_arr,coll_item=coll_item,
+                    cate_result_item = cate_result[(cate_result['date']==date)]
+                    self.draw_ins_visdom(ins_in_scale, ins_output_item, fur_target, ts_arr,coll_item=coll_item,scale_item=scale_item,cate_result=cate_result_item,
                                 trend_result=trend_result_item, date=date, iter_num='{}_{}_{}'.format(k,j,date), key=(p0_name+'/'+p1_name))
             
             fur_target_total = np.concatenate(fur_target_total)     
@@ -1055,9 +1058,12 @@ class FuturesTransformerModule(MlpModule):
         # plt.savefig("{}/{}".format(RESULT_FILE_PATH,name), dpi=300, bbox_inches='tight')
         # plt.show()     
     
-    def draw_ins_visdom(self,instruments,output=None,fur_target=None,ts_arr=None,coll_item=None,trend_result=None,date=None,iter_num='',key=None):
+    def draw_ins_visdom(self,instruments,output=None,fur_target=None,ts_arr=None,coll_item=None,scale_item=None,
+                        cate_result=None,trend_result=None,date=None,iter_num='',key=None):
         
         name_arr = []
+        p0 = scale_item['p0']
+        p1 = scale_item['p1']
         for inner_index, item in enumerate(ts_arr[instruments]):
             match_item = coll_item[coll_item['instrument'] == item['instrument']]
             if match_item.shape[0] > 0:
@@ -1073,11 +1079,17 @@ class FuturesTransformerModule(MlpModule):
         # pred_trend_value = trend_result['pred_trend_value'].values[0]
         # real_trend_values = trend_result['real_trend_values'].values[0]
         match_flag = ""
-        if np.any(trend_result['is_can']==1):
-            trend_flag = trend_result['can_trend_flag'].values[0]
-            trend_flag_str = "long" if trend_flag==1 else "short"
-            match_flag = trend_flag_str + "_" + str(trend_result['can_ins_num'].values[0])
-        target_title = "{}_{} {}".format(date,key,match_flag)  
+        # if np.any(trend_result['is_can']==1):
+        #     trend_flag = trend_result['can_trend_flag'].values[0]
+        #     trend_flag_str = "long" if trend_flag==1 else "short"
+        #     match_flag = trend_flag_str + "_" + str(trend_result['can_ins_num'].values[0])
+        cate_item = cate_result[(cate_result['p0']==p0)&(cate_result['p1']==p1)].iloc[0]
+        if cate_item['top_flag']==1:
+            target_title = "{}_{} long".format(date,key,match_flag)  
+        elif cate_item['top_flag']==-1:
+            target_title = "{}_{} short".format(date,key,match_flag)   
+        else:
+            target_title = "{}_{}".format(date,key)             
         viz_result_detail = global_var.get_value("viz_result_detail")
         viz_result_detail.viz_bar_compare(view_data, win=win, title=target_title, rownames=name_arr, legends=["pred_cls", "target", "price"])        
 
@@ -1090,29 +1102,30 @@ class FuturesTransformerModule(MlpModule):
         xtickvals = np.arange(0,len(xticklabels),5).tolist()
         xticklabels = [xticklabels[i] for i in xtickvals]
         x_range = pd.to_datetime(trend_result['date'].astype(str)).dt.strftime('%Y-%m-%d').unique() 
-        # 小类趋势
-        for i,row in self.scale_arr.iterrows():
-            p0 = row['p0']
-            p1 = row['p1']
-            win = "batch_trend_line_{}_{}".format(date,i)
-            title = "bt_{}/{}".format(row['p0_name'],row['p1_name'])  
-            item = trend_result[(trend_result['p0']==p0)&(trend_result['p1']==p1)]
-            view_data = item[['pred_trend_value','real_trend_values','pred_trend_value_scale','real_trend_values_scale']].values
-            # x_range = item['date'].values
-            viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
-        # 大类趋势
-        names = ['pred_scale','target_scale'] 
-        for p0 in self.scale_arr['p0'].unique():
-            p0_name = self.scale_arr[self.scale_arr['p0']==p0]['p0_name'].values[0]
-            item = trend_result[(trend_result['p0']==p0)]
-            win = "batch_trend_p0_{}_{}".format(date,p0)
-            title = "bt_p0:{}".format(p0_name)              
-            view_data = item.groupby('date')[['pred_trend_value_scale','real_trend_values_scale']].mean().values
-            viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
+        # # 小类趋势
+        # for i,row in self.scale_arr.iterrows():
+        #     p0 = row['p0']
+        #     p1 = row['p1']
+        #     win = "batch_trend_line_{}_{}".format(date,i)
+        #     title = "bt_{}/{}".format(row['p0_name'],row['p1_name'])  
+        #     item = trend_result[(trend_result['p0']==p0)&(trend_result['p1']==p1)]
+        #     view_data = item[['pred_trend_value','real_trend_values','pred_trend_value_scale','real_trend_values_scale']].values
+        #     # x_range = item['date'].values
+        #     viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
+        # # 大类趋势
+        # names = ['pred_scale','target_scale'] 
+        # for p0 in self.scale_arr['p0'].unique():
+        #     p0_name = self.scale_arr[self.scale_arr['p0']==p0]['p0_name'].values[0]
+        #     item = trend_result[(trend_result['p0']==p0)]
+        #     win = "batch_trend_p0_{}_{}".format(date,p0)
+        #     title = "bt_p0:{}".format(p0_name)              
+        #     view_data = item.groupby('date')[['pred_trend_value_scale','real_trend_values_scale']].mean().values
+        #     viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)
         # 整体趋势
         win = "batch_trend_all_{}".format(date)
         title = "bt_all:{}".format(date)          
-        view_data = trend_result.groupby('date')[['pred_trend_value_scale','real_trend_values_scale']].mean().values
+        # view_data = trend_result.groupby('date')[['pred_trend_value_scale','real_trend_values_scale']].mean().values
+        view_data = trend_result[(trend_result['p0']=='total')&(trend_result['p1']=='total')][['pred_trend_value','real_trend_values','pred_trend_value_scale','real_trend_values_scale']].values
         viz_result_ext.viz_matrix_var(view_data,win=win,title=title,xtickvals=xtickvals,xticklabels=xticklabels,names=names)          
         
 
@@ -1146,7 +1159,17 @@ class FuturesTransformerModule(MlpModule):
         
         cate_result_item = cate_result[(cate_result['date']==date)]
         viz_result = global_var.get_value("viz_result")
-        name_arr = ["{}/{}".format(item[1]['p0_name'][:2],item[1]['p1_name'][:2]) for item in self.scale_arr.iterrows()]
+        name_arr = []
+        for i,cate_item in cate_result_item.iterrows():
+            p0 = cate_item['p0']
+            p1 = cate_item['p1']
+            scale_item = self.scale_arr[(self.scale_arr['p0']==p0)&(self.scale_arr['p1']==p1)]
+            name = "{}/{}".format(scale_item['p0_name'].values[0][:2],scale_item['p1_name'].values[0][:2])
+            if cate_item['top_flag']==1:
+                name = name + "/T"
+            if cate_item['top_flag']==-1:
+                name = name + "/V"    
+            name_arr.append(name)               
         view_data = cate_result_item[['value','real_value']].values
         win = "cate_{}".format(date)
         target_title = "cate_{}".format(date)  
@@ -1181,8 +1204,6 @@ class FuturesTransformerModule(MlpModule):
             name_prefix = name.split("_")[0]
             if name_prefix!=mode:
                 continue
-            # if 'score_head_output' in name:
-            #     print("ggg")            
             feat = feat.squeeze(-1)
             # 以品种为单位计算L2
             if len(feat.shape)==2:
@@ -1486,11 +1507,12 @@ class FuturesTransformerModule(MlpModule):
                 trend_result_item = self.compute_branch_trend(trend_logits_item, date=date,batch_no=i)
                 # 对候选类别进行筛选
                 # trend_result_item = self.sumup_trend(trend_result_item)   
-                trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)         
             else:
                 trend_result_item = trend_result[trend_result['date']==date]
             if trend_result_item.shape[0]==0:
-                continue                 
+                continue     
+            # 对候选类别进行筛选            
+            trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)   
             # 生成目标索引
             result_list = self.build_import_index(output_data=output_list, trend_result=trend_result_item,
                                                   cate_result=cate_compare_result,pred_top_num=pred_top_num,date=date,batch_no=i)
@@ -1547,17 +1569,24 @@ class FuturesTransformerModule(MlpModule):
         if predict_mode:
             return result_date_list      
         
-        rate_columns = ["total_cnt", "yield_rate", "win_rate","trend_eva_diff","trend_match_rate","trend_recall"]    
-        ls_num = np.sum(result_total_list['real_trend_flag']!=0)
-        match_ls_num = np.sum((result_total_list['real_trend_flag']!=0)&(result_total_list['trend_match_flag']))
+        trend_total = trend_result_total[trend_result_total['p0']=='total']
+        trend_total['trend_eva_diff'] = np.abs(trend_total['real_trend_values'] - trend_total['pred_trend_value'])
+        rate_columns = ["total_cnt", "yield_rate", "win_rate","trend_eva_diff","trend_match_rate","trend_recall","cate_corr_rate","cate_yield"]    
+        ls_num = np.sum(trend_total['real_trend_flag']!=0)
+        match_ls_num = np.sum((trend_total['real_trend_flag']!=0)&(trend_total['trend_match_flag']))
         recall_rate = match_ls_num/ls_num
+        trend_match_rate = np.sum(trend_total['trend_match_flag'])/trend_total.shape[0]
+        cate_top_res = cate_result_total[cate_result_total['top_flag']==1]
+        cate_top_inverse_res = cate_result_total[cate_result_total['top_flag']==-1]
+        cate_corr_rate = (np.sum(cate_top_res['real_value']>0)/cate_top_res.shape[0] + np.sum(cate_top_inverse_res['real_value']<0)/cate_top_inverse_res.shape[0])/2
+        cate_yield = (np.sum(cate_top_res['real_value'])/cate_top_res.shape[0] + np.sum(-cate_top_inverse_res['real_value'])/cate_top_inverse_res.shape[0])
         
         rate_total = [result_total_list.shape[0],
                       round(result_total_list['diff_range'].sum(), 3),
                       round(np.sum(result_total_list['diff_range'] > 0) / result_total_list.shape[0], 3),
-                      result_total_list['trend_eva_diff'].mean(),
-                      result_total_list['trend_match_rate'].mean(),
-                      recall_rate
+                      trend_total['trend_eva_diff'].mean(),
+                      trend_match_rate,recall_rate,
+                      cate_corr_rate,cate_yield
                       ]
         rate_total = pd.DataFrame(np.array([rate_total]), columns=rate_columns)
         for i in range(4):
@@ -1592,20 +1621,28 @@ class FuturesTransformerModule(MlpModule):
         result = []
         columns = ['p0','p1','date','pred_trend_value','pred_trend_value_scale','pred_trend_flag']
         scale_arr = emb_scale_arr(self.scale_arr)
+        
+        def proc_item(key,inner_key):
+            trend_batch = trend_data[key][inner_key]
+            trend_batch_norm = StandardScaler().fit_transform(np.expand_dims(trend_batch,-1)).squeeze(-1)
+            # pred_trend_value = trend_batch_norm[batch_no]
+            trend_item = trend_batch[batch_no]
+            pred_trend_value = scale_value(trend_item,trend_batch.min(),trend_batch.max(),self.trend_threhold['min'],self.trend_threhold['max'])
+            pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
+            result.append([key,inner_key,date,trend_item,pred_trend_value,pred_trend_flag])            
+            
         for key in scale_arr: 
             for inner_key in scale_arr[key]:
-                trend_batch = trend_data[key][inner_key]
-                trend_item = trend_batch[batch_no]
-                pred_trend_value = scale_value(trend_item,trend_batch.min(),trend_batch.max(),self.trend_threhold['min'],self.trend_threhold['max'])
-                pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
-                result.append([key,inner_key,date,trend_item,pred_trend_value,pred_trend_flag])
+                proc_item(key,inner_key)
+        proc_item('total','total')
         result = pd.DataFrame(result,columns=columns)
-        # 汇总所有类别数据
-        total_pred_value = result[['pred_trend_value','pred_trend_value_scale']].mean().values
-        pred_trend_flag = self.get_trend_flag_from_value(total_pred_value[1])
-        total_row = {'p0':'total','p1':'total','date':result['date'].values[0],
-                     'pred_trend_value':total_pred_value[0],'pred_trend_value_scale':total_pred_value[1],'pred_trend_flag':pred_trend_flag}
-        result = pd.concat([result,pd.DataFrame(total_row, index=[0])])
+        # # 汇总所有类别数据
+        # result_total = result[(result['p0']=='total')&(result['p1']=='total')]
+        # total_pred_value = result_total[['pred_trend_value','pred_trend_value_scale']].values[0]
+        # pred_trend_flag = self.get_trend_flag_from_value(total_pred_value[1])
+        # total_row = {'p0':'total','p1':'total','date':result['date'].values[0],
+        #              'pred_trend_value':total_pred_value[0],'pred_trend_value_scale':total_pred_value[1],'pred_trend_flag':pred_trend_flag}
+        # result = pd.concat([result,pd.DataFrame(total_row, index=[0])])
         
         return result
             
@@ -1826,11 +1863,12 @@ class FuturesTransformerModule(MlpModule):
             for target_info_arr in target_info_list:
                 data_mean = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_arr)[ins]]).mean()
                 scale_data_item.append(data_mean)
-                total_mean = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_arr)]).mean()
-                total_mean_data.append(total_mean)
             scale_data_item = np.array(scale_data_item)
             scale_data.append([p0,p1,scale_data_item])
-            scale_data.append(['total','total',np.array(total_mean_data)])
+        for target_info_arr in target_info_list:
+            total_mean = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_arr)]).mean()
+            total_mean_data.append(total_mean)            
+        scale_data.append(['total','total',np.array(total_mean_data)])
         scale_data = pd.DataFrame(scale_data,columns=['p0','p1','value'])
         
         return scale_data
@@ -1912,6 +1950,11 @@ class FuturesTransformerModule(MlpModule):
             cate_result_new.append(row)
             index += 1
         cate_result_new = pd.DataFrame(cate_result_new)
+        max_index = cate_result_new['value'].idxmax()
+        min_index = cate_result_new['value'].idxmin()
+        cate_result_new['top_flag'] = 0
+        cate_result_new.loc[max_index,'top_flag'] = 1
+        cate_result_new.loc[min_index,'top_flag'] = -1
         
         return cate_result_new
         
@@ -1924,7 +1967,8 @@ class FuturesTransformerModule(MlpModule):
             p0 = row['p0']
             p1 = row['p1']       
             trend_target_item = trend_target[(trend_target['p0']==p0)&(trend_target['p1']==p1)]['value'].values[0]
-            # ins = scale_arr[(scale_arr['p0']==p0)&(scale_arr['p1']==p1)]['instruments']
+            trend_target_norm = StandardScaler().fit_transform(np.expand_dims(trend_target_item,-1)).squeeze(-1)
+            # real_trend_values_scale = trend_target_norm[batch_no]
             # real_trend_values = np.sum(open_diff[ins]>0trend_result_new = pd.DataFrame(trend_result_new))/ins.shape[0]
             real_trend_values = trend_target_item[batch_no]
             row['real_trend_values'] = real_trend_values

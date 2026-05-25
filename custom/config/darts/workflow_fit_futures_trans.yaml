@@ -64,10 +64,10 @@ task:
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"
-            pred_index_data_path: "pred_index_data_2503.csv" 
-            pred_cate_data_path: "" 
+            pred_index_data_path: "pred_index_data_2501.csv" 
+            pred_cate_data_path: "pred_cate_data_2501.csv" 
             load_index_data: True
-            load_cate_data: False
+            load_cate_data: True
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05
@@ -85,9 +85,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transScaleLoss_2503"
+               model_name: "Futures_cleanDataAllCutlen2_transScaleCCCLoss_2501"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
                task_weights: [[0.5],[0.5]]
                grad_limits: [5.0,3.0]
@@ -120,8 +120,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2012-01-01, 2025-03-28]
-                valid: [2025-03-01, 2025-06-15]
+                train: [2012-01-01, 2025-01-28]
+                valid: [2025-01-01, 2025-04-15]
                 test: [2025-07-01, 2025-09-30]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

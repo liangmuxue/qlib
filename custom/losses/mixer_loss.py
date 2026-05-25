@@ -259,7 +259,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:
-                loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=detail_top_num,mid_num=detail_top_num,need_mid=True)
+                # loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=detail_top_num,mid_num=detail_top_num,need_mid=True)
+                loss_item = self.ccc_loss_comp(pred_norm, target_norm_item)
             loss_key = item['p0_code'] + "_" + item['p1_code']
             if loss_key in detail_trunk_loss:
                 detail_trunk_loss[loss_key] = torch.cat([detail_trunk_loss[loss_key],torch.Tensor([loss_item])])
@@ -485,8 +486,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 batch_size = 0
                 detail_trunk_loss = {}
                 price_diff_rate = torch.zeros(target_class.shape[0]).to(target_class.device)
-                trend_output = {}
-                trend_target = {}
+                trend_output = {'total':torch.zeros([target_class.shape[0]]).to(target_class.device)}
+                trend_target = {'total':torch.zeros([target_class.shape[0]]).to(target_class.device)}
                 ins_output_in_batch = torch.zeros([target_class.shape[0],ins_all.shape[0]]).to(target_class.device)
                 ins_target_in_batch = torch.zeros([target_class.shape[0],ins_all.shape[0]]).to(target_class.device)
                 cate_target_in_batch = torch.zeros([target_class.shape[0],10]).to(target_class.device)
@@ -584,7 +585,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # 业务分支top损失计算             
                         loss_item = 0
                         cnt = 0
-                        for key in trend_output.keys():
+                        for key in self.scale_dict.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
                             # loss,_ = self.compute_multi_trunk_loss(sv_out_item,target_item,key=key,norm_in_batch=0,detail_trunk_loss=detail_trunk_loss)
@@ -595,17 +596,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         cls_loss[i] += loss_item
                         batch_size += 1                                   
                     elif target_mode==3:
-                        for key in trend_output.keys():
-                            ins_arr = self.scale_dict[key]
-                            for k,inner_key in enumerate(ins_arr.keys()):
-                                trend_output[key][inner_key][j] = sw_index_logits[0][key][inner_key][j]
-                                ins_inner = torch.Tensor(ins_arr[inner_key]['instruments']).to(target_class.device).long()
-                                ins_inner = tensor_intersect(ins_inner, ins_rel_index)
-                                price_diff_range = price_targets[j,ins_inner]  
-                                if ins_inner.shape[0]==0:
-                                    continue
-                                diff_rate = torch.sum(price_diff_range>0)/ins_inner.shape[0]
-                                trend_target[key][inner_key][j] = diff_rate                        
+                        trend_output['total'][j] = sw_index_logits[0]['total']['total'][j]
+                        ins_diff = np.array([t['open_diff'] for t in np.array(target_info[j])[ins_rel_index.cpu().numpy()]])
+                        target_mean = ins_diff.mean()      
+                        trend_target['total'][j] = target_mean              
                         batch_size += 1
                     elif target_mode==0:
                         for key in trend_output.keys():
@@ -644,7 +638,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     detail_loss = {}
                     for key in detail_trunk_loss.keys():
                         detail_loss[key] = detail_trunk_loss[key].mean()
-                if target_mode in [0,3]:
+                if target_mode in [0]:
                     loss = 0
                     cnt = 0
                     detail_loss = {}
@@ -662,7 +656,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             loss += d_loss
                             cnt += 1
                     cls_loss[i] = loss/cnt
-                        
+                if target_mode in [3]:
+                    loss = 0
+                    cnt = 0
+                    detail_loss = {}
+                    target_norm = trend_target['total']
+                    trend_norm = trend_output['total']
+                    cls_loss[i] = self.compute_batch_with_time_section_loss(trend_norm, target_norm,future_week_info,top_num=3,mid_num=3)             
                                                 
                 loss_sum = loss_sum + cls_loss[i] + ce_loss[i] + fds_loss[i] + corr_loss[i]
                            

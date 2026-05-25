@@ -65,9 +65,9 @@ task:
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
             pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"
             pred_index_data_path: "pred_index_data_2501.csv" 
-            pred_cate_data_path: "" 
+            pred_cate_data_path: "pred_cate_data_2501.csv" 
             load_index_data: True
-            load_cate_data: False
+            load_cate_data: True
             scheduler_config: 
                # start_factor: 1
                # end_factor: 0.05
