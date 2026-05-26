@@ -587,7 +587,7 @@ class SparseGateFeatureTopK(nn.Module):
         
         # 分别按照夜盘类别、行业类别、保证金范围生成不同注意力尺度的网络计算
         self.top_global_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
-                                    layer_norm=True,batch_norm=False,dropout=dropout).double()
+                                    layer_norm=False,batch_norm=False,dropout=dropout).double()
         scales_layer = []    
         scales_arr = concat_scale_arr(scales_dict)
         scales_trend_arr = emb_scale_arr(scales_dict)

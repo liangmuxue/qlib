@@ -1636,8 +1636,8 @@ class FuturesTransformerModule(MlpModule):
             proc_item('total','total')
             result = pd.DataFrame(result,columns=columns)
         else:
-            result_total = result[(result['p0']=='total')&(result['p1']=='total')]
-            total_pred_value = result_total[['pred_trend_value','pred_trend_value_scale']].values[0]
+            result = pd.DataFrame(result,columns=columns)
+            total_pred_value = result[['pred_trend_value','pred_trend_value_scale']].mean().values
             pred_trend_flag = self.get_trend_flag_from_value(total_pred_value[1])
             total_row = {'p0':'total','p1':'total','date':result['date'].values[0],
                          'pred_trend_value':total_pred_value[0],'pred_trend_value_scale':total_pred_value[1],'pred_trend_flag':pred_trend_flag}
