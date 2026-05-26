@@ -588,8 +588,6 @@ class SparseGateFeatureTopK(nn.Module):
         # 分别按照夜盘类别、行业类别、保证金范围生成不同注意力尺度的网络计算
         self.top_global_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
                                     layer_norm=True,batch_norm=False,dropout=dropout).double()
-        self.trend_global_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=False,dropout=dropout).double()                                    
         scales_layer = []    
         scales_arr = concat_scale_arr(scales_dict)
         scales_trend_arr = emb_scale_arr(scales_dict)
@@ -617,8 +615,10 @@ class SparseGateFeatureTopK(nn.Module):
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=input_dim,
                                     layer_norm=False,batch_norm=False,dropout=dropout)     
             trend_layer.append(branch_trend_combine_layer)
-        # self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
-        #                             layer_norm=False,batch_norm=True,dropout=dropout)  
+        self.total_features_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=input_dim,
+                                    layer_norm=True,batch_norm=False,dropout=dropout)  
+        self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
+                                    layer_norm=False,batch_norm=True,dropout=dropout)          
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
         self.branch_trend_combine_layer_bn = nn.BatchNorm1d(scales_dict.shape[0],track_running_stats=True)
             

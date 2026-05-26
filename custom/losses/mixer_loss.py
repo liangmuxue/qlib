@@ -218,6 +218,53 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         return top_loss        
 
+    
+    def compute_global_trunk_loss(self,pred,target,ins_rel_index=None,detail_trunk_loss=None):
+        """按照业务属性，总体加分片比较"""
+
+        loss_detail = {}
+        loss = 0
+        target_all = target[ins_rel_index]
+        pred_all = pred[ins_rel_index]
+        
+        top_num = 3
+        # 针对总体进行损失计算
+        if all_elements_same(target_all) or all_elements_same(pred_all) or ins_rel_index.shape[0]<top_num*3:
+            loss += self.mse_loss(pred_all.unsqueeze(0), target_all.unsqueeze(0))
+        else:
+            loss += self.compute_top_loss(pred_all, target_all,top_num=top_num,mid_num=top_num,need_mid=True)   
+        if 'global' in detail_trunk_loss:
+            detail_trunk_loss['global'] = torch.cat([detail_trunk_loss['global'],torch.Tensor([loss])])
+        else:
+            detail_trunk_loss['global'] = torch.Tensor([loss])
+        
+        detail_top_num = 1
+        cnt = 0
+        # 针对每个小分类进行损失计算
+        for i,item in self.scale_dict_par.iterrows():
+            loss_key = item['p0_code'] + "_" + item['p1_code']
+            ins = torch.Tensor(item['instruments']).to(pred.device).long() 
+            ins_inner,_,_ = torch_intersect_indices(ins_rel_index,ins)
+            if ins_inner.shape[0]<2:
+                loss_item = 0
+            else:
+                pred_norm = normalization_standard(pred[ins_inner])
+                target_norm_item = normalization_standard(target[ins_inner])
+                if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
+                    loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
+                else:
+                    # loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=detail_top_num,mid_num=detail_top_num,need_mid=True)
+                    loss_item = self.ccc_loss_comp(pred_norm, target_norm_item)
+            if loss_key in detail_trunk_loss:
+                detail_trunk_loss[loss_key] = torch.cat([detail_trunk_loss[loss_key],torch.Tensor([loss_item])])
+            else:
+                detail_trunk_loss[loss_key] = torch.Tensor([loss_item])
+            cnt += 1
+            loss = loss + loss_item
+        loss = loss/cnt
+            
+        return loss
+        
     def compute_multi_trunk_loss(self,pred_ori,target,key=None,norm_in_batch=0,detail_trunk_loss=None):
         """按照业务属性，分片比较"""
 
@@ -515,7 +562,14 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     target_info_total.append(target_info[j])             
                     detail_trunk_loss_item = []
                     price_diff_range = price_targets[j,ins_rel_index]  
-                    # 不同模式的损失计算                          
+                    # 不同模式的损失计算     
+                    if target_mode in [1]:   
+                        # 使用总体特征输出,并依据业务分片计算损失
+                        scale_output = sv[0]
+                        sv_out_item = scale_output['global_feature'][j]
+                        loss_item = self.compute_global_trunk_loss(sv_out_item,ins_diff,ins_rel_index=ins_rel_index,detail_trunk_loss=detail_trunk_loss)
+                        cls_loss[i] += loss_item
+                        batch_size += 1                                           
                     if target_mode in [2]:
                         detail_loss = {}
                         # 按照类别趋势进行横向比较，兼顾大类和小类
@@ -616,18 +670,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         batch_size += 1
                                         
                 if target_mode in [1]:
-                    ins_out = ins_output_in_batch # normalization_standard(ins_output_in_batch,dim=0)
-                    ins_target = ins_target_in_batch # normalization_standard(ins_target_in_batch,dim=0)
-                    cnt = 0
-                    for k in range(ins_output_in_batch.shape[1]):
-                        if (torch.sum(ins_target[:,k]==0)>ins_target.shape[0]-12) or (torch.sum(ins_out[:,k]==0)>ins_target.shape[0]-12):
-                            continue
-                        cls_loss[i] += self.compute_batch_with_time_section_loss(ins_out[:,k], ins_target[:,k],future_week_info,top_num=3,mid_num=3)
-                        cnt += 1
-                    if cnt>0:
-                        cls_loss[i] = cls_loss[i]/cnt
-                    else:
-                        cls_loss[i] = self.mse_loss(ins_out,ins_target)          
+                    cls_loss[i] = cls_loss[i]/batch_size  
+                    detail_loss = {}
+                    for key in detail_trunk_loss.keys():
+                        detail_loss[key] = detail_trunk_loss[key].mean()        
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
                     ce_loss[i] = ce_loss[i]/batch_size  
