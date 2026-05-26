@@ -620,7 +620,8 @@ class SparseGateFeatureTopK(nn.Module):
         self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
                                     layer_norm=False,batch_norm=True,dropout=dropout)          
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
-        self.branch_trend_combine_layer_bn = nn.BatchNorm1d(scales_dict.shape[0],track_running_stats=True)
+        self.branch_trend_combine_layer_ln = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=input_dim,
+                                    layer_norm=True,batch_norm=False,dropout=dropout) 
             
     def forward(self, x,x_seq):
         # x: (batch_size, 品种S, 特征input_dim)
@@ -649,7 +650,7 @@ class SparseGateFeatureTopK(nn.Module):
             cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1)).squeeze(-1)
             trend_list.append(cate_data)     
         trend_list = torch.stack(trend_list).transpose(1,0)    
-        # trend_list = self.branch_trend_combine_layer_bn(trend_list)
+        trend_list = self.branch_trend_combine_layer_ln(trend_list)
         
         return features_list,trend_list,trend_logits_list
 
