@@ -1655,8 +1655,10 @@ class FuturesTransformerModule(MlpModule):
         mode = 'single'
         
         # 同时从正反2个方向选取品种
-        trend_result_can = trend_result[(trend_result['is_can']==1)&(trend_result['date']==date)]
-        cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)     
+        trend_result_item = trend_result[(trend_result['date']==date)]
+        trend_result_can = trend_result_item[(trend_result_item['is_can']==1)]
+        cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
+        # cancidate_list = self.compute_arg_sort_by_total_trend(features,trend_result=trend_result_item,cate_result=cate_result,batch_no=batch_no,date=date)     
         
         return cancidate_list
     
@@ -1798,52 +1800,27 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index_total
         
-    def compute_arg_sort_by_branch_trend(self, features, combine_index,date=None,top_num=2,batch_no=0):
-        """根据输出进行排序,参照分支输出趋势"""
+    def compute_arg_sort_by_total_trend(self, features,cate_result=None,trend_result=None,date=None,batch_no=0,top_num=2):
+        """根据输出进行排序,参照总体输出趋势"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
-        node_num = ins_all.shape[0]
+        global_feature = features['global_feature'][batch_no]
         
-        item_top_num = top_num//2
+        trend_result_total = trend_result[trend_result['p0']=='total']
+        pred_trend_value = trend_result_total['pred_trend_value'].values[0]
+        pred_trend_value_scale = trend_result_total['pred_trend_value_scale'].values[0]
         
         pre_index_total = []
-        # 根据配置，从指数预测结果中加载数据
-        if len(self.pred_index_data_path)>3 and self.load_index_data:
-            pred_data_path = os.path.join(RESULT_FILE_PATH, self.pred_index_data_path)
-            pred_index_data = pd.read_csv(pred_data_path)
-        else:
-            pred_index_data = None
-        
-        scale_arr = emb_scale_arr(self.scale_arr)
         # 根据趋势增减top数量
-        for i,row in self.scale_arr.iterrows():
-            p0 = row['p0']
-            p1 = row['p1']
-            ins = row['instruments']
-            rel_ins = scale_arr[p0][p1]['rel_ins']
-            features_item = features[p0][batch_no][rel_ins]
-            if pred_index_data is None:
-                combine_index_scale = combine_index[p0][p1]
-                pred_trend_value = combine_index_scale[batch_no]
-                pred_trend_value_scale = scale_value(pred_trend_value,combine_index_scale.min(),
-                                    combine_index_scale.max(),self.trend_threhold['min'],self.trend_threhold['max'])
-            else:
-                pred_trend_value = pred_index_data[(pred_index_data['date']==date)&(pred_index_data['scale_idx']==i)]['pred_trend_value'].values[0]
-            # if date==20241230:
-            #     print("ggg")
-            # long_num,short_num = self.criterion.judge_topNum_from_trend(pred_trend_value,top_num=item_top_num,trend_threhold=self.trend_threhold)
-            long_num,short_num = [1,1]
-            pre_index = np.argsort(-features_item)[:long_num]
-            pred_trend_flag = self.get_trend_flag_from_value(pred_trend_value)
-            for index in pre_index:
-                pre_index_total.append([ins[index],1,pred_trend_value,pred_trend_value_scale,pred_trend_flag,p0,p1])
-            pre_index = np.argsort(features_item)[:short_num]
-            for index in pre_index:
-                pre_index_total.append([ins[index],0,pred_trend_value,pred_trend_value_scale,pred_trend_flag,p0,p1])
+        pre_index = np.argsort(-global_feature)[:2]
+        for index in pre_index:
+            pre_index_total.append([index,1,pred_trend_value,pred_trend_value_scale,1,'total','total'])
+        pre_index = np.argsort(global_feature)[:2]
+        for index in pre_index:
+            pre_index_total.append([index,0,pred_trend_value,pred_trend_value_scale,0,'total','total'])  
+              
         pre_index_total = np.array(pre_index_total)
-        col_data_types = {"top_index":int, "top_flag":int, "pred_trend_value":float, "pred_trend_value_scale":float, 
-                          "pred_trend_flag":int, "p0":str, "p1":str}  
         pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
         pre_index_total['top_index'] = pre_index_total['top_index'].astype(int)
         pre_index_total['top_flag'] = pre_index_total['top_flag'].astype(int)
@@ -1889,7 +1866,10 @@ class FuturesTransformerModule(MlpModule):
             p1 = row.p1
             p0 = row.p0
             trend_target_item = trend_target[(trend_target['p0']==p0)&(trend_target['p1']==p1)]['value'].values[0]
-            ins = scale_arr[p0][p1]['instruments']
+            if p0=='total':
+                ins = keep_index
+            else:
+                ins = scale_arr[p0][p1]['instruments']
             ins = np.intersect1d(ins,keep_index)
             # real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
             real_trend_values = open_diff[ins].mean()
