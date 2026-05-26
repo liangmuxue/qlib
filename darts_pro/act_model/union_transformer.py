@@ -617,8 +617,8 @@ class SparseGateFeatureTopK(nn.Module):
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=input_dim,
                                     layer_norm=False,batch_norm=False,dropout=dropout)     
             trend_layer.append(branch_trend_combine_layer)
-        self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
-                                    layer_norm=False,batch_norm=True,dropout=dropout)  
+        # self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
+        #                             layer_norm=False,batch_norm=True,dropout=dropout)  
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
         self.branch_trend_combine_layer_bn = nn.BatchNorm1d(scales_dict.shape[0],track_running_stats=True)
             
@@ -640,7 +640,7 @@ class SparseGateFeatureTopK(nn.Module):
             features_list[key] = scale_features
             trend_logits_list[key] = trend_index_logits
         # Total Trend
-        trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}
+        # trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}
         # Cate Compare
         trend_list = []
         for i,item in self.scales_dict.iterrows():

@@ -238,17 +238,23 @@ class CollResAna():
     def build_match_results(self):
         """分别找出比较准的日期和不太准的日期"""
         
-        match_results = self.coll_result_data.groupby(by='date').apply(lambda x: (x['target_class'] >=2).sum())   
-        match_dates = match_results[match_results.values>=2].index.values
-        no_match_dates = match_results[match_results.values<2].index.values
+        yield_results = self.coll_result_data.groupby(by='date').apply(lambda x: x['diff_range'].sum()).reset_index()
+        yield_results = pd.DataFrame(yield_results.values,columns=['date','yield'])
+        
+        match_results = self.coll_result_data.groupby(by='date').apply(
+            lambda x: pd.Series([(x['target_class']>=2).sum(), x['diff_range'].sum()], index=['match_cnt','yield'])
+        ).reset_index()
+        # match_results =  pd.DataFrame(match_results.values,columns=['date','match_cnt','yield'])
+        match_dates = match_results[match_results['match_cnt']>=3].index.values
+        no_match_dates = match_results[match_results.values<3].index.values
         return  match_results, match_dates,  no_match_dates         
 
     def comprisive_stat(self):
         self.prepare_data()
         # self.relative_stat()
-        # self.normal_stat()
+        self.normal_stat()
         # self.scale_info_stat()
-        self.trend_info_stat()
+        # self.trend_info_stat()
         # self.price_range_stat()
         # self.target_corr_stat()
         # self.ins_index_stat()
@@ -478,6 +484,7 @@ class CollResAna():
         futures_dataset = self.val_dataset
         output_chunk_length = self.output_chunk_length
         match_results, match_dates, no_match_dates = self.build_match_results()
+        
         for index,dates in enumerate([match_dates,no_match_dates]):
             target_data = []
             for i in range(len(futures_dataset)):
@@ -495,9 +502,10 @@ class CollResAna():
             target_data['date'] = target_data['date'].astype(int)
             normal_info = target_data.groupby(by='date')['open_diff'].agg(['mean', 'std']).reset_index()
             title = "correct" if index==0 else "fail"
-            print("{} eva info{}".format(title,normal_info))
+            print("{} eva info: \n {}".format(title,normal_info))
             # print("{} eva mean:{},std:{}".format(title,normal_info['mean'].describe(),normal_info['std'].describe()))
-
+        self.coll_result_data['date'].isin(match_dates)
+    
     def scale_info_stat(self):   
         """根据预测评估数据，统计业务属性信息"""
         
