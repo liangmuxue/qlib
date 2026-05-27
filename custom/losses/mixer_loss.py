@@ -605,7 +605,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 cate_target_data[p0] = p1_target
                         
                         cate_target_norm = standardize_dict_tensor(cate_target_data)
-                        cate_pred_norm = cate_pred_data # standardize_dict_tensor(cate_pred_data)
+                        cate_pred_norm = standardize_dict_tensor(cate_pred_data)
                            
                         # 比较小类
                         # for key in cate_target_norm:
