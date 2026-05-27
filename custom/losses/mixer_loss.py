@@ -579,6 +579,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         data_idx = 0
                         cate_pred_data = {}
                         cate_target_data = {}
+                        contain_flag = True
                         for scale_item in self.scale_arr:
                             p0 = scale_item['p0']
                             ins_arr = torch.Tensor(scale_item['instruments']).to(target_class.device).long()
@@ -593,6 +594,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 ins_diff_item = ins_diff[ins_p1]
                                 if ins_p1.shape[0]==0:
                                     data_idx += 1  
+                                    contain_flag = False
                                     continue
                                 p1_pred.append(pred_data[data_idx])
                                 cate_target_in_batch[j,data_idx] = ins_diff_item.mean()
@@ -604,30 +606,41 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 cate_pred_data[p0] = p1_pred                   
                                 cate_target_data[p0] = p1_target
                         
-                        cate_target_norm = standardize_dict_tensor(cate_target_data)
-                        cate_pred_norm = standardize_dict_tensor(cate_pred_data)
-                           
-                        # 比较小类
-                        # for key in cate_target_norm:
-                        #     p1_cate_target = cate_target_norm[key]
-                        #     p1_cate_pred = cate_pred_norm[key]
-                        #     if all_elements_same(p1_cate_target) or all_elements_same(p1_cate_pred):
-                        #         loss_inner = self.mse_loss(p1_cate_pred.unsqueeze(0),p1_cate_target.unsqueeze(0))
-                        #     else:
-                        #         loss_inner = self.ccc_loss_comp(p1_cate_pred,p1_cate_target)
-                        #     loss_item += loss_inner
-                        #     detail_loss[key] = loss_inner
-                        #     cnt += 1                               
+                        cate_target_norm = list(cate_target_data.values()) # standardize_dict_tensor(cate_target_data)
+                        cate_pred_norm = list(cate_pred_data.values()) # standardize_dict_tensor(cate_pred_data)
+                        
+                        if contain_flag:
+                            # 比较小类
+                            cate_bins = [[0,-1],[1,2,3]]
+                            cate_target_splits = []
+                            cate_pred_splits = []
+                            for item in cate_bins:
+                                cate_target_sp = torch.cat([cate_target_norm[idx] for idx in item])
+                                cate_target_splits.append(cate_target_sp)
+                                cate_pred_sp = torch.cat([cate_pred_norm[idx] for idx in item])
+                                cate_pred_splits.append(cate_pred_sp)
+                                
+                            for n in range(len(cate_bins)):
+                                cate_target_sp = normalization_standard(cate_target_splits[n])
+                                cate_pred_sp = normalization_standard(cate_pred_splits[n])
+                                if all_elements_same(cate_target_sp) or all_elements_same(cate_pred_sp):
+                                    loss_inner = self.mse_loss(cate_pred_sp.unsqueeze(0),cate_target_sp.unsqueeze(0))
+                                else:
+                                    loss_inner = self.ccc_loss_comp(cate_pred_sp,cate_target_sp)
+                                loss_item += loss_inner
+                                key = "cate" + str(n)
+                                detail_loss[key] = loss_inner
+                                cnt += 1                               
                         # 比较大类
-                        p0_cate_target = torch.cat([cate_target_norm[key] for key in cate_target_norm.keys()])
-                        p0_cate_pred = torch.cat([cate_pred_norm[key] for key in cate_pred_norm.keys()])
+                        p0_cate_target = torch.cat([cate_target_data[key] for key in cate_target_data.keys()])
+                        p0_cate_pred = torch.cat([cate_pred_data[key] for key in cate_pred_data.keys()])
                         if p0_cate_target.shape[0]>2:
                             if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
                                 loss_inner = self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
                             else:
-                                loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=1, mid_num=1, need_mid=True)
+                                loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=2, mid_num=2, need_mid=True)
                             loss_item += loss_inner
-                            # detail_loss['main'] = loss_inner
+                            detail_loss['main'] = loss_inner
                             cnt += 1
                         if cnt>0:
                             loss_item = loss_item/cnt

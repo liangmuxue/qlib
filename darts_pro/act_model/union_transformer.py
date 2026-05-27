@@ -651,7 +651,7 @@ class SparseGateFeatureTopK(nn.Module):
             cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1)).squeeze(-1)
             trend_list.append(cate_data)     
         trend_list = torch.stack(trend_list).transpose(1,0)    
-        trend_list = self.branch_trend_combine_layer_ln(trend_list)
+        # trend_list = self.branch_trend_combine_layer_ln(trend_list)
         
         return features_list,trend_list,trend_logits_list
 
