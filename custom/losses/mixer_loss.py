@@ -545,6 +545,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         item = self.scale_dict[key][inner_key]
                         trend_output[key][inner_key] = torch.zeros([target_class.shape[0]]).to(target_class.device)
                         trend_target[key][inner_key] = torch.zeros([target_class.shape[0]]).to(target_class.device)
+                if target_mode in [2]:
+                    detail_loss = {}       
                 for j in range(target_class.shape[0]):
                     target_info_item = target_info[j][main_index_abs]
                     date = target_info_item['future_start_datetime']
@@ -571,7 +573,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         cls_loss[i] += loss_item
                         batch_size += 1                                           
                     if target_mode in [2]:
-                        detail_loss = {}
                         # 按照类别趋势进行横向比较，兼顾大类和小类
                         pred_data = sw_index_data[0][j]
                         loss_item = 0
@@ -608,7 +609,6 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         
                         cate_target_norm = list(cate_target_data.values()) # standardize_dict_tensor(cate_target_data)
                         cate_pred_norm = list(cate_pred_data.values()) # standardize_dict_tensor(cate_pred_data)
-                        
                         if contain_flag:
                             # 比较小类
                             cate_bins = [[0,-1],[1,2,3]]
@@ -629,18 +629,24 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                     loss_inner = self.ccc_loss_comp(cate_pred_sp,cate_target_sp)
                                 loss_item += loss_inner
                                 key = "cate" + str(n)
-                                detail_loss[key] = loss_inner
+                                if key not in detail_loss:
+                                    detail_loss[key] = [loss_inner]
+                                else:
+                                    detail_loss[key].append(loss_inner)
                                 cnt += 1                               
                         # 比较大类
                         p0_cate_target = torch.cat([cate_target_data[key] for key in cate_target_data.keys()])
                         p0_cate_pred = torch.cat([cate_pred_data[key] for key in cate_pred_data.keys()])
-                        if p0_cate_target.shape[0]>2:
+                        if p0_cate_target.shape[0]>5:
                             if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
                                 loss_inner = self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
                             else:
                                 loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=2, mid_num=2, need_mid=True)
                             loss_item += loss_inner
-                            detail_loss['main'] = loss_inner
+                            if 'main' not in detail_loss:
+                                detail_loss['main'] = [loss_inner]
+                            else:
+                                detail_loss['main'].append(loss_inner)
                             cnt += 1
                         if cnt>0:
                             loss_item = loss_item/cnt
@@ -693,6 +699,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 if target_mode in [2]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
                     ce_loss[i] = ce_loss[i]/batch_size  
+                    for key in detail_loss.keys():
+                        detail_loss[key] = torch.stack(detail_loss[key]).mean()                    
                 if target_mode in [5]:  
                     cls_loss[i] = cls_loss[i]/batch_size  
                     ce_loss[i] = ce_loss[i]/batch_size  
