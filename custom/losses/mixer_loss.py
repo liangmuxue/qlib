@@ -526,7 +526,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if optimizers_idx==i or optimizers_idx==-1:
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
-                sw_index_logits,sv,sw_index_data = output_item  
+                sw_index_logits,sv,sw_index_data,sw_index_data_p0 = output_item  
                 future_round_targets_factor = future_round_targets[...,i]
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 target_info_total = []
@@ -575,17 +575,22 @@ class FuturesIndustryLoss(UncertaintyLoss):
                     if target_mode in [2]:
                         # 按照类别趋势进行横向比较，兼顾大类和小类
                         pred_data = sw_index_data[0][j]
+                        pred_data_p0 = sw_index_data_p0[0][j]
                         loss_item = 0
                         cnt = 0
                         data_idx = 0
                         cate_pred_data = {}
                         cate_target_data = {}
                         contain_flag = True
-                        for scale_item in self.scale_arr:
+                        target_data_p0 = torch.zeros_like(pred_data_p0).to(target_class.device)
+                        for k,scale_item in enumerate(self.scale_arr):
                             p0 = scale_item['p0']
                             ins_arr = torch.Tensor(scale_item['instruments']).to(target_class.device).long()
                             ins_arr = tensor_intersect(ins_arr, ins_rel_index)
                             ins_diff_item = ins_diff[ins_arr]
+                            target_mean_item = ins_diff_item.mean()
+                            if not torch.isnan(target_mean_item):
+                                target_data_p0[k] = target_mean_item
                             p1_target = []
                             p1_pred = []
                             for key in self.scale_dict[p0].keys():
@@ -606,6 +611,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 p1_target = torch.stack(p1_target)
                                 cate_pred_data[p0] = p1_pred                   
                                 cate_target_data[p0] = p1_target
+               
                         
                         cate_target_norm = list(cate_target_data.values()) # standardize_dict_tensor(cate_target_data)
                         cate_pred_norm = list(cate_pred_data.values()) # standardize_dict_tensor(cate_pred_data)
@@ -635,19 +641,32 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                     detail_loss[key].append(loss_inner)
                                 cnt += 1                               
                         # 比较大类
-                        p0_cate_target = torch.cat([cate_target_data[key] for key in cate_target_data.keys()])
-                        p0_cate_pred = torch.cat([cate_pred_data[key] for key in cate_pred_data.keys()])
-                        if p0_cate_target.shape[0]>5:
-                            if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
-                                loss_inner = self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
+                        if torch.sum(torch.isnan(target_data_p0))==0 and torch.sum(target_data_p0==0)<(target_data_p0.shape[0]-2):
+                            pred_data_p0 = normalization_standard(pred_data_p0)
+                            target_data_p0 = normalization_standard(target_data_p0)
+                            if all_elements_same(pred_data_p0) or all_elements_same(target_data_p0):
+                                loss_inner = self.mse_loss(pred_data_p0.unsqueeze(0),target_data_p0.unsqueeze(0))
                             else:
-                                loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=2, mid_num=2, need_mid=True)
-                            loss_item += loss_inner
+                                loss_inner = self.ccc_loss_comp(pred_data_p0,target_data_p0)     
+                            loss_item += loss_inner  
                             if 'main' not in detail_loss:
                                 detail_loss['main'] = [loss_inner]
                             else:
-                                detail_loss['main'].append(loss_inner)
-                            cnt += 1
+                                detail_loss['main'].append(loss_inner)                              
+                            cnt += 1                             
+                        # p0_cate_target = torch.cat([cate_target_data[key] for key in cate_target_data.keys()])
+                        # p0_cate_pred = torch.cat([cate_pred_data[key] for key in cate_pred_data.keys()])
+                        # if p0_cate_target.shape[0]>5:
+                        #     if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
+                        #         loss_inner = self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
+                        #     else:
+                        #         loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=2, mid_num=2, need_mid=True)
+                        #     loss_item += loss_inner
+                        #     if 'main' not in detail_loss:
+                        #         detail_loss['main'] = [loss_inner]
+                        #     else:
+                        #         detail_loss['main'].append(loss_inner)
+                        #     cnt += 1
                         if cnt>0:
                             loss_item = loss_item/cnt
                             cls_loss[i] += loss_item

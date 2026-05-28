@@ -620,8 +620,7 @@ class SparseGateFeatureTopK(nn.Module):
         self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
                                     layer_norm=False,batch_norm=True,dropout=dropout)          
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
-        # self.branch_trend_combine_layer_bn = nn.BatchNorm1d(scales_dict.shape[0],track_running_stats=True)
-        self.branch_trend_combine_layer_ln = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=input_dim,
+        self.branch_trend_combine_layer_p0 = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=input_dim,
                                     layer_norm=False,batch_norm=False,dropout=dropout)         
             
     def forward(self, x,x_seq):
@@ -651,9 +650,9 @@ class SparseGateFeatureTopK(nn.Module):
             cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1)).squeeze(-1)
             trend_list.append(cate_data)     
         trend_list = torch.stack(trend_list).transpose(1,0)    
-        # trend_list = self.branch_trend_combine_layer_ln(trend_list)
+        trend_list_p0 = self.branch_trend_combine_layer_p0(trend_list)
         
-        return features_list,trend_list,trend_logits_list
+        return features_list,trend_list,trend_logits_list,trend_list_p0
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -751,15 +750,17 @@ class UnionTransCombine(nn.Module):
         trend_logits_combine = []
         cls_out_combine = []    
         trend_list_combine = []
+        trend_list_p0_combine = []
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features_list,trend_list,trend_logits_list = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1),pred_seq)
+            features_list,trend_list,trend_logits_list,trend_list_p0 = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1),pred_seq)
             cls_out_combine.append(features_list)
             # 整体指数预测的网络输出
             trend_list_combine.append(trend_list)
             trend_logits_combine.append(trend_logits_list)
+            trend_list_p0_combine.append(trend_list_p0)
         
-        return trend_logits_combine,cls_out_combine,trend_list_combine   
+        return trend_logits_combine,cls_out_combine,trend_list_combine,trend_list_p0_combine   
 
 

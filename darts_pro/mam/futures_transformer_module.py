@@ -1369,7 +1369,7 @@ class FuturesTransformerModule(MlpModule):
                 _,sv_indus, comm_index = output[0]
                 trend_logits,_,_  = output[1]
             else:
-                trend_logits,sv_indus, comm_index = output[0]
+                trend_logits,sv_indus, comm_index,_ = output[0]
             sv_indus = sv_indus[0]
             comm_index = comm_index[0]
             trend_logits = trend_logits[0]                
