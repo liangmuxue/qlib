@@ -1431,7 +1431,7 @@ class FuturesTransformerModule(MlpModule):
     def combine_result_data(self, output_result=None, predict_mode=False, pred_top_num=2):
         """计算涨跌幅分类准确度以及相关数据"""
         
-        return None,None,None,None
+        # return None,None,None,None
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         # 使用全部验证结果进行统一比较

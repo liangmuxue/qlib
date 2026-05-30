@@ -21,7 +21,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
-import gc
+import shap
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from darts.metrics import mape
@@ -92,8 +92,8 @@ class FuturesProcessModel(TftDataframeModel):
         if self.type.startswith("pred_futures_trans"):
             self.fit_futures_trans(dataset)
             return                      
-        if self.type.startswith("data_corr"):
-            self.data_corr(dataset)   
+        if self.type.startswith("analysis_model"):
+            self.analysis_model(dataset)   
             return     
         if self.type=="predict":
             self.predict(dataset)   
@@ -289,98 +289,130 @@ class FuturesProcessModel(TftDataframeModel):
             my_model.act_model_type = mode
         return my_model
                     
-    def data_corr(
+    def analysis_model(
         self,
         dataset: TFTFuturesDataset,
     ):
-        """对数据进行相关性分析"""
+        """分析特征重要性"""
         
-        scale_mode = self.optargs["scale_mode"]
-        pred_len = self.optargs["forecast_horizon"]
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.batch_file_path = self.kwargs["batch_file_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
         self.save_dataset_file = self.kwargs["save_dataset_file"]      
         if not os.path.exists(self.batch_file_path):
             os.mkdir(self.batch_file_path)
+        
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        global_var.set_value("trend_threhold",self.optargs["trend_threhold"])
+        train_data,val_data = dataset.build_series_data()
+        train_series_transformed,past_convariates_train,future_convariates_train = train_data
+        val_series_transformed,past_convariates_val,future_convariates_val = val_data
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)  
             
-        df_data_path = os.path.join(self.batch_file_path,"main_data.pkl")
-        df_train_path = os.path.join(self.batch_file_path,"df_train.pkl")
-        df_valid_path = os.path.join(self.batch_file_path,"df_valid.pkl")
-        ass_train_path = os.path.join(self.batch_file_path,"ass_data_train.pkl")
-        ass_valid_path = os.path.join(self.batch_file_path,"ass_data_valid.pkl")
-            
-        if self.load_dataset_file:
-            # 加载主要序列数据和辅助数据
-            with open(df_data_path, "rb") as fin:
-                train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = \
-                    pickle.load(fin)   
-            with open(ass_train_path, "rb") as fin:
-                ass_data_train = pickle.load(fin)  
-            with open(ass_valid_path, "rb") as fin:
-                ass_data_valid = pickle.load(fin) 
-            with open(df_train_path, "rb") as fin:
-                dataset.df_train = pickle.load(fin)  
-                dataset.prepare_inner_data(dataset.df_train)      
-            with open(df_valid_path, "rb") as fin:
-                dataset.df_val = pickle.load(fin)     
-                dataset.prepare_inner_data(dataset.df_val)           
-            global_var.set_value("ass_data_train",ass_data_train)
-            global_var.set_value("ass_data_valid",ass_data_valid)
-            global_var.set_value("load_ass_data",True)
+        # 使用股票代码数量作为embbding长度
+        emb_size = dataset.get_emb_size()
+        # emb_size = 500
+        load_weight = self.optargs["load_weight"]
+        # map_location = torch.device("cpu")
+        device = self._build_device()
+        
+        outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
+                        'top_num':self.optargs['loss_top_num'],'pred_top_num':self.optargs['pred_top_num'],
+                        'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode'],
+                        'trend_threhold':self.optargs['trend_threhold'],
+                        'pred_index_data_path':self.kwargs["pred_index_data_path"],'load_index_data':self.kwargs["load_index_data"],
+                        'pred_cate_data_path':self.kwargs["pred_cate_data_path"],'load_cate_data':self.kwargs["load_cate_data"]
+                        }
+        if load_weight:
+            best_weight = self.optargs["best_weight"]    
+            self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
+            self.model.model.set_outer_params(outer_params) 
         else:
-            # 生成tft时间序列数据集,包括目标数据、协变量等
-            train_series_transformed,val_series_transformed,series_total,past_convariates,future_convariates = dataset.build_series_data()
-            
-        output_chunk_length = self.optargs["forecast_horizon"]
-        input_chunk_length = self.optargs["wave_period"] - output_chunk_length
-        past_split = self.optargs["past_split"] 
+            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
+        self.model.mode = self.type 
+        self.model.set_outer_params(outer_params) 
         
-        custom_dataset_valid = FuturesIndustryDataset(
-                    target_series=val_series_transformed,
-                    covariates=past_convariates,
-                    future_covariates=future_convariates,
-                    input_chunk_length=input_chunk_length,
-                    output_chunk_length=output_chunk_length,
-                    max_samples_per_ts=None,
-                    use_static_covariates=True,
-                    target_num=len(past_split),
-                    scale_mode=scale_mode,
-                    mode="valid"
-                )            
-        data_assis = StatDataAssis()
-        col_list = dataset.col_def["col_list"] + ["label"]
-        analysis_columns = ["label_ori","REV5","IMAX5","QTLUMA5","OBV5","CCI5","KMID","KLEN","KMID2","KUP","KUP2",
-                            "KLOW","KLOW2","KSFT","RSV5", 'STD5','QTLU5','CORD5','CNTD5','VSTD5','QTLUMA5','BETA5',
-            'KURT5','SKEW5','CNTP5','CNTN5','SUMP5','CORR5','SUMPMA5','RANK5','RANKMA5']
-        analysis_columns = ["RSV5","QTLU5","CNTN5","BULLS","CCI5"]
-        # analysis_columns = ['RSV10','CCI10','CNTN10','QTLU10','QTLUMA10']
-        # analysis_columns = ["QTLUMA5",'QTLU5','IMXD5','SKEW5','BULLS','RSV5','ATR5','AOS','STD5','SUMPMA5']
-        # analysis_columns = ['rsv_diff','bulls_diff','cci_diff','diff_range','close_range']
         
-        results = []
-        price_col = 'open_range'
-        # price_col = 'CLOSE'
-        custom_date = None
-        # custom_date = [20221025]
+        trainer,model,train_loader,val_loader = \
+        self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+        self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+        self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+        self.model.model.set_outer_params(outer_params) 
+
+        real_model = self.model.model.sub_models[0]
+        real_model.eval()        # SHAP 必须 eval
+        for p in real_model.parameters():
+            p.requires_grad = False  # 关闭梯度，提速防报错
         
-        # 行业品种相关度横向比较
-        for i in range(len(analysis_columns)):
-            target_df = dataset.df_val
-            if custom_date is not None:
-                target_df = dataset.df_val[dataset.df_val['datetime_number'].isin(custom_date)]
-            tar_col = analysis_columns[i]
-            df_instrument = target_df[~target_df['instrument'].str.startswith('ZS_')]
-            corr_data = df_instrument[[price_col,tar_col]].corr().values
-            df_indus = target_df[(target_df['instrument'].str.startswith('ZS_'))&(target_df['instrument']!='ZS_ALL')&(target_df['instrument']!='ZS_JRQH')&(target_df['instrument']!='ZS_NMFI')]
-            corr_indus_data = df_indus[[price_col,tar_col]].corr().values
-            results.append([corr_data[0,1],corr_indus_data[0,1]])
-        results = np.array(results).transpose(1,0)
-        results = pd.DataFrame(results,index=['品种相关度','行业相关度'],columns=analysis_columns)
-        pd.set_option('expand_frame_repr', False)
-        print("指标走势与价格走势相关度:\n",results)
+        train_dataset = train_loader.dataset
+        val_dataset = val_loader.dataset
+        # 背景数据：用少量训练集（10~100 个样本，算基准）
+        cnt = 100
+        past_covariate_total = []
+        static_covariate_total = []
+        historic_future_covariates_total = []
+        for i in range(len(train_dataset)):
+            data = train_dataset[i]
+            past_covariate_total.append(data[1])
+            historic_future_covariates_total.append(data[2])
+            static_covariate_total.apend(data[4])
+            if i>cnt:
+                break
+        past_covariate_total = torch.tensor(np.stack(past_covariate_total),dtype=torch.float32)     
+        static_covariate_total = torch.tensor(np.stack(static_covariate_total),dtype=torch.float32)  
+        historic_future_covariates_total = torch.tensor(np.stack(historic_future_covariates_total),dtype=torch.float32)   
+        background = [past_covariate_total, historic_future_covariates_total, static_covariate_total] 
         
-        # print(dataset.df_val[(dataset.df_val['datetime_number']>=20221020)&(dataset.df_val['datetime_number']<=20221028)&(dataset.df_val['instrument'].str.startswith('ZS_'))&(dataset.df_val['instrument']!='ZS_ALL')&(dataset.df_val['instrument']!='ZS_JRQH')&(dataset.df_val['instrument']!='ZS_NMFI')][['instrument','diff_range','rsv_diff','RSV5','CLOSE']])
+        cnt = 30
+        past_covariate_total = []
+        static_covariate_total = []
+        historic_future_covariates_total = []        
+        for i in range(len(val_dataset)):
+            data = val_dataset[i]
+            past_covariate_total.append(data[1])
+            historic_future_covariates_total.append(data[2])
+            static_covariate_total.apend(data[4])
+            if i>cnt:
+                break
+        past_covariate_total = torch.tensor(np.stack(past_covariate_total),dtype=torch.float32)     
+        static_covariate_total = torch.tensor(np.stack(static_covariate_total),dtype=torch.float32)  
+        historic_future_covariates_total = torch.tensor(np.stack(historic_future_covariates_total),dtype=torch.float32)           
+        
+        # 待解释数据：选测试集一小部分
+        to_explain = [past_covariate_total, historic_future_covariates_total, static_covariate_total] 
+        # ---------- 选解释器（MLP/CNN 用 DeepExplainer） ----------
+        explainer = shap.DeepExplainer(
+            model=real_model,
+            data=background  # 背景：tensor/numpy 都可
+        )
+        # ---------- 计算 SHAP 值 ----------
+        # shap_values 形状：(n_samples, n_features)
+        shap_values = explainer.shap_values(to_explain)
+
+        print("shap_values length:", len(shap_values))
+        print("feat1 SHAP shape:", shap_values[0].shape)
+        print("feat2 SHAP shape:", shap_values[1].shape)
+        print("feat3 SHAP shape:", shap_values[2].shape)        
+        # ---------- 可视化（重要性 + 影响方向） ----------
+        names1 = [f'num_{i}' for i in range(10)]
+        names2 = [f'cat_{i}' for i in range(5)]
+        names3 = [f'seq_{i}' for i in range(16)]
+        
+        # 特征重要性图（最常用）
+        print("\n=== import 1 ===")
+        shap.summary_plot(shap_values[0], to_explain[0].numpy(), feature_names=names1)
+        
+        print("\n=== import 2 ===")
+        shap.summary_plot(shap_values[1], to_explain[1].numpy(), feature_names=names2)
+        
+        print("\n=== import 3 ===")
+        shap.summary_plot(shap_values[2], to_explain[2].numpy(), feature_names=names3)        
+                    
 
     @staticmethod           
     def _batch_collate_fn(batch):

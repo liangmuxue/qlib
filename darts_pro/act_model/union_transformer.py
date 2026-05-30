@@ -631,7 +631,7 @@ class SparseGateFeatureTopK(nn.Module):
         batch_size, S, input_dim = x.shape
         features_list = {}
         trend_logits_list = {}
-        if self.target_mode!=2:
+        if self.target_mode!=2 or True:
             # 分别根据不同的业务尺度，生成1维度特征
             g_features = self.top_global_layer(x.reshape(batch_size,-1))  
             features_list['global_feature'] = g_features
