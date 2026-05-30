@@ -8,8 +8,11 @@ from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from cus_utils.db_accessor import DbAccessor
 from pickle import TRUE
-from cus_utils.common_compute import linear_map, normalization_axis
+from cus_utils.common_compute import linear_map, normalization_axis,check_iqr_outler
+from darts_pro.mam.futures_transformer_module import build_mul_scale_arr
 from tft.class_define import get_simple_class
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from scipy import stats
 
 class DictToObject:
     def __init__(self, dictionary):
@@ -190,6 +193,31 @@ def compare_clean_data_and_1min_cross_data(match_date=None):
     # print("min date:{}".format(lack_data['date'].min()))
     return lack_data
 
+def get_high_corr_pairs(corr_matrix, threshold=0.85):
+    correlated_pairs = set()
+    for i in range(len(corr_matrix.columns)):
+        for j in range(i):
+            if abs(corr_matrix.iloc[i, j]) > threshold:
+                col1 = corr_matrix.columns[i]
+                col2 = corr_matrix.columns[j]
+                correlated_pairs.add((col1, col2, corr_matrix.iloc[i, j]))
+    return list(correlated_pairs)
+
+def compare_distribution_ks(train_feat, val_feat, feat_name):
+    # KS 检验
+    ks_stat, p_value = stats.ks_2samp(train_feat, val_feat)
+    return {
+        "feature": feat_name,
+        "ks_stat": round(ks_stat, 4),
+        "p_value": round(p_value, 4),
+        "is_different": p_value < 0.05  # True=分布不一致
+    }
+
+def kl_divergence(p, q):
+    p = np.histogram(p, bins=50, density=True)[0] + 1e-8
+    q = np.histogram(q, bins=50, density=True)[0] + 1e-8
+    return np.sum(p * np.log(p / q))
+    
 #######################  For Training #############################
 
 class CollResAna():
@@ -234,7 +262,55 @@ class CollResAna():
             self.val_dataset = val_loader.dataset
             self.train_dataset = train_loader.dataset
         self.tft_dataset = dataset
-                
+    
+    def extre_data_invest(self):
+        """排查异常数据"""
+        
+        futures_dataset = self.train_dataset
+        # futures_dataset = self.val_dataset
+        sw_ins_mappings = futures_dataset.sw_ins_mappings
+        scale_arr = build_mul_scale_arr(sw_ins_mappings,mode=6,dataset=self.tft_dataset)
+        outler_data = []
+        outler_scale_data = []
+        scale_diff_in_outlier = None
+        for i in range(len(futures_dataset)):
+            past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
+                covariate_future_total,future_target_total,target_class_total,price_targets,past_future_round_targets,\
+                index_round_targets,long_diff_seq_targets,target_info_total = futures_dataset[i]
+            future_start_datetime = int(futures_dataset.date_list[i])   
+            ins_diff = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_total)])
+            ins_diff_norm = np.array([t['open_diff_norm'] if t is not None else 0 for t in np.array(target_info_total)])
+            scale_diff = []
+            scale_diff_all = []
+            for k,scale_item in scale_arr.iterrows():
+                ins = scale_item['instruments']
+                ins_diff_inner = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_total)[ins]])
+                # ins_diff_norm_inner = np.array([t['open_diff_norm'] if t is not None else 0 for t in np.array(target_info_total)[ins]])
+                ins_diff_inner = ins_diff_inner[ins_diff_inner!=0]
+                if ins_diff_inner.shape[0]>0:
+                    mean_data = ins_diff_inner.mean()
+                    scale_diff.append(mean_data)
+                    scale_diff_all.append([future_start_datetime,k,mean_data])
+                else:
+                    scale_diff_all.append([future_start_datetime,k,0])
+            scale_diff = np.array(scale_diff)
+            scale_diff_all = np.array(scale_diff_all)
+            outler = check_iqr_outler(ins_diff)
+            outler_scale = check_iqr_outler(scale_diff,10)
+            
+            if outler.shape[0]>0:
+                outler_data.append([future_start_datetime,outler.index.values,np.round(outler.values[:,0],2)])
+            if outler_scale.shape[0]>0:
+                if scale_diff_in_outlier is None:
+                    scale_diff_in_outlier = scale_diff_all
+                else:
+                    scale_diff_in_outlier = np.concatenate([scale_diff_in_outlier,scale_diff_all])
+                outler_scale_data.append([future_start_datetime,outler_scale.index.values,np.round(outler_scale.values[:,0],2)])        
+        outler_data = pd.DataFrame(np.array(outler_data),columns=['date','index','value'])
+        outler_scale_data = pd.DataFrame(np.array(outler_scale_data),columns=['date','index','value'])
+        scale_diff_in_outlier = pd.DataFrame(np.array(scale_diff_in_outlier),columns=['date','index','value'])
+        outler_scale_data
+                          
     def build_match_results(self):
         """分别找出比较准的日期和不太准的日期"""
         
@@ -251,8 +327,10 @@ class CollResAna():
 
     def comprisive_stat(self):
         self.prepare_data()
+        # self.extre_data_invest()
+        self.fea_rel_stat()
         # self.relative_stat()
-        self.normal_stat()
+        # self.normal_stat()
         # self.scale_info_stat()
         # self.trend_info_stat()
         # self.price_range_stat()
@@ -322,7 +400,47 @@ class CollResAna():
         diff_data_total = pd.DataFrame(np.array(diff_data_total),columns=['date','round_price_corr','top_round_price_corr'])
         print("round_price corr:\n {}".format(diff_data_total))
         print("round_price mean:{}".format(diff_data_total['round_price_corr'].mean()))
-
+    
+    def fea_rel_stat(self):
+        """特征间相关性排查"""
+        
+        dataset = self.tft_dataset
+        columns = list(set(dataset.get_past_columns()))
+        
+        corr_matrix = dataset.df_all[columns].corr()
+        high_corr = get_high_corr_pairs(corr_matrix, threshold=0.85)
+        for pair in high_corr:
+            print(f"{pair[0]} <-> {pair[1]} | corr: {pair[2]:.2f}")        
+        
+        X = dataset.df_all[columns]
+        
+        # VIF排查
+        X = dataset.df_all[columns]
+        vif_data = pd.DataFrame()
+        vif_data["feature"] = X.columns
+        vif_data["VIF"] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+        vif_data = vif_data.sort_values("VIF", ascending=False)
+        print(vif_data)
+        
+        # KS检验
+        X_train = self.train_dataset.df_data[columns]
+        X_val = self.val_dataset.df_data[columns]
+        dist_diff = []
+        for col in X_train.columns:
+            res = compare_distribution_ks(X_train[col], X_val[col], col)
+            dist_diff.append(res)
+        
+        dist_df = pd.DataFrame(dist_diff)
+        dist_df = dist_df.sort_values("is_different", ascending=False)
+        print("=== 训练/验证集分布差异（KS检验）===")
+        print(dist_df)        
+        
+        print("=== 训练/验证集分布差异（KL检验）===")
+        for col in columns:
+            kl = kl_divergence(X_train[col], X_val[col])
+            print("{}:{}".format(col,kl))
+        
+        
     def ins_index_stat(self):
         """查看品种与指数的协同关系"""
  
@@ -572,7 +690,7 @@ if __name__ == "__main__":
     # compare_dataset_consistence()
     # compare_clean_data_and_continus_data(match_date=20251009)
     # compare_clean_data_and_1min_cross_data(match_date=20251009)
-    coll_ana = CollResAna("custom/data/results/stats",yaml_file="custom/config/darts/workflow_pred_futures_trans.yaml")
+    coll_ana = CollResAna("custom/data/results/stats",yaml_file="custom/config/darts/workflow_pred_futures_trans_index.yaml")
     coll_ana.comprisive_stat()
        
     

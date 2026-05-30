@@ -529,13 +529,14 @@ class ContinuousToDiscreteIndex(nn.Module):
 class AttScaleFeature(nn.Module):
     """按照指定尺度，实现特征处理"""
 
-    def __init__(self,sample_dim,input_dim,seq_len=5,ins_arr=None,ins_trend_dict=None, hidden_dim=16, dropout=0.1,num_indices=3,device=None):
+    def __init__(self,sample_dim,input_dim,seq_len=5,ins_arr=None,ins_trend_dict=None, hidden_dim=16, dropout=0.1,num_indices=3,target_mode=0,device=None):
         super().__init__()
         self.sample_dim = sample_dim
         self.scale_arr = torch.Tensor(ins_arr).long().to(device)
         self.ins_trend_dict = ins_trend_dict
         self.num_indices = num_indices
         self.seq_len = seq_len
+        self.target_mode = target_mode
         
         # TOP值选取网络
         sample_dim_inner = ins_arr.shape[0]
@@ -579,8 +580,9 @@ class SparseGateFeatureTopK(nn.Module):
     """综合TOPK选取"""
     
     def __init__(self,sample_dim,input_dim,seq_len=5,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
-                 scales_dict=None,device=None):
+                 target_mode=0,scales_dict=None,device=None):
         super().__init__()
+        self.target_mode = target_mode
         self.sample_dim = sample_dim
         self.k = k
         self.num_heads = num_heads
@@ -598,7 +600,8 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in enumerate(scales_arr):
             trend_arr = scales_trend_arr[item['p0']]
             instruments_dict = {key:torch.Tensor(trend_arr[key]['instruments']).to(device).long() for key in trend_arr.keys()}
-            scales_layer.append(AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,ins_arr=item['instruments'],ins_trend_dict=instruments_dict,device=device))
+            scales_layer.append(AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,ins_arr=item['instruments'],target_mode=target_mode,
+                                                ins_trend_dict=instruments_dict,device=device))
         self.scales_layer = nn.ModuleList(scales_layer)
         # # 分支趋势网络
         # branch_trend_layer = []
@@ -627,19 +630,19 @@ class SparseGateFeatureTopK(nn.Module):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
         features_list = {}
-        trend_list = []
         trend_logits_list = {}
-        # 分别根据不同的业务尺度，生成1维度特征
-        g_features = self.top_global_layer(x.reshape(batch_size,-1))  
-        features_list['global_feature'] = g_features
-        # Instrument Compare
-        for i,layer in enumerate(self.scales_layer):
-            scale_features,_,trend_index_logits = layer(x,x_seq)  
-            scale_def = self.scales_arr[i]
-            key = scale_def['p']
-            # 合并主体特征和分尺度特征
-            features_list[key] = scale_features
-            trend_logits_list[key] = trend_index_logits
+        if self.target_mode!=2:
+            # 分别根据不同的业务尺度，生成1维度特征
+            g_features = self.top_global_layer(x.reshape(batch_size,-1))  
+            features_list['global_feature'] = g_features
+            # Instrument Compare
+            for i,layer in enumerate(self.scales_layer):
+                scale_features,_,trend_index_logits = layer(x,x_seq)  
+                scale_def = self.scales_arr[i]
+                key = scale_def['p']
+                # 合并主体特征和分尺度特征
+                features_list[key] = scale_features
+                trend_logits_list[key] = trend_index_logits
         # Total Trend
         # trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}
         # Cate Compare
@@ -677,6 +680,7 @@ class UnionTransCombine(nn.Module):
         top_num=3,            # topk数量
         scales_arr=None,
         time_encoder=None,
+        target_mode=0,
         device='cuda'
     ):
         super().__init__()
@@ -727,7 +731,7 @@ class UnionTransCombine(nn.Module):
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
-        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, seq_len=pred_len,
+        self.top_selector = nn.ParameterList([SparseGateFeatureTopK(sample_dim,obs_dim, k=top_num, seq_len=pred_len,target_mode=target_mode,
                         hidden_dim=hidden_size,num_heads=4, dropout=0.1,scales_dict=scales_arr,device=device) for _ in range(self.target_feat_dim)])
 
         ############# 中间变量调试 #############

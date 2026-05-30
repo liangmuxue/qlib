@@ -187,7 +187,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                                     &(df_data["instrument_rank"]==code)]
                 price_array = df_item["label_ori"].values
                 datetime_array = df_item["datetime_number"].values                                
-                diff_range = df_item["open_diff"].values        
+                diff_range = df_item["open_diff"].values   
+                diff_range_norm = df_item["diff_range_norm"].values       
                 open_array = df_item["OPEN"].values      
                 dayofweek = df_item["dayofweek"].values   
                 week = df_item["week"].values   
@@ -196,7 +197,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                     df_zs_all = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                        &(~df_data['instrument'].str.startswith('ZS'))]
                     diff_range = df_zs_all.groupby("datetime_number")["diff_range"].mean().values                                                    
-                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array,dayofweek,week)
+                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array,dayofweek,week,diff_range_norm)
             # 保存到本地
             save_ass_data = global_var.get_value("save_ass_data")
             if save_ass_data:
@@ -621,17 +622,19 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
             open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
+            diff_range_norm = self.ass_data[code][7][past_start_ser:future_end_ser]
             # dayofweek_array = self.ass_data[code][5][past_start_ser:future_end_ser]
             # week_array = self.ass_data[code][6][past_start_ser:future_end_ser]
             # 计算开盘价目标差值范围
             open_diff = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
+            open_diff_norm = diff_range_norm[-self.output_chunk_length+self.cut_len-1]
             # future_dayofweek = dayofweek_array[-self.output_chunk_length+self.cut_len-1]
             # future_week = week_array[-self.output_chunk_length+self.cut_len-1]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引
             target_info = {"total_idx":idx,"item_rank_code":code,"instrument":instrument,"past_start":past_start,"past_end":past_end,
                                "future_start_datetime":future_start_datetime,"future_start":future_start,"future_end":future_end,
                                "price_array":price_array,"diff_range":diff_range,"datetime_array":datetime_array,"open_array":open_array,
-                               "open_diff":open_diff,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
+                               "open_diff_norm":open_diff_norm,"open_diff":open_diff,"total_start":target_series.time_index.start,"total_end":target_series.time_index.stop}
             # 过去协变量序列数据
             covariate_series = self.covariates[ori_index] 
             raise_if_not(

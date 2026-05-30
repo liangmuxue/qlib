@@ -14,6 +14,20 @@ from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAK
 from pip._internal.models import candidate
 
 
+def check_iqr_outler(data,range=3):
+    """四分位排查异常值"""
+    
+    col = "target"
+    df = pd.DataFrame(data,columns = [col] )
+    Q1 = df[col].quantile(0.25)
+    Q3 = df[col].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - range * IQR
+    upper_bound = Q3 + range * IQR
+    outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)]
+    
+    return outliers
+
 def standardize_dict_tensor(original_dict):
     """
     对字典中所有PyTorch张量进行全局标准化，并映射回原字典

@@ -224,7 +224,8 @@ class TFTFuturesDataset(TFTSeriesDataset):
         
         df[df['instrument'].str.startswith('ZS_')] = df_indus
         # 针对其他训练指标数据，统一使用训练集的标准化参数.进行训练集和验证集数据的标准化,需要按照品种分组进行
-        norm_cols = self.get_past_columns()[:15]
+        col_cnt = len(self.get_past_columns())//3
+        norm_cols = self.get_past_columns()[:col_cnt]
         # norm_cols += ['diff_range_norm']
         group_stats = df_train.groupby('instrument')[norm_cols].agg(['mean', 'std']).reset_index()   
         # 处理标准差为 0 的情况（可选）

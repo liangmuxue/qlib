@@ -406,7 +406,7 @@ class FuturesTransformerModule(MlpModule):
                 static_num=static_covariates.shape[-1]-1,
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
-                hidden_dim=64,
+                hidden_dim=48,
                 hidden_size=16,
                 nhead=8,
                 num_layers=3,
@@ -419,6 +419,7 @@ class FuturesTransformerModule(MlpModule):
                 static_cate_emb=dataset.get_cate_dict(),
                 scales_arr=self.scale_arr,
                 device=self.device,
+                target_mode=self.target_mode[seq]
             )         
             self.time_embed_dim = model.time_embed_dim      
             self.embedding_size = input_dim
@@ -903,6 +904,8 @@ class FuturesTransformerModule(MlpModule):
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         rate_total, coll_result,trend_result,cate_result = self.combine_result_data(self.output_result, pred_top_num=self.pred_top_num)
+        if rate_total is None:
+            return
         date_total_num = float(coll_result['date'].unique().shape[0])
         
         # 打印相关指标
@@ -1428,7 +1431,7 @@ class FuturesTransformerModule(MlpModule):
     def combine_result_data(self, output_result=None, predict_mode=False, pred_top_num=2):
         """计算涨跌幅分类准确度以及相关数据"""
         
-        # return None,None,None,None
+        return None,None,None,None
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         # 使用全部验证结果进行统一比较
@@ -1591,7 +1594,7 @@ class FuturesTransformerModule(MlpModule):
             rate_total['dist_{}'.format(i)] = round(distribute, 3)
             
         if rate_total.shape[0] == 0:
-            return None, None
+            return None, None,None, None
         
         return rate_total, result_total_list,trend_result_total,cate_result_total
     
@@ -1978,6 +1981,11 @@ class FuturesTransformerModule(MlpModule):
         distances = pairwise_compare(torch.Tensor(output_last), torch.Tensor(output_other), distance_func=self.criterion.mse_dis).squeeze(0)
         return distances
             
+            
+    def on_test_start(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        print('test_step')
+        
+        
     ##############################  Predict Part ################################
 
     def on_predict_start(self): 
