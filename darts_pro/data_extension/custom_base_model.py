@@ -45,6 +45,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         loss_number=3,
         device="cpu",
         train_sample=None,
+        opt_size=1,
         model_type='tft',
         **kwargs
     ):
@@ -64,7 +65,7 @@ class BaseMixModule(PLMixedCovariatesModule):
         classify_vr_layers = []
         # 涨跌幅度分类
         vr_range_num = len(CLASS_SIMPLE_VALUES.keys()) 
-        for i in range(len(past_split)):
+        for i in range(opt_size):
             # 拆分过去协变量,形成不同的网络配置，给到不同的model
             model =  self.create_real_model(output_dim, variables_meta_array[i], num_static_components, 
                                             hidden_size, lstm_layers, num_attention_heads, full_attention, 

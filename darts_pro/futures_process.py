@@ -54,6 +54,19 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
 logger = AppLogger()
 
+class ShapWrapper(torch.nn.Module):
+    """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
+    def __init__(self, pl_model, output_index=0):
+        super().__init__()
+        self.model = pl_model
+        self.output_index = output_index  # 选择看第几个输出
+
+    def forward(self, *inputs):
+        # 原模型返回 (out1, out2, out3)
+        outputs = self.model(*inputs)
+        # 只返回你指定的那一个输出
+        return outputs[2][0]
+    
 class FuturesProcessModel(TftDataframeModel):
 
     def fit(
@@ -344,8 +357,10 @@ class FuturesProcessModel(TftDataframeModel):
         self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
         self.model.model.set_outer_params(outer_params) 
 
-        real_model = self.model.model.sub_models[0]
+        self.model.model.eval()
+        real_model = self.model.model.sub_models[0].cuda()
         real_model.eval()        # SHAP 必须 eval
+        
         for p in real_model.parameters():
             p.requires_grad = False  # 关闭梯度，提速防报错
         
@@ -356,64 +371,210 @@ class FuturesProcessModel(TftDataframeModel):
         past_covariate_total = []
         static_covariate_total = []
         historic_future_covariates_total = []
-        for i in range(len(train_dataset)):
-            data = train_dataset[i]
-            past_covariate_total.append(data[1])
-            historic_future_covariates_total.append(data[2])
-            static_covariate_total.apend(data[4])
-            if i>cnt:
-                break
-        past_covariate_total = torch.tensor(np.stack(past_covariate_total),dtype=torch.float32)     
-        static_covariate_total = torch.tensor(np.stack(static_covariate_total),dtype=torch.float32)  
-        historic_future_covariates_total = torch.tensor(np.stack(historic_future_covariates_total),dtype=torch.float32)   
-        background = [past_covariate_total, historic_future_covariates_total, static_covariate_total] 
-        
-        cnt = 30
-        past_covariate_total = []
-        static_covariate_total = []
-        historic_future_covariates_total = []        
-        for i in range(len(val_dataset)):
-            data = val_dataset[i]
-            past_covariate_total.append(data[1])
-            historic_future_covariates_total.append(data[2])
-            static_covariate_total.apend(data[4])
-            if i>cnt:
-                break
-        past_covariate_total = torch.tensor(np.stack(past_covariate_total),dtype=torch.float32)     
-        static_covariate_total = torch.tensor(np.stack(static_covariate_total),dtype=torch.float32)  
-        historic_future_covariates_total = torch.tensor(np.stack(historic_future_covariates_total),dtype=torch.float32)           
-        
+        # 背景数据：用少量训练集
+        background,_ = self.form_input_data(train_dataset,pl_module=self.model.model,data_loader=train_loader,sampler_cnt=1,mode='train')
         # 待解释数据：选测试集一小部分
-        to_explain = [past_covariate_total, historic_future_covariates_total, static_covariate_total] 
+        to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=self.model.model,data_loader=val_loader,sampler_cnt=1,mode='val')
+        
         # ---------- 选解释器（MLP/CNN 用 DeepExplainer） ----------
-        explainer = shap.DeepExplainer(
-            model=real_model,
-            data=background  # 背景：tensor/numpy 都可
-        )
-        # ---------- 计算 SHAP 值 ----------
-        # shap_values 形状：(n_samples, n_features)
-        shap_values = explainer.shap_values(to_explain)
+        wrapped_model = ShapWrapper(real_model, output_index=2)
+        
+        self.model_layer_analysis(real_model, background, to_explain)
 
-        print("shap_values length:", len(shap_values))
-        print("feat1 SHAP shape:", shap_values[0].shape)
-        print("feat2 SHAP shape:", shap_values[1].shape)
-        print("feat3 SHAP shape:", shap_values[2].shape)        
-        # ---------- 可视化（重要性 + 影响方向） ----------
-        names1 = [f'num_{i}' for i in range(10)]
-        names2 = [f'cat_{i}' for i in range(5)]
-        names3 = [f'seq_{i}' for i in range(16)]
-        
-        # 特征重要性图（最常用）
-        print("\n=== import 1 ===")
-        shap.summary_plot(shap_values[0], to_explain[0].numpy(), feature_names=names1)
-        
-        print("\n=== import 2 ===")
-        shap.summary_plot(shap_values[1], to_explain[1].numpy(), feature_names=names2)
-        
-        print("\n=== import 3 ===")
-        shap.summary_plot(shap_values[2], to_explain[2].numpy(), feature_names=names3)        
+        # explainer = shap.GradientExplainer(
+        #     model=wrapped_model,
+        #     data=background  # 背景：tensor/numpy 都可
+        # )        
+        # # ---------- 计算 SHAP 值 ----------
+        # # shap_values 形状：(n_samples, n_features)
+        # shap_values = explainer.shap_values(to_explain)
+        #
+        # print("shap_values length:", len(shap_values))
+        # print("trend_list_main SHAP shape:", shap_values[3].shape)       
+        #
+        # # ======================== 【5】核心诊断：每层SHAP贡献 ========================
+        # print("="*60)
+        # print("  训练损失不下降 → SHAP 层诊断报告")
+        # print("="*60)
+        #
+        # for i, (out, sv) in enumerate(zip(layer_recorder, shap_values)):
+        #     # 量化指标
+        #     mean_abs = np.mean(np.abs(sv))
+        #     neg_ratio = np.mean(sv < 0)
+        #     zero_ratio = np.mean(np.abs(out.cpu().numpy()) < 1e-6)
+        #
+        #     # 输出诊断
+        #     print(f"\n📌 层 {i+1}")
+        #     print(f"   平均贡献强度：{mean_abs:.6f}")
+        #     print(f"   负贡献比例：{neg_ratio:.1%}")
+        #     print(f"   神经元死亡比例：{zero_ratio:.1%}")
+        #
+        #     # ======================== 自动判断问题 ========================
+        #     if mean_abs < 1e-5:
+        #         print("   ❌ 问题：该层**完全失效，无任何贡献**（梯度消失/权重死了）")
+        #     elif neg_ratio > 0.2:
+        #         print("   ❌ 问题：该层**有害**，在破坏预测（梯度爆炸/过拟合）")
+        #     elif zero_ratio > 0.8:
+        #         print("   ❌ 问题：该层**神经元全部死亡**（ReLU死区/权重为0）")
+        #     else:
+        #         print("   ✅ 正常")        
+         
+        # # ---------- 可视化（重要性 + 影响方向） ----------
+        # names = [f'num_{i}' for i in range(5)]
+        # # 特征重要性图（最常用）
+        # print("\n=== import trend_list_main ===")
+        # for i in range(len(to_explain)):
+        #     print("\n=== No {} ===".format(i))
+        #     shap.summary_plot(shap_values[3], to_explain[i].cpu().numpy(), feature_names=names)        
                     
+    def model_layer_analysis(self,model,background_input,test_input):
+        """Model Layer compute analysis"""
+        
+        # 每个输入展平后的总长度
+        dim1 = 34 * 7
+        dim2 = 34 * 28 * 12
+        dim3 = 34 * 28 * 20
+        dim4 = 34 * 20
+        total_dim = dim1 + dim2 + dim3 + dim4
+        
+        def flatten_inputs(x_arr):
+            """把多个不同形状输入 → 展平 → 拼接成一个长向量"""
+            x_arr_flat = []
+            for x in x_arr:
+                x_arr_flat.append(x.flatten(1))
+            return torch.cat(x_arr_flat, dim=1).cpu().numpy()
+        
+        def split_restore_inputs(X_flat):
+            """把长向量 → 拆分 → 恢复成模型需要的多输入形状"""
+            X_tensor = torch.tensor(X_flat, dtype=torch.float32)
+            
+            x1_flat = X_tensor[:, :dim1]
+            x2_flat = X_tensor[:, dim1:dim1+dim2]
+            x3_flat = X_tensor[:, dim1+dim2:dim1+dim2+dim3]
+            x4_flat = X_tensor[:, dim1+dim2+dim3:]
+            
+            # 恢复原形状
+            x1 = x1_flat.view(-1, 34,7).cuda()
+            x2 = x2_flat.view(-1, 34, 28,12).cuda()
+            x3 = x3_flat.view(-1, 34, 28,20).cuda()
+            x4 = x4_flat.view(-1, 34, 20).cuda()
+            return x1, x2, x3, x4
+        
+        # wrapped_model = ShapWrapper(model, output_index=2)
+        
+        layers_to_explain = [model.trans_model, model.top_selector[0]]
+        
+        # 4. 逐层算 SHAP
+        shap_per_layer = []
+        layer_outputs = []
 
+        # ==============================================
+        # 包装函数：给 KernelExplainer 用（输出=中间层）
+        # ==============================================
+        # def predict_middle(X_flat):
+        #     """输入：展平向量；输出：模型中间层结果"""
+        #     x_tuple = split_restore_inputs(X_flat)
+        #
+        #     with torch.no_grad():
+        #         model(*x_tuple)  # 前向传播
+        #
+        #     # 返回【中间层结果】给 SHAP
+        #     return model.middle.numpy()
+        
+        for i,layer in enumerate(layers_to_explain):
+            # 前向，拿到该层输出
+            # 注意：这里要搭一个“到这一层为止”的 forward
+            def forward_to_layer(x):
+                if layer is model.trans_model:
+                    x_tuple = split_restore_inputs(x)
+                    x = model.trans_model(*x_tuple)   
+                    x = x[0][1].cpu().numpy()
+                    x = x.reshape([x.shape[0],-1])         
+                if layer is model.top_selector[0]:
+                    x = model.trans_model(x) 
+                    x = x[0][1]  
+                    x = model.top_selector[0](x)
+                    x = x[2].cpu().numpy()
+                    x = x.reshape([x.shape[0],-1]) 
+                return x
+    
+            # out = forward_to_layer(test_input)
+            # layer_outputs.append(out)
+    
+            background = flatten_inputs(background_input)
+            X_test_flat = flatten_inputs(test_input)[:2]
+            
+            # GradientExplainer：指定 (model, layer)
+            # explainer = shap.GradientExplainer(
+            #     (wrapped_model, layer),   # 关键：绑定特定层
+            #     background_input
+            # )
+            explainer = shap.KernelExplainer(forward_to_layer, background)
+            # 计算该层的 SHAP
+            sv = explainer.shap_values(X_test_flat, nsamples=10,l1_reg="num_features(10)",eps=1e-6 )            
+            # shap_per_layer.append(sv)   
+            with open("shap_values_{}.pkl".format(i), "wb") as f:
+                pickle.dump(sv, f)
+            print("layer_{}  ok".format(i))
+
+        # for i, (out, sv) in enumerate(zip(layer_outputs, shap_per_layer)):
+        #     print(f"Layer {i+1} | out.shape={out.shape} | shap.shape={sv.shape}")
+            # 看 sv 是否全接近 0 → 这一层“不干活”
+                
+    def form_input_data(self,fur_dataset,sampler_cnt=3,data_loader=None,pl_module=None,mode='train'):
+        
+        static_covs_total,past_convs_item_total,his_future_emb_total,future_emb_total,future_single_emb_total = [],[],[],[],[]
+        
+        for i,data in enumerate(data_loader):
+            (
+                past_target,
+                past_covariates,
+                historic_future_covariates,
+                future_covariates,
+                static_covariates,
+                past_future_covariates,
+                future_target,
+                target_class,
+                price_targets,
+                past_future_round_targets,
+                index_round_targets,
+                future_week_info,
+                target_info
+            ) = data           
+            inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
+                   static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class,target_info)    
+            pl_module = pl_module.cuda()       
+            input_batch = pl_module._process_input_batch(inp,mode=mode)
+            input_batch_transform = []
+            for item in input_batch:
+                if isinstance(item,list):
+                    item = [it.float().cuda() for it in item]  
+                else:
+                    item = item.float().cuda()
+                input_batch_transform.append(item)
+            pl_module.eval()
+            with torch.no_grad():
+                ouput = pl_module.forward(input_batch_transform)    
+            out_total,input_final,_ = ouput
+            layer_recorder = out_total[0][-1]
+            static_covs,past_convs_item,his_future_emb,future_single_emb = input_final
+            static_covs_total.append(static_covs)
+            past_convs_item_total.append(past_convs_item)
+            his_future_emb_total.append(his_future_emb)
+            future_single_emb_total.append(future_single_emb)
+            if i>=sampler_cnt-1:
+                break
+        
+        static_covs_total = torch.cat(static_covs_total,dim=0).float().cuda()
+        past_convs_item_total = torch.cat(past_convs_item_total,dim=0).float().cuda()
+        his_future_emb_total = torch.cat(his_future_emb_total,dim=0).float().cuda()
+        # future_emb_total = torch.cat(future_emb_total,dim=0).float()
+        future_single_emb_total = torch.cat(future_single_emb_total,dim=0).float().cuda()
+        
+        input_final = [static_covs_total,past_convs_item_total,his_future_emb_total,future_single_emb_total]
+           
+        return input_final,layer_recorder
+    
     @staticmethod           
     def _batch_collate_fn(batch):
         """批次整合"""

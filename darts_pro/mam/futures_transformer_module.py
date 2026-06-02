@@ -574,10 +574,13 @@ class FuturesTransformerModule(MlpModule):
                         convs_emb.append(emb_data)
                     convs_emb = torch.stack(convs_emb).permute(1,0,2,3)
                     return convs_emb
-                his_future_emb = transform_emb(his_future_covs).to(self.device)        
-                future_emb = transform_emb(futures_convs).to(self.device).double()    
+                his_future_emb = transform_emb(his_future_covs).to(self.device)   
+                future_emb = transform_emb(futures_convs).to(self.device) 
+                if his_future_emb.dtype==torch.float64:  
+                    future_emb = future_emb.double()    
                 future_single_emb =  future_emb[:,:,target_len,:]   
-                out = m(static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb)                
+                input_final = (static_covs,past_convs_item, his_future_emb,future_single_emb)
+                out = m(static_covs,past_convs_item, his_future_emb,future_single_emb)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
             else:
                 # 模拟数据
@@ -589,7 +592,7 @@ class FuturesTransformerModule(MlpModule):
             out_total.append(out)    
             out_class_total.append(out_class)
         
-        return out_total, vr_class, out_class_total  
+        return out_total, input_final, out_class_total  
     
     def on_train_start(self): 
         super().on_train_start()
@@ -637,7 +640,7 @@ class FuturesTransformerModule(MlpModule):
         inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
                static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class,target_info)     
         past_target = train_batch[0]
-        input_batch = self._process_input_batch(inp)
+        input_batch = self._process_input_batch(inp,mode='train')
         future_covs = input_batch[1]
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
@@ -797,7 +800,7 @@ class FuturesTransformerModule(MlpModule):
               
         inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
                static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class,target_info) 
-        input_batch = self._process_input_batch(inp)
+        input_batch = self._process_input_batch(inp,mode='valid')
         future_covs = input_batch[1]
         (output, vr_class, vr_class_list) = self(input_batch, optimizer_idx=-1)
         
@@ -827,7 +830,7 @@ class FuturesTransformerModule(MlpModule):
         return loss, detail_loss, output_combine       
 
     def _process_input_batch(
-        self, input_batch
+        self, input_batch,mode='train'
     ):
         """重载方法，以适应数据结构变化"""
         (
@@ -875,8 +878,7 @@ class FuturesTransformerModule(MlpModule):
         static_covariates = static_covariates[..., 1:]
         # 切分出过去整体round数值,规则为全部过去数值-冗余值(预测长度)-1l
         past_index_targets = index_round_targets[:,:,:self.input_chunk_length,:]
-        # 去掉正泰zsall部分
-        sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
+        sw_ins_mappings = self.train_sw_ins_mappings if mode=='train' else self.valid_sw_ins_mappings
         indus_rel_index = FuturesMappingUtil.get_industry_rel_index(sw_ins_mappings)
         past_index_targets = past_index_targets[:, indus_rel_index,:,:]
         # 切分单独的过去round数值
@@ -1323,7 +1325,7 @@ class FuturesTransformerModule(MlpModule):
     def dump_val_data(self, val_batch, outputs, batch_data):
     
         output, vr_class, price_outputs, past_future_round_targets = outputs
-        choice_out, trend_value, combine_index = vr_class
+        # choice_out, trend_value, combine_index = vr_class
         (past_target, past_covariates, historic_future_covariates, future_covariates,
             static_covariates, past_future_covariates, future_target, target_class, price_targets, _, index_round_targets, future_week_info, target_info) = val_batch
         # 记录批次内价格涨跌幅，用于整体指数批次归一化数据的回溯
@@ -1337,7 +1339,7 @@ class FuturesTransformerModule(MlpModule):
         #     ts[main_index]["pred_round_data"] = output[-1][2].cpu().numpy().squeeze(-1)
         whole_index_round_targets = index_round_targets[:,:,:-1,:]
         # 保存数据用于后续验证
-        output_res = (output, choice_out.cpu().numpy(), batch_data, combine_index.cpu().numpy(), past_target.cpu().numpy(),
+        output_res = (output, batch_data, past_target.cpu().numpy(),
                       future_target.cpu().numpy(), target_class.cpu().numpy(),
                       price_targets.cpu().numpy(), past_future_round_targets.cpu().numpy(), whole_index_round_targets.cpu().numpy(),
                       index_round_targets.cpu().numpy(), future_week_info.cpu().numpy(), target_info)
@@ -1358,13 +1360,11 @@ class FuturesTransformerModule(MlpModule):
         cls_total = {}
         comm_index_total = []
         trend_logits_total = {}
-        choice_total = []
         trend_total = []
-        combine_index_total = []
         index_round_targets_total = []
         future_week_info_total = []
         for item in output_result:
-            (output, choice, batch_data, combine_index, past_target, future_target, target_class, price_targets, past_future_round_targets, whole_index_round_targets, index_round_targets, future_week_info, target_info) = item
+            (output, batch_data, past_target, future_target, target_class, price_targets, past_future_round_targets, whole_index_round_targets, index_round_targets, future_week_info, target_info) = item
             x_bar_inner = []
             dec_inner = []
             # 合并列表中的品种和整体趋势
@@ -1395,9 +1395,7 @@ class FuturesTransformerModule(MlpModule):
                 
             # ce_index_inner = np.stack(ce_index_inner).transpose(1,2,0)
             x_bar_total.append(x_bar_inner)
-            choice_total.append(choice)
             trend_total.append(batch_data)
-            combine_index_total.append(combine_index)
             
             target_info_total.append(target_info)
             target_class_total.append(target_class)
@@ -1410,9 +1408,7 @@ class FuturesTransformerModule(MlpModule):
             future_week_info_total.append(future_week_info)
         
         x_bar_total = np.concatenate(x_bar_total)
-        choice_total = np.concatenate(choice_total)
         trend_total = np.concatenate(trend_total)
-        combine_index_total = np.concatenate(combine_index_total)
         comm_index_total = np.concatenate(comm_index_total)
         target_class_total = np.concatenate(target_class_total)
         past_target_total = np.concatenate(past_target_total)
@@ -1424,7 +1420,7 @@ class FuturesTransformerModule(MlpModule):
         target_info_total = np.concatenate(target_info_total)
         future_week_info_total = np.concatenate(future_week_info_total)
                     
-        return (x_bar_total, sv_total, cls_total, comm_index_total, trend_logits_total, trend_total, combine_index_total), \
+        return (x_bar_total, sv_total, cls_total, comm_index_total, trend_logits_total, trend_total), \
                     past_target_total, future_target_total, target_class_total, price_targets_total, past_future_round_targets_total, \
                     future_week_info_total, index_round_targets_total, target_info_total        
                            

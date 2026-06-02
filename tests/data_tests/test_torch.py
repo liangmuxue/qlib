@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
-
+import shap
 import numpy as np
 import time
 from cus_utils.metrics import pca_apply
@@ -329,7 +329,115 @@ def test_cos():
     # input2 = torch.Tensor(np.array([1,30]))
     # similarity = torch.cosine_similarity(input1, input2, dim=0)
     # print(similarity) 
-       
+
+def test_shap():
+
+    # 1. 定义你的模型
+    class DeepNetwork(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer1 = nn.Linear(10, 32)
+            self.layer2 = nn.Linear(32, 16)
+            self.layer3 = nn.Linear(16, 1)
+            
+        def forward(self, x):
+            x = torch.relu(self.layer1(x))
+            x = torch.relu(self.layer2(x))
+            return self.layer3(x)
+    
+    model = DeepNetwork().eval()
+    
+    # 2. 准备实验数据
+    background_input = torch.randn(100, 10)
+    test_input = torch.randn(5, 10)
+    
+    # =========================================================
+    # 【核心调试技术】动态拦截与替换函数
+    # =========================================================
+    def make_predict_func(model, target_layer_name, original_input):
+        """
+        这个工厂函数专门为 SHAP 打造。
+        它返回一个新函数，这个新函数接收【中间层的特征(NumPy)】，然后让模型继续往后跑，输出【最终预测】。
+        """
+        def predict_from_this_layer(intermediate_np):
+            # 1. 将 SHAP 扰动后的中间层数据转为 PyTorch Tensor
+            inter_tensor = torch.from_numpy(intermediate_np).float()
+            
+            # 2. 注册一个临时的“强行修改 Hook”
+            # 当模型跑到这一层时，不管前面算出了什么，强制换成 SHAP 传进来的 inter_tensor
+            def override_hook(module, input, output):
+                return inter_tensor
+    
+            # 找到目标层，挂上这个“强行篡改”的钩子
+            for name, module in model.named_modules():
+                if name == target_layer_name:
+                    handle = module.register_forward_hook(override_hook)
+                    break
+            
+            # 3. 用【最初的输入】跑一遍模型
+            # 此时模型走到 target_layer 时，输出会被强制替换为我们传进去的中间层特征
+            with torch.no_grad():
+                final_output = model(original_input)
+                
+            # 4. 任务完成，立刻拔掉这个钩子，不要影响下一次计算
+            handle.remove()
+            
+            return final_output.cpu().numpy()
+    
+        return predict_from_this_layer
+    # =========================================================
+    
+    # 3. 收集未被破坏时的中间层原始激活值（作为 SHAP 的背景和测试集）
+    # 我们用一个简单的临时 Hook 来拿一次数据
+    activations = {}
+    def lam_func(name,o):
+        activations.update({name: o.detach()})
+    def SimpleHook(name):
+        return lambda m, i, o: lam_func(name,o)
+    
+    # 假设我们要统一分析 'layer1' 和 'layer2'
+    h1 = model.layer1.register_forward_hook(SimpleHook('layer1'))
+    h2 = model.layer2.register_forward_hook(SimpleHook('layer2'))
+    
+    # 跑一次前向，拿到背景层的激活值
+    _ = model(background_input)
+    bg_layer1 = activations['layer1'].numpy()
+    bg_layer2 = activations['layer2'].numpy()
+    
+    # 再跑一次，拿到测试层的激活值
+    _ = model(test_input)
+    test_layer1 = activations['layer1'].numpy()
+    test_layer2 = activations['layer2'].numpy()
+    
+    # 拔掉收集数据的钩子
+    h1.remove()
+    h2.remove()
+    
+    # =========================================================
+    # 4. 统一循环分析（在这里调用 make_predict_func）
+    # =========================================================
+    layers_to_analyze = {
+        'layer1': (bg_layer1, test_layer1),
+        'layer2': (bg_layer2, test_layer2)
+    }
+    
+    for layer_name, (bg_feat, test_feat) in layers_to_analyze.items():
+        print(f"\n🚀 正在通过 SHAP 剖析中间层: {layer_name}")
+        
+        # 【在这里调用！】动态生成针对当前层的预测函数
+        # 这个函数内部会施展“偷天换日”，把模型该层的输出换成 SHAP 微扰后的数据
+        layer_predict_func = make_predict_func(model, layer_name, test_input)
+        
+        # 初始化 SHAP 解释器，传入刚刚生成的专用函数
+        # 抽样 10 个背景加速计算
+        explainer = shap.KernelExplainer(layer_predict_func, bg_feat[:10]) 
+        
+        # 计算该层的 SHAP 值
+        shap_vals = explainer.shap_values(test_feat[:2])
+        print(f"✅ 层 {layer_name} 解释完成！SHAP 形状为: {np.shape(shap_vals)}")
+        print(f"这意味着该层的 {bg_feat.shape[1]} 个神经元，对最终输出的贡献已经被成功量化。")    
+    
+  
 if __name__ == "__main__":
     # test_slice()
     # test_tensor()    
@@ -341,7 +449,8 @@ if __name__ == "__main__":
     # test_pca()
     # test_multi_grad()
     # test_topk()
-    test_cos()
+    # test_cos()
+    test_shap()
     # test_js()
     # test_cos()
     # test_nor()

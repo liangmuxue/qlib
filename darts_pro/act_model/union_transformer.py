@@ -401,7 +401,7 @@ class TFTWithFutureCovariates(nn.Module):
                      dropout=dropout, pred_len=1)        
         
 
-    def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None, time_embed_fut=None,time_embed_fut_single=None):
+    def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None,time_embed_fut_single=None):
         """
         static_feat: [B, S, static_dim] - 静态特征
         obs_feat: [B, S, T, obs_dim] - 历史观测特征（仅过去）
@@ -479,30 +479,30 @@ class TFTWithFutureCovariates(nn.Module):
         # 2.7 取最后时间步的历史编码（历史信息总结）
         hist_summary = hist_encoded[:, -1, :]  # [B*S, hidden_dim]
         
-        time_embed_fut_flat = time_embed_fut.reshape(B*S, P, time_embed_fut.shape[-1])
-        time_embed_fut_singel_flat = time_embed_fut_single.reshape(B*S, 1, time_embed_fut.shape[-1])
+        # time_embed_fut_flat = time_embed_fut.reshape(B*S, P, time_embed_fut.shape[-1])
+        time_embed_fut_singel_flat = time_embed_fut_single.reshape(B*S, 1, -1)
         
         # 未来协变量投影
         # 静态特征广播到所有预测步：[B*S,1,hidden_dim] → [B*S,P,hidden_dim]
         static_broadcast = static_context_fut.repeat(1, P, 1)
         # 拼接未来协变量 + 静态特征--未来不使用静态特征，静态特征固定比重会干扰网络传播
         # fut_input = torch.cat([time_embed_fut_flat, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
-        fut_input = time_embed_fut_flat
+        # fut_input = time_embed_fut_flat
         fut_single_input = torch.cat([time_embed_fut_singel_flat, static_context_fut.repeat(1, 1, 1)], dim=-1)  # [B*S,1,F_time+F_static]  
         # fut_single_input = time_embed_fut_singel_flat 
                   
-        fut_proj = self.fut_proj(fut_input)  # [B*S, P, hidden_dim]
+        # fut_proj = self.fut_proj(fut_input)  # [B*S, P, hidden_dim]
         fut_single_proj = self.fut_single_proj(fut_single_input)  # [B*S, P, hidden_dim]
         
         
         # 针对序列目标和单独阶段目标分别进行解码
-        pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
+        # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
         pred_tar = self.tar_decoder(hist_summary,fut_single_proj)        # [B*S*1, obs_dim]
         
         # # 4.4 变量权重恢复
         # var_weights = var_weights.reshape(B, S, T, self.obs_dim)  # [B, S, T, obs_dim]
         
-        return (pred_seq,pred_tar), sample_attn_weights
+        return (None,pred_tar), sample_attn_weights
 
 class ContinuousToDiscreteIndex(nn.Module):
     def __init__(self, num_indices=3, hidden_dim=8):
@@ -561,7 +561,7 @@ class AttScaleFeature(nn.Module):
         # self.trend_layer = nn.ModuleList(trend_layer_inner)          
         
         
-    def forward(self, x,x_seq):
+    def forward(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, _ = x.shape
         
@@ -589,7 +589,7 @@ class SparseGateFeatureTopK(nn.Module):
         
         # 分别按照夜盘类别、行业类别、保证金范围生成不同注意力尺度的网络计算
         self.top_global_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=False,dropout=dropout).double()
+                                    layer_norm=False,batch_norm=False,dropout=dropout)
         scales_layer = []    
         scales_arr = concat_scale_arr(scales_dict)
         scales_trend_arr = emb_scale_arr(scales_dict)
@@ -623,7 +623,9 @@ class SparseGateFeatureTopK(nn.Module):
         self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
                                     layer_norm=False,batch_norm=True,dropout=dropout)          
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
-        self.branch_trend_combine_layer_p0 = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=input_dim,
+        self.branch_trend_combine_layer_total = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=input_dim,
+                                    layer_norm=False,batch_norm=False,dropout=dropout)  
+        self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=input_dim,
                                     layer_norm=False,batch_norm=False,dropout=dropout)         
             
     def forward(self, x,x_seq):
@@ -637,7 +639,7 @@ class SparseGateFeatureTopK(nn.Module):
             features_list['global_feature'] = g_features
             # Instrument Compare
             for i,layer in enumerate(self.scales_layer):
-                scale_features,_,trend_index_logits = layer(x,x_seq)  
+                scale_features,_,trend_index_logits = layer(x)  
                 scale_def = self.scales_arr[i]
                 key = scale_def['p']
                 # 合并主体特征和分尺度特征
@@ -653,9 +655,10 @@ class SparseGateFeatureTopK(nn.Module):
             cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1)).squeeze(-1)
             trend_list.append(cate_data)     
         trend_list = torch.stack(trend_list).transpose(1,0)    
-        trend_list_p0 = self.branch_trend_combine_layer_p0(trend_list)
+        trend_list_total = self.branch_trend_combine_layer_total(trend_list)
+        trend_list_main = self.branch_trend_combine_layer_main(trend_list)
         
-        return features_list,trend_list,trend_logits_list,trend_list_p0
+        return features_list,trend_list_total,trend_logits_list,trend_list_main
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -741,30 +744,28 @@ class UnionTransCombine(nn.Module):
         return self.time_encoder.transform_inner(batch_data)
     
     def forward(
-        self,static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb
+        self,static_covs,past_convs_item, his_future_emb,future_single_emb
     ):    
         
         # 基础模型的向前传播
-        (pred_seq,pred_tar),_ = self.trans_model(
-            static_covs,past_convs_item, his_future_emb,future_emb,future_single_emb
-        )   
-        y_pred_reshape = pred_seq.reshape(pred_seq.shape[0],-1)
+        output = self.trans_model(static_covs,past_convs_item, his_future_emb,future_single_emb)   
+        (_,pred_tar),_ = output
         
         # dec_out_combine = self.dec_layer(y_pred_reshape).reshape(pred_seq.shape[0],self.sample_dim,self.pred_len,self.target_feat_dim)
         trend_logits_combine = []
         cls_out_combine = []    
-        trend_list_combine = []
-        trend_list_p0_combine = []
+        trend_list_total = []
+        trend_list_main_combine = []
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features_list,trend_list,trend_logits_list,trend_list_p0 = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1),pred_seq)
+            features_list,trend_list,trend_logits_list,trend_list_main = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1),None)
             cls_out_combine.append(features_list)
             # 整体指数预测的网络输出
-            trend_list_combine.append(trend_list)
+            trend_list_total.append(trend_list)
             trend_logits_combine.append(trend_logits_list)
-            trend_list_p0_combine.append(trend_list_p0)
+            trend_list_main_combine.append(trend_list_main)
         
-        return trend_logits_combine,cls_out_combine,trend_list_combine,trend_list_p0_combine   
+        return trend_logits_combine,cls_out_combine,trend_list_total,trend_list_main_combine   
 
 
