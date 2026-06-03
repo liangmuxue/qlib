@@ -158,14 +158,15 @@ class LinelessLayer(nn.Module):
     """全连接加非线性"""
 
     def __init__(self,input_num,output_num,shutcut_num=0,hidden_size=16,device=None,layer_norm=True,batch_norm=False,
-                 dropout=0,bias=False,sigmoid=False,elementwise_affine=True,track_running_stats=True):   
+                 dropout=0,bias=False,sigmoid=False,relu=True,elementwise_affine=True,track_running_stats=True):   
         super(LinelessLayer, self).__init__()
         
         self.bias = bias
         self.sigmoid = sigmoid
         self.linear_hidden = nn.Linear(input_num, hidden_size)
-        self.linear_output = nn.Linear(hidden_size, output_num,bias=bias)
+        self.linear_output = nn.Linear(hidden_size, output_num)
         self.relu = nn.GELU() 
+        self.relu_flag = relu
         # self.relu = nn.ReLU() 
         self.batch_norm = batch_norm
         self.output_num = output_num
@@ -194,7 +195,8 @@ class LinelessLayer(nn.Module):
     def forward(self, input_data,res_data=None): 
         
         input_data = self.linear_hidden(input_data)
-        input_data = self.relu(input_data)
+        if self.relu_flag:
+            input_data = self.relu(input_data)
         input_data = self.linear_output(input_data)
         if self.dropout_value>0:
             input_data = self.dropout(input_data)

@@ -12,6 +12,8 @@ from darts_pro.tft_futures_dataset import concat_scale_arr,emb_scale_arr
 
 from .cov_cnn import LinelessLayer
 
+PRINT_STD_FLAG = False
+
 # ---------------------- 核心新增：样本维度交互模块 ----------------------
 class SampleCrossAttention(nn.Module):
     """样本维度自注意力：建模样本间（站点/设备/用户）的关联"""
@@ -464,6 +466,8 @@ class TFTWithFutureCovariates(nn.Module):
         
         # 2.4 历史特征投影
         obs_proj = self.obs_proj(obs_input)  # [B*S, T, hidden_dim]
+        if PRINT_STD_FLAG:
+            print("obs_proj std:{}".format(obs_proj.std()))
         if static_context_hist is not None:
             # static_balanced, temporal_balanced = self.static_balancer(static_context_hist, obs_proj)
             # obs_proj = temporal_balanced + static_balanced
@@ -493,12 +497,14 @@ class TFTWithFutureCovariates(nn.Module):
                   
         # fut_proj = self.fut_proj(fut_input)  # [B*S, P, hidden_dim]
         fut_single_proj = self.fut_single_proj(fut_single_input)  # [B*S, P, hidden_dim]
-        
+        if PRINT_STD_FLAG:
+            print("fut_single_proj std:{}".format(fut_single_proj.std()))
         
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
         pred_tar = self.tar_decoder(hist_summary,fut_single_proj)        # [B*S*1, obs_dim]
-        
+        if PRINT_STD_FLAG:
+            print("pred_tar std:{}".format(pred_tar.std()))
         # # 4.4 变量权重恢复
         # var_weights = var_weights.reshape(B, S, T, self.obs_dim)  # [B, S, T, obs_dim]
         
@@ -615,16 +621,20 @@ class SparseGateFeatureTopK(nn.Module):
         trend_layer = [] 
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
-            branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=input_dim,
+            branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=input_dim,relu=False,
                                     layer_norm=False,batch_norm=False,dropout=dropout)     
+            nn.init.kaiming_normal_(branch_trend_combine_layer.linear_hidden.weight, nonlinearity='linear')
+            nn.init.kaiming_normal_(branch_trend_combine_layer.linear_output.weight, nonlinearity='linear')
+            nn.init.constant_(branch_trend_combine_layer.linear_hidden.bias, 0.0)
+            nn.init.constant_(branch_trend_combine_layer.linear_output.bias, 0.0)
+            # branch_trend_combine_layer.weight.data *= 8.0
             trend_layer.append(branch_trend_combine_layer)
         self.total_features_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=input_dim,
                                     layer_norm=True,batch_norm=False,dropout=dropout)  
         self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
                                     layer_norm=False,batch_norm=True,dropout=dropout)          
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
-        self.branch_trend_combine_layer_total = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=input_dim,
-                                    layer_norm=False,batch_norm=False,dropout=dropout)  
+        self.branch_trend_combine_layer_total = nn.Linear(scales_dict.shape[0],scales_dict.shape[0],bias=False) 
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=input_dim,
                                     layer_norm=False,batch_norm=False,dropout=dropout)         
             
@@ -655,10 +665,12 @@ class SparseGateFeatureTopK(nn.Module):
             cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1)).squeeze(-1)
             trend_list.append(cate_data)     
         trend_list = torch.stack(trend_list).transpose(1,0)    
+        if PRINT_STD_FLAG:
+            print("trend_list std:{}".format(trend_list.std()))
         trend_list_total = self.branch_trend_combine_layer_total(trend_list)
         trend_list_main = self.branch_trend_combine_layer_main(trend_list)
         
-        return features_list,trend_list_total,trend_logits_list,trend_list_main
+        return trend_logits_list,features_list,trend_list_total,trend_list_main
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -759,7 +771,7 @@ class UnionTransCombine(nn.Module):
         # 品种间比较目标的网络输出
         for i in range(self.target_feat_dim):
             # 主要比较目标输出
-            features_list,trend_list,trend_logits_list,trend_list_main = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1),None)
+            trend_logits_list,features_list,trend_list,trend_list_main = self.top_selector[i](pred_tar.reshape(pred_tar.shape[0],self.sample_dim,-1),None)
             cls_out_combine.append(features_list)
             # 整体指数预测的网络输出
             trend_list_total.append(trend_list)

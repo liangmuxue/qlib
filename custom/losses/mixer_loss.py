@@ -526,7 +526,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if optimizers_idx==i or optimizers_idx==-1:
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
-                sw_index_logits,sv,trend_list_total,trend_list_main,_ = output_item  
+                sw_index_logits,sv,trend_list_total,trend_list_main = output_item  
                 future_round_targets_factor = future_round_targets[...,i]
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 target_info_total = []
