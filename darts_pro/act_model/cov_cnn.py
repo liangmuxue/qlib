@@ -177,7 +177,7 @@ class LinelessLayer(nn.Module):
         if batch_norm:
             if output_num==1:
                 # 使用纯实时归一化,不更新参数
-                self.bn = nn.BatchNorm1d(output_num,track_running_stats=track_running_stats)   
+                self.bn = nn.BatchNorm1d(hidden_size,track_running_stats=track_running_stats)   
             else:
                 self.bn = nn.BatchNorm1d(output_num,momentum=0.1)       
         if output_num>1 and layer_norm:
@@ -195,6 +195,8 @@ class LinelessLayer(nn.Module):
     def forward(self, input_data,res_data=None): 
         
         input_data = self.linear_hidden(input_data)
+        if self.batch_norm:
+            input_data = self.bn(input_data)          
         if self.relu_flag:
             input_data = self.relu(input_data)
         input_data = self.linear_output(input_data)
@@ -202,8 +204,6 @@ class LinelessLayer(nn.Module):
             input_data = self.dropout(input_data)
         if self.layer_norm:
             input_data = self.ln(input_data)
-        if self.batch_norm:
-            input_data = self.bn(input_data)             
         if res_data is not None:
             input_data = input_data + self.residual_layer(res_data)
         if self.sigmoid:

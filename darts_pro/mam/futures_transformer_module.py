@@ -397,7 +397,6 @@ class FuturesTransformerModule(MlpModule):
             # 记录时间字段
             self.embed_cols = dataset.get_future_columns()
             
-            
             target_feat_dim = 1
             
             # 使用混合时间序列模型,TFT底座
@@ -406,7 +405,7 @@ class FuturesTransformerModule(MlpModule):
                 static_num=static_covariates.shape[-1]-1,
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
-                hidden_dim=48,
+                hidden_dim=96,
                 hidden_size=16,
                 nhead=8,
                 num_layers=3,
@@ -568,6 +567,9 @@ class FuturesTransformerModule(MlpModule):
                             # 直接使用1号参考数值
                             convs[nodata_idx,k,:,:] = convs[nodata_idx,0,:,:]
                         for k_idx,key in enumerate(self.embed_cols):
+                            # Ignore week property
+                            if key=='week':
+                                continue
                             batch_data[key] = convs[:,k,:,k_idx].flatten().cpu()   
                         emb_data = m.transform_inner(batch_data)
                         emb_data = emb_data.reshape(his_future_covs.shape[0],convs.shape[2],-1)

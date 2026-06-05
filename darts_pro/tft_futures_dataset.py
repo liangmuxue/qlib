@@ -2,7 +2,8 @@ import warnings
 
 from qlib.data.dataset import DatasetH
 from qlib.data.dataset.handler import DataHandler, DataHandlerLP
-from sklearn.preprocessing import MinMaxScaler,StandardScaler,LabelEncoder
+from sklearn.preprocessing import MinMaxScaler,StandardScaler,LabelEncoder,OrdinalEncoder
+from sklearn.decomposition import PCA
 from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
@@ -249,16 +250,22 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df = df.fillna(0) 
         df = df[df['datetime_number']!=0]   
         cate_dict = {}               
-        # 静态协变量:离散型生成嵌入数值，连续型生成标准化数据
-        for conv_col in self.get_static_cate_columns():
-            num_class = df[conv_col].unique().shape[0]
-            cate_dict[conv_col] = num_class
-            conv_col_scale = conv_col + "_scale"
-            df[conv_col_scale] = LabelEncoder().fit_transform(df[conv_col].values)
+        # 静态协变量离散型生成嵌入数值
+        embedding_dim = 4
+        pca = PCA(n_components=embedding_dim, random_state=42)        
+        encoder = OrdinalEncoder()
+        df_encoded = encoder.fit_transform(df[self.get_static_cate_columns()])        
+        embedding_vectors = pca.fit_transform(df_encoded)
+        scaler = StandardScaler()
+        embedding_scaled = scaler.fit_transform(embedding_vectors)  
+        conv_cols_scale = [conv_col + "_scale" for conv_col in self.get_static_cate_columns()]       
+        df[conv_cols_scale] = embedding_scaled
+        df[conv_cols_scale] = df[conv_cols_scale].round(6)
         # Reset industry's create_year
         df.loc[df['instrument'].str.startswith('ZS_'),'create_year_scale'] = 0
         # 保存离散数量，用于后续模型参数
         self.cate_static_dict = cate_dict
+        # 静态协变量，连续型生成标准化数据
         for conv_col in self.get_static_cont_columns():
             conv_col_scale = conv_col + "_scale"
             df[conv_col_scale] = (df[conv_col] - df[conv_col].mean())/df[conv_col].std()

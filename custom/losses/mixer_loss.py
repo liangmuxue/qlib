@@ -642,10 +642,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         # # 比较大类
                         # if torch.sum(torch.isnan(target_data_main))==0 and torch.sum(target_data_main==0)<(target_data_main.shape[0]-2):
                         #     ava_idx = torch.where(target_data_main!=0)[0]
-                        #     pred_data_main = normalization_standard(pred_data_main[ava_idx])
-                        #     target_data_p0 = normalization_standard(target_data_main[ava_idx])
+                        #     pred_data_main = pred_data_main[ava_idx] # normalization_standard(pred_data_main[ava_idx])
+                        #     target_data_main = target_data_main[ava_idx] # normalization_standard(target_data_main[ava_idx])
                         #     if all_elements_same(pred_data_main) or all_elements_same(target_data_main):
-                        #         loss_inner = self.mse_loss(pred_data_main.unsqueeze(0),target_data_p0.unsqueeze(0))
+                        #         loss_inner = self.mse_loss(pred_data_main.unsqueeze(0),target_data_main.unsqueeze(0))
                         #     else:
                         #         loss_inner = self.ccc_loss_comp(pred_data_main,target_data_main)     
                         #         # loss_inner = self.compute_top_loss(pred_data_p0,target_data_p0,top_num=1, mid_num=1, need_mid=True)    
@@ -662,8 +662,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         p0_cate_pred = torch.cat([cate_pred_data[key] for key in cate_pred_data.keys()])
                         ava_idx = torch.where(p0_cate_target!=0)[0]
                         if ava_idx.shape[0]>2:
-                            p0_cate_pred = normalization_standard(p0_cate_pred[ava_idx])
-                            p0_cate_target = normalization_standard(p0_cate_target[ava_idx])
+                            p0_cate_pred = p0_cate_pred[ava_idx] # normalization_standard(p0_cate_pred[ava_idx])
+                            p0_cate_target = p0_cate_target[ava_idx] # normalization_standard(p0_cate_target[ava_idx])
                             if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
                                 loss_inner = self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
                             else:

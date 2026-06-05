@@ -191,13 +191,13 @@ class FuturesIndustryDataset(GenericShiftedDataset):
                 diff_range_norm = df_item["diff_range_norm"].values       
                 open_array = df_item["OPEN"].values      
                 dayofweek = df_item["dayofweek"].values   
-                week = df_item["week"].values   
+                # week = df_item["week"].values   
                 # 对于行业或者总体指标，需要计算下属所有品种的差值的平均
                 if series.instrument_code=="ZS_ALL":
                     df_zs_all = df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)
                                        &(~df_data['instrument'].str.startswith('ZS'))]
                     diff_range = df_zs_all.groupby("datetime_number")["diff_range"].mean().values                                                    
-                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array,dayofweek,week,diff_range_norm)
+                self.ass_data[code] = (instrument,diff_range,price_array,datetime_array,open_array,dayofweek,diff_range_norm)
             # 保存到本地
             save_ass_data = global_var.get_value("save_ass_data")
             if save_ass_data:
@@ -622,7 +622,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             price_array = self.ass_data[code][2][past_start_ser:future_end_ser]
             datetime_array = self.ass_data[code][3][past_start_ser:future_end_ser]
             open_array = self.ass_data[code][4][past_start_ser:future_end_ser]
-            diff_range_norm = self.ass_data[code][7][past_start_ser:future_end_ser]
+            diff_range_norm = self.ass_data[code][6][past_start_ser:future_end_ser]
             # dayofweek_array = self.ass_data[code][5][past_start_ser:future_end_ser]
             # week_array = self.ass_data[code][6][past_start_ser:future_end_ser]
             # 计算开盘价目标差值范围

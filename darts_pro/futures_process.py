@@ -363,8 +363,8 @@ class FuturesProcessModel(TftDataframeModel):
         # 待解释数据：选测试集一小部分
         to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=self.model.model,data_loader=val_loader,sampler_cnt=3,mode='val')
         # Model Layer compute analysis
-        # self.model_layer_analysis(real_model, background, to_explain)
-        self.viz_shape_value(to_explain)
+        self.model_layer_analysis(real_model, background, to_explain)
+        # self.viz_shape_value(to_explain)
         # self.check_sampler_output(real_model, background)
 
         # # ======================== 【5】核心诊断：每层SHAP贡献 ========================
@@ -406,50 +406,77 @@ class FuturesProcessModel(TftDataframeModel):
     
     def viz_shape_value(self,to_explain):
         
-        with open("custom/data/asis/shap_values_{}.pkl".format(1), "rb") as f:
-            loaded_shap_values = pickle.load(f)
-        
+        analysis_no = 2
+        analysis_task_name = 'taskTotal'
+        # analysis_no = 3
+        # analysis_task_name = 'taskMain'        
+        loaded_shap_values = {}
+        with open("custom/data/asis/shap_values_train_{}.pkl".format(analysis_no), "rb") as f:
+            loaded_shap_values['train'] = pickle.load(f)
+        with open("custom/data/asis/shap_values_val_{}.pkl".format(analysis_no), "rb") as f:
+            loaded_shap_values['val'] = pickle.load(f)        
         # ---------- 可视化（重要性 + 影响方向） ----------
         # 特征重要性图（最常用）
         print("\n=== import trend_list_main ===")
         title_list = ['static_covs','past_convs','his_future_emb','future_single_emb']
-        for i in range(len(loaded_shap_values)):
-            title = title_list[i]
-            print("\n=== do {} ===".format(title))
-            sv = loaded_shap_values[i]
-            to_explain_item = to_explain[i].cpu().numpy()
-            to_explain_item = to_explain_item[:2]
-            # 合并shap数值的非特征维度,包含所有输出元素的shap取值
-            if i==0:
-                sv_2d = sv.sum(axis=(1,3)) 
-                # 合并待解释数据的非特征维度
-                to_explain_item = to_explain_item.mean(axis=(1))
-                
-            elif i==1:
-                sv_2d = sv.sum(axis=(1,2,4)) 
-                to_explain_item = to_explain_item.mean(axis=(1,2))
-            elif i==2:
-                sv_2d = sv.sum(axis=(1,2,4)) 
-                to_explain_item = to_explain_item.mean(axis=(1,2))
-            else:
-                sv_2d = sv.sum(axis=(1,3)) 
-                to_explain_item = to_explain_item.mean(axis=(1))
-            names = [f'num_{i}' for i in range(sv.shape[2])]
-            # Draw
+        for ana_type in ['train','val']:
+            sum_sv = []
+            sum_explain = []
+            for i in range(len(loaded_shap_values[ana_type])):
+                title = analysis_task_name + "_" + ana_type + "_" + title_list[i]
+                print("\n=== do {} {} ===".format(ana_type,title))
+                sv = loaded_shap_values[ana_type][i]
+                to_explain_item = to_explain[i].cpu().numpy()
+                to_explain_item = to_explain_item[:10]
+                # 合并shap数值的非特征维度,包含所有输出元素的shap取值
+                if i==0:
+                    sv_2d = sv.sum(axis=(1,3)) 
+                    # 合并待解释数据的非特征维度
+                    to_explain_item = to_explain_item.mean(axis=(1))
+                elif i==1:
+                    sv_2d = sv.sum(axis=(1,2,4)) 
+                    to_explain_item = to_explain_item.mean(axis=(1,2))
+                elif i==2:
+                    sv_2d = sv.sum(axis=(1,2,4)) 
+                    to_explain_item = to_explain_item.mean(axis=(1,2))
+                else:
+                    sv_2d = sv.sum(axis=(1,3)) 
+                    to_explain_item = to_explain_item.mean(axis=(1))
+                sum_sv.append(sv_2d.sum(axis=-1))
+                sum_explain.append(to_explain_item.sum(axis=-1))
+                names = [f'num_{i}' for i in range(sv.shape[2])]
+                # Draw
+                plt.figure(figsize=(10,6))
+                shap.summary_plot(
+                    sv_2d, to_explain_item,
+                    feature_names=names,
+                    plot_type="bar", # 蜂群删掉这行
+                    show=False,      # 必须False
+                )
+                # 加标题
+                plt.title(title, fontsize=13, pad=12)
+                fig = plt.gcf()
+                save_path = "custom/data/asis/view_data/{}/{}.png".format(analysis_task_name,title)
+                fig.savefig(save_path, dpi=300, bbox_inches='tight')
+                plt.close(fig) 
+            # 对不同输入进行总体比较   
+            sum_sv = np.stack(sum_sv).transpose(1,0)
+            sum_explain = np.stack(sum_explain).transpose(1,0)
+            names = title_list
             plt.figure(figsize=(10,6))
             shap.summary_plot(
-                sv_2d, to_explain_item,
+                sum_sv, sum_explain,
                 feature_names=names,
                 plot_type="bar", # 蜂群删掉这行
                 show=False,      # 必须False
             )
-            # 加标题
+            title = analysis_task_name + "_" + ana_type + "_all"
             plt.title(title, fontsize=13, pad=12)
             fig = plt.gcf()
-            save_path = "custom/data/asis/view_data/{}.png".format(title)
+            save_path = "custom/data/asis/view_data/{}/{}.png".format(analysis_task_name,title)
             fig.savefig(save_path, dpi=300, bbox_inches='tight')
             plt.close(fig) 
-                            
+                                                    
     def model_layer_analysis(self,model,background_input,test_input):
         """Model Layer compute analysis"""
         
@@ -485,18 +512,20 @@ class FuturesProcessModel(TftDataframeModel):
 
         class ShapWrapper(torch.nn.Module):
             """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
-            def __init__(self, pl_model, output_index=0):
+            def __init__(self, pl_model, output_index=0,output_no=2):
                 super().__init__()
                 self.model = pl_model
                 self.output_index = output_index  # 选择看第几个输出
                 self.layer = None
+                self.output_no = output_no
             
             def set_layer(self,layer=None):
                 self.layer = layer
             
             def forward(self, *inputs):
                 # 原模型返回 (out1, out2, out3)
-                outputs = self.forward_to_layer(inputs)
+                # outputs = self.forward_to_layer(inputs)
+                outputs = self.forward_to_end(inputs)
                 return outputs
 
             # 前向，拿到该层输出,注意：这里要搭一个“到这一层为止”的 forward
@@ -510,13 +539,21 @@ class FuturesProcessModel(TftDataframeModel):
                     x = x[0][1]  
                     x = x.reshape(x.shape[0],x.shape[1],-1)
                     x = model.top_selector[0](x,None)
-                    x = x[2]
-                    x = x.reshape([x.shape[0],-1]) 
+                    # 对于多输出，需要指定计算某个输出值
+                    x = x[self.output_no]
+                    x = x.reshape([x.shape[0],-1])
                 return x
                                 
-           
-        wrapped_model = ShapWrapper(model, output_index=2)
-        
+            def forward_to_end(self,x_array):
+                x = model.trans_model(*x_array)   
+                x = x[0][1]  
+                x = x.reshape(x.shape[0],x.shape[1],-1)
+                x = model.top_selector[0](x,None)
+                # 对于多输出，需要指定计算某个输出值
+                x = x[self.output_no]
+                x = x.reshape([x.shape[0],-1])
+                return x
+                       
         layers_to_explain = [model.trans_model, model.top_selector[0]]
         
         # 4. 逐层算 SHAP
@@ -536,13 +573,14 @@ class FuturesProcessModel(TftDataframeModel):
         #     # 返回【中间层结果】给 SHAP
         #     return model.middle.numpy()
         
-        for i,layer in enumerate(layers_to_explain):
-                    
-            wrapped_model.set_layer(layer)
-            # out = forward_to_layer(test_input)
-            # layer_outputs.append(out)
-    
-            X_test = [item[:2] for item in test_input]
+        X_test = [item[:10] for item in test_input]
+        X_train = [item[50:60] for item in background_input]
+        backround = [item[:50] for item in background_input]
+        
+        for i,out_no in enumerate([2,3]):
+               
+            wrapped_model = ShapWrapper(model, output_no=out_no)     
+            # wrapped_model.set_layer(layer)
             
             # GradientExplainer：指定 (model, layer)
             # explainer = shap.GradientExplainer(
@@ -550,13 +588,16 @@ class FuturesProcessModel(TftDataframeModel):
             #     background_input
             # )
             # explainer = shap.KernelExplainer(forward_to_layer, background)
-            explainer = shap.GradientExplainer(wrapped_model, background_input)
-            # 计算该层的 SHAP
-            sv = explainer.shap_values(X_test, nsamples=10)     
+            explainer = shap.GradientExplainer(wrapped_model, backround)
+            # 分别计算训练集的SHAP和验证集的SHAP
+            sv_val = explainer.shap_values(X_test, nsamples=10)     
+            sv_train = explainer.shap_values(X_train, nsamples=10)     
             # shap_per_layer.append(sv)   
-            with open("custom/data/asis/shap_values_{}.pkl".format(i), "wb") as f:
-                pickle.dump(sv, f)
-            print("layer_{}  ok".format(i))
+            with open("custom/data/asis/shap_values_val_{}.pkl".format(out_no), "wb") as f:
+                pickle.dump(sv_val, f)
+            with open("custom/data/asis/shap_values_train_{}.pkl".format(out_no), "wb") as f:
+                pickle.dump(sv_train, f)                
+            print("out_{}  ok".format(out_no))
 
         # for i, (out, sv) in enumerate(zip(layer_outputs, shap_per_layer)):
         #     print(f"Layer {i+1} | out.shape={out.shape} | shap.shape={sv.shape}")
