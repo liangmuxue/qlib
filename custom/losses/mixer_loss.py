@@ -648,7 +648,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         #         loss_inner = self.mse_loss(pred_data_main.unsqueeze(0),target_data_main.unsqueeze(0))
                         #     else:
                         #         loss_inner = self.ccc_loss_comp(pred_data_main,target_data_main)     
-                        #         # loss_inner = self.compute_top_loss(pred_data_p0,target_data_p0,top_num=1, mid_num=1, need_mid=True)    
+                        #         # loss_inner = self.compute_top_loss(pred_data_main,target_data_main,top_num=1, mid_num=1, need_mid=True)    
                         #     loss_item += loss_inner  
                         #     if 'main' not in detail_loss:
                         #         detail_loss['main'] = [loss_inner]

@@ -14,6 +14,8 @@ from torch.utils.data.sampler import Sampler
 from torch.utils.data import DataLoader, Dataset
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 
+from trader.utils.date_util import get_end_of_month,get_long_holiday_eve
+import pandas_market_calendars as mcal
 from data_extract.data_baseinfo_extractor import StockDataExtractor
 
 class TFTDataset(DatasetH):
@@ -42,6 +44,12 @@ class TFTDataset(DatasetH):
             # self.cus_setup_data(**kwargs)
             return        
         super().__init__(**kwargs)
+        
+        # 初始化交易日期列表，后续计算特殊日期时使用
+        fut_cal = mcal.get_calendar("XSHG")
+        start_date = "2012-01-01"
+        end_date = "2026-12-31"
+        self.trade_days = fut_cal.schedule(start_date=start_date, end_date=end_date).index
         
     def config(self, **kwargs):
         if "step_len" in kwargs:
@@ -148,6 +156,15 @@ class TFTDataset(DatasetH):
         data["day"] = data.datetime.dt.day  
         data["year"] = data.datetime.dt.year  
         data["week"] = data.datetime.dt.isocalendar().week
+        # 取得长假前一天标志
+        df_eve = get_long_holiday_eve(start_year=data["year"].min(), end_year=data["year"].max())
+        data['is_holiday_eve'] = 0
+        map_dict = dict(zip(df_eve["datetime"], df_eve["is_holiday_eve"]))
+        data["is_holiday_eve"] = data["datetime"].map(map_dict).fillna(data["is_holiday_eve"]).astype(int)  
+        # 取得月末日期   
+        data['end_of_month'] = 0
+        mon_days,_ = get_end_of_month(self.trade_days)  
+        data.loc[data['datetime'].isin(mon_days),'end_of_month'] = 1
         # 保留时间戳
         data["datetime_number"] = data.datetime.dt.strftime('%Y%m%d').astype(int)     
         data["label"] = data["label"].astype("float64")

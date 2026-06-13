@@ -29,8 +29,8 @@ from darts.logging import raise_if_not,raise_if
 class FuturesModel(IndustryRollModel):    
 
     def create_sampler(self,dataset,batch_size=None,shuffle=True):
-        # self.sampler_mode = False
-        # return None
+        self.sampler_mode = False
+        return None
         
         self.sampler_mode = True
         # 验证模式不使用sampler，训练模式使用

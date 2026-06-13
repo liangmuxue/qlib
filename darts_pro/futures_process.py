@@ -49,6 +49,7 @@ from darts_pro.data_extension.series_data_utils import StatDataAssis
 from sklearn.preprocessing import MinMaxScaler
 from darts_pro.data_extension.futures_industry_dataset import FuturesIndustryDataset
 from tft.class_define import CLASS_SIMPLE_VALUES,get_simple_class
+from captum.attr import LayerGradientShap,GradientShap,IntegratedGradients
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from cus_utils.log_util import AppLogger
@@ -363,8 +364,10 @@ class FuturesProcessModel(TftDataframeModel):
         # 待解释数据：选测试集一小部分
         to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=self.model.model,data_loader=val_loader,sampler_cnt=3,mode='val')
         # Model Layer compute analysis
-        self.model_layer_analysis(real_model, background, to_explain)
-        # self.viz_shape_value(to_explain)
+        sample_num = 50
+        # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
+        # self.viz_shape_value(to_explain,sample_num=sample_num)
+        self.ind_layer_analysis(real_model, background, to_explain,sample_num=10)
         # self.check_sampler_output(real_model, background)
 
         # # ======================== 【5】核心诊断：每层SHAP贡献 ========================
@@ -404,12 +407,12 @@ class FuturesProcessModel(TftDataframeModel):
             out = model(*input) 
             print("mean:{},std:{}".format(out[2][0].mean(),out[2][0].std()))
     
-    def viz_shape_value(self,to_explain):
+    def viz_shape_value(self,to_explain,sample_num=10):
         
         analysis_no = 2
         analysis_task_name = 'taskTotal'
-        # analysis_no = 3
-        # analysis_task_name = 'taskMain'        
+        analysis_no = 3
+        analysis_task_name = 'taskMain'        
         loaded_shap_values = {}
         with open("custom/data/asis/shap_values_train_{}.pkl".format(analysis_no), "rb") as f:
             loaded_shap_values['train'] = pickle.load(f)
@@ -419,15 +422,20 @@ class FuturesProcessModel(TftDataframeModel):
         # 特征重要性图（最常用）
         print("\n=== import trend_list_main ===")
         title_list = ['static_covs','past_convs','his_future_emb','future_single_emb']
+        sum_sv_combine = []
+        sum_explain_combine = []
+        exp_past_cov_combine = []
+        sv_past_cov_combine = []
         for ana_type in ['train','val']:
             sum_sv = []
             sum_explain = []
+            
             for i in range(len(loaded_shap_values[ana_type])):
                 title = analysis_task_name + "_" + ana_type + "_" + title_list[i]
                 print("\n=== do {} {} ===".format(ana_type,title))
                 sv = loaded_shap_values[ana_type][i]
                 to_explain_item = to_explain[i].cpu().numpy()
-                to_explain_item = to_explain_item[:10]
+                to_explain_item = to_explain_item[:sample_num]
                 # 合并shap数值的非特征维度,包含所有输出元素的shap取值
                 if i==0:
                     sv_2d = sv.sum(axis=(1,3)) 
@@ -436,6 +444,8 @@ class FuturesProcessModel(TftDataframeModel):
                 elif i==1:
                     sv_2d = sv.sum(axis=(1,2,4)) 
                     to_explain_item = to_explain_item.mean(axis=(1,2))
+                    sv_past_cov_combine.append(sv_2d)
+                    exp_past_cov_combine.append(to_explain_item)
                 elif i==2:
                     sv_2d = sv.sum(axis=(1,2,4)) 
                     to_explain_item = to_explain_item.mean(axis=(1,2))
@@ -462,6 +472,8 @@ class FuturesProcessModel(TftDataframeModel):
             # 对不同输入进行总体比较   
             sum_sv = np.stack(sum_sv).transpose(1,0)
             sum_explain = np.stack(sum_explain).transpose(1,0)
+            sum_sv_combine.append(sum_sv)
+            sum_explain_combine.append(sum_explain)
             names = title_list
             plt.figure(figsize=(10,6))
             shap.summary_plot(
@@ -476,8 +488,235 @@ class FuturesProcessModel(TftDataframeModel):
             save_path = "custom/data/asis/view_data/{}/{}.png".format(analysis_task_name,title)
             fig.savefig(save_path, dpi=300, bbox_inches='tight')
             plt.close(fig) 
-                                                    
-    def model_layer_analysis(self,model,background_input,test_input):
+        # # 绘制依赖图
+        # plt.figure(figsize=(10,6))
+        # for i, ana_type in enumerate(['train','val']):
+        #     c = '#1f77b4' if ana_type=='train' else '#ff7f0e'
+        #     sum_sv = sum_sv_combine[i]
+        #     sum_explain = sum_explain_combine[i]
+        #     plt.scatter(sum_explain, sum_sv,c=c, alpha=0.5, s=12, label="train and test set")            
+        # fig = plt.gcf()
+        # save_path = "custom/data/asis/view_data/{}/dep_tt.png".format(analysis_task_name)
+        # fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        # plt.close(fig)     
+        # # Depandance
+        # plt.figure(figsize=(10,6))      
+        # columns = ['RSI5','SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','STD5','OPEN_COM','KDJ_K','QTLUMA5']
+        # sum_explain_train = exp_past_cov_combine[0] # pd.DataFrame(exp_past_cov_combine[0],columns=columns)
+        # sum_explain_val = exp_past_cov_combine[1] # pd.DataFrame(exp_past_cov_combine[1],columns=columns)
+        # sum_sv_train = sv_past_cov_combine[0] # pd.DataFrame(sv_past_cov_combine[0],columns=columns)
+        # sum_sv_val = sv_past_cov_combine[1] # pd.DataFrame(sv_past_cov_combine[1],columns=columns)        
+        # # shap.dependence_plot(columns[1], sum_sv_train,sum_explain_train,feature_names=columns, show=False, title="train dep")
+        # shap.dependence_plot(columns[1], sum_sv_val,sum_explain_val, feature_names=columns, show=False, title="val dep")            
+        # fig = plt.gcf()
+        # save_path = "custom/data/asis/view_data/{}/dep_plot_val.png".format(analysis_task_name)
+        # fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        # plt.close(fig)                
+        #
+
+    def ind_layer_analysis(self,model,background_input,test_input,sample_num=10):
+
+        class ShapWrapper(torch.nn.Module):
+            """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
+            def __init__(self, pl_model, output_index=0,output_no=2):
+                super().__init__()
+                self.model = pl_model
+                self.output_index = output_index  # 选择看第几个输出
+                self.layer = None
+                self.output_no = output_no
+            
+            def set_layer(self,layer=None):
+                self.layer = layer
+            
+            def forward(self, *inputs):
+                # 原模型返回 (out1, out2, out3)
+                if self.layer is not None:
+                    outputs = self.forward_to_layer(inputs)
+                else:
+                    outputs = self.forward_to_end(inputs)
+                return outputs
+            
+            def top_select(self,x):
+                x = self.model.top_selector[0](x)
+                # 对于多输出，需要指定计算某个输出值
+                # x = x[self.output_no]
+                return x
+                              
+            def forward_to_end(self,x_array):
+                x = self.model(*x_array)   
+                # print("output is:{}".format(x[self.output_index][0].mean()))
+                return x[self.output_index][0]
+            
+            def forward_to_layer(self,x_array):
+                if self.layer=='model.trans_model':
+                    # # Split back temp
+                    # x_array = torch.split(x_array[0], [7,12,2], dim=-1)
+                    # x_array = (x_array[0].mean(dim=-2),x_array[1],x_array[2])
+                    x = self.model.trans_model(*x_array)   
+                    x = x.reshape([x.shape[0],-1])         
+                if self.layer=='model.top_selector.0':
+                    x = self.model.trans_model(*x_array)   
+                    x = x.reshape(x.shape[0],x.shape[1],-1)
+                    x = self.top_select(x)
+                    x = x.reshape([x.shape[0],-1])
+                return x
+                   
+        model = ShapWrapper(model,output_index=2)         
+        x = tuple([item[:50] for item in test_input])
+        baselines = tuple([xi[:50] for xi in background_input])
+        # baselines = tuple([torch.zeros_like(xi[:50]) for xi in background_input])
+        x_train =  tuple([xi[50:100] for xi in background_input])
+        y_baseline = model(*baselines)
+        y_pred = model(*x)
+        print("y_baseline:{},y_pred:{}".format(y_baseline.mean(),y_pred.mean()))
+        input_names = ['static_covs','past_convs','his_future_emb','future_single_emb']
+        # 对每个输入分别归因
+        # gs = GradientShap(model)
+        # for i in range(len(baselines)):
+        #     baselines_item = tuple([baselines[j] if j==i else x[j] for j in range(len(baselines))])
+        #     attr_inp_combine = []
+        #     for k in range(sample_num):
+        #         # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
+        #         x_single = tuple([item[k:k+1] for item in x])
+        #         attr_inp,delta = gs.attribute(x_single, baselines_item, n_samples=200, stdevs=0.1,target=0,return_convergence_delta=True)
+        #         attr_inp_combine.append(attr_inp[i])  
+        #     attr_inp_combine = torch.cat(attr_inp_combine)
+        #     print("input {} attr_inp shape:{},mean:{}".format(input_names[i],attr_inp_combine.shape, attr_inp_combine.abs().mean().item()))       
+
+        # 训练接和验证集的归因差异排查
+        ig = IntegratedGradients(model)
+        train_attr, delta_train = ig.attribute(x_train, target=0, return_convergence_delta=True,internal_batch_size=32)
+        val_attr, delta_val = ig.attribute(x, target=0, return_convergence_delta=True,internal_batch_size=32)
+        for i in range(len(baselines)):
+            train_importance = np.mean(np.abs(train_attr[i].detach().cpu().numpy()))
+            val_importance = np.mean(np.abs(val_attr[i].detach().cpu().numpy()))              
+            print("input {} train_importance:{},val_importance:{}".format(input_names[i],train_importance, val_importance))   
+ 
+        # # 对每一层做梯度SHAP
+        # focus_layers = ['model.trans_model.static_grn_hist','model.trans_model.obs_grn','model.trans_model.calendar_encoder','model.trans_model.transformer_encoder']
+        # focus_layers = ['model.trans_model.obs_grn','model.trans_model.calendar_encoder','model.trans_model.transformer_encoder']        
+        # target_input_idx = 0 
+        # layer_attr_combine0 = {}
+        # layer_attr_combine1 = {}
+        # for name, layer in model.named_modules():
+        #     if name in focus_layers:
+        #         lgs = LayerGradientShap(model, layer)
+        #         attr_inp_combine0 = []
+        #         attr_inp_combine1 = []
+        #         for k in range(sample_num):
+        #             # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
+        #             x_single = tuple([item[k:k+1] for item in x])
+        #             x_single_train = tuple([item[k:k+1] for item in x_train])
+        #             attr_inp = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+        #             attr_inp_train = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+        #             if isinstance(attr_inp,tuple):
+        #                 attr_inp_combine0.append(attr_inp[0])
+        #                 attr_inp_combine1.append(attr_inp[1])  
+        #             else:
+        #                 attr_inp_combine0.append(attr_inp[0])
+        #         if len(attr_inp_combine0)>0:
+        #             attr_inp_combine0 = torch.cat(attr_inp_combine0)    
+        #             target0_attr = attr_inp_combine0.detach().cpu().numpy()   
+        #             layer_attr_combine0[name] = np.abs(target0_attr).mean()
+        #         if len(attr_inp_combine1)>0:
+        #             attr_inp_combine1 = torch.cat(attr_inp_combine1)           
+        #             target1_attr = attr_inp_combine1.detach().cpu().numpy()
+        #             layer_attr_combine1[name] = np.abs(target1_attr).mean()
+        # print("{} layer atr:{}".format(input_names[0],layer_attr_combine0))   
+        # print("{} layer atr:{}".format(input_names[1],layer_attr_combine1))   
+ 
+        focus_layers = ['model.trans_model','model.top_selector.0']  
+        train_contribs = {}
+        val_contribs = {}       
+        def concat_input(tule_input):
+            static_covs,past_convs_item, his_future_covs = tule_input
+            x_concat = torch.cat([static_covs.unsqueeze(-2).repeat(1,1,past_convs_item.shape[2],1),past_convs_item,his_future_covs],dim=-1)
+            return x_concat
+        # ========== 核心1：分层独立归一 + 绝对值统计（推荐主方案） ==========
+        def layer_wise_normalize(attr_tensor):
+            """
+            单图层独立Min-Max归一化，不跨层共享极值
+            attr_tensor: 任意维度归因张量
+            """
+            attr = attr_tensor.detach().cpu().numpy()
+            # 每层/每个样本单独归一，保留层内分布
+            min_val = np.min(attr, axis=tuple(range(1, attr.ndim)), keepdims=True)
+            max_val = np.max(attr, axis=tuple(range(1, attr.ndim)), keepdims=True)
+            norm_attr = (attr - min_val) / (max_val - min_val + 1e-8)
+            return norm_attr
+        
+        def calc_total_contribution(attr_tensor):
+            """
+            计算层总有效贡献：绝对值均值（消除正负抵消、维度影响）
+            """
+            attr_abs = torch.abs(attr_tensor)
+            # 全局平均，统一不同维度层的统计口径
+            total_contrib = torch.mean(attr_abs).item()
+            return total_contrib
+        
+        # ========== 核心2：深度加权系数（平滑校正） ==========
+        def get_depth_weight(layer_depth, total_depth):
+            """
+            深度越靠近输出（depth越大），权重小幅下调，平滑抵消梯度偏置
+            layer_depth: 当前层相对深度 (Transformer=1, MLP=2)
+            total_depth: 网络总层数
+            """
+            # 系数范围 0.7 ~ 1.0，线性平滑，不极端压制/抬高
+            return 1.0 - 0.3 * (layer_depth - 1) / (total_depth - 1)   
+             
+        for name, layer in model.named_modules():
+            if name in focus_layers:
+                model.set_layer(name)
+                lgs = LayerGradientShap(model, layer)
+                attr_inp_combine = []
+                attr_inp_combine_after = []
+                attr_inp_combine_train = []
+                attr_inp_combine_train_after = []
+                for k in range(sample_num):
+                    # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
+                    x_single = tuple([item[k:k+1] for item in x])
+                    x_single_train = tuple([item[k:k+1] for item in x_train])
+                    # attr_inp = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
+                    attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+                    # attr_inp_train = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
+                    attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+                    if name=='model.trans_model':
+                        # attr_inp_combine.append(attr_inp[1])
+                        # attr_inp_combine_train.append(attr_inp_train[1])
+                        for h in range(x_single[0].shape[1]):
+                            size = h * x_single[0].shape[2]
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_combine_after.append(attr_inp_after[0])
+                            attr_inp_combine_train_after.append(attr_inp_train_after[0])
+                    if name=='model.top_selector.0':
+                        # attr_inp_combine.append(attr_inp[0])
+                        # attr_inp_combine_train.append(attr_inp_train[0])   
+                        for h in range(10):   
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
+                            attr_inp_combine_after.append(attr_inp_after[0])
+                            attr_inp_combine_train_after.append(attr_inp_train_after[0])                  
+                # attr_inp_combine = torch.cat(attr_inp_combine)    
+                # attr_inp_combine_train = torch.cat(attr_inp_combine_train) 
+                attr_inp_combine_after = torch.cat(attr_inp_combine_after)    
+                attr_inp_combine_train_after = torch.cat(attr_inp_combine_train_after) 
+                # train_contribs[name] = attr_inp_combine_train.abs().mean().item()
+                # val_contribs[name] = attr_inp_combine.abs().mean().item()
+                # train_contrib_value = torch.norm(attr_inp_combine_train_after,dim=-1).mean().item()
+                # val_contrib_value = torch.norm(attr_inp_combine_after,dim=-1).mean().item()
+                attr_inp_combine_train_after = attr_inp_combine_train_after[attr_inp_combine_train_after!=0]
+                attr_inp_combine_after = attr_inp_combine_after[attr_inp_combine_after!=0]
+                train_contrib_total = calc_total_contribution(attr_inp_combine_train_after)
+                # train_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_train_after)))
+                val_contrib_total = calc_total_contribution(attr_inp_combine_after)
+                # val_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_after)))
+                train_contribs[name+"_after_total"] = train_contrib_total
+                val_contribs[name+"_after_total"] = val_contrib_total
+        print("train_contribs:",train_contribs)
+        print("val_contribs:",val_contribs)
+                        
+    def model_layer_analysis(self,model,background_input,test_input,sample_num=10):
         """Model Layer compute analysis"""
         
         # 每个输入展平后的总长度
@@ -551,7 +790,7 @@ class FuturesProcessModel(TftDataframeModel):
                 x = model.top_selector[0](x,None)
                 # 对于多输出，需要指定计算某个输出值
                 x = x[self.output_no]
-                x = x.reshape([x.shape[0],-1])
+                x = x.reshape([x.shape[0],-1])*1000000
                 return x
                        
         layers_to_explain = [model.trans_model, model.top_selector[0]]
@@ -573,9 +812,9 @@ class FuturesProcessModel(TftDataframeModel):
         #     # 返回【中间层结果】给 SHAP
         #     return model.middle.numpy()
         
-        X_test = [item[:10] for item in test_input]
-        X_train = [item[50:60] for item in background_input]
-        backround = [item[:50] for item in background_input]
+        X_test = [item[:sample_num] for item in test_input]
+        X_train = [item[sample_num:2*sample_num] for item in background_input]
+        backround = [item[:sample_num] for item in background_input]
         
         for i,out_no in enumerate([2,3]):
                
@@ -606,6 +845,7 @@ class FuturesProcessModel(TftDataframeModel):
     def form_input_data(self,fur_dataset,sampler_cnt=3,data_loader=None,pl_module=None,mode='train'):
         
         static_covs_total,past_convs_item_total,his_future_emb_total,future_emb_total,future_single_emb_total = [],[],[],[],[]
+        future_date = []
         
         for i,data in enumerate(data_loader):
             (
@@ -625,6 +865,7 @@ class FuturesProcessModel(TftDataframeModel):
             ) = data           
             inp = (past_target, future_target, past_covariates, historic_future_covariates, future_covariates, 
                    static_covariates, past_future_covariates, price_targets, past_future_round_targets, index_round_targets,target_class,target_info)    
+            future_date.append([item[0]['future_start_datetime'] for item in target_info])
             pl_module = pl_module.cuda()       
             input_batch = pl_module._process_input_batch(inp,mode=mode)
             input_batch_transform = []
@@ -639,21 +880,23 @@ class FuturesProcessModel(TftDataframeModel):
                 ouput = pl_module.forward(input_batch_transform)    
             out_total,input_final,_ = ouput
             layer_recorder = out_total[0][-1]
-            static_covs,past_convs_item,his_future_emb,future_single_emb = input_final
+            static_covs,past_convs_item,his_future_emb = input_final
             static_covs_total.append(static_covs)
             past_convs_item_total.append(past_convs_item)
             his_future_emb_total.append(his_future_emb)
-            future_single_emb_total.append(future_single_emb)
+            # future_single_emb_total.append(future_single_emb)
             if i>=sampler_cnt-1:
                 break
+        
+        future_date = np.array(future_date)
         
         static_covs_total = torch.cat(static_covs_total,dim=0).float().cuda()
         past_convs_item_total = torch.cat(past_convs_item_total,dim=0).float().cuda()
         his_future_emb_total = torch.cat(his_future_emb_total,dim=0).float().cuda()
         # future_emb_total = torch.cat(future_emb_total,dim=0).float()
-        future_single_emb_total = torch.cat(future_single_emb_total,dim=0).float().cuda()
+        # future_single_emb_total = torch.cat(future_single_emb_total,dim=0).float().cuda()
         
-        input_final = [static_covs_total,past_convs_item_total,his_future_emb_total,future_single_emb_total]
+        input_final = [static_covs_total,past_convs_item_total,his_future_emb_total]
            
         return input_final,layer_recorder
     

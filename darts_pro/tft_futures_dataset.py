@@ -7,7 +7,6 @@ from sklearn.decomposition import PCA
 from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 from tft.class_define import CLASS_VALUES,CLASS_SIMPLE_VALUES
-from trader.utils.date_util import tradedays,get_tradedays_dur,get_tradedays
 import pandas as pd
 import numpy as np
 import pickle

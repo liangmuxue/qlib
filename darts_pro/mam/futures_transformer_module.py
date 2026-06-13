@@ -398,13 +398,14 @@ class FuturesTransformerModule(MlpModule):
             self.embed_cols = dataset.get_future_columns()
             
             target_feat_dim = 1
-            
+            time_embed_dim = len(self.embed_cols)
             # 使用混合时间序列模型,TFT底座
             model = UnionTransCombine(
                 target_feat_dim=target_feat_dim,
                 static_num=static_covariates.shape[-1]-1,
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
+                time_embed_dim=time_embed_dim,
                 hidden_dim=96,
                 hidden_size=16,
                 nhead=8,
@@ -420,7 +421,7 @@ class FuturesTransformerModule(MlpModule):
                 device=self.device,
                 target_mode=self.target_mode[seq]
             )         
-            self.time_embed_dim = model.time_embed_dim      
+            self.time_embed_dim = time_embed_dim      
             self.embedding_size = input_dim
             
             ################# 植入钩子进行中间变量输出调试 #################
@@ -576,13 +577,15 @@ class FuturesTransformerModule(MlpModule):
                         convs_emb.append(emb_data)
                     convs_emb = torch.stack(convs_emb).permute(1,0,2,3)
                     return convs_emb
-                his_future_emb = transform_emb(his_future_covs).to(self.device)   
-                future_emb = transform_emb(futures_convs).to(self.device) 
-                if his_future_emb.dtype==torch.float64:  
-                    future_emb = future_emb.double()    
-                future_single_emb =  future_emb[:,:,target_len,:]   
-                input_final = (static_covs,past_convs_item, his_future_emb,future_single_emb)
-                out = m(static_covs,past_convs_item, his_future_emb,future_single_emb)                
+                # his_future_emb = transform_emb(his_future_covs).to(self.device)   
+                # future_emb = transform_emb(futures_convs).to(self.device) 
+                # if his_future_emb.dtype==torch.float64:  
+                #     future_emb = future_emb.double()    
+                # future_single_emb =  future_emb[:,:,target_len,:]   
+                future_single_conv =  his_future_covs[:,:,target_len,:]   
+                # input_final = (static_covs,past_convs_item, his_future_covs,future_single_conv)
+                input_final = (static_covs,past_convs_item, his_future_covs)
+                out = m(*input_final)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
             else:
                 # 模拟数据
@@ -703,6 +706,8 @@ class FuturesTransformerModule(MlpModule):
                 self.log("total_norm_ins_layer", update_info["total_norm_ins_layer"], prog_bar=True) 
             else:
                 self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)           
+                self.log("total_norm_trans", update_info["total_norm_trans"], batch_size=train_batch[0].shape[0], prog_bar=False)
+                self.log("total_norm_ins_layer", update_info["total_norm_ins_layer"], prog_bar=False)                 
                                        
         # self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
         self.log("lr", self.trainer.optimizers[0].param_groups[0]["lr"], batch_size=train_batch[0].shape[0], prog_bar=True)  

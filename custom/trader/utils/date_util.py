@@ -1,9 +1,108 @@
 import time
 import datetime as dt
-from datetime import datetime,timedelta
-import calendar
+from datetime import datetime,timedelta,date
+import chinese_calendar as ccal
 from chinese_calendar import is_holiday
+import pandas_market_calendars as mcal
 from dateutil.relativedelta import relativedelta
+import pandas as pd
+
+def get_end_of_month(trade_days):
+    """取得月末日期"""
+
+    # 1、每月最后交易日（月末锚点）
+    month_last = trade_days.to_series().resample("M").last().dropna()
+    # 2、月末效应：月末最后3个交易日（你做月末效应核心）
+    month_effect_days = []
+    for dt in month_last:
+        pos = trade_days.get_indexer([dt], method="ffill")[0]
+        slice_day = trade_days[max(0, pos-2):pos+1]
+        month_effect_days.extend(slice_day)
+    
+    # 3、季度末最后3个交易日（季末资金效应）
+    q_last = trade_days.to_series().resample("Q").last().dropna()
+    q_effect_days = []
+    for dt in q_last:
+        pos = trade_days.get_indexer([dt], method="ffill")[0]
+        slice_day = trade_days[max(0, pos-2):pos+1]
+        q_effect_days.extend(slice_day)
+        
+    return month_effect_days,q_effect_days
+    
+def get_long_holiday_eve(start_year, end_year):
+    """取得长假前一天"""
+    
+    holiday_names = [
+        "New Year's Day", "Spring Festival", "Tomb-sweeping Day", "Labour Day", "Dragon Boat Festival", "National Day","Mid-autumn Festival"
+    ]  
+        
+    start = date(start_year,1,1)
+    end = date(end_year,12,31)
+    dt_range = pd.date_range(start, end, freq="D")
+    eve_dates = []
+
+    for d in dt_range:
+        cur_date = d.date()
+        next_date = cur_date + timedelta(days=1)
+
+        # 1.当天是工作日（包含周末调休补班）
+        if not ccal.is_workday(cur_date):
+            continue
+
+        # 2.次日是否【法定节假日（带节日名，排除普通周末）】
+        is_legal_hol, hol_name = ccal.get_holiday_detail(next_date)
+        # 必须存在节日名称且在法定节日列表，普通周末is_legal_hol=False/无名称
+        if is_legal_hol and hol_name in holiday_names:
+            eve_dates.append(d)
+
+    df_ref = pd.DataFrame({"datetime":eve_dates, "is_holiday_eve":1})
+    df_ref["datetime"] = pd.to_datetime(df_ref["datetime"])
+    return df_ref
+
+def get_holiday_eves(start_year: int, end_year: int) -> pd.DataFrame:
+    """
+    获取指定年份范围内，所有国内长假前一天
+    长假包含：春节、清明节、劳动节、端午节、中秋节、国庆节
+    返回：DataFrame（含 假期名称、假期开始日、假期前一天）
+    """
+    # 1. 生成目标年份所有日期
+    dates = pd.date_range(
+        start=f"{start_year}-01-01",
+        end=f"{end_year}-12-31",
+        freq="D"
+    )
+    df = pd.DataFrame({"datetime": dates})
+
+    # 2. 标记所有法定节假日 & 假期类型
+    df["is_holiday"] = df["datetime"].apply(chinese_calendar.is_holiday)
+    df["is_workday"] = df["datetime"].apply(chinese_calendar.is_workday)
+    df["holiday_name"] = df["datetime"].apply(
+        lambda d: chinese_calendar.get_holiday_detail(d)[1]
+    )
+
+    # 3. 筛选出【长假开始日】（排除调休、周末、重复日期）
+    # holiday_names = [
+    #     "春节", "清明节", "劳动节", "端午节", "中秋节", "国庆节"
+    # ]
+    holiday_names = [
+        "New Year's Day", "Spring Festival", "Tomb-sweeping Day", "Labour Day", "Dragon Boat Festival", "National Day","Mid-autumn Festival"
+    ]    
+    holiday_starts = df[
+        (df["holiday_name"].isin(holiday_names))
+        & (df["is_holiday"] == True)
+    ].copy()
+
+    # 去重：每个假期只保留第一天
+    holiday_starts = holiday_starts.drop_duplicates(subset=["holiday_name", "datetime"], keep="first")
+
+    # 4. 计算【长假前一天】
+    holiday_starts["holiday_eve"] = holiday_starts["datetime"] - pd.Timedelta(days=1)
+
+    # 5. 整理输出
+    # result = holiday_starts[["holiday_name", "datetime", "holiday_eve"]].rename(
+    #     columns={"datetime": "假期开始日", "holiday_eve": "长假前一天"}
+    # )
+    return holiday_starts.reset_index(drop=True)
 
 def get_next_working_day(day):
     """取得指定日期的下一工作日"""

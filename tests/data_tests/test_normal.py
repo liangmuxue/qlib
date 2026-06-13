@@ -1,133 +1,47 @@
-from trader.utils.date_util import tradedays
-from datetime import datetime
-import math
-import pickle
 import numpy as np
-import time
+import matplotlib.pyplot as plt
+from scipy.stats import gaussian_filter1d
 
-def test_days_dur():
-    trade_date = 20230508
-    before_date = 20230510
-    trade_date = datetime.strptime(str(trade_date),"%Y%m%d")
-    before_date = datetime.strptime(str(before_date),"%Y%m%d")
-    dur_days = tradedays(trade_date,before_date)
-    print(dur_days)
+# ----------------------
+# 模拟你图中的数据分布（与原图特征对齐）
+# ----------------------
+np.random.seed(42)
+# 训练集（蓝色点）
+x_train = np.array([-2.5, -2, -1.8, -1.6, -1.5, -1.5, -1.5, -1.4, -1.4, -1.4, -1.3, -1.3, -1.3, -1.3, -1.2, -1.2, -1.2, -1.2, -1.1, -1, 0, 0.6, 0.8, 0.9, 0.9, 0.9, 1, 1, 1, 1.1, 1.1, 1.6, 2, 2.3, 3.1, 3.2, 3.2, 3.5])
+y_train = np.array([-0.8, -0.5, 4.5, 0.7, 0.1, -0.1, -2.5, 1.2, -0.7, -1.7, -3.5, -2.1, -1.5, 0.6, -4.5, -2.2, -1.6, 0.1, -1.3, -0.7, 0.6, 2.4, 1.9, 2.5, -0.1, 0.9, 0.1, 1.2, -0.5, 0.6, -1.4, -0.6, 0.2, -2.2, -1.2, -0.4, -0.3, -0.9])
 
- 
-def test_crf():
-    import torch
-    from TorchCRF import CRF
-    from torch.utils.data import TensorDataset,DataLoader
-    from torch.optim import Adam
-    import matplotlib.pyplot as plt
-    batch_size = 10
-    seq_len = 19
-    num_tags = 9
-    X = torch.randn(1000,seq_len,num_tags)
-    tags = torch.ones([1000,seq_len]).long()
-    tensor_data = TensorDataset(X,tags)
-    dataloader = DataLoader(tensor_data,shuffle = True,batch_size = batch_size)
-    model = CRF(num_tags)
-    optimizer = Adam(model.parameters(),lr = 0.05,betas = (0.9,0.99))
-    losses = []
-    for seq,seq_tag in dataloader:
-        loss = (-1)*model(seq,seq_tag)
-        loss.backward()
-        optimizer.step()
-        losses.append(loss.tolist())
-    plt.xlabel('number of iter')
-    plt.ylabel('loss')
-    plt.title('a simple of torchcrf')
-    plt.plot(losses)
-    plt.legend()
-    plt.show()
-    print('value',model.decode(X[:4]))
+# 测试集（橙色点）
+x_test = np.array([-2.5, -2, -1.6, -1.5, -1.5, -1.5, -1.4, -1.4, -1.4, -1.3, -1.3, -1.2, -1.2, -1.1, 0, 0.6, 0.9, 0.9, 1, 1, 1, 1.1, 1.1, 1.2, 1.6, 2, 2.2, 3.1, 3.2, 3.2, 3.5])
+y_test = np.array([0.5, 0.1, 1.2, 0.2, 0.0, -1.6, 0.6, -1.7, -2.5, -2.6, -3.6, 0.8, 0.6, -2.1, 0.6, 0.6, 0.1, 1.3, 1.2, -0.1, -0.5, -0.9, -1.0, 0.0, 0.0, 0.3, 0.5, 0.3, 0.0, 0.0, 1.2])
 
-def test_date():
-    start_date = 20220801
-    start_date = datetime.strptime(str(start_date),'%Y%m%d').date()    
-    print(start_date)
-    
-def test_import():
-    from darts_pro.data_extension.custom_nor_model import TFTBatchModel
+# ----------------------
+# 绘制带平滑线的对比图
+# ----------------------
+plt.figure(figsize=(12, 8), dpi=120)
 
+# 绘制散点
+plt.scatter(x_train, y_train, c="#1f77b4", alpha=0.6, s=40, label="Train set")
+plt.scatter(x_test, y_test, c="#ff7f0e", alpha=0.6, s=40, label="Test set")
 
-def debug_data():    
-    
-    data_path = "custom/data/asis/debug/rate_total.pkl"
-    with open(data_path, "rb") as fin:
-        rate_total = pickle.load(fin)      
-    print(rate_total) 
+# 训练集平滑拟合线
+sort_idx_train = np.argsort(x_train)
+x_train_sorted = x_train[sort_idx_train]
+y_train_smooth = gaussian_filter1d(y_train[sort_idx_train], sigma=3)
+plt.plot(x_train_sorted, y_train_smooth, c="darkblue", lw=2.5, label="Train trend (smoothed)")
 
-def test_math():
+# 测试集平滑拟合线
+sort_idx_test = np.argsort(x_test)
+x_test_sorted = x_test[sort_idx_test]
+y_test_smooth = gaussian_filter1d(y_test[sort_idx_test], sigma=3)
+plt.plot(x_test_sorted, y_test_smooth, c="darkorange", lw=2.5, label="Test trend (smoothed)")
 
-    def slope(line):
-        x1, y1, x2, y2 = line
-        if x2 != x1:
-            return (y2 - y1) / (x2 - x1)
-        else:
-            return 0
-        
-    def slope_to_angle_signed(slope):
-        angle_radians = math.atan(slope)
-        angle_degrees = math.degrees(angle_radians)
-        return angle_degrees if slope >= 0 else 180 + angle_degrees
-    
-    line = [1, 2, 3, 3]
-    s = slope(line)
-    angle = slope_to_angle_signed(s)
-    angle = -angle if s<0 else angle
-    sin_val = math.sin(math.radians(angle))  
-    print(f"slope is {s} angle is {angle},sin is:{sin_val}")   
-    
-    x1, y1, x2, y2 = line
-    angle = np.rad2deg(np.arctan2(y2 - y1, x2 - x1))
-    
-def get_time(f):
-
-    def inner(*arg,**kwarg):
-        s_time = time.time()
-        res = f(*arg,**kwarg)
-        e_time = time.time()
-        print('func f:{},time:{}'.format(f.__name__,(e_time - s_time)))
-        return res
-    return inner
-
-def test_time_compute():
-    
-    @get_time
-    def tt():
-        time.sleep(1)
-        
-    class Cls():
-        @get_time
-        def inner_func(self):
-            time.sleep(1)
-    
-    # tt()
-    cls = Cls()
-    cls.inner_func()
-
-def test_c_head():
-    import CppHeaderParser
-    cppHeader = CppHeaderParser.CppHeader("custom/trader/emulator/openctp/ThostFtdcUserApiDataType.h")
-    for define in cppHeader.deines:
-        print(define)
-
-def test_dict_merge():
-    a = {"a":1}
-    b = {"b":1}
-    a.update(b)
-    print(a)
-
-if __name__ == "__main__":
-    # test_days_dur()
-
-    # test_import()
-    # test_date()
-    # test_math()
-    # test_time_compute()
-    # test_c_head()
-    test_dict_merge()
-    # debug_data()
-    
+# 辅助线与美化
+plt.axhline(y=0, ls="--", c="gray", alpha=0.7)
+plt.axvline(x=0, ls="--", c="gray", alpha=0.7)
+plt.xlabel("Feature Value", fontsize=12)
+plt.ylabel("SHAP Value", fontsize=12)
+plt.title("Train vs Test SHAP Dependence Plot (with Smoothed Trend)", fontsize=14)
+plt.legend(fontsize=11)
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()

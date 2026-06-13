@@ -560,8 +560,12 @@ class MultiTaskOptimizer(Adam):
             self._set_gradients(total_gradients)
             super().step()
             conflict_analysis = {}
+            # 计算重点层梯度参数数值情况
+            total_norm_trans,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)            
             return {
                 'total_grad_norm': self._compute_total_grad_norm(total_gradients),
+                'total_norm_trans': total_norm_trans,
+                'total_norm_ins_layer': total_norm_ins_layer,                
                 'total_loss': task_losses[0].item()
             }              
             
