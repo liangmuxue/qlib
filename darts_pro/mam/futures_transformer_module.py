@@ -406,11 +406,11 @@ class FuturesTransformerModule(MlpModule):
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
                 time_embed_dim=time_embed_dim,
-                hidden_dim=96,
+                hidden_dim=64,
                 hidden_size=16,
                 nhead=8,
-                num_layers=3,
-                dropout=0.1,
+                num_layers=2,
+                dropout=dropout,
                 seq_len=self.input_chunk_length,
                 pred_len=pred_len,
                 sample_dim=combine_nodes_num,
@@ -499,7 +499,7 @@ class FuturesTransformerModule(MlpModule):
         # 余弦退火
         lr_scheduler_cls = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
         # Linear Ls
-        # lr_scheduler_cls = torch.optim.lr_scheduler.LinearLR
+        lr_scheduler_cls = torch.optim.lr_scheduler.LinearLR
         lr_scheduler = create_from_cls_and_kwargs(
             lr_scheduler_cls, lr_sched_kws
         )
@@ -583,8 +583,8 @@ class FuturesTransformerModule(MlpModule):
                 #     future_emb = future_emb.double()    
                 # future_single_emb =  future_emb[:,:,target_len,:]   
                 future_single_conv =  his_future_covs[:,:,target_len,:]   
-                # input_final = (static_covs,past_convs_item, his_future_covs,future_single_conv)
-                input_final = (static_covs,past_convs_item, his_future_covs)
+                input_final = (static_covs,past_convs_item, his_future_covs,future_single_conv)
+                # input_final = (static_covs,past_convs_item, his_future_covs)
                 out = m(*input_final)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
             else:

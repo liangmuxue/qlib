@@ -565,12 +565,12 @@ def test_visdom():
       
 if __name__ == "__main__":
     # test_dbscan()
-    # test_SpectralClustering()
+    test_SpectralClustering()
     # test_matirx_view()
     # test_bound()
     # test_tensorboard_viz()
     # test_group_bar()
-    test_visdom()
+    # test_visdom()
         
     
     

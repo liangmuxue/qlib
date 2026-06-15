@@ -405,7 +405,8 @@ class FuturesProcessModel(TftDataframeModel):
             out1 = model(*input_1) 
             out2 = model(*input_2)
             out = model(*input) 
-            print("mean:{},std:{}".format(out[2][0].mean(),out[2][0].std()))
+            print("out2 mean:{},std:{}".format(out[2][0].mean(),out[2][0].std()))
+            print("out3 mean 2:{},std:{}".format(out[3][0].mean(),out[3][0].std()))
     
     def viz_shape_value(self,to_explain,sample_num=10):
         
@@ -585,12 +586,27 @@ class FuturesProcessModel(TftDataframeModel):
 
         # 训练接和验证集的归因差异排查
         ig = IntegratedGradients(model)
-        train_attr, delta_train = ig.attribute(x_train, target=0, return_convergence_delta=True,internal_batch_size=32)
-        val_attr, delta_val = ig.attribute(x, target=0, return_convergence_delta=True,internal_batch_size=32)
         for i in range(len(baselines)):
-            train_importance = np.mean(np.abs(train_attr[i].detach().cpu().numpy()))
-            val_importance = np.mean(np.abs(val_attr[i].detach().cpu().numpy()))              
-            print("input {} train_importance:{},val_importance:{}".format(input_names[i],train_importance, val_importance))   
+            train_importance_total = []
+            val_importance_total = []            
+            train_attr, delta_train = ig.attribute(x_train, target=0, return_convergence_delta=True,internal_batch_size=32)
+            val_attr, delta_val = ig.attribute(x, target=0, return_convergence_delta=True,internal_batch_size=32)
+            train_attr_final = torch.nan_to_num(train_attr[i]) 
+            train_importance = np.abs(train_attr_final.detach().cpu().numpy())
+            train_importance_mean = train_importance.flatten()
+            train_importance_mean = train_importance_mean[train_importance_mean!=0]
+            train_importance_mean = np.abs(train_importance).mean()
+            train_importance_detail = []
+            for j in range(train_attr_final.shape[-1]):
+                train_importance_detail_item = train_attr_final[...,j]
+                train_importance_detail_item = train_importance_detail_item[train_importance_detail_item!=0].abs().detach().cpu().numpy().mean()
+                train_importance_detail.append(train_importance_detail_item)
+            val_importance = np.abs(val_attr[i].detach().cpu().numpy())           
+            val_importance_mean = val_importance.mean()
+            val_importance_detail = val_importance.mean(tuple(range(val_importance.ndim - 1)))
+            print("input {} train_importance mean:{},val_importance mean:{}".format(input_names[i],train_importance_mean, val_importance_mean)) 
+            if i==1:
+                print("input {} train_importance detail:{},val_importance detail:{}".format(input_names[i],train_importance_detail, val_importance_detail)) 
  
         # # 对每一层做梯度SHAP
         # focus_layers = ['model.trans_model.static_grn_hist','model.trans_model.obs_grn','model.trans_model.calendar_encoder','model.trans_model.transformer_encoder']
@@ -692,7 +708,7 @@ class FuturesProcessModel(TftDataframeModel):
                     if name=='model.top_selector.0':
                         # attr_inp_combine.append(attr_inp[0])
                         # attr_inp_combine_train.append(attr_inp_train[0])   
-                        for h in range(10):   
+                        for h in range(7):   
                             attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
                             attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
                             attr_inp_combine_after.append(attr_inp_after[0])
@@ -880,11 +896,11 @@ class FuturesProcessModel(TftDataframeModel):
                 ouput = pl_module.forward(input_batch_transform)    
             out_total,input_final,_ = ouput
             layer_recorder = out_total[0][-1]
-            static_covs,past_convs_item,his_future_emb = input_final
+            static_covs,past_convs_item,his_future_emb,future_single_emb = input_final
             static_covs_total.append(static_covs)
             past_convs_item_total.append(past_convs_item)
             his_future_emb_total.append(his_future_emb)
-            # future_single_emb_total.append(future_single_emb)
+            future_single_emb_total.append(future_single_emb)
             if i>=sampler_cnt-1:
                 break
         
@@ -894,9 +910,9 @@ class FuturesProcessModel(TftDataframeModel):
         past_convs_item_total = torch.cat(past_convs_item_total,dim=0).float().cuda()
         his_future_emb_total = torch.cat(his_future_emb_total,dim=0).float().cuda()
         # future_emb_total = torch.cat(future_emb_total,dim=0).float()
-        # future_single_emb_total = torch.cat(future_single_emb_total,dim=0).float().cuda()
+        future_single_emb_total = torch.cat(future_single_emb_total,dim=0).float().cuda()
         
-        input_final = [static_covs_total,past_convs_item_total,his_future_emb_total]
+        input_final = [static_covs_total,past_convs_item_total,his_future_emb_total,future_single_emb_total]
            
         return input_final,layer_recorder
     

@@ -78,7 +78,7 @@ task:
             optimizer_kwargs:
                lr: 1e-3
                betas: [0.9,0.999]
-               weight_decay: 1e-3
+               weight_decay: 1e-4
             optargs:
                provider_uri: *provider_uri
                market: *market
@@ -147,7 +147,7 @@ task:
                 ext_column: ['near_basis_rate','dom_basis_rate']
                 target_column: ['RSI5','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
-                future_covariate_col: ['end_of_month','is_holiday_eve']   
+                future_covariate_col: ['year','dayofweek','month','week'] 
                 past_covariate_col: ['SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','STD5','OPEN_COM','KDJ_K','QTLUMA5'
                                   ,'SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','STD5','OPEN_COM','KDJ_K','QTLUMA5'
                                   ,'SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','STD5','OPEN_COM','KDJ_K','QTLUMA5'

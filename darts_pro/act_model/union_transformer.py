@@ -148,7 +148,7 @@ class GatedResidualNetwork(nn.Module):
         # 残差连接适配
         self.residual = nn.Linear(input_dim, output_dim) if input_dim != output_dim else nn.Identity()
 
-    def forward(self, x, context=None):
+    def forward(self, x, context=None,scale_ctx=0.1):
         """
         x: (batch, seq_len, input_dim) 或 (batch, input_dim)
         """
@@ -163,7 +163,7 @@ class GatedResidualNetwork(nn.Module):
             # ctx_scaled = self.scale_ctx * ctx       
             # 先归一化再融合
             x_scaled = self.norm_x(x)
-            ctx_scaled = self.norm_ctx(ctx) * self.scale_ctx               
+            ctx_scaled = self.norm_ctx(ctx) * scale_ctx               
             # 融合权重，门控自动选择
             concat = torch.cat([x_scaled, ctx_scaled], dim=-2).permute(0,1,3,2)
             gate_weight = torch.sigmoid(self.fusion_gate(concat)).permute(0,1,3,2)
@@ -231,7 +231,7 @@ class DecoderLayer(nn.Module):
         self.output_grn = GatedResidualNetwork(hidden_dim, hidden_dim, hidden_dim, dropout=dropout)
         self.final_proj = nn.Linear(hidden_dim, obs_dim)
         
-    def forward(self,hist_summary):
+    def forward(self,hist_summary,fut_proj=None,fur_scale=1.0):
         
         S = self.sample_dim
         P = self.pred_len
@@ -239,12 +239,14 @@ class DecoderLayer(nn.Module):
         
         # 融合历史总结+未来协变量（核心：历史指导未来预测）
         hist_summary_expanded = hist_summary.unsqueeze(1).repeat(1, P, 1)  # [B*S, P, hidden_dim]
-        # if fut_proj is not None:
-        #     fusion_input = torch.cat([hist_summary_expanded, fut_proj], dim=-1)  # [B*S, P, 2*hidden_dim]
-        #     fusion_out = self.future_fusion(fusion_input)  # [B*S, P, hidden_dim]
-        # else:
-        #     fusion_out = hist_summary_expanded
-        fusion_out = hist_summary_expanded
+        if fut_proj is not None:
+            fut_proj = fut_proj.reshape(B*S,fut_proj.shape[-2],fut_proj.shape[-1])
+            # 使用缩放避免未来协变量权重过高
+            fut_proj = fut_proj * fur_scale
+            fusion_input = torch.cat([hist_summary_expanded, fut_proj], dim=-1)  # [B*S, P, 2*hidden_dim]
+            fusion_out = self.future_fusion(fusion_input)  # [B*S, P, hidden_dim]
+        else:
+            fusion_out = hist_summary_expanded
         # 门控融合
         final_feat = self.attention_gate(fusion_out)  # [B*S, P, hidden_dim]
         
@@ -405,7 +407,8 @@ class TFTWithFutureCovariates(nn.Module):
         
         self.calendar_encoder = GatedResidualNetwork(input_dim=time_embed_dim, hidden_dim=hidden_dim,output_dim=hidden_dim,
                                                  context_combine_dim=seq_len)       
-        self.calendar_encoder_fur = GatedResidualNetwork(input_dim=time_embed_dim, hidden_dim=hidden_dim,output_dim=hidden_dim)  
+        self.calendar_encoder_fur = GatedResidualNetwork(input_dim=time_embed_dim, hidden_dim=hidden_dim,output_dim=hidden_dim,
+                                                 context_combine_dim=1)  
         # 3. 历史特征投影（观测+时间）
         self.obs_proj = nn.Linear(obs_dim + time_embed_dim, hidden_dim)
         self.static_norm = nn.LayerNorm(hidden_dim)
@@ -439,7 +442,7 @@ class TFTWithFutureCovariates(nn.Module):
                      dropout=dropout, pred_len=1)        
         
 
-    def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None):
+    def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None,future_single_emb=None):
         """
         static_feat: [B, S, static_dim] - 静态特征
         obs_feat: [B, S, T, obs_dim] - 历史观测特征（仅过去）
@@ -509,21 +512,12 @@ class TFTWithFutureCovariates(nn.Module):
         # time_embed_fut_flat = time_embed_fut.reshape(B*S, P, time_embed_fut.shape[-1])
         
         # 未来协变量投影
-        # 静态特征广播到所有预测步：[B*S,1,hidden_dim] → [B*S,P,hidden_dim]
-        # static_broadcast = static_context_fut.repeat(1, P, 1)
-        # 拼接未来协变量 + 静态特征--未来不使用静态特征，静态特征固定比重会干扰网络传播
-        # fut_input = torch.cat([time_embed_fut_flat, static_broadcast], dim=-1)  # [B*S,P,F_time+F_static]  
-        # fut_input = time_embed_fut_flat
-        # fut_single_input = self.fur_temporal_grn(time_embed_fut_singel_flat,context=static_context_fut)
-        # fut_single_input = time_embed_fut_singel_flat 
-                  
-        # fut_single_proj = self.calendar_encoder_fur(time_embed_fut_single.unsqueeze(-2),context=static_context_hist)
-        # if PRINT_STD_FLAG:
-        #     print("fut_single_proj std:{}".format(fut_single_proj.std()))
-        # fut_single_proj = fut_single_proj.reshape(B*S,fut_single_proj.shape[2],fut_single_proj.shape[3])
+        future_single_emb = self.calendar_encoder_fur(future_single_emb.unsqueeze(-2),context=static_context_hist)
+        if PRINT_STD_FLAG:
+            print("future_single_emb std:{}".format(future_single_emb.std()))
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        pred_tar = self.tar_decoder(hist_summary)        # [B*S*1, obs_dim]
+        pred_tar = self.tar_decoder(hist_summary,future_single_emb)        # [B*S*1, obs_dim]
         if PRINT_STD_FLAG:
             print("pred_tar std:{}".format(pred_tar.std()))
         # # 4.4 变量权重恢复
@@ -644,10 +638,10 @@ class SparseGateFeatureTopK(nn.Module):
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=input_dim,relu=True,
                                     layer_norm=False,batch_norm=True,dropout=dropout)     
-            nn.init.kaiming_normal_(branch_trend_combine_layer.linear_hidden.weight, nonlinearity='linear')
-            nn.init.kaiming_normal_(branch_trend_combine_layer.linear_output.weight, nonlinearity='linear')
-            nn.init.constant_(branch_trend_combine_layer.linear_hidden.bias, 0.0)
-            nn.init.constant_(branch_trend_combine_layer.linear_output.bias, 0.0)
+            # nn.init.kaiming_normal_(branch_trend_combine_layer.linear_hidden.weight, nonlinearity='linear')
+            # nn.init.kaiming_normal_(branch_trend_combine_layer.linear_output.weight, nonlinearity='linear')
+            # nn.init.constant_(branch_trend_combine_layer.linear_hidden.bias, 0.0)
+            # nn.init.constant_(branch_trend_combine_layer.linear_output.bias, 0.0)
             # branch_trend_combine_layer.weight.data *= 8.0
             trend_layer.append(branch_trend_combine_layer)
         self.total_features_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=input_dim,
@@ -768,7 +762,6 @@ class UnionTransCombine(nn.Module):
         self.target_feat_dim = target_feat_dim  
         # 整合输出网络
         self.ins_layer = nn.ParameterList([LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3).double() for _ in range(self.target_feat_dim)])
-        self.dec_layer = LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim*pred_len*target_feat_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3)
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
@@ -782,13 +775,12 @@ class UnionTransCombine(nn.Module):
         return self.time_encoder.transform_inner(batch_data)
     
     def forward(
-        self,static_covs,past_convs_item, his_future_emb
+        self,static_covs,past_convs_item, his_future_emb,future_single_emb
     ):    
         
         # 基础模型的向前传播
-        pred_tar = self.trans_model(static_covs,past_convs_item, his_future_emb)   
+        pred_tar = self.trans_model(static_covs,past_convs_item, his_future_emb,future_single_emb)   
         
-        # dec_out_combine = self.dec_layer(y_pred_reshape).reshape(pred_seq.shape[0],self.sample_dim,self.pred_len,self.target_feat_dim)
         trend_logits_combine = []
         cls_out_combine = []    
         trend_list_total = []
