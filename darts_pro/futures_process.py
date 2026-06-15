@@ -367,8 +367,8 @@ class FuturesProcessModel(TftDataframeModel):
         sample_num = 50
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
-        self.ind_layer_analysis(real_model, background, to_explain,sample_num=10)
-        # self.check_sampler_output(real_model, background)
+        # self.ind_layer_analysis(real_model, background, to_explain,sample_num=10)
+        self.check_sampler_output(real_model, background)
 
         # # ======================== 【5】核心诊断：每层SHAP贡献 ========================
         # print("="*60)

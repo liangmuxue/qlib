@@ -85,9 +85,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2015Cutlen2_transCateLoss_2503"
+               model_name: "Futures_cleanData2015Cutlen2_transBnCateLoss_2503"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
                task_weights: [[0.5],[0.5,0.5]]
                grad_limits: [5.0,3.0]

@@ -644,15 +644,10 @@ class SparseGateFeatureTopK(nn.Module):
             # nn.init.constant_(branch_trend_combine_layer.linear_output.bias, 0.0)
             # branch_trend_combine_layer.weight.data *= 8.0
             trend_layer.append(branch_trend_combine_layer)
-        self.total_features_layer = LinelessLayer(sample_dim*input_dim,sample_dim,hidden_size=input_dim,
-                                    layer_norm=True,batch_norm=False,dropout=dropout)  
-        self.total_trend_layer = LinelessLayer(sample_dim*input_dim,1,hidden_size=input_dim,
-                                    layer_norm=False,batch_norm=True,dropout=dropout)          
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
         self.branch_trend_combine_layer_total = nn.Linear(scales_dict.shape[0],scales_dict.shape[0],bias=False) 
-        self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=input_dim,
-                                    layer_norm=False,batch_norm=False,dropout=dropout)         
-            
+        self.branch_trend_combine_layer_main = nn.Linear(scales_dict.shape[0],len(scales_arr),bias=False) 
+        
     def forward_combine(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
@@ -761,7 +756,7 @@ class UnionTransCombine(nn.Module):
         self.sample_dim = sample_dim
         self.target_feat_dim = target_feat_dim  
         # 整合输出网络
-        self.ins_layer = nn.ParameterList([LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3).double() for _ in range(self.target_feat_dim)])
+        # self.ins_layer = nn.ParameterList([LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3).double() for _ in range(self.target_feat_dim)])
         # 指数整合输出网络       
         self.index_combine_layer = LinelessLayer(sample_dim*obs_dim*pred_len,pred_len)     
         # TOPK选择器网络
