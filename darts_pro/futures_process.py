@@ -367,8 +367,8 @@ class FuturesProcessModel(TftDataframeModel):
         sample_num = 50
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
-        # self.ind_layer_analysis(real_model, background, to_explain,sample_num=10)
-        self.check_sampler_output(real_model, background)
+        self.ind_layer_analysis(real_model, background, to_explain,sample_num=10)
+        # self.check_sampler_output(real_model, background)
 
         # # ======================== 【5】核心诊断：每层SHAP贡献 ========================
         # print("="*60)
@@ -400,8 +400,8 @@ class FuturesProcessModel(TftDataframeModel):
     
     def check_sampler_output(self,model,input):
         with torch.no_grad():
-            input_1 = [item[:1] for item in input]
-            input_2 = [item[8:9] for item in input]
+            input_1 = [item[:10] for item in input]
+            input_2 = [item[10:20] for item in input]
             out1 = model(*input_1) 
             out2 = model(*input_2)
             out = model(*input) 

@@ -85,7 +85,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2015Cutlen2_transBnCateLoss_2503"
+               model_name: "Futures_cleanData2015Cutlen2_transScaleLoss_2503"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -121,7 +121,7 @@ task:
                 kwargs: *data_handler_config
             segments:
                 train: [2015-01-01, 2025-03-28]
-                valid: [2025-03-01, 2025-06-15]
+                valid: [2025-03-01, 2025-05-15]
                 test: [2025-07-01, 2025-09-30]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'

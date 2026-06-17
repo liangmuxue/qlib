@@ -231,7 +231,7 @@ class DecoderLayer(nn.Module):
         self.output_grn = GatedResidualNetwork(hidden_dim, hidden_dim, hidden_dim, dropout=dropout)
         self.final_proj = nn.Linear(hidden_dim, obs_dim)
         
-    def forward(self,hist_summary,fut_proj=None,fur_scale=1.0):
+    def forward(self,hist_summary,fut_proj=None,fur_scale=0.2):
         
         S = self.sample_dim
         P = self.pred_len
@@ -517,7 +517,7 @@ class TFTWithFutureCovariates(nn.Module):
             print("future_single_emb std:{}".format(future_single_emb.std()))
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        pred_tar = self.tar_decoder(hist_summary,future_single_emb)        # [B*S*1, obs_dim]
+        pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=0.4)        # [B*S*1, obs_dim]
         if PRINT_STD_FLAG:
             print("pred_tar std:{}".format(pred_tar.std()))
         # # 4.4 变量权重恢复
@@ -600,7 +600,7 @@ class AttScaleFeature(nn.Module):
 class SparseGateFeatureTopK(nn.Module):
     """综合TOPK选取"""
     
-    def __init__(self,sample_dim,input_dim,seq_len=5,k=3, hidden_dim=16,num_heads=4, dropout=0.1,
+    def __init__(self,sample_dim,input_dim,seq_len=5,k=3, hidden_dim=16,num_heads=4, dropout=0.1,mlp_init_scale=1.5,
                  target_mode=0,scales_dict=None,device=None):
         super().__init__()
         self.target_mode = target_mode
@@ -637,17 +637,23 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=input_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=dropout)     
-            # nn.init.kaiming_normal_(branch_trend_combine_layer.linear_hidden.weight, nonlinearity='linear')
-            # nn.init.kaiming_normal_(branch_trend_combine_layer.linear_output.weight, nonlinearity='linear')
-            # nn.init.constant_(branch_trend_combine_layer.linear_hidden.bias, 0.0)
-            # nn.init.constant_(branch_trend_combine_layer.linear_output.bias, 0.0)
+                                    layer_norm=False,batch_norm=True,track_running_stats=True,dropout=dropout)     
+            nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
+            nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
+            nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
+            nn.init.zeros_(branch_trend_combine_layer.linear_output.bias)
             # branch_trend_combine_layer.weight.data *= 8.0
             trend_layer.append(branch_trend_combine_layer)
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
-        self.branch_trend_combine_layer_total = nn.Linear(scales_dict.shape[0],scales_dict.shape[0],bias=False) 
-        self.branch_trend_combine_layer_main = nn.Linear(scales_dict.shape[0],len(scales_arr),bias=False) 
-        
+        self.branch_trend_combine_layer_total = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=input_dim,
+                                    layer_norm=False,batch_norm=True,dropout=dropout) 
+        self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=input_dim,
+                                    layer_norm=False,batch_norm=True,dropout=dropout)   
+        nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
+        nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
+        nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
+        nn.init.zeros_(self.branch_trend_combine_layer_main.linear_output.bias)
+                
     def forward_combine(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
@@ -710,6 +716,7 @@ class UnionTransCombine(nn.Module):
         top_num=3,            # topk数量
         scales_arr=None,
         target_mode=0,
+        trans_scale=0.4,
         device='cuda'
     ):
         super().__init__()
@@ -755,6 +762,7 @@ class UnionTransCombine(nn.Module):
         self.pred_len = pred_len         
         self.sample_dim = sample_dim
         self.target_feat_dim = target_feat_dim  
+        self.trans_scale = trans_scale
         # 整合输出网络
         # self.ins_layer = nn.ParameterList([LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3).double() for _ in range(self.target_feat_dim)])
         # 指数整合输出网络       
@@ -775,6 +783,7 @@ class UnionTransCombine(nn.Module):
         
         # 基础模型的向前传播
         pred_tar = self.trans_model(static_covs,past_convs_item, his_future_emb,future_single_emb)   
+        pred_tar = pred_tar * self.trans_scale
         
         trend_logits_combine = []
         cls_out_combine = []    
