@@ -461,7 +461,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         val_series = series2seq(val_series)
         val_past_covariates = series2seq(val_past_covariates)
         val_future_covariates = series2seq(val_future_covariates)
-
+        
         self.encoders = self.initialize_encoders()
         if self.encoders.encoding_available:
             past_covariates, future_covariates = self.generate_fit_encodings(

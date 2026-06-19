@@ -85,11 +85,11 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2015Cutlen2_transCateLoss_2507"
+               model_name: "Futures_cleanData2015Cutlen2_transScaleLoss_2503"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               task_weights: [[0.5],[0.5,0.5]]
+               task_weights: [[1.0],[0.5,0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
                main_task_seq: [[],[1]]
@@ -120,8 +120,8 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2015-01-01, 2025-07-28]
-                valid: [2025-07-01, 2025-10-15]
+                train: [2015-01-01, 2025-03-28]
+                valid: [2025-05-01, 2025-08-15]
                 test: [2025-07-01, 2025-09-30]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
@@ -129,7 +129,7 @@ task:
             aug_type: 'no'
             data_type: 'date_range'
             transform_inner: True
-            scale_time_col: False
+            scale_time_col: True
             instrument_pick: [600520,600521,600522]
             scaler_type: 'norm'
             model_type: 'tft'

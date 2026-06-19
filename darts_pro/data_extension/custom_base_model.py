@@ -70,7 +70,8 @@ class BaseMixModule(PLMixedCovariatesModule):
             model =  self.create_real_model(output_dim, variables_meta_array[i], num_static_components, 
                                             hidden_size, lstm_layers, num_attention_heads, full_attention, 
                                             feed_forward, hidden_continuous_size, categorical_embedding_sizes, 
-                                            dropout, add_relative_index, norm_type,model_type=model_type,device=device,seq=i,**kwargs)
+                                            dropout, add_relative_index, norm_type,model_type=model_type,device=device,
+                                            seq=i,**kwargs)
             if isinstance(model, tuple):
                 model_main,_ = model
                 model_list.append(model_main)

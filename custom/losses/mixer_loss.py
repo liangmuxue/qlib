@@ -526,7 +526,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if optimizers_idx==i or optimizers_idx==-1:
                 output_item = output[i] 
                 # 输出值分别为未来目标走势预测、分类目标幅度预测、行业分类总体幅度预测
-                sw_index_logits,sv,trend_list_total,trend_list_main = output_item  
+                sw_index_logits,sv,trend_list_total,trend_list_main,_ = output_item  
                 future_round_targets_factor = future_round_targets[...,i]
                 # 分批次，按照不同分类，分别衡量类内期货品种总体损失
                 target_info_total = []
@@ -675,6 +675,10 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             else:
                                 detail_loss['total'].append(loss_inner)
                             cnt += 1
+                        # # 通过损失调整高低层的贡献比例
+                        # radio_loss = self.balance_layer_ratio(pred_tar, pred_data_total)
+                        # lambda_reg = 1.0
+                        # ce_loss[i] += radio_loss * lambda_reg
                         if cnt>0:
                             loss_item = loss_item/cnt
                             cls_loss[i] += loss_item
@@ -764,6 +768,16 @@ class FuturesIndustryLoss(UncertaintyLoss):
                            
         return loss_sum,[corr_loss,ce_loss,fds_loss,cls_loss,detail_loss]    
     
+    def balance_layer_ratio(self,pred_tar,trend_list_total,target_ratio=1.0):
+        """通过损失调整高低层的贡献比例"""
+        
+        trans_mag = pred_tar.abs().mean()
+        mlp_mag = trend_list_total.abs().mean()
+        current_ratio = mlp_mag / (trans_mag + 1e-8)
+        loss_ratio = torch.abs(current_ratio - target_ratio)
+        
+        return loss_ratio     
+        
     
     def get_sample_weights(self,y_true,min_threshold=-0.5,max_threshold=0.5, out_weight=10.0,min_num=2):
         

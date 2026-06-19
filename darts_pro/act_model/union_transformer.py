@@ -441,8 +441,17 @@ class TFTWithFutureCovariates(nn.Module):
         self.tar_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
                      dropout=dropout, pred_len=1)        
         
-
-    def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None,future_single_emb=None):
+    def get_dynamic_target_ratio(self,epoch,max_epochs, final_target=1.2,warmup_ratio=0.5):
+        # 线性退火：前期偏向浅层，后期收敛到固定目标比例
+        
+        total_epochs = max_epochs
+        if epoch < total_epochs * 0.2 or total_epochs==0:
+            return warmup_ratio
+        else:
+            alpha = (epoch - total_epochs*0.2) / (total_epochs*0.8)
+            return warmup_ratio * (1-alpha) + final_target * alpha
+            
+    def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None,future_single_emb=None,current_epoch=0,max_epochs=0):
         """
         static_feat: [B, S, static_dim] - 静态特征
         obs_feat: [B, S, T, obs_dim] - 历史观测特征（仅过去）
@@ -494,7 +503,7 @@ class TFTWithFutureCovariates(nn.Module):
             print("obs_proj std:{}".format(obs_feat.std()))          
         # 2.1 融合历史观测+时间嵌入+样本交互
         # obs_input = torch.cat([obs_feat, time_embed_hist], dim=-1)  # [B,S,T,F]
-        obs_input = obs_feat + time_embed_hist
+        obs_input = obs_feat + time_embed_hist * 0.7
         
         # 2.2 展平样本维度：[B,S,T,F] → [B*S, T, F]
         obs_input = obs_input.reshape(B*S, T, -1)     
@@ -509,15 +518,17 @@ class TFTWithFutureCovariates(nn.Module):
         # 2.7 取最后时间步的历史编码（历史信息总结）
         hist_summary = hist_encoded[:, -1, :]  # [B*S, hidden_dim]
         
-        # time_embed_fut_flat = time_embed_fut.reshape(B*S, P, time_embed_fut.shape[-1])
-        
         # 未来协变量投影
         future_single_emb = self.calendar_encoder_fur(future_single_emb.unsqueeze(-2),context=static_context_hist)
         if PRINT_STD_FLAG:
             print("future_single_emb std:{}".format(future_single_emb.std()))
+            
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=0.4)        # [B*S*1, obs_dim]
+        fur_scale = self.get_dynamic_target_ratio(current_epoch,max_epochs,warmup_ratio=0.1)
+        self.fur_scale = fur_scale
+        pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
+        
         if PRINT_STD_FLAG:
             print("pred_tar std:{}".format(pred_tar.std()))
         # # 4.4 变量权重恢复
@@ -697,6 +708,7 @@ class UnionTransCombine(nn.Module):
 
     def __init__(
         self,
+        max_epochs=0,
         obs_dim=6,             # 历史观测特征维度（要预测的变量）
         fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
         time_embed_dim=2,
@@ -720,25 +732,7 @@ class UnionTransCombine(nn.Module):
         device='cuda'
     ):
         super().__init__()
-        # time_encoder = TimeFeatureEncoder('datetime')   
-        # # range_data = {'year':df['datetime'].dt.year.unique().tolist(),
-        # #               'month':df['datetime'].dt.month.unique().tolist(),
-        # #               'day':df['datetime'].dt.day.unique().tolist(),
-        # #               'dayofweek':df['datetime'].dt.dayofweek.unique().tolist(),
-        # #             }
-        # range_data = {'year':[i for i in range(2012,2026)],
-        #               'month':[i for i in range(0,12)],
-        #               'day':[i for i in range(1,32)],
-        #               'dayofweek':[i for i in range(0,5)],
-        #               # 'week':[i for i in range(0,55)],
-        #             }          
-        # dataset = global_var.get_value("dataset")   
-        # time_encoder.fit_static(range_data) 
-        # # self.time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1], device).shape[-1]    
-        # # 记录时间字段
-        # # self.embed_cols = dataset.get_future_columns()
-        # self.time_encoder = time_encoder        
-        # self.time_embed_dim = time_encoder.transform(dataset.df_all.iloc[:1]).shape[-1] 
+        self.max_epochs = max_epochs
         
         self.time_embed_dim = time_embed_dim
         self.trans_model = TFTWithFutureCovariates(
@@ -774,16 +768,27 @@ class UnionTransCombine(nn.Module):
         ############# 中间变量调试 #############
         self.features = {}
     
-    def transform_inner(self, batch_data):
+    def transform_inner(self, batch_data):        
         return self.time_encoder.transform_inner(batch_data)
-    
+
+    def get_dynamic_target_ratio(self,epoch,max_epochs, final_target=1.2,warmup_ratio=0.4):
+        # 线性退火：前期偏向浅层，后期收敛到固定目标比例
+        
+        total_epochs = max_epochs
+        if epoch < total_epochs * 0.2 or total_epochs==0:
+            return warmup_ratio
+        else:
+            alpha = (epoch - total_epochs*0.2) / (total_epochs*0.8)
+            return warmup_ratio * (1-alpha) + final_target * alpha
+          
     def forward(
-        self,static_covs,past_convs_item, his_future_emb,future_single_emb
+        self,static_covs,past_convs_item, his_future_emb,future_single_emb,current_epoch=0,max_epochs=180,
     ):    
         
         # 基础模型的向前传播
-        pred_tar = self.trans_model(static_covs,past_convs_item, his_future_emb,future_single_emb)   
-        pred_tar = pred_tar * self.trans_scale
+        pred_tar = self.trans_model(static_covs,past_convs_item, his_future_emb,future_single_emb,current_epoch=current_epoch,max_epochs=max_epochs)   
+        tar_scale = self.get_dynamic_target_ratio(current_epoch,max_epochs)
+        pred_tar = pred_tar * tar_scale
         
         trend_logits_combine = []
         cls_out_combine = []    
@@ -799,6 +804,6 @@ class UnionTransCombine(nn.Module):
             trend_logits_combine.append(trend_logits_list)
             trend_list_main_combine.append(trend_list_main)
         
-        return trend_logits_combine,cls_out_combine,trend_list_total,trend_list_main_combine   
+        return trend_logits_combine,cls_out_combine,trend_list_total,trend_list_main_combine,(tar_scale,self.trans_model.fur_scale)
 
 

@@ -272,7 +272,7 @@ class TFTFuturesDataset(TFTSeriesDataset):
         future_covariate_col = self.get_future_columns()     
         for conv_col in future_covariate_col:
             conv_col_scale = conv_col + "_scale"
-            df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).min()) / (df[conv_col].astype(int).max() - df[conv_col].astype(int).min())                
+            df[conv_col_scale] = (df[conv_col].astype(int) - df[conv_col].astype(int).mean()) / df[conv_col].astype(int).std()                
         # 按照代码，新增排序字段，用于后续embedding
         rank_group_column = self.get_group_rank_column()
         df[rank_group_column] = df[group_column].rank(method='dense',ascending=True).astype("int")  

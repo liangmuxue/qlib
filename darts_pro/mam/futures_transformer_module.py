@@ -585,7 +585,9 @@ class FuturesTransformerModule(MlpModule):
                 future_single_conv =  his_future_covs[:,:,target_len,:]   
                 input_final = (static_covs,past_convs_item, his_future_covs,future_single_conv)
                 # input_final = (static_covs,past_convs_item, his_future_covs)
-                out = m(*input_final)                
+                if not hasattr(self, 'cur_epoch'):
+                    self.cur_epoch = 0
+                out = m(*input_final,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
             else:
                 # 模拟数据
@@ -650,6 +652,8 @@ class FuturesTransformerModule(MlpModule):
         # 给criterion对象设置epoch数量。用于动态loss策略
         if self.criterion is not None:
             self.criterion.epoch = self.epochs_trained   
+            self.sub_models[0].current_epoch = self.epochs_trained  
+            
         total_loss = torch.tensor(0.0).to(self.device)
         for i in range(self.get_optimizer_size()):
             (output, vr_class, tar_class) = self(input_batch, optimizer_idx=i)
@@ -728,6 +732,10 @@ class FuturesTransformerModule(MlpModule):
         
         return total_loss, detail_loss, output 
 
+    def on_train_epoch_start(self):
+        self.loss_data = []
+        self.cur_epoch = self.current_epoch
+        
     def on_train_epoch_end(self):
         
         # 可视化权重和梯度
@@ -767,19 +775,14 @@ class FuturesTransformerModule(MlpModule):
                         grad = total_gradients[grad_name]
                         self.logger.experiment.add_histogram('grad/' + grad_name,grad,global_step)
 
-                   
+        self.cur_epoch = self.current_epoch
+                
     def validation_step(self, val_batch, batch_idx) -> torch.Tensor:
         """训练验证部分"""
         
         loss, detail_loss, output = self.validation_step_real(val_batch, batch_idx)
         (corr_loss_combine, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
-        # 补充计算批次内指数数据评估
-        sw_ins_mappings = self.valid_sw_ins_mappings
-        indicator_idx = 0
-        # 计算指标数据中最后一条特征数据与前面特征数据的距离，并与实际目标值距离数据比较相关性
-        # corr_dis = self.compute_feature_target_trend_corr(main_index_feature,main_targets)
-        # self.log("corr_dis", corr_dis, batch_size=val_batch[0].shape[0], prog_bar=True)
-        # batch_data = predictions.cpu().numpy()
+
         batch_data = np.ones([1])
         
         self.dump_val_data(val_batch, output, batch_data)
@@ -810,7 +813,8 @@ class FuturesTransformerModule(MlpModule):
         input_batch = self._process_input_batch(inp,mode='valid')
         future_covs = input_batch[1]
         (output, vr_class, vr_class_list) = self(input_batch, optimizer_idx=-1)
-        
+        scale_info = output[0][-1]
+        print("fur_scale:{},trans_scale:{}".format(scale_info[0],scale_info[1]))
         # 全部损失
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
                     (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, future_week_info,target_info), optimizers_idx=-1)
@@ -1379,7 +1383,7 @@ class FuturesTransformerModule(MlpModule):
                 _,sv_indus, comm_index = output[0]
                 trend_logits,_,_  = output[1]
             else:
-                trend_logits,sv_indus, comm_index,_ = output[0]
+                trend_logits,sv_indus, comm_index,_,_ = output[0]
             sv_indus = sv_indus[0]
             comm_index = comm_index[0]
             trend_logits = trend_logits[0]                
