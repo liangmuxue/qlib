@@ -814,7 +814,7 @@ class FuturesTransformerModule(MlpModule):
         future_covs = input_batch[1]
         (output, vr_class, vr_class_list) = self(input_batch, optimizer_idx=-1)
         scale_info = output[0][-1]
-        print("fur_scale:{},trans_scale:{}".format(scale_info[0],scale_info[1]))
+        # print("fur_scale:{},trans_scale:{}".format(scale_info[0],scale_info[1]))
         # 全部损失
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
                     (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, future_week_info,target_info), optimizers_idx=-1)

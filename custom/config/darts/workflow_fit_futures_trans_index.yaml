@@ -54,7 +54,7 @@ task:
         kwargs:
             # GPU: [0,1,2,3,4,5,6,7] 
             GPU: [0] 
-            batch_size: 32
+            batch_size: 64
             seed: 0
             n_jobs: 20
             log_every_n_steps: 5
@@ -102,7 +102,7 @@ task:
                hidden_size: 16  
                forecast_horizon: &forecast_horizon 2
                cut_len: &cut_len 2
-               dropout: 0.3
+               dropout: 0.4
                opt_size: 1
                past_split: [[0,11],[11,22]]
                target_mode: [2,2,2,1,3]
