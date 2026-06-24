@@ -692,7 +692,6 @@ class FuturesTransformerModule(MlpModule):
                 self.features['total_gradients'] = update_info['total_gradients']
                 self.features['gradient_components_ori'] = update_info['gradient_components_ori']
             # update_info = opt.step_with_batch([cls_loss[i],ce_loss[i]],batch_idx=batch_idx,total_batch_number=self.trainer.num_training_batches)
-            self.lr_schedulers()[i].step() 
             task_weights = self.task_weights[i]
             if len(task_weights) > 1 and update_info is not None:
                 # total_loss = total_loss + update_info["total_loss"]
@@ -738,6 +737,9 @@ class FuturesTransformerModule(MlpModule):
         
     def on_train_epoch_end(self):
         
+        # 统一在每个epoch结束时再进行学习率更新
+        for i in range(self.get_optimizer_size()):
+            self.lr_schedulers()[i].step() 
         # 可视化权重和梯度
         for name,params in self.sub_models[0].named_parameters():
             global_step = self.global_step
@@ -829,7 +831,10 @@ class FuturesTransformerModule(MlpModule):
                 self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
                 if cls_detail is not None:
                     for key in cls_detail.keys():
-                        self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)  
+                        if key=='total':
+                            self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)  
+                        else:
+                            self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)  
             if fds_loss[i] != 0 and len(task_weights) > 2:
                 self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
             if corr_loss[i] != 0 and len(task_weights) > 3:

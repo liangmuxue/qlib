@@ -164,6 +164,7 @@ class LinelessLayer(nn.Module):
         self.bias = bias
         self.sigmoid = sigmoid
         self.linear_hidden = nn.Linear(input_num, hidden_size)
+        self.linear_hidden_redu = nn.Linear(hidden_size, hidden_size)
         self.linear_output = nn.Linear(hidden_size, output_num)
         self.relu = nn.GELU() 
         self.relu_flag = relu
@@ -188,9 +189,11 @@ class LinelessLayer(nn.Module):
         if bias:
             nn.init.constant_(self.linear_output.bias, 0.1)
             
-    def forward(self, input_data,res_data=None): 
+    def forward(self, input_data,redu=False,res_data=None): 
         
         input_data = self.linear_hidden(input_data)
+        if redu:
+            input_data = self.linear_hidden_redu(input_data)
         if self.batch_norm:
             input_data = self.bn(input_data)          
         if self.relu_flag:
