@@ -26,7 +26,7 @@ from .multiTask_optimizer import MultiTaskOptimizer,analyze_similarity
 from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,scale_value, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
-from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr,get_scale_cate_ins
+from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr
 import matplotlib.pyplot as plt
 
 from pandas.errors import SettingWithCopyWarning
@@ -1521,8 +1521,8 @@ class FuturesTransformerModule(MlpModule):
             (features, cate_data,trend_logits_item) = output_list
             # 类别比较结果
             if cate_result is None:
-                # cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)   
-                cate_compare_result = self.compute_cateMain_compare(trend_list_main,batch_no=i,date=date)   
+                cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)   
+                # cate_compare_result = self.compute_cateMain_compare(trend_list_main,batch_no=i,date=date)   
             else:
                 cate_compare_result =  cate_result[cate_result['date']==date]               
             if trend_result is None:
@@ -1534,7 +1534,7 @@ class FuturesTransformerModule(MlpModule):
             if trend_result_item.shape[0]==0:
                 continue     
             # 对候选类别进行筛选            
-            trend_result_item = self.sumup_trend_with_cateMain(trend_result_item,cate_compare_result)   
+            trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)   
             # 生成目标索引
             result_list = self.build_import_index(output_data=output_list, trend_result=trend_result_item,
                                                   cate_result=cate_compare_result,pred_top_num=pred_top_num,date=date,batch_no=i)
@@ -1682,8 +1682,8 @@ class FuturesTransformerModule(MlpModule):
         # 同时从正反2个方向选取品种
         trend_result_item = trend_result[(trend_result['date']==date)]
         trend_result_can = trend_result_item[(trend_result_item['is_can']==1)]
-        # cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
-        cancidate_list = self.compute_arg_sort_by_total_trend(features,trend_result=trend_result,batch_no=batch_no,date=date)     
+        cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
+        # cancidate_list = self.compute_arg_sort_by_total_trend(features,cate_result=cate_result,batch_no=batch_no,date=date)     
         
         return cancidate_list
     
@@ -1731,7 +1731,6 @@ class FuturesTransformerModule(MlpModule):
     def sumup_trend_with_cateMain(self,trend_result,cate_result):
         """参考类别比较结果，对类别趋势结果进行筛选，获取类别候选"""
         
-        trend_result = trend_result.groupby('p0').first().reset_index()
         trend_result['is_can'] = 0
         trend_result['can_trend_flag'] = 0
         trend_result['can_ins_num'] = 0
@@ -1739,12 +1738,12 @@ class FuturesTransformerModule(MlpModule):
         trend_result = trend_result.sort_values(by='pred_trend_value_scale').reset_index()
         cate_result = cate_result.sort_values(by='value').reset_index()
         long_cate_top = cate_result.iloc[-1]
-        long_cate_top_dict = {'p0':long_cate_top['p0']}
+        long_cate_top_dict = {'p0':long_cate_top['p0'],'p1':long_cate_top['p1']}
         short_cate_top = cate_result.iloc[0]
-        short_cate_top_dict = {'p0':short_cate_top['p0']}
+        short_cate_top_dict = {'p0':short_cate_top['p0'],'p1':short_cate_top['p1']}
         long_condi = (trend_result['p0']==long_cate_top_dict['p0'])
         short_condi = (trend_result['p0']==short_cate_top_dict['p0'])    
-        # 31模式：如果总体趋势为多方，则取得1个多方大类（内部品种3个,空方大类内部1个。空方则反过来。趋势为平，则品种2+2
+        # 31模式：如果总体趋势为多方，则取得1个多方小类（内部品种3）。空方则反过来。趋势为平，则类别1+1，品种2+2
         if total_trend_flag==1:
             trend_result.loc[long_condi,'is_can'] = 1
             trend_result.loc[long_condi,'can_trend_flag'] = 1
@@ -1768,8 +1767,7 @@ class FuturesTransformerModule(MlpModule):
             trend_result.loc[short_condi,'can_ins_num'] = 2        
         
         trend_result = trend_result.astype({'is_can':int,'can_trend_flag':int,'can_ins_num':int})  
-        return trend_result        
-       
+        return trend_result           
     def sumup_trend(self,trend_result):
         """对类别趋势结果进行筛选，获取类别候选"""
         
@@ -1845,10 +1843,9 @@ class FuturesTransformerModule(MlpModule):
         for i,key in enumerate(scale_arr.keys()):
             item = scale_arr[key] 
             p0 = key
-            p0_item = self.scale_arr[self.scale_arr['p0_code']==key]
-            p0_name = p0_item['p0_name'].values[0]
-            p1 = p0_item['p1'].values[0]
-            p1_name = p0_item['p1_name'].values[0]
+            p0_name = self.scale_arr[self.scale_arr['p0_code']==key]['p0_name'].values[0]
+            p1 = 'any'
+            p1_name = 'any'
             if i==top_idx:
                 top_flag = 1
             elif i==top_inverse_idx:
@@ -1896,7 +1893,7 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index_total
         
-    def compute_arg_sort_by_total_trend(self, features,trend_result=None,date=None,batch_no=0,top_num=2):
+    def compute_arg_sort_by_total_trend(self, features,cate_result=None,date=None,batch_no=0,top_num=2):
         """根据输出进行排序,参照总体输出趋势"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -1906,23 +1903,21 @@ class FuturesTransformerModule(MlpModule):
         
         scale_arr = emb_scale_arr(self.scale_arr)
         # 根据趋势增减top数量
-        for i,row in trend_result.iterrows():
+        for i,row in cate_result.iterrows():
             p0 = row['p0']
-            p1 = row['p1']
             can_trend_flag = row['can_trend_flag']
             can_ins_num = row['can_ins_num']     
             pred_trend_value = row['pred_trend_value'] 
             pred_trend_value_scale = row['pred_trend_value_scale']
-            if p0=='total':
-                continue
-            rel_ins = get_scale_cate_ins(self.scale_arr,p0)
-            features_item = features[p0][batch_no]
+            rel_ins = scale_arr[p0]['rel_ins']
+            features_item = features[p0][batch_no][rel_ins]
             if can_trend_flag==1:
                 pre_index = np.argsort(-features_item)[:can_ins_num]
             else:
                 pre_index = np.argsort(features_item)[:can_ins_num]            
             for index in pre_index:
-                real_index = rel_ins[index]
+                real_index = scale_arr[p0]['instruments'][index]
+                p1 = 'any'
                 pre_index_total.append([real_index,can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
         pre_index_total = np.array(pre_index_total)
         pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
@@ -2026,9 +2021,8 @@ class FuturesTransformerModule(MlpModule):
         for _,row in cate_result.iterrows():
             p0 = row['p0']
             p1 = row['p1']             
-            # scale_item = self.scale_arr.iloc[index]
-            # ins = scale_item['instruments']
-            ins = get_scale_cate_ins(self.scale_arr,p0)
+            scale_item = self.scale_arr.iloc[index]
+            ins = scale_item['instruments']
             cate_mean = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_list)[ins]]).mean()
             row['real_value'] = cate_mean
             cate_result_new.append(row)
@@ -2157,4 +2151,3 @@ class FuturesTransformerModule(MlpModule):
         self.result_target = result_target
         
         return result_target
-                         
