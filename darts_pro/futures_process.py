@@ -570,7 +570,7 @@ class FuturesProcessModel(TftDataframeModel):
                     x = x.reshape([x.shape[0],-1])
                 return x
         
-        output_index = 3
+        output_index = 2
         model = ShapWrapper(model,output_index=output_index)         
         x = tuple([item[:50] for item in test_input])
         baselines = tuple([xi[:50] for xi in background_input])

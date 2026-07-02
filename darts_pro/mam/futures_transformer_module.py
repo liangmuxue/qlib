@@ -1845,9 +1845,10 @@ class FuturesTransformerModule(MlpModule):
         for i,key in enumerate(scale_arr.keys()):
             item = scale_arr[key] 
             p0 = key
-            p0_name = self.scale_arr[self.scale_arr['p0_code']==key]['p0_name'].values[0]
-            p1 = 'any'
-            p1_name = 'any'
+            p0_item = self.scale_arr[self.scale_arr['p0_code']==key]
+            p0_name = p0_item['p0_name'].values[0]
+            p1 = p0_item['p1'].values[0]
+            p1_name = p0_item['p1_name'].values[0]
             if i==top_idx:
                 top_flag = 1
             elif i==top_inverse_idx:
@@ -1907,6 +1908,7 @@ class FuturesTransformerModule(MlpModule):
         # 根据趋势增减top数量
         for i,row in trend_result.iterrows():
             p0 = row['p0']
+            p1 = row['p1']
             can_trend_flag = row['can_trend_flag']
             can_ins_num = row['can_ins_num']     
             pred_trend_value = row['pred_trend_value'] 
@@ -1921,7 +1923,6 @@ class FuturesTransformerModule(MlpModule):
                 pre_index = np.argsort(features_item)[:can_ins_num]            
             for index in pre_index:
                 real_index = rel_ins[index]
-                p1 = 'any'
                 pre_index_total.append([real_index,can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
         pre_index_total = np.array(pre_index_total)
         pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
@@ -2025,8 +2026,9 @@ class FuturesTransformerModule(MlpModule):
         for _,row in cate_result.iterrows():
             p0 = row['p0']
             p1 = row['p1']             
-            scale_item = self.scale_arr.iloc[index]
-            ins = scale_item['instruments']
+            # scale_item = self.scale_arr.iloc[index]
+            # ins = scale_item['instruments']
+            ins = get_scale_cate_ins(self.scale_arr,p0)
             cate_mean = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_list)[ins]]).mean()
             row['real_value'] = cate_mean
             cate_result_new.append(row)
