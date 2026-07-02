@@ -628,6 +628,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # 计算开盘价目标差值范围
             open_diff = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
             open_diff_norm = diff_range_norm[-self.output_chunk_length+self.cut_len-1]
+            open_diff = diff_range[-self.output_chunk_length+self.cut_len-1]
             # future_dayofweek = dayofweek_array[-self.output_chunk_length+self.cut_len-1]
             # future_week = week_array[-self.output_chunk_length+self.cut_len-1]
             # 辅助数据索引数据还需要加上偏移量，以恢复到原索引

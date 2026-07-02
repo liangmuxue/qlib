@@ -319,10 +319,10 @@ class MultiTaskOptimizer(Adam):
             pc_grad(gradient_components)
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components,dynamic_grad=False)
+        # 计算重点层梯度参数数值情况
+        total_norm_trans,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)        
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
-        # 计算重点层梯度参数数值情况
-        total_norm_trans,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)
                 
         # 手动设置梯度并更新参数
         self._set_gradients(total_gradients)
@@ -346,19 +346,23 @@ class MultiTaskOptimizer(Adam):
     
     def compute_focus_grad_info(self,total_gradients):
         
-        total_norm_tcn = 0
+        total_norm_encoder = 0
+        total_norm_decoder = 0
         total_norm_ins_layer = 0
         for grad_name in total_gradients.keys():
             grad = total_gradients[grad_name]
-            if grad_name.startswith("trans_model"):
-                total_norm_tcn += torch.norm(grad) ** 2
+            if grad_name.startswith("trans_model_encoder"):
+                total_norm_encoder += torch.norm(grad) ** 2
+            elif grad_name.startswith("trans_model_decoder"):
+                total_norm_decoder += torch.norm(grad) ** 2                
             else:
                 total_norm_ins_layer += torch.norm(grad) ** 2
                 
         total_norm_ins_layer = torch.sqrt(total_norm_ins_layer).item()
-        total_norm_tcn = torch.sqrt(total_norm_tcn).item()
+        total_norm_encoder = torch.sqrt(total_norm_encoder).item()
+        total_norm_decoder = torch.sqrt(total_norm_decoder).item()
         
-        return total_norm_tcn,total_norm_ins_layer
+        return total_norm_encoder,total_norm_decoder,total_norm_ins_layer
 
     def grad_combine(self,gradient_components,dynamic_grad=True):
             """合并多个任务梯度"""
@@ -557,14 +561,48 @@ class MultiTaskOptimizer(Adam):
             gradient_components = None
                   
         if not self.use_gradient_surgery:
-            self._set_gradients(total_gradients)
+            # 计算重点层梯度参数数值情况
+            total_norm_encoder,total_norm_decoder,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)   
+            changed = False
+            
+            # encoder_threhold = 0.25
+            # if total_norm_encoder>encoder_threhold:
+            #     # 对特定网络层，进行梯度剪裁   
+            #     clip_coef = encoder_threhold/total_norm_encoder
+            #     for key in total_gradients.keys():
+            #         p = total_gradients[key]
+            #         p *= clip_coef     
+            #     changed = True              
+            ins_rate = 1.0
+            if (total_norm_ins_layer/total_norm_encoder)>ins_rate:
+                # 对特定网络层，进行梯度剪裁   
+                clip_coef = total_norm_encoder/total_norm_ins_layer*ins_rate
+                for key in total_gradients.keys():
+                    if key.startswith("trans_model_encoder") or key.startswith("trans_model_decoder"):
+                        continue
+                    p = total_gradients[key]
+                    p *= clip_coef     
+                changed = True   
+            dec_rate = 0.5
+            if (total_norm_decoder/total_norm_encoder)>dec_rate:
+                # 对特定网络层，进行梯度剪裁   
+                clip_coef = total_norm_encoder/total_norm_decoder*dec_rate
+                for key in total_gradients.keys():
+                    if key.startswith("trans_model_decoder"):
+                        p = total_gradients[key]
+                        p *= clip_coef   
+                changed = True
+            if changed:     
+                total_norm_encoder,total_norm_decoder,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)
+                
+            self._set_gradients(total_gradients)                        
             super().step()
             conflict_analysis = {}
-            # 计算重点层梯度参数数值情况
-            total_norm_trans,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)            
+    
             return {
                 'total_grad_norm': self._compute_total_grad_norm(total_gradients),
-                'total_norm_trans': total_norm_trans,
+                'total_norm_encoder': total_norm_encoder,
+                'total_norm_decoder': total_norm_decoder,
                 'total_norm_ins_layer': total_norm_ins_layer,                
                 'total_loss': task_losses[0].item()
             }              

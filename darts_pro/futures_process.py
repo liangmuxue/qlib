@@ -543,7 +543,7 @@ class FuturesProcessModel(TftDataframeModel):
                 return outputs
             
             def top_select(self,x):
-                x = self.model.top_selector[0](x)
+                x = self.model.top_selector[0](x,output_index=self.output_index)
                 # 对于多输出，需要指定计算某个输出值
                 # x = x[self.output_no]
                 return x
@@ -554,20 +554,24 @@ class FuturesProcessModel(TftDataframeModel):
                 return x[self.output_index][0]
             
             def forward_to_layer(self,x_array):
-                if self.layer=='model.trans_model':
-                    # # Split back temp
-                    # x_array = torch.split(x_array[0], [7,12,2], dim=-1)
-                    # x_array = (x_array[0].mean(dim=-2),x_array[1],x_array[2])
-                    x = self.model.trans_model(*x_array,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)   
+                if self.layer=='model.trans_model_encoder':
+                    x = self.model.trans_model_encoder(*x_array,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)   
+                    x = x[0]
                     x = x.reshape([x.shape[0],-1])         
+                if self.layer=='model.trans_model_decoder':
+                    x = self.model.trans_model_encoder(*x_array,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)   
+                    x = self.model.trans_model_decoder(x[0],x_array[3],x[1])   
+                    x = x.reshape([x.shape[0],-1])                          
                 if self.layer=='model.top_selector.0':
-                    x = self.model.trans_model(*x_array,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)   
+                    x = self.model.trans_model_encoder(*x_array,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)   
+                    x = self.model.trans_model_decoder(x[0],x_array[3],x[1])   
                     x = x.reshape(x.shape[0],x.shape[1],-1)
                     x = self.top_select(x)
                     x = x.reshape([x.shape[0],-1])
                 return x
         
-        model = ShapWrapper(model,output_index=2)         
+        output_index = 3
+        model = ShapWrapper(model,output_index=output_index)         
         x = tuple([item[:50] for item in test_input])
         baselines = tuple([xi[:50] for xi in background_input])
         x_train = tuple([xi[50:100] for xi in background_input])
@@ -610,14 +614,17 @@ class FuturesProcessModel(TftDataframeModel):
                 train_importance_detail_item = train_attr_final[...,j]
                 train_importance_detail_item = train_importance_detail_item[train_importance_detail_item!=0].abs().detach().cpu().numpy().mean()
                 train_importance_detail.append(train_importance_detail_item)
-            val_importance = np.abs(val_attr[i].detach().cpu().numpy())           
+
+            val_attr_final = torch.nan_to_num(val_attr[i])    
+            val_importance = np.abs(val_attr_final[i].detach().cpu().numpy())                       
+            # val_importance = np.abs(val_attr[i].detach().cpu().numpy())           
             val_importance_mean = val_importance.mean()
             val_importance_detail = val_importance.mean(tuple(range(val_importance.ndim - 1)))
             print("input {} train_importance mean:{},val_importance mean:{}".format(input_names[i],train_importance_mean, val_importance_mean)) 
             # if i==1:
             #     print("input {} train_importance detail:{},val_importance detail:{}".format(input_names[i],train_importance_detail, val_importance_detail)) 
  
-        focus_layers = ['model.trans_model','model.top_selector.0']  
+        focus_layers = ['model.trans_model_encoder','model.trans_model_decoder','model.top_selector.0']  
         train_contribs = {}
         val_contribs = {}       
         def concat_input(tule_input):
@@ -672,23 +679,42 @@ class FuturesProcessModel(TftDataframeModel):
                     attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
                     # attr_inp_train = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
                     attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
-                    if name=='model.trans_model':
+                    if name=='model.trans_model_encoder':
                         # attr_inp_combine.append(attr_inp[1])
                         # attr_inp_combine_train.append(attr_inp_train[1])
                         for h in range(x_single[0].shape[1]):
                             size = h * x_single[0].shape[2]
                             attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
                             attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-                            attr_inp_combine_after.append(attr_inp_after[0])
-                            attr_inp_combine_train_after.append(attr_inp_train_after[0])
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])  
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)
+                    if name=='model.trans_model_decoder':
+                        # attr_inp_combine.append(attr_inp[1])
+                        # attr_inp_combine_train.append(attr_inp_train[1])
+                        for h in range(x_single[0].shape[1]):
+                            size = h * x_single[0].shape[2]
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)                      
                     if name=='model.top_selector.0':
                         # attr_inp_combine.append(attr_inp[0])
                         # attr_inp_combine_train.append(attr_inp_train[0])   
-                        for h in range(7):   
+                        if output_index==2:
+                            r = 7
+                        else:
+                            r = 4
+                        for h in range(r):   
                             attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
                             attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
-                            attr_inp_combine_after.append(attr_inp_after[0])
-                            attr_inp_combine_train_after.append(attr_inp_train_after[0])                  
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)                                           
                 # attr_inp_combine = torch.cat(attr_inp_combine)    
                 # attr_inp_combine_train = torch.cat(attr_inp_combine_train) 
                 attr_inp_combine_after = torch.cat(attr_inp_combine_after)    
@@ -1294,5 +1320,3 @@ class FuturesProcessModel(TftDataframeModel):
         total_results = total_results[['date','pred_trend', 'top_index', 'instrument', 'diff_range']] 
         save_path = os.path.join(self.optargs["work_dir"],"total_coll_results.csv")
         total_results.to_csv(save_path,index=False)
-        
-                         

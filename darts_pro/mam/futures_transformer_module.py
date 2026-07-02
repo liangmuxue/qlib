@@ -26,7 +26,7 @@ from .multiTask_optimizer import MultiTaskOptimizer,analyze_similarity
 from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,scale_value, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
-from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr
+from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr,get_scale_cate_ins
 import matplotlib.pyplot as plt
 
 from pandas.errors import SettingWithCopyWarning
@@ -406,15 +406,16 @@ class FuturesTransformerModule(MlpModule):
                 obs_dim=input_dim,
                 fut_dim=future_covariate.shape[-1],
                 time_embed_dim=time_embed_dim,
+                d_model=64,
                 hidden_dim=64,
                 hidden_size=16,
                 nhead=8,
-                num_layers=2,
+                num_layers=4,
                 dropout=dropout,
                 seq_len=self.input_chunk_length,
                 pred_len=pred_len,
                 sample_dim=combine_nodes_num,
-                sample_heads=4,
+                # sample_heads=4,
                 static_emb_dim=4,
                 static_cate_emb=dataset.get_cate_dict(),
                 scales_arr=self.scale_arr,
@@ -705,11 +706,13 @@ class FuturesTransformerModule(MlpModule):
                         self.log("task_grad_norm_corr", update_info["task_grad_norms"][3], batch_size=train_batch[0].shape[0], prog_bar=False)                        
                     # self.log("conflict_cnt", update_info["conflict_analysis"]["conflict_count"], batch_size=train_batch[0].shape[0], prog_bar=False)
                     # self.log("similarity", update_info["conflict_analysis"]["similarity"], batch_size=train_batch[0].shape[0], prog_bar=False)
-                self.log("total_norm_trans", update_info["total_norm_trans"], batch_size=train_batch[0].shape[0], prog_bar=True)
+                self.log("total_norm_encoder", update_info["total_norm_encoder"], batch_size=train_batch[0].shape[0], prog_bar=False)
+                self.log("total_norm_decoder", update_info["total_norm_decoder"], batch_size=train_batch[0].shape[0], prog_bar=False)
                 self.log("total_norm_ins_layer", update_info["total_norm_ins_layer"], prog_bar=True) 
             else:
                 self.log("total_grad_norm", update_info["total_grad_norm"], batch_size=train_batch[0].shape[0], prog_bar=True)           
-                self.log("total_norm_trans", update_info["total_norm_trans"], batch_size=train_batch[0].shape[0], prog_bar=False)
+                self.log("total_norm_encoder", update_info["total_norm_encoder"], batch_size=train_batch[0].shape[0], prog_bar=False)
+                self.log("total_norm_decoder", update_info["total_norm_decoder"], batch_size=train_batch[0].shape[0], prog_bar=False)
                 self.log("total_norm_ins_layer", update_info["total_norm_ins_layer"], prog_bar=False)                 
                                        
         # self.log("train_loss", total_loss, batch_size=train_batch[0].shape[0], prog_bar=True)
@@ -1375,6 +1378,7 @@ class FuturesTransformerModule(MlpModule):
         sv_total = [[] for _ in range(len(self.past_split))]
         cls_total = {}
         comm_index_total = []
+        trend_list_main_total = []
         trend_logits_total = {}
         trend_total = []
         index_round_targets_total = []
@@ -1388,10 +1392,12 @@ class FuturesTransformerModule(MlpModule):
                 _,sv_indus, comm_index = output[0]
                 trend_logits,_,_  = output[1]
             else:
-                trend_logits,sv_indus, comm_index,_,_ = output[0]
+                trend_logits,sv_indus, comm_index,trend_list_main,_ = output[0]
             sv_indus = sv_indus[0]
             comm_index = comm_index[0]
-            trend_logits = trend_logits[0]                
+            trend_logits = trend_logits[0]       
+            trend_list_main = trend_list_main[0]
+            
             for key in sv_indus.keys():
                 cur_data = sv_indus[key].cpu().numpy()
                 if key not in cls_total:
@@ -1413,6 +1419,7 @@ class FuturesTransformerModule(MlpModule):
             x_bar_total.append(x_bar_inner)
             trend_total.append(batch_data)
             
+            trend_list_main_total.append(trend_list_main.cpu().numpy())  
             target_info_total.append(target_info)
             target_class_total.append(target_class)
             past_target_total.append(past_target)
@@ -1426,6 +1433,7 @@ class FuturesTransformerModule(MlpModule):
         x_bar_total = np.concatenate(x_bar_total)
         trend_total = np.concatenate(trend_total)
         comm_index_total = np.concatenate(comm_index_total)
+        trend_list_main_total = np.concatenate(trend_list_main_total)
         target_class_total = np.concatenate(target_class_total)
         past_target_total = np.concatenate(past_target_total)
         future_target_total = np.concatenate(future_target_total)
@@ -1436,7 +1444,7 @@ class FuturesTransformerModule(MlpModule):
         target_info_total = np.concatenate(target_info_total)
         future_week_info_total = np.concatenate(future_week_info_total)
                     
-        return (x_bar_total, sv_total, cls_total, comm_index_total, trend_logits_total, trend_total), \
+        return (trend_list_main_total, sv_total, cls_total, comm_index_total, trend_logits_total, trend_total), \
                     past_target_total, future_target_total, target_class_total, price_targets_total, past_future_round_targets_total, \
                     future_week_info_total, index_round_targets_total, target_info_total        
                            
@@ -1499,6 +1507,7 @@ class FuturesTransformerModule(MlpModule):
             keep_index = np.where(target_class_list >= 0)[0]
             # 去除指数整体及行业
             keep_index = np.intersect1d(keep_index, ins_all)  
+            trend_list_main = output_3d[0]
             trend_data = output_3d[3]
             features = output_3d[2]
             trend_logits = output_3d[4]
@@ -1512,7 +1521,8 @@ class FuturesTransformerModule(MlpModule):
             (features, cate_data,trend_logits_item) = output_list
             # 类别比较结果
             if cate_result is None:
-                cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)   
+                # cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)   
+                cate_compare_result = self.compute_cateMain_compare(trend_list_main,batch_no=i,date=date)   
             else:
                 cate_compare_result =  cate_result[cate_result['date']==date]               
             if trend_result is None:
@@ -1524,7 +1534,7 @@ class FuturesTransformerModule(MlpModule):
             if trend_result_item.shape[0]==0:
                 continue     
             # 对候选类别进行筛选            
-            trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)   
+            trend_result_item = self.sumup_trend_with_cateMain(trend_result_item,cate_compare_result)   
             # 生成目标索引
             result_list = self.build_import_index(output_data=output_list, trend_result=trend_result_item,
                                                   cate_result=cate_compare_result,pred_top_num=pred_top_num,date=date,batch_no=i)
@@ -1618,8 +1628,8 @@ class FuturesTransformerModule(MlpModule):
 
         import_index_list = self.strategy_top_bidi(features, trend_logits_item,pred_top_num=pred_top_num, trend_result=trend_result,
                                             cate_result=cate_result,batch_no=batch_no,date=date)
-        # self.strategy_main_index(ce_values, cls_values, dec_out, pred_top_num=pred_top_num, target=target, target_info=target_info,
-        #                                     index_round_targets=index_round_targets, combine_instrument=combine_instrument)
+        # import_index_list = self.strategy_top_bidi(features, trend_logits_item,pred_top_num=pred_top_num, trend_result=trend_result,
+        #                                     cate_result=cate_result,batch_no=batch_no,date=date)
  
         # 构建结果集
         result_list = import_index_list
@@ -1672,8 +1682,8 @@ class FuturesTransformerModule(MlpModule):
         # 同时从正反2个方向选取品种
         trend_result_item = trend_result[(trend_result['date']==date)]
         trend_result_can = trend_result_item[(trend_result_item['is_can']==1)]
-        cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
-        # cancidate_list = self.compute_arg_sort_by_total_trend(features,trend_result=trend_result_item,cate_result=cate_result,batch_no=batch_no,date=date)     
+        # cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
+        cancidate_list = self.compute_arg_sort_by_total_trend(features,trend_result=trend_result,batch_no=batch_no,date=date)     
         
         return cancidate_list
     
@@ -1717,7 +1727,49 @@ class FuturesTransformerModule(MlpModule):
         
         trend_result = trend_result.astype({'is_can':int,'can_trend_flag':int,'can_ins_num':int})  
         return trend_result
-            
+
+    def sumup_trend_with_cateMain(self,trend_result,cate_result):
+        """参考类别比较结果，对类别趋势结果进行筛选，获取类别候选"""
+        
+        trend_result = trend_result.groupby('p0').first().reset_index()
+        trend_result['is_can'] = 0
+        trend_result['can_trend_flag'] = 0
+        trend_result['can_ins_num'] = 0
+        total_trend_flag = trend_result[trend_result['p0']=='total']['pred_trend_flag'].values[0]
+        trend_result = trend_result.sort_values(by='pred_trend_value_scale').reset_index()
+        cate_result = cate_result.sort_values(by='value').reset_index()
+        long_cate_top = cate_result.iloc[-1]
+        long_cate_top_dict = {'p0':long_cate_top['p0']}
+        short_cate_top = cate_result.iloc[0]
+        short_cate_top_dict = {'p0':short_cate_top['p0']}
+        long_condi = (trend_result['p0']==long_cate_top_dict['p0'])
+        short_condi = (trend_result['p0']==short_cate_top_dict['p0'])    
+        # 31模式：如果总体趋势为多方，则取得1个多方大类（内部品种3个,空方大类内部1个。空方则反过来。趋势为平，则品种2+2
+        if total_trend_flag==1:
+            trend_result.loc[long_condi,'is_can'] = 1
+            trend_result.loc[long_condi,'can_trend_flag'] = 1
+            trend_result.loc[long_condi,'can_ins_num'] = 3
+            trend_result.loc[short_condi,'is_can'] = 1
+            trend_result.loc[short_condi,'can_trend_flag'] = 0
+            trend_result.loc[short_condi,'can_ins_num'] = 1            
+        elif total_trend_flag==-1:
+            trend_result.loc[long_condi,'is_can'] = 1
+            trend_result.loc[long_condi,'can_trend_flag'] = 1
+            trend_result.loc[long_condi,'can_ins_num'] = 1
+            trend_result.loc[short_condi,'is_can'] = 1
+            trend_result.loc[short_condi,'can_trend_flag'] = 0
+            trend_result.loc[short_condi,'can_ins_num'] = 3    
+        else:
+            trend_result.loc[long_condi,'is_can'] = 1
+            trend_result.loc[long_condi,'can_trend_flag'] = 1
+            trend_result.loc[long_condi,'can_ins_num'] = 2
+            trend_result.loc[short_condi,'is_can'] = 1
+            trend_result.loc[short_condi,'can_trend_flag'] = 0
+            trend_result.loc[short_condi,'can_ins_num'] = 2        
+        
+        trend_result = trend_result.astype({'is_can':int,'can_trend_flag':int,'can_ins_num':int})  
+        return trend_result        
+       
     def sumup_trend(self,trend_result):
         """对类别趋势结果进行筛选，获取类别候选"""
         
@@ -1781,7 +1833,35 @@ class FuturesTransformerModule(MlpModule):
         result['value'] = result['value'].astype(float)
         
         return result
-            
+    
+    def compute_cateMain_compare(self,cate_data,batch_no=0,date=None):
+        
+        result = []
+        cate_data_item = cate_data[batch_no]
+        top_idx = cate_data_item.argmax()
+        top_inverse_idx = -cate_data_item.argmax()
+        columns = ['date','p0','p1','p0_name','p1_name','top_flag','value']
+        scale_arr = emb_scale_arr(self.scale_arr)
+        for i,key in enumerate(scale_arr.keys()):
+            item = scale_arr[key] 
+            p0 = key
+            p0_name = self.scale_arr[self.scale_arr['p0_code']==key]['p0_name'].values[0]
+            p1 = 'any'
+            p1_name = 'any'
+            if i==top_idx:
+                top_flag = 1
+            elif i==top_inverse_idx:
+                top_flag = -1
+            else:
+                top_flag = 0
+            result.append([date,p0,p1,p0_name,p1_name,top_flag,cate_data_item[i]])
+        result = pd.DataFrame(result,columns=columns)
+        result['date'] = result['date'].astype(int)
+        result['top_flag'] = result['top_flag'].astype(int)
+        result['value'] = result['value'].astype(float)
+        
+        return result
+                        
     def compute_arg_sort_by_trend(self, features,cate_result=None,trend_result=None,date=None,batch_no=0):
         """根据输出进行排序,参照整体及分支输出趋势"""
         
@@ -1815,26 +1895,34 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index_total
         
-    def compute_arg_sort_by_total_trend(self, features,cate_result=None,trend_result=None,date=None,batch_no=0,top_num=2):
+    def compute_arg_sort_by_total_trend(self, features,trend_result=None,date=None,batch_no=0,top_num=2):
         """根据输出进行排序,参照总体输出趋势"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
-        global_feature = features['global_feature'][batch_no]
-        
-        trend_result_total = trend_result[trend_result['p0']=='total']
-        pred_trend_value = trend_result_total['pred_trend_value'].values[0]
-        pred_trend_value_scale = trend_result_total['pred_trend_value_scale'].values[0]
         
         pre_index_total = []
+        
+        scale_arr = emb_scale_arr(self.scale_arr)
         # 根据趋势增减top数量
-        pre_index = np.argsort(-global_feature)[:2]
-        for index in pre_index:
-            pre_index_total.append([index,1,pred_trend_value,pred_trend_value_scale,1,'total','total'])
-        pre_index = np.argsort(global_feature)[:2]
-        for index in pre_index:
-            pre_index_total.append([index,0,pred_trend_value,pred_trend_value_scale,0,'total','total'])  
-              
+        for i,row in trend_result.iterrows():
+            p0 = row['p0']
+            can_trend_flag = row['can_trend_flag']
+            can_ins_num = row['can_ins_num']     
+            pred_trend_value = row['pred_trend_value'] 
+            pred_trend_value_scale = row['pred_trend_value_scale']
+            if p0=='total':
+                continue
+            rel_ins = get_scale_cate_ins(self.scale_arr,p0)
+            features_item = features[p0][batch_no]
+            if can_trend_flag==1:
+                pre_index = np.argsort(-features_item)[:can_ins_num]
+            else:
+                pre_index = np.argsort(features_item)[:can_ins_num]            
+            for index in pre_index:
+                real_index = rel_ins[index]
+                p1 = 'any'
+                pre_index_total.append([real_index,can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
         pre_index_total = np.array(pre_index_total)
         pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
         pre_index_total['top_index'] = pre_index_total['top_index'].astype(int)

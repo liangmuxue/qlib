@@ -217,7 +217,7 @@ class DecoderLayer(nn.Module):
         self.sample_dim = sample_dim
         self.hidden_dim = hidden_dim
         self.obs_dim = obs_dim
-        
+        self.line_hidden_dim = 4
         # 未来协变量融合网络（关键：融合历史编码+未来协变量）
         self.future_fusion = GatedResidualNetwork(hidden_dim, hidden_dim, hidden_dim, dropout=dropout)
         
@@ -226,7 +226,13 @@ class DecoderLayer(nn.Module):
         
         # 输出层（预测目标变量）
         self.output_grn = GatedResidualNetwork(hidden_dim, hidden_dim, hidden_dim, dropout=dropout)
-        self.final_proj = nn.Linear(hidden_dim, obs_dim)
+        
+        self.hidden_proj = nn.Linear(hidden_dim, self.line_hidden_dim)
+        self.final_proj = nn.Linear(self.line_hidden_dim, obs_dim)
+        # nn.init.xavier_normal_(self.final_proj.weight, gain=0.1)
+        # nn.init.zeros_(self.final_proj.bias)
+        self.dec_norm = nn.BatchNorm1d(self.line_hidden_dim)
+        self.fuse_drop = nn.Dropout(dropout)
         
     def forward(self,hist_summary,fut_proj=None,fur_scale=0.2):
         
@@ -243,11 +249,15 @@ class DecoderLayer(nn.Module):
             final_feat = hist_summary + fut_proj * fur_scale
         else:
             # 门控融合
-            final_feat = hist_summary # self.future_fusion(hist_summary_expanded)  # [B*S, P, hidden_dim]
+            final_feat = hist_summary_expanded # self.future_fusion(hist_summary_expanded)  # [B*S, P, hidden_dim]
         
         # 输出层（每个预测步独立预测）
         final_feat_flat = final_feat.reshape(B*S*P, self.hidden_dim)  # [B*S*P, hidden_dim]
-        pred_flat = self.final_proj(final_feat_flat)        # [B*S*P, obs_dim]        
+        final_feat_flat = self.hidden_proj(final_feat_flat)
+        final_feat_flat = self.dec_norm(final_feat_flat)  
+        pred_flat = self.final_proj(final_feat_flat)        # [B*S*P, obs_dim]   
+        final_feat_flat = self.fuse_drop(final_feat_flat)
+           
         # 恢复维度
         pred = pred_flat.reshape(B*S, P, self.obs_dim)  # [B*S, P, obs_dim]
         pred = pred.reshape(B, S, P, self.obs_dim)      # [B, S, P, obs_dim]   
@@ -297,7 +307,7 @@ class MultiScaleGlobalPool(nn.Module):
         # 步骤3：残差连接补充细节信息（避免丢失原始时序细节）
         flat_x = x.reshape(batch_size, -1)  # [batch, seq_len*feature_dim]
         residual = self.residual_fc(flat_x)  # 降维到feature_dim
-        final_out = global_pool + 0.1 * residual  # 残差缩放，避免主导
+        final_out = global_pool # + 0.1 * residual  # 残差缩放，避免主导
         
         return final_out
 
@@ -324,7 +334,7 @@ class FeatureScaleBalancer(nn.Module):
         
         return static_emb, temporal_feat
            
-class TFTWithFutureCovariates(nn.Module):
+class TFTWithFutureCovariatesEn(nn.Module):
     """带已知未来协变量+样本关联的TFT模型（无未来泄露）"""
     def __init__(
         self,
@@ -339,7 +349,7 @@ class TFTWithFutureCovariates(nn.Module):
         seq_len=1,               # 历史数据步长
         pred_len=1,            # 预测步长
         sample_dim=3,          # 样本维度（站点/设备数）
-        sample_heads=4,        # 样本间注意力头数
+        d_model=64,        # 注意力维度
         static_emb_dim=4,      # 离散特征嵌入维度
         static_cate_emb=None,  # 静态离散特征嵌入
         device='cuda'
@@ -385,7 +395,7 @@ class TFTWithFutureCovariates(nn.Module):
         # 历史日历相关协变量的GRN
         self.his_temporal_grn = GatedResidualNetwork(input_dim=hidden_dim, 
                                                  hidden_dim=hidden_dim, 
-                                                 output_dim=hidden_dim,
+                                                 output_dim=d_model,
                                                  context_combine_dim=seq_len)                  
         # 全局池化多尺度
         self.pool_layer = MultiScaleGlobalPool(obs_dim, seq_len,num_scales=3)
@@ -407,8 +417,6 @@ class TFTWithFutureCovariates(nn.Module):
         
         self.calendar_encoder = GatedResidualNetwork(input_dim=time_embed_dim, hidden_dim=hidden_dim,output_dim=hidden_dim,
                                                  context_combine_dim=seq_len)       
-        self.calendar_encoder_fur = GatedResidualNetwork(input_dim=time_embed_dim, hidden_dim=hidden_dim,output_dim=hidden_dim,
-                                                 context_combine_dim=1)  
         # 3. 历史特征投影（观测+时间）
         self.obs_proj = nn.Linear(obs_dim + time_embed_dim, hidden_dim)
         self.static_norm = nn.LayerNorm(hidden_dim)
@@ -424,22 +432,18 @@ class TFTWithFutureCovariates(nn.Module):
         
         # 6. Transformer编码器（因果掩码，仅处理历史）
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
+            d_model=d_model,
             nhead=nhead,
-            dim_feedforward=hidden_dim*4,
+            dim_feedforward=hidden_dim*6,
             dropout=dropout,
             batch_first=True,
             norm_first=True,
             activation='gelu'
         )
-        encoder_norm = nn.LayerNorm(hidden_dim)
+        encoder_norm = nn.LayerNorm(d_model)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers,norm=encoder_norm)
+        self.transformer_end = nn.Linear(d_model,hidden_dim)
         
-        # 分别定义完整预测序列的解码器，以及最终单独目标的解码器
-        self.seq_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
-                     dropout=dropout, pred_len=pred_len)
-        self.tar_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
-                     dropout=dropout, pred_len=1)        
         
     def get_dynamic_target_ratio(self,epoch,max_epochs, final_target=1.0,warmup_ratio=0.5):
         # 线性退火：前期偏向浅层，后期收敛到固定目标比例
@@ -463,6 +467,12 @@ class TFTWithFutureCovariates(nn.Module):
             var_weights: [B, S, T, obs_dim] - 变量权重
             sample_attn_weights: [B, sample_heads, S, S] - 样本间注意力权重
         """
+        
+        hist_summary,future_single_emb = self.forward_encode(static_feat, obs_feat, time_embed_hist, future_single_emb, current_epoch, max_epochs)
+        
+        return hist_summary,future_single_emb
+    
+    def forward_encode(self, static_feat=None, obs_feat=None, time_embed_hist=None,future_single_emb=None,current_epoch=0,max_epochs=0):    
         B, S, T, _ = obs_feat.shape  # B=batch, S=样本数, T=历史序列长度
         P = self.pred_len            # P=预测步长
         
@@ -495,10 +505,10 @@ class TFTWithFutureCovariates(nn.Module):
             static_context_fut = static_feat_fut # self.static_context_fut(static_feat_fut).unsqueeze(1)  # [B*S,1,hidden_dim]
         else:
             static_context_hist = None
-  
-        time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.05)
         
-        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.02)
+        time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.1)
+        
+        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.05)
         if PRINT_STD_FLAG:
             print("obs_proj std:{}".format(obs_feat.std()))          
         # 2.1 融合历史观测+时间嵌入+样本交互
@@ -513,29 +523,74 @@ class TFTWithFutureCovariates(nn.Module):
         
         # 2.6 Transformer编码（因果掩码，禁止看未来）--Cancel
         # causal_mask = generate_causal_mask(T, obs_proj.device)
-        hist_encoded = self.transformer_encoder(obs_input, mask=None)  # [B*S, T, hidden_dim]
-        
+        hist_encoded = self.transformer_encoder(obs_input, mask=None)  # [B*S, T, d_model]
+        hist_encoded = self.transformer_end(hist_encoded) # [B*S, T, hidden_dim]
+        if PRINT_STD_FLAG:
+            print("hist_encoded std:{}".format(hist_encoded.std()))        
         # 2.7 取最后时间步的历史编码（历史信息总结）
         hist_summary = hist_encoded[:, -1, :]  # [B*S, hidden_dim]
+        hist_summary = hist_summary.reshape([B,S,-1])
         
+        return hist_summary,static_context_hist
+    
+
+class TFTWithFutureCovariatesDe(nn.Module):
+    """带已知未来协变量+样本关联的TFT模型（无未来泄露）"""
+    def __init__(
+        self,
+        static_num=0,          # 静态特征维度
+        obs_dim=6,             # 历史观测特征维度
+        fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
+        time_embed_dim=28,     # 时间特征嵌入维度（含节假日）
+        hidden_dim=64,         # 隐藏层维度
+        nhead=8,               # 注意力头数
+        num_layers=2,          # Transformer层数
+        dropout=0.1,
+        seq_len=1,               # 历史数据步长
+        pred_len=1,            # 预测步长
+        sample_dim=3,          # 样本维度（站点/设备数）
+        d_model=64,        # 注意力维度
+        static_emb_dim=4,      # 离散特征嵌入维度
+        static_cate_emb=None,  # 静态离散特征嵌入
+        device='cuda'
+    ):
+
+        super().__init__()
+        
+        self.calendar_encoder_fur = GatedResidualNetwork(input_dim=time_embed_dim, hidden_dim=hidden_dim,output_dim=hidden_dim,
+                                                 context_combine_dim=1)          
+        # 分别定义完整预测序列的解码器，以及最终单独目标的解码器
+        # self.seq_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
+        #              dropout=0.01, pred_len=pred_len)
+        self.tar_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
+                     dropout=0.01, pred_len=1)          
+        
+    def forward(self, hist_summary,future_single_emb=None,static_context_hist=None):
+
+        B, S, _ = hist_summary.shape
+        hist_summary = hist_summary.reshape([B*S,-1])
         # 未来协变量投影
         future_single_emb = self.calendar_encoder_fur(future_single_emb.unsqueeze(-2),context=static_context_hist)
+              
         if PRINT_STD_FLAG:
+            print("hist_summary std:{}".format(hist_summary.std()))
             print("future_single_emb std:{}".format(future_single_emb.std()))
-            
+        
+        hist_summary = hist_summary * 0.8
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        fur_scale = 0.01 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
+        fur_scale = 0.03 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
+        # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
         
         if PRINT_STD_FLAG:
             print("pred_tar std:{}".format(pred_tar.std()))
         # # 4.4 变量权重恢复
         # var_weights = var_weights.reshape(B, S, T, self.obs_dim)  # [B, S, T, obs_dim]
         
-        return pred_tar
-
+        return pred_tar           
+            
 class ContinuousToDiscreteIndex(nn.Module):
     def __init__(self, num_indices=3, hidden_dim=8):
         super().__init__()
@@ -709,9 +764,9 @@ class SparseGateFeatureTopK(nn.Module):
         
         return trend_logits_list,features_list,trend_list_total,trend_list_main
     
-    def forward(self, x):
-        trend_logits_list,features_list,trend_list_total,trend_list_main = self.forward_combine(x)
-        return trend_list_total
+    def forward(self, x,output_index=2):
+        output = self.forward_combine(x)
+        return output[output_index]
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -723,6 +778,7 @@ class UnionTransCombine(nn.Module):
         fut_dim=3,             # 已知未来协变量维度（天气/节假日等）
         time_embed_dim=2,
         hidden_dim=64,         # 隐藏层维度
+        d_model=64,
         nhead=8,               # 注意力头数
         num_layers=2,          # Transformer层数
         dropout=0.1,
@@ -744,25 +800,42 @@ class UnionTransCombine(nn.Module):
         super().__init__()
         self.max_epochs = max_epochs
         
+        dropout_trans = dropout
         self.time_embed_dim = time_embed_dim
-        self.trans_model = TFTWithFutureCovariates(
+        self.trans_model_encoder = TFTWithFutureCovariatesEn(
                 static_num=static_num,
                 obs_dim=obs_dim,
                 fut_dim=fut_dim,
                 time_embed_dim=self.time_embed_dim,
                 hidden_dim=hidden_dim,
                 nhead=nhead,
+                d_model=d_model,
                 num_layers=num_layers,
-                dropout=dropout,
+                dropout=dropout_trans,
                 seq_len=seq_len,
                 pred_len=pred_len,
                 sample_dim=sample_dim,
-                sample_heads=sample_heads,
                 static_cate_emb=static_cate_emb,
                 static_emb_dim=static_emb_dim,
                 device=device,
             )
-        
+        self.trans_model_decoder = TFTWithFutureCovariatesDe(
+                static_num=static_num,
+                obs_dim=obs_dim,
+                fut_dim=fut_dim,
+                time_embed_dim=self.time_embed_dim,
+                hidden_dim=hidden_dim,
+                nhead=nhead,
+                d_model=d_model,
+                num_layers=num_layers,
+                dropout=dropout_trans,
+                seq_len=seq_len,
+                pred_len=pred_len,
+                sample_dim=sample_dim,
+                static_cate_emb=static_cate_emb,
+                static_emb_dim=static_emb_dim,
+                device=device,
+            )        
         self.pred_len = pred_len         
         self.sample_dim = sample_dim
         self.target_feat_dim = target_feat_dim  
@@ -796,8 +869,9 @@ class UnionTransCombine(nn.Module):
     ):    
         
         # 基础模型的向前传播
-        pred_tar = self.trans_model(static_covs,past_convs_item, his_future_emb,future_single_emb,current_epoch=current_epoch,max_epochs=max_epochs)   
-        tar_scale = 1.2 # self.get_dynamic_target_ratio(current_epoch,max_epochs)
+        hist_summary,static_context_hist = self.trans_model_encoder(static_covs,past_convs_item, his_future_emb,future_single_emb,current_epoch=current_epoch,max_epochs=max_epochs)   
+        pred_tar = self.trans_model_decoder(hist_summary,future_single_emb=future_single_emb,static_context_hist=static_context_hist)  
+        tar_scale = 2.0 # self.get_dynamic_target_ratio(current_epoch,max_epochs)
         pred_tar = pred_tar * tar_scale
         
         trend_logits_combine = []
@@ -814,6 +888,6 @@ class UnionTransCombine(nn.Module):
             trend_logits_combine.append(trend_logits_list)
             trend_list_main_combine.append(trend_list_main)
         
-        return trend_logits_combine,cls_out_combine,trend_list_total,trend_list_main_combine,(tar_scale,self.trans_model.fur_scale)
+        return trend_logits_combine,cls_out_combine,trend_list_total,trend_list_main_combine,(tar_scale)
 
 

@@ -639,22 +639,22 @@ class FuturesIndustryLoss(UncertaintyLoss):
                             #     else:
                             #         detail_loss[key].append(loss_inner)
                             #     cnt += 1                               
-                        # # 比较大类
-                        # if torch.sum(torch.isnan(target_data_main))==0 and torch.sum(target_data_main==0)<(target_data_main.shape[0]-2):
-                        #     ava_idx = torch.where(target_data_main!=0)[0]
-                        #     pred_data_main = pred_data_main[ava_idx] # normalization_standard(pred_data_main[ava_idx])
-                        #     target_data_main = target_data_main[ava_idx] # normalization_standard(target_data_main[ava_idx])
-                        #     if all_elements_same(pred_data_main) or all_elements_same(target_data_main):
-                        #         loss_inner = self.mse_loss(pred_data_main.unsqueeze(0),target_data_main.unsqueeze(0))
-                        #     else:
-                        #         loss_inner = self.ccc_loss_comp(pred_data_main,target_data_main)     
-                        #         # loss_inner = self.compute_top_loss(pred_data_main,target_data_main,top_num=1, mid_num=1, need_mid=True)    
-                        #     loss_item += loss_inner  
-                        #     if 'main' not in detail_loss:
-                        #         detail_loss['main'] = [loss_inner]
-                        #     else:
-                        #         detail_loss['main'].append(loss_inner)                              
-                        #     cnt += 1         
+                        # 比较大类
+                        if torch.sum(torch.isnan(target_data_main))==0 and torch.sum(target_data_main==0)<(target_data_main.shape[0]-2):
+                            ava_idx = torch.where(target_data_main!=0)[0]
+                            pred_data_main = pred_data_main[ava_idx] # normalization_standard(pred_data_main[ava_idx])
+                            target_data_main = target_data_main[ava_idx] # normalization_standard(target_data_main[ava_idx])
+                            if all_elements_same(pred_data_main) or all_elements_same(target_data_main):
+                                loss_inner = self.mse_loss(pred_data_main.unsqueeze(0),target_data_main.unsqueeze(0))
+                            else:
+                                # loss_inner = self.ccc_loss_comp(pred_data_main,target_data_main)     
+                                loss_inner = self.compute_top_loss(pred_data_main,target_data_main,top_num=1, mid_num=1, need_mid=True)    
+                            loss_item += loss_inner  
+                            if 'main' not in detail_loss:
+                                detail_loss['main'] = [loss_inner]
+                            else:
+                                detail_loss['main'].append(loss_inner)                              
+                            cnt += 1         
                         # cate_target_norm = standardize_dict_tensor(cate_target_data)
                         # cate_pred_norm = standardize_dict_tensor(cate_pred_data)                             
                         # 比较所有分类                  
@@ -717,7 +717,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                                 inner_ins = np.intersect1d(inner_ins, ins_rel_index.cpu().numpy())
                                 if inner_ins.shape[0]<2:
                                     continue
-                                ins_diff = np.array([t['open_diff'] for t in np.array(target_info[j])[inner_ins]])
+                                ins_diff = np.array([t['open_diff_norm'] for t in np.array(target_info[j])[inner_ins]])
                                 target_mean = ins_diff.mean()
                                 trend_target[key][inner_key][j] = target_mean               
                         batch_size += 1

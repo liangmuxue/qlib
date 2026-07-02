@@ -35,6 +35,11 @@ def concat_scale_arr(scale_arr):
             
     return df_group.to_dict('records')
 
+def get_scale_cate_ins(scale_arr,p0):
+    
+    instruments = np.concatenate(scale_arr[scale_arr['p0']==p0]['instruments'].values)
+    return instruments
+    
 def emb_scale_arr(scale_arr):
     """把2级分片定义合并为涵盖上下级关系的定义"""
     
@@ -181,8 +186,8 @@ class TFTFuturesDataset(TFTSeriesDataset):
         df['datetime_number'] = df['datetime_number'].astype(int)
         
         # 剔除open_diff超出范围的异常值
-        df.loc[df['open_diff']>5,'open_diff'] = 5
-        df.loc[df['open_diff']<-5,'open_diff'] = -5            
+        df.loc[df['open_diff']>10,'open_diff'] = 10
+        df.loc[df['open_diff']<-10,'open_diff'] = -10            
         # # 生成业务分片均值数据
         # scale_columns = list(scale_conf.keys())
         # self.scale_dict,df_mean_norm = self.build_scale_mean(df,scale_columns,tar_col='open_diff',val_range=val_range)  

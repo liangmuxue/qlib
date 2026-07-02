@@ -266,12 +266,14 @@ class CollResAna():
     def extre_data_invest(self):
         """排查异常数据"""
         
-        futures_dataset = self.train_dataset
-        # futures_dataset = self.val_dataset
+        # futures_dataset = self.train_dataset
+        futures_dataset = self.val_dataset
         sw_ins_mappings = futures_dataset.sw_ins_mappings
         scale_arr = build_mul_scale_arr(sw_ins_mappings,mode=6,dataset=self.tft_dataset)
         outler_data = []
         outler_scale_data = []
+        ins_diff_total = []
+        ins_diff_norm_total = []
         scale_diff_in_outlier = None
         for i in range(len(futures_dataset)):
             past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total, \
@@ -279,7 +281,9 @@ class CollResAna():
                 index_round_targets,long_diff_seq_targets,target_info_total = futures_dataset[i]
             future_start_datetime = int(futures_dataset.date_list[i])   
             ins_diff = np.array([t['open_diff'] if t is not None else 0 for t in np.array(target_info_total)])
+            ins_diff_total.append(ins_diff)
             ins_diff_norm = np.array([t['open_diff_norm'] if t is not None else 0 for t in np.array(target_info_total)])
+            ins_diff_norm_total.append(ins_diff_norm)
             scale_diff = []
             scale_diff_all = []
             for k,scale_item in scale_arr.iterrows():
@@ -307,9 +311,13 @@ class CollResAna():
                     scale_diff_in_outlier = np.concatenate([scale_diff_in_outlier,scale_diff_all])
                 outler_scale_data.append([future_start_datetime,outler_scale.index.values,np.round(outler_scale.values[:,0],2)])        
         outler_data = pd.DataFrame(np.array(outler_data),columns=['date','index','value'])
-        outler_scale_data = pd.DataFrame(np.array(outler_scale_data),columns=['date','index','value'])
-        scale_diff_in_outlier = pd.DataFrame(np.array(scale_diff_in_outlier),columns=['date','index','value'])
-        outler_scale_data
+        if len(outler_scale_data)>0:
+            outler_scale_data = pd.DataFrame(np.array(outler_scale_data),columns=['date','index','value'])
+            outler_scale_data
+            scale_diff_in_outlier = pd.DataFrame(np.array(scale_diff_in_outlier),columns=['date','index','value'])
+        ins_diff_total = np.concatenate(ins_diff_total)
+        ins_diff_norm_total = np.concatenate(ins_diff_norm_total)
+        ins_diff_total
                           
     def build_match_results(self):
         """分别找出比较准的日期和不太准的日期"""
@@ -327,8 +335,8 @@ class CollResAna():
 
     def comprisive_stat(self):
         self.prepare_data()
-        # self.extre_data_invest()
-        self.fea_rel_stat()
+        self.extre_data_invest()
+        # self.fea_rel_stat()
         # self.relative_stat()
         # self.normal_stat()
         # self.scale_info_stat()
