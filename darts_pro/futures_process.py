@@ -23,7 +23,10 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 import shap
 from typing import Dict, List, Optional, Sequence, Tuple, Union
-
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning import loggers as pl_loggers
+            
 from darts.metrics import mape
 from darts.models import TFTModel
 from darts import TimeSeries, concatenate
@@ -139,9 +142,10 @@ class FuturesProcessModel(TftDataframeModel):
         
         # 生成tft时间序列数据集,包括目标数据、协变量等
         global_var.set_value("trend_threhold",self.optargs["trend_threhold"])
-        train_data,val_data = dataset.build_series_data()
+        train_data,val_data,test_data = dataset.build_series_data()
         train_series_transformed,past_convariates_train,future_convariates_train = train_data
         val_series_transformed,past_convariates_val,future_convariates_val = val_data
+        test_series_transformed,past_convariates_test,future_convariates_test = test_data
         global_var.set_value("load_ass_data",False)
         global_var.set_value("save_ass_data",False)  
             
@@ -172,19 +176,87 @@ class FuturesProcessModel(TftDataframeModel):
         
         if self.type=="pred_futures_trans":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
-            trainer,model,train_loader,val_loader = \
+            trainer,model,train_loader,val_loader,test_loader = \
             self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                    test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
             self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             self.model.model.set_outer_params(outer_params) 
             trainer.validate(model=model,dataloaders=val_loader)
-        else:
-            trainer,model_inner,train_loader,val_loader= \
+            loss_result = self.model.model.loss_result
+            [loss_main,loss_total] = loss_result      
+            print("main loss:{},total loss:{}".format(loss_main,loss_total))
+        elif self.type=="fit_futures_trans":
+            # 设置外部hook，每训练一个轮次后，进行测试
+            
+            class ExternalTrainHook(Callback):
+                """外部训练生命周期钩子，完全脱离LightningModule"""
+                def __init__(self,trainer,test_loader,epoch_num=0,log_folder=None,caller=None):
+                    self.caller = caller
+                    self.trainer = trainer
+                    self.test_loader = test_loader
+                    self.in_process = False
+                    logger = pl_loggers.TensorBoardLogger(save_dir=log_folder, default_hp_metric=False,name="", version="val_logs")
+                    trainer.logger = logger     
+                    self.epoch_num = epoch_num     
+
+                def clone_pl_model(self,src_model) -> pl.LightningModule:
+                    # 1. 用原超参新建实例
+                    new_model = type(src_model)(**src_model.hparams)
+                    # 2. 复制网络权重
+                    new_model.load_state_dict(src_model.state_dict())
+                    new_model.set_outer_params(outer_params) 
+                    # 3. 同步设备
+                    new_model = new_model.to(src_model.device)
+                    
+                    return new_model
+          
+                def on_validation_epoch_end(self, trainer, pl_module):
+                    tb = self.trainer.logger.experiment
+                    
+                    caller = self.caller
+                    best_weight = caller.optargs["best_weight"]    
+                    outer_model = FuturesModel.load_from_checkpoint(caller.optargs["model_name"],work_dir=caller.optargs["work_dir"],device=device,
+                                                                     best=best_weight,batch_file_path=caller.batch_file_path,map_location=None)
+                    caller.rebuild_model_params(outer_model,model_name=caller.optargs["model_name"])  
+                    model = outer_model.model
+                    model.set_outer_params(outer_params) 
+                    model.set_outer_params({'outer_call':True}) 
+                    self.trainer.validate(model=model,dataloaders=self.test_loader)
+                    loss_result = model.loss_result
+                    [loss_main,loss_total] = loss_result
+                    print("main loss:{},total loss:{}".format(loss_main,loss_total))
+                    tb.add_scalar("main", loss_main, trainer.current_epoch)   
+                    tb.add_scalar("total", loss_total, trainer.current_epoch)       
+                    
+                    rate_total = model.rate_total                               
+                    for key in rate_total.columns:
+                        if key.startswith("dist"):
+                            continue
+                        if key.startswith("trend"):
+                            continue                        
+                        item = rate_total[key].values[0]
+                        tb.add_scalar("{}".format(key), item, trainer.current_epoch)
+                        if key=='cate_yield':
+                            print("cate_yield:{}".format(item))
+                        
+            trainer,model_inner,train_loader,val_loader,_ = \
             self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+                    test_series=None,test_past_covariates=None,test_future_covariates=None,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=True)   
+            trainer_test,_,_,_,test_loader = \
+            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                    test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=True)  
+            
+            log_folder = os.path.join(self.optargs["work_dir"],self.optargs["model_name"])
+            hook = ExternalTrainHook(trainer_test,test_loader,log_folder=log_folder,epoch_num=trainer.current_epoch,caller=self)
+            trainer.callbacks.append(hook)
+            self.model.train(trainer,model_inner,train_loader,val_loader)
 
     def rebuild_model_params(self,model,model_name=None):
         
@@ -205,7 +277,7 @@ class FuturesProcessModel(TftDataframeModel):
         device = "cuda:" + cudas
         return device
     
-    def _build_model(self,dataset,emb_size=1000,use_model_name=True,mode=0):
+    def _build_model(self,dataset,emb_size=1000,use_model_name=True,mode=0,callbacks=None):
         """生成模型"""
         
         log_every_n_steps = self.kwargs["log_every_n_steps"]
@@ -231,13 +303,8 @@ class FuturesProcessModel(TftDataframeModel):
         gpus_size = len(gpu_params)
         # 自定义回调函数
         lightning_callbacks = []
-        if "lightning_callbacks" in  self.kwargs:
-            lightning_callbacks_config = self.kwargs.get("lightning_callbacks", [])
-            for config in lightning_callbacks_config:
-                callback = init_instance_by_config(
-                    config,
-                )   
-                lightning_callbacks.append(callback)          
+        if callbacks is not None:
+            lightning_callbacks.append(callbacks)          
                    
         pl_trainer_kwargs = {"accelerator": "cpu","log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}    
         pl_trainer_kwargs = {"accelerator": "gpu","gpus":gpus_size, "strategy":"ddp", "devices": gpu_params,"log_every_n_steps":log_every_n_steps,"callbacks": lightning_callbacks}               
@@ -305,7 +372,7 @@ class FuturesProcessModel(TftDataframeModel):
         
         # 生成tft时间序列数据集,包括目标数据、协变量等
         global_var.set_value("trend_threhold",self.optargs["trend_threhold"])
-        train_data,val_data = dataset.build_series_data()
+        train_data,val_data,_ = dataset.build_series_data()
         train_series_transformed,past_convariates_train,future_convariates_train = train_data
         val_series_transformed,past_convariates_val,future_convariates_val = val_data
         global_var.set_value("load_ass_data",False)
@@ -337,7 +404,7 @@ class FuturesProcessModel(TftDataframeModel):
         self.model.set_outer_params(outer_params) 
         
         
-        trainer,model,train_loader,val_loader = \
+        trainer,model,train_loader,val_loader,_ = \
         self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                 val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                  max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  

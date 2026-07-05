@@ -70,7 +70,7 @@ class FuturesModel(IndustryRollModel):
             # 透传行业分类和股票映射关系，后续使用
             self.train_sw_ins_mappings = ds.sw_ins_mappings            
         # 验证模式下，需要传入之前存储的静态数据集合
-        if mode=="valid" or mode=="predict":
+        if mode=="valid" or mode=="predict" or mode=="test":
             ds = FuturesIndustryDataset(
                 target_series=target,
                 covariates=past_covariates,

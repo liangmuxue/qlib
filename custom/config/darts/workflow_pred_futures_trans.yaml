@@ -5,9 +5,9 @@ market: &market clean_data
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     init_data: True
-    start_time: 2012-01-01
+    start_time: 2023-01-01
     end_time: 2025-12-31
-    fit_start_time: 2012-01-01
+    fit_start_time: 2023-01-01
     fit_end_time: 2025-12-31
     instruments: *market
     infer_processors:
@@ -59,22 +59,22 @@ task:
             n_jobs: 20
             log_every_n_steps: 5
             type: 'pred_futures_trans'
-            n_epochs : 180
+            n_epochs : 280            # 统合计算准确率数值
             save_dataset_file: False
             load_dataset_file: &load_dataset_file False
             batch_file_path: 'custom/data/asis/Futures_Begin_202212'
-            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2012/task/118/dump_data/"
-            pred_index_data_path: "pred_index_data_2501.csv" 
-            pred_cate_data_path: "pred_cate_data_2501.csv" 
-            load_index_data: True
-            load_cate_data: True
+            pred_data_path: "/home/qdata/workflow/wf_backtest_flow_2023/task/118/dump_data/"
+            pred_index_data_path: "pred_index_data_2503.csv" 
+            pred_cate_data_path: "" 
+            load_index_data: False
+            load_cate_data: False
             scheduler_config: 
                # start_factor: 1
-               # end_factor: 0.05
-               # total_iters: 1e4
+               # end_factor: 0.01
+               # total_iters: 1e2
                T_0: 10 # 初始周期
                T_mult: 2  # 周期倍增
-               eta_min: 1e-6  # 最小学习率
+               eta_min: 1e-5  # 最小学习率
             optimizer_kwargs:
                lr: 1e-3
                betas: [0.9,0.999]
@@ -85,14 +85,14 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanDataAllCutlen2_transScaleLoss_2501"
+               model_name: "Futures_cleanData2023Cutlen2_transLossMore_2503"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False
-               task_weights: [[0.5,0.5],[0.5]]
+               task_weights: [[1.0],[0.5,0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
-               main_task_seq: [[1],[]]
+               main_task_seq: [[],[1]]
                use_pcgrad: True
                candidate_inverse: False
                pred_mode: 'single'
@@ -102,10 +102,10 @@ task:
                hidden_size: 16  
                forecast_horizon: &forecast_horizon 2
                cut_len: &cut_len 2
-               dropout: 0.3
+               dropout: 0.5
                opt_size: 1
-               past_split: [[0,15],[15,30]]
-               target_mode: [5,1,2,1,3]
+               past_split: [[0,11],[11,22]]
+               target_mode: [2,2,2,1,3]
                scale_mode: [1,1,2,2,0]
                filter_conv_index: -1
                loss_top_num: 1
@@ -120,16 +120,16 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2012-01-01, 2025-01-28]
-                valid: [2025-01-01, 2025-04-15]
-                test: [2025-07-01, 2025-09-30]
+                train: [2023-01-01, 2025-03-28]
+                valid: [2025-03-01, 2025-06-15]
+                test: [2025-03-01, 2025-06-15]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
             aug_type: 'no'
             data_type: 'date_range'
             transform_inner: True
-            scale_time_col: False
+            scale_time_col: True
             instrument_pick: [600520,600521,600522]
             scaler_type: 'norm'
             model_type: 'tft'
@@ -145,14 +145,12 @@ task:
                 datetime_index_column: 'datetime_number'
                 group_rank_column: 'instrument_rank'
                 ext_column: ['near_basis_rate','dom_basis_rate']
-                target_column: ['diff_range_norm','diff_range_norm','SUMD5','SUMD5','RSV5']
+                target_column: ['RSI5','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
-                future_covariate_col: ['year','dayofweek','month','day','week']   
-                past_covariate_col: ['SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
-                                  ,'SUMD5','CORR5','RSQR5','RSV5','WVMA5','STD5','OPEN_COM','HIGH', 'LOW','CNTP5','REFCLOSE','SKEW5','KDJ_K','dom_basis_rate','QTLUMA5'
+                future_covariate_col: ['year','dayofweek','month','week'] 
+                past_covariate_col: ['SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','STD5','OPEN_COM','diff_range','QTLUMA5'
+                                  ,'SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','STD5','OPEN_COM','diff_range','QTLUMA5'
+                                  ,'SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','STD5','OPEN_COM','diff_range','QTLUMA5'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','create_year','limit_rate','magin_radio']   
                 static_cate_col: ['industry','night_flag','exchange_id','create_year']

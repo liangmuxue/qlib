@@ -67,7 +67,7 @@ class TFTSeriesDataset(TFTDataset):
     def get_emb_size(self):
         return self.emb_size
             
-    def _pre_process_df(self,df,val_range=None):
+    def _pre_process_df(self,df,val_range=None,test_range=None):
         """数据预处理"""
         
         # 从数据库表中读取股票基础信息，并加入申万行业分类以及指数数据，需要填充相互的缺失值
@@ -90,10 +90,10 @@ class TFTSeriesDataset(TFTDataset):
         ext_info = pd.DataFrame(np.array(ext_info_arr),columns=["instrument","industry","tradable_shares","cons_num","static_pe","yield"]).astype(
             {"instrument":str,"industry":int,"tradable_shares":float,"cons_num":int,"static_pe":float,"yield":float})   
         data_filter = DataFilter()
-        # 清除序列长度不够的股票
+        # 清除序列长度不够的品种
         group_column = self.get_group_column()
         time_column = self.col_def["time_column"]       
-        df = data_filter.data_clean(df, self.step_len,valid_range=val_range,group_column=group_column,time_column=time_column)  
+        df = data_filter.data_clean(df, self.step_len,valid_range=test_range,group_column=group_column,time_column=time_column)  
         # 重置异常值      
         df = self.reset_outlier(df)
         # 生成时间字段
@@ -199,7 +199,7 @@ class TFTSeriesDataset(TFTDataset):
     def get_group_code_by_rank(self,group_rank):    
         return self.group_mapping[group_rank]
            
-    def create_base_data(self,segments_total=None,val_range=None,outer_df=None):
+    def create_base_data(self,segments_total=None,val_range=None,test_range=None,outer_df=None):
         """创建基础数据"""
         
         if outer_df is not None:
@@ -217,7 +217,7 @@ class TFTSeriesDataset(TFTDataset):
             self.emb_size = df_all[self.get_group_column()].unique().shape[0] + 1
             # 前处理
             logger.debug("begin _pre_process_df")
-            df_all = self._pre_process_df(df_all,val_range=val_range)
+            df_all = self._pre_process_df(df_all,val_range=val_range,test_range=test_range)
             # 为每个序列生成不同的scaler
             self.df_all = df_all
             logger.debug("emb size after p:{}".format(self.get_emb_size()))
@@ -229,6 +229,9 @@ class TFTSeriesDataset(TFTDataset):
         val_range = segments["valid"]
         valid_start = val_range[0]
         valid_end = val_range[1]  
+        test_range = segments["test"]
+        test_start = test_range[0]
+        test_end = test_range[1]         
         
         # 根据配置决定使用全集模式还是差集模式   
         if "train_total" in segments:
@@ -236,12 +239,13 @@ class TFTSeriesDataset(TFTDataset):
             range_mode = 0
         else:
             train_range = segments["train"]
-            train_end = train_range[1]              
-            total_range = [train_range[0],valid_end]   
+            train_end = train_range[1]        
+            # 使用测试集日期作为结束日期      
+            total_range = [train_range[0],test_end]   
             range_mode = 1
 
         # 生成全集基础数据
-        self.create_base_data(total_range,val_range,outer_df=outer_df)
+        self.create_base_data(total_range,val_range,test_range,outer_df=outer_df)
 
         # 截取训练集与测试集
         df_all = self.df_all
@@ -254,15 +258,19 @@ class TFTSeriesDataset(TFTDataset):
             df_train = df_all[df_all["datetime"]<pd.to_datetime(str(train_end))]
         # 验证集直接根据配置进行截取
         df_val = df_all[(df_all["datetime"]>=pd.to_datetime(str(valid_start))) & (df_all["datetime"]<pd.to_datetime(str(valid_end)))]
+        df_test = df_all[(df_all["datetime"]>=pd.to_datetime(str(test_start))) & (df_all["datetime"]<pd.to_datetime(str(test_end)))]
         # 在筛选的过程中，有可能产生个数不一致的情况，取交集
         df_train = df_train[df_train[self.get_group_column()].isin(df_val[self.get_group_column()])]
         df_val = df_val[df_val[self.get_group_column()].isin(df_train[self.get_group_column()])]
+        df_test = df_test[df_test[self.get_group_column()].isin(df_train[self.get_group_column()])]
         # 针对训练接和验证集，分别生成价格归一化数据
         df_train["price_norm"] = df_train[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5))    
-        df_val["price_norm"] = df_val[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5))    
+        df_val["price_norm"] = df_val[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5))   
+        df_test["price_norm"] = df_test[["label_ori","instrument"]].groupby("instrument").transform(lambda x: ((x-x.min())/(x.max()-x.min())+1e-5))   
         # 存储数据到本地变量
         self.df_train = df_train
         self.df_val = df_val
+        self.df_test = df_test
         
         # 根据标志，决定是否进行验证集数据检查清理
         if val_ds_filter:
@@ -274,7 +282,8 @@ class TFTSeriesDataset(TFTDataset):
         # 单独生成训练数据序列和验证数据序列
         train_data = self.create_series_data(self.df_train,fill_future=fill_future)  
         val_data = self.create_series_data(self.df_val,fill_future=fill_future)  
-        return [train_data,val_data]       
+        test_data = self.create_series_data(self.df_test,fill_future=fill_future)  
+        return [train_data,val_data,test_data]       
           
     def build_series_data(self,outer_df=None,no_series_data=False,val_ds_filter=False,fill_future=True):
         """从pandas数据生成时间序列类型数据"""

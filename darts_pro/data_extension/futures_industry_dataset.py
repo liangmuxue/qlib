@@ -121,8 +121,10 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         
         if mode=="train":
             df_data_total = dataset.df_train          
-        else:
+        elif mode=="valid":
             df_data_total = dataset.df_val 
+        else:
+            df_data_total = dataset.df_test
         
         instrument_df = self.get_variety_list_with_indus()
         # 包含品种编码和行业板块编码

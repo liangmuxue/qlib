@@ -73,7 +73,7 @@ def get_scale_conf():
 
 class TFTFuturesDataset(TFTSeriesDataset):
             
-    def _pre_process_df(self,df,val_range=None):
+    def _pre_process_df(self,df,val_range=None,test_range=None):
         """数据预处理"""
  
         # 补充行业数据

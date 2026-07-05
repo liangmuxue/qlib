@@ -446,12 +446,16 @@ class TFTExtModel(MixedCovariatesTorchModel):
         val_series: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
         val_past_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
         val_future_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        test_series: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        test_past_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,
+        test_future_covariates: Optional[Union[TimeSeries, Sequence[TimeSeries]]] = None,        
         trainer: Optional[pl.Trainer] = None,
         verbose: Optional[bool] = None,
         epochs: int = 0,
         max_samples_per_ts: Optional[int] = None,
         num_loader_workers: int = 0,
         seperate_mode = False,
+        hook=None,
     ):
         """重载原方法"""
         # guarantee that all inputs are either list of `TimeSeries` or `None`
@@ -535,7 +539,19 @@ class TFTExtModel(MixedCovariatesTorchModel):
             )
         else:
             val_dataset = None
-        
+            
+        if test_series is not None:
+            test_dataset = self._build_train_dataset(
+                target=test_series,
+                past_covariates=test_past_covariates,
+                future_covariates=test_future_covariates,
+                max_samples_per_ts=max_samples_per_ts,
+                mode="test"
+            )
+            self.check_dataset_range(train_dataset,test_dataset)
+        else:
+            test_dataset = None
+                    
         self.check_dataset_range(train_dataset,val_dataset)
         
         # Pro-actively catch length exceptions to display nicer messages
@@ -574,13 +590,13 @@ class TFTExtModel(MixedCovariatesTorchModel):
         if self.mode.startswith("pred") or self.mode.startswith("analysis"):
             # 预测模式，不使用tensorboard
             self.trainer_params["logger"] = False
-            trainer,model,train_loader,val_loader = self._setup_for_train(train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers)
+            trainer,model,train_loader,val_loader,test_loader = self._setup_for_train(train_dataset, val_dataset,test_dataset, trainer, verbose, epochs, num_loader_workers,hook=hook)
             self.trainer = trainer
             if self.model is None:
                 self.model = model
-            return trainer,model,train_loader,val_loader
+            return trainer,model,train_loader,val_loader,test_loader
         return self.fit_from_dataset(
-            train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers,seperate_mode=seperate_mode
+            train_dataset, val_dataset,test_dataset, trainer, verbose, epochs, num_loader_workers,seperate_mode=seperate_mode,hook=hook
         )
     
     def check_dataset_range(self,train_dataset,val_dataset):
@@ -590,30 +606,36 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self,
         train_dataset: TrainingDataset,
         val_dataset: Optional[TrainingDataset] = None,
+        test_dataset: Optional[TrainingDataset] = None,
         trainer: Optional[pl.Trainer] = None,
         verbose: Optional[bool] = None,
         epochs: int = 0,
         num_loader_workers: int = 0,
-        seperate_mode=False
+        seperate_mode=False,
+        hook=None,
     ):
         if seperate_mode:
             return self._setup_for_train(
                 train_dataset=train_dataset,
                 val_dataset=val_dataset,
+                test_dataset=test_dataset,
                 trainer=trainer,
                 verbose=verbose,
                 epochs=epochs,
                 num_loader_workers=num_loader_workers,
+                hook=hook,
             )     
         else:       
             self.train(
                 *self._setup_for_train(
                     train_dataset=train_dataset,
                     val_dataset=val_dataset,
+                    test_dataset=test_dataset,
                     trainer=trainer,
                     verbose=verbose,
                     epochs=epochs,
                     num_loader_workers=num_loader_workers,
+                    hook=hook,
                 )
             )
         return self
@@ -643,10 +665,12 @@ class TFTExtModel(MixedCovariatesTorchModel):
         self,
         train_dataset: TrainingDataset,
         val_dataset: Optional[TrainingDataset] = None,
+        test_dataset: Optional[TrainingDataset] = None,
         trainer: Optional[pl.Trainer] = None,
         verbose: Optional[bool] = None,
         epochs: int = 0,
         num_loader_workers: int = 0,
+        hook=None,
     ) -> Tuple[pl.Trainer, PLForecastingModule, DataLoader, Optional[DataLoader]]:
 
         """重载父类方法，规避相关数据检查"""
@@ -735,13 +759,27 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 collate_fn=self.create_collate(is_train=False),
             )
         )
-
+        test_loader = (
+            None
+            if test_dataset is None
+            else DataLoader(
+                test_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_loader_workers,
+                pin_memory=True,
+                drop_last=False,
+                sampler=val_sampler,
+                collate_fn=self.create_collate(is_train=False),
+            )
+        )
         # if user wants to train the model for more epochs, ignore the n_epochs parameter
         train_num_epochs = epochs if epochs > 0 else self.n_epochs
 
         # setup trainer
         trainer = self._setup_trainer(trainer,model, verbose, train_num_epochs)
-
+        if hook is not None:
+            trainer.callbacks.append(hook)  
         #  working on that, see https://github.com/PyTorchLightning/pytorch-lightning/issues/9636)
         if self.epochs_trained > 0 and not self.load_ckpt_path:
             logger.warning(
@@ -756,7 +794,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         # if epochs>0 and self.n_epochs>0:
         #     self._train(trainer,model,train_loader, val_loader)
             
-        return trainer,model,train_loader,val_loader
+        return trainer,model,train_loader,val_loader,test_loader
     
            
     def _build_train_dataset(

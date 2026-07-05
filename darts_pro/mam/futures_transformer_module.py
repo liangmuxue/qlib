@@ -334,7 +334,7 @@ class FuturesTransformerModule(MlpModule):
         # For pred step1 result
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH, INTER_RS_FILEPATH)
         self.result_columns = ["date", "indus_index", "trend_flag", "price_inf", "ce_inf"]
-        
+        self.outer_call = False
         
     def set_outer_params(self, params):
         for name in params:
@@ -622,6 +622,7 @@ class FuturesTransformerModule(MlpModule):
     def on_validation_epoch_start(self): 
         self.import_price_result = None
         self.total_imp_cnt = 0
+        self.loss_result = []
     
     def get_optimizer_size(self):
         return self.opt_size
@@ -789,8 +790,11 @@ class FuturesTransformerModule(MlpModule):
         (corr_loss_combine, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
 
         batch_data = np.ones([1])
-        
         self.dump_val_data(val_batch, output, batch_data)
+        real_batch_size = output[-1].shape[0]
+        batch_size = self.trainer.val_dataloaders[0].batch_size
+        self.dump_loss_data(detail_loss[-1],batch_size=batch_size,real_batch_size=real_batch_size)
+        
         return loss
         
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
@@ -824,27 +828,25 @@ class FuturesTransformerModule(MlpModule):
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
                     (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, future_week_info,target_info), optimizers_idx=-1)
         (corr_loss, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
-        self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
-        preds_combine = []
-        for i in range(self.opt_size):
-            task_weights = self.task_weights[i]
-            if ce_loss[i] != 0 and len(task_weights) > 1:
-                self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
-            if cls_loss[i] != 0:
-                self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
-                if cls_detail is not None:
-                    for key in cls_detail.keys():
-                        if key=='total':
-                            self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)  
-                        else:
-                            self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)  
-            if fds_loss[i] != 0 and len(task_weights) > 2:
-                self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
-            if corr_loss[i] != 0 and len(task_weights) > 3:
-                self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)   
-
         output_combine = (output, vr_class, price_targets, past_future_round_targets)
-        
+        if not self.outer_call:
+            for i in range(self.opt_size):
+                task_weights = self.task_weights[i]
+                if ce_loss[i] != 0 and len(task_weights) > 1:
+                    self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
+                if cls_loss[i] != 0:
+                    self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
+                    if cls_detail is not None:
+                        for key in cls_detail.keys():
+                            if key=='total':
+                                self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)  
+                            else:
+                                self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)  
+                if fds_loss[i] != 0 and len(task_weights) > 2:
+                    self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
+                if corr_loss[i] != 0 and len(task_weights) > 3:
+                    self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)   
+            self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
                 
         return loss, detail_loss, output_combine       
 
@@ -928,7 +930,9 @@ class FuturesTransformerModule(MlpModule):
         if rate_total is None:
             return
         date_total_num = float(coll_result['date'].unique().shape[0])
-        
+        self.rate_total = rate_total
+        if self.outer_call:
+            return
         # 打印相关指标
         if rate_total is not None and rate_total.shape[0] > 0:
             for col in rate_total.columns:
@@ -942,6 +946,24 @@ class FuturesTransformerModule(MlpModule):
             # self.log("cate_corr_rate", rate_total["cate_corr_rate"].values[0], prog_bar=True,sync_dist=True)
             # self.log("cate_yield", rate_total["cate_yield"].values[0], prog_bar=True,sync_dist=True)  
         
+        # 生成epoch内损失均值数据
+        loss_result = self.loss_result
+        loss_result = pd.DataFrame(np.array(loss_result),columns=['main','total','real_batch_size','batch_size'])
+        real_batch_size_sum = 0
+        batch_size_sum = 0
+        loss_main = 0
+        loss_total = 0
+        # 综合每个批次size与标准批次size，计算实际loss数据
+        for i,row in loss_result.iterrows():
+            real_batch_size = int(row['real_batch_size'])
+            real_batch_size_sum += real_batch_size
+            batch_size_sum += int(row['batch_size'])
+            loss_main += float(row['main']) * real_batch_size
+            loss_total += float(row['total']) * real_batch_size     
+        loss_main = loss_main/real_batch_size_sum
+        loss_total = loss_total/real_batch_size_sum 
+        self.loss_result = [loss_main,loss_total]
+                
         output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_total, \
             past_future_round_targets_total, future_week_info_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
         viz_total_size = 0
@@ -1340,7 +1362,13 @@ class FuturesTransformerModule(MlpModule):
         yield_rate_info = pd.DataFrame(np.array(data),columns=['mode',"suc_yield","fail_yield","fail_trend_yield"])            
         return (indus_info,cy_info,win_rate_info,yield_rate_info)        
         
-                                                         
+    def dump_loss_data(self, loss_detail,batch_size=32,real_batch_size=32):
+        """计算当前epoch的验证损失均值"""
+        
+        loss_detail_rebuild = [loss_detail[key].item() for key in loss_detail.keys()]
+        loss_detail_rebuild = loss_detail_rebuild + [real_batch_size,batch_size]
+        self.loss_result.append(loss_detail_rebuild)
+                                                      
     def dump_val_data(self, val_batch, outputs, batch_data):
     
         output, vr_class, price_outputs, past_future_round_targets = outputs
