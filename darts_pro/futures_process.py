@@ -197,7 +197,7 @@ class FuturesProcessModel(TftDataframeModel):
                     self.caller = caller
                     self.trainer = trainer
                     self.test_loader = test_loader
-                    self.in_process = False
+                    self.begin = False
                     logger = pl_loggers.TensorBoardLogger(save_dir=log_folder, default_hp_metric=False,name="", version="val_logs")
                     trainer.logger = logger     
                     self.epoch_num = epoch_num     
@@ -213,21 +213,24 @@ class FuturesProcessModel(TftDataframeModel):
                     
                     return new_model
           
-                def on_validation_epoch_end(self, trainer, pl_module):
+                def on_validation_end(self, trainer, pl_module):
                     tb = self.trainer.logger.experiment
-                    
-                    caller = self.caller
-                    best_weight = caller.optargs["best_weight"]    
-                    outer_model = FuturesModel.load_from_checkpoint(caller.optargs["model_name"],work_dir=caller.optargs["work_dir"],device=device,
-                                                                     best=best_weight,batch_file_path=caller.batch_file_path,map_location=None)
-                    caller.rebuild_model_params(outer_model,model_name=caller.optargs["model_name"])  
-                    model = outer_model.model
-                    model.set_outer_params(outer_params) 
+                    model = self.clone_pl_model(pl_module)
                     model.set_outer_params({'outer_call':True}) 
+                    # caller = self.caller
+                    # best_weight = caller.optargs["best_weight"]    
+                    # outer_model = FuturesModel.load_from_checkpoint(caller.optargs["model_name"],work_dir=caller.optargs["work_dir"],device=device,
+                    #                                                  best=best_weight,batch_file_path=caller.batch_file_path,map_location=None)
+                    # caller.rebuild_model_params(outer_model,model_name=caller.optargs["model_name"])  
+                    # model = outer_model.model
+                    # model.set_outer_params(outer_params) 
+                    # model.set_outer_params({'outer_call':True}) 
+                    
                     self.trainer.validate(model=model,dataloaders=self.test_loader)
                     loss_result = model.loss_result
                     [loss_main,loss_total] = loss_result
                     print("main loss:{},total loss:{}".format(loss_main,loss_total))
+                    tb.add_scalar("epoch", trainer.current_epoch, trainer.current_epoch)   
                     tb.add_scalar("main", loss_main, trainer.current_epoch)   
                     tb.add_scalar("total", loss_total, trainer.current_epoch)       
                     
@@ -236,7 +239,9 @@ class FuturesProcessModel(TftDataframeModel):
                         if key.startswith("dist"):
                             continue
                         if key.startswith("trend"):
-                            continue                        
+                            continue             
+                        if key=='win_rate' or key=='yield_rate' or  key=='total_cnt':
+                            continue                                      
                         item = rate_total[key].values[0]
                         tb.add_scalar("{}".format(key), item, trainer.current_epoch)
                         if key=='cate_yield':

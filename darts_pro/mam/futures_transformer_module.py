@@ -617,7 +617,7 @@ class FuturesTransformerModule(MlpModule):
         
         
     def on_validation_end(self): 
-        pass
+        end = 1
         
     def on_validation_epoch_start(self): 
         self.import_price_result = None
@@ -931,20 +931,6 @@ class FuturesTransformerModule(MlpModule):
             return
         date_total_num = float(coll_result['date'].unique().shape[0])
         self.rate_total = rate_total
-        if self.outer_call:
-            return
-        # 打印相关指标
-        if rate_total is not None and rate_total.shape[0] > 0:
-            for col in rate_total.columns:
-                if col != "total_cnt":
-                    self.log(col, rate_total[col].values[0], prog_bar=True,sync_dist=True)  
-            
-            dur_num = self.cut_len - 1
-            anno_yield = rate_total['yield_rate'].values[0] * (240 / date_total_num) / (2 * self.pred_top_num * dur_num) 
-            self.log("anno_yield", anno_yield, prog_bar=True,sync_dist=True) 
-            self.log("trend_eva_diff", rate_total["trend_eva_diff"].values[0], prog_bar=True,sync_dist=True) 
-            # self.log("cate_corr_rate", rate_total["cate_corr_rate"].values[0], prog_bar=True,sync_dist=True)
-            # self.log("cate_yield", rate_total["cate_yield"].values[0], prog_bar=True,sync_dist=True)  
         
         # 生成epoch内损失均值数据
         loss_result = self.loss_result
@@ -962,7 +948,22 @@ class FuturesTransformerModule(MlpModule):
             loss_total += float(row['total']) * real_batch_size     
         loss_main = loss_main/real_batch_size_sum
         loss_total = loss_total/real_batch_size_sum 
-        self.loss_result = [loss_main,loss_total]
+        self.loss_result = [loss_main,loss_total]   
+             
+        if self.outer_call:
+            return
+        
+        # 打印相关指标
+        if rate_total is not None and rate_total.shape[0] > 0:
+            for col in rate_total.columns:
+                if col != "total_cnt":
+                    self.log(col, rate_total[col].values[0], prog_bar=True,sync_dist=True)  
+            dur_num = self.cut_len - 1
+            anno_yield = rate_total['yield_rate'].values[0] * (240 / date_total_num) / (2 * self.pred_top_num * dur_num) 
+            self.log("anno_yield", anno_yield, prog_bar=True,sync_dist=True) 
+            self.log("trend_eva_diff", rate_total["trend_eva_diff"].values[0], prog_bar=True,sync_dist=True) 
+            # self.log("cate_corr_rate", rate_total["cate_corr_rate"].values[0], prog_bar=True,sync_dist=True)
+            # self.log("cate_yield", rate_total["cate_yield"].values[0], prog_bar=True,sync_dist=True)  
                 
         output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_total, \
             past_future_round_targets_total, future_week_info_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
@@ -1366,6 +1367,8 @@ class FuturesTransformerModule(MlpModule):
         """计算当前epoch的验证损失均值"""
         
         loss_detail_rebuild = [loss_detail[key].item() for key in loss_detail.keys()]
+        if len(loss_detail_rebuild)==1:
+            loss_detail_rebuild = [0.0] + loss_detail_rebuild
         loss_detail_rebuild = loss_detail_rebuild + [real_batch_size,batch_size]
         self.loss_result.append(loss_detail_rebuild)
                                                       
