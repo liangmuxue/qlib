@@ -319,6 +319,8 @@ class FuturesTransformerModule(MlpModule):
         self.main_task_seq = main_task_seq
         self.time_encoder = None
         self.nhead = 4
+        self.cate_mode = 'cateMain'
+        # self.cate_mode = 'cateTotal'        
         # 趋势数值量级区间
         self.trend_threhold = None
 
@@ -334,7 +336,7 @@ class FuturesTransformerModule(MlpModule):
         # For pred step1 result
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH, INTER_RS_FILEPATH)
         self.result_columns = ["date", "indus_index", "trend_flag", "price_inf", "ce_inf"]
-        
+        self.outer_call = False
         
     def set_outer_params(self, params):
         for name in params:
@@ -622,6 +624,7 @@ class FuturesTransformerModule(MlpModule):
     def on_validation_epoch_start(self): 
         self.import_price_result = None
         self.total_imp_cnt = 0
+        self.loss_result = []
     
     def get_optimizer_size(self):
         return self.opt_size
@@ -789,8 +792,11 @@ class FuturesTransformerModule(MlpModule):
         (corr_loss_combine, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
 
         batch_data = np.ones([1])
-        
         self.dump_val_data(val_batch, output, batch_data)
+        real_batch_size = output[-1].shape[0]
+        batch_size = self.trainer.val_dataloaders[0].batch_size        
+        self.dump_loss_data(detail_loss[-1],batch_size=batch_size,real_batch_size=real_batch_size)
+        
         return loss
         
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
@@ -927,7 +933,29 @@ class FuturesTransformerModule(MlpModule):
         rate_total, coll_result,trend_result,cate_result = self.combine_result_data(self.output_result, pred_top_num=self.pred_top_num)
         if rate_total is None:
             return
+        self.rate_total = rate_total
         date_total_num = float(coll_result['date'].unique().shape[0])
+        
+        # 生成epoch内损失均值数据
+        loss_result = self.loss_result
+        loss_result = pd.DataFrame(np.array(loss_result),columns=['main','total','real_batch_size','batch_size'])
+        real_batch_size_sum = 0
+        batch_size_sum = 0
+        loss_main = 0
+        loss_total = 0
+        # 综合每个批次size与标准批次size，计算实际loss数据
+        for i,row in loss_result.iterrows():
+            real_batch_size = int(row['real_batch_size'])
+            real_batch_size_sum += real_batch_size
+            batch_size_sum += int(row['batch_size'])
+            loss_main += float(row['main']) * real_batch_size
+            loss_total += float(row['total']) * real_batch_size     
+        loss_main = loss_main/real_batch_size_sum
+        loss_total = loss_total/real_batch_size_sum 
+        self.loss_result = [loss_main,loss_total]  
+        
+        if self.outer_call:
+            return                
         
         # 打印相关指标
         if rate_total is not None and rate_total.shape[0] > 0:
@@ -1339,7 +1367,15 @@ class FuturesTransformerModule(MlpModule):
                 ['long',long_suc['diff_range'].sum(),-long_fail['diff_range'].sum(),-long_fail_withtrend['diff_range'].sum()]]
         yield_rate_info = pd.DataFrame(np.array(data),columns=['mode',"suc_yield","fail_yield","fail_trend_yield"])            
         return (indus_info,cy_info,win_rate_info,yield_rate_info)        
+
+    def dump_loss_data(self, loss_detail,batch_size=32,real_batch_size=32):
+        """计算当前epoch的验证损失均值"""
         
+        loss_detail_rebuild = [loss_detail[key].item() for key in loss_detail.keys()]
+        if len(loss_detail_rebuild)==1:
+            loss_detail_rebuild = [0.0] + loss_detail_rebuild
+        loss_detail_rebuild = loss_detail_rebuild + [real_batch_size,batch_size]
+        self.loss_result.append(loss_detail_rebuild)       
                                                          
     def dump_val_data(self, val_batch, outputs, batch_data):
     
@@ -1521,8 +1557,10 @@ class FuturesTransformerModule(MlpModule):
             (features, cate_data,trend_logits_item) = output_list
             # 类别比较结果
             if cate_result is None:
-                # cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)   
-                cate_compare_result = self.compute_cateMain_compare(trend_list_main,batch_no=i,date=date)   
+                if self.cate_mode=='cateMain':
+                    cate_compare_result = self.compute_cateMain_compare(trend_list_main,batch_no=i,date=date)   
+                else:
+                    cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)  
             else:
                 cate_compare_result =  cate_result[cate_result['date']==date]               
             if trend_result is None:
@@ -1534,7 +1572,10 @@ class FuturesTransformerModule(MlpModule):
             if trend_result_item.shape[0]==0:
                 continue     
             # 对候选类别进行筛选            
-            trend_result_item = self.sumup_trend_with_cateMain(trend_result_item,cate_compare_result)   
+            if self.cate_mode=='cateMain':
+                trend_result_item = self.sumup_trend_with_cateMain(trend_result_item,cate_compare_result)   
+            else:
+                trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)  
             # 生成目标索引
             result_list = self.build_import_index(output_data=output_list, trend_result=trend_result_item,
                                                   cate_result=cate_compare_result,pred_top_num=pred_top_num,date=date,batch_no=i)
@@ -1568,8 +1609,12 @@ class FuturesTransformerModule(MlpModule):
             for i,row in coll_results.iterrows():
                 p0 = row['p0']
                 p1 = row['p1']
-                coll_results.loc[(coll_results['p0']==p0)&(coll_results['p1']==p1)&(coll_results['date']==date),['real_trend_flag','trend_match_flag']] = \
-                   trend_result_item[(trend_result_item['p0']==p0)&(trend_result_item['p1']==p1)][['real_trend_flag','trend_match_flag']].values
+                if self.cate_mode=='cateTotal':
+                    coll_results.loc[(coll_results['p0']==p0)&(coll_results['p1']==p1)&(coll_results['date']==date),['real_trend_flag','trend_match_flag']] = \
+                       trend_result_item[(trend_result_item['p0']==p0)&(trend_result_item['p1']==p1)][['real_trend_flag','trend_match_flag']].values
+                else:
+                    coll_results.loc[(coll_results['p0']==p0)&(coll_results['date']==date),['real_trend_flag','trend_match_flag']] = \
+                       trend_result_item[(trend_result_item['p0']==p0)][['real_trend_flag','trend_match_flag']].values                    
                 coll_results['trend_match_rate'] = np.sum(coll_results['trend_match_flag'])/coll_results.shape[0]
                           
             # 把结果数据整合到预测记录中
@@ -1682,8 +1727,10 @@ class FuturesTransformerModule(MlpModule):
         # 同时从正反2个方向选取品种
         trend_result_item = trend_result[(trend_result['date']==date)]
         trend_result_can = trend_result_item[(trend_result_item['is_can']==1)]
-        # cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
-        cancidate_list = self.compute_arg_sort_by_total_trend(features,trend_result=trend_result,batch_no=batch_no,date=date)     
+        if self.cate_mode=='cateTotal':
+            cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)
+        else:   
+            cancidate_list = self.compute_arg_sort_by_main_trend(features,trend_result=trend_result,batch_no=batch_no,date=date)     
         
         return cancidate_list
     
@@ -1895,8 +1942,8 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index_total
         
-    def compute_arg_sort_by_total_trend(self, features,trend_result=None,date=None,batch_no=0,top_num=2):
-        """根据输出进行排序,参照总体输出趋势"""
+    def compute_arg_sort_by_main_trend(self, features,trend_result=None,date=None,batch_no=0,top_num=2):
+        """根据输出进行排序,参照大类别输出趋势"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         ins_all = FuturesMappingUtil.get_all_instrument(sw_ins_mappings)
@@ -1968,17 +2015,18 @@ class FuturesTransformerModule(MlpModule):
             overroll_trend = row.top_flag
             p1 = row.p1
             p0 = row.p0
-            trend_target_item = trend_target[(trend_target['p0']==p0)&(trend_target['p1']==p1)]['value'].values[0]
-            if p0=='total':
-                ins = keep_index
-            else:
+            if self.cate_mode=='cateTotal':
                 ins = scale_arr[p0][p1]['instruments']
+            else:
+                ins = get_scale_cate_ins(self.scale_arr,p0)
             ins = np.intersect1d(ins,keep_index)
             # real_trend_values = np.sum(open_diff[ins]>0)/ins.shape[0]
             real_trend_values = open_diff[ins].mean()
             # Do Target Scale
-            real_trend_values_scale = scale_value(real_trend_values,trend_target_item.min(),trend_target_item.max(),
-                                self.trend_threhold['min'],self.trend_threhold['max'])
+            # trend_target_item = trend_target[(trend_target['p0']==p0)&(trend_target['p1']==p1)]['value'].values[0]
+            # real_trend_values_scale = scale_value(real_trend_values,trend_target_item.min(),trend_target_item.max(),
+            #                     self.trend_threhold['min'],self.trend_threhold['max'])
+            real_trend_values_scale = 0.0
             ts = target_info[imp_idx]
             diff_range, p_taraget_class, _ = self.criterion.compute_diff_range_class(ts)
             # 根据多空判断取得实际对应的类别
