@@ -26,7 +26,7 @@ from .multiTask_optimizer import MultiTaskOptimizer,analyze_similarity
 from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,scale_value, normalization_axis
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
-from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr
+from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr,get_scale_cate_ins
 import matplotlib.pyplot as plt
 
 from pandas.errors import SettingWithCopyWarning
@@ -334,7 +334,7 @@ class FuturesTransformerModule(MlpModule):
         # For pred step1 result
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH, INTER_RS_FILEPATH)
         self.result_columns = ["date", "indus_index", "trend_flag", "price_inf", "ce_inf"]
-        self.outer_call = False
+        
         
     def set_outer_params(self, params):
         for name in params:
@@ -617,12 +617,11 @@ class FuturesTransformerModule(MlpModule):
         
         
     def on_validation_end(self): 
-        end = 1
+        pass
         
     def on_validation_epoch_start(self): 
         self.import_price_result = None
         self.total_imp_cnt = 0
-        self.loss_result = []
     
     def get_optimizer_size(self):
         return self.opt_size
@@ -790,11 +789,8 @@ class FuturesTransformerModule(MlpModule):
         (corr_loss_combine, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
 
         batch_data = np.ones([1])
-        self.dump_val_data(val_batch, output, batch_data)
-        real_batch_size = output[-1].shape[0]
-        batch_size = self.trainer.val_dataloaders[0].batch_size
-        self.dump_loss_data(detail_loss[-1],batch_size=batch_size,real_batch_size=real_batch_size)
         
+        self.dump_val_data(val_batch, output, batch_data)
         return loss
         
     def validation_step_real(self, val_batch, batch_idx) -> torch.Tensor:
@@ -828,25 +824,27 @@ class FuturesTransformerModule(MlpModule):
         loss, detail_loss = self._compute_loss((output, vr_class, vr_class_list),
                     (future_target, future_covs, target_class, past_future_round_targets, index_round_targets, price_targets, future_week_info,target_info), optimizers_idx=-1)
         (corr_loss, ce_loss, fds_loss, cls_loss, cls_detail) = detail_loss
+        self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
+        preds_combine = []
+        for i in range(self.opt_size):
+            task_weights = self.task_weights[i]
+            if ce_loss[i] != 0 and len(task_weights) > 1:
+                self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
+            if cls_loss[i] != 0:
+                self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
+                if cls_detail is not None:
+                    for key in cls_detail.keys():
+                        if key=='total':
+                            self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)  
+                        else:
+                            self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)  
+            if fds_loss[i] != 0 and len(task_weights) > 2:
+                self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
+            if corr_loss[i] != 0 and len(task_weights) > 3:
+                self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)   
+
         output_combine = (output, vr_class, price_targets, past_future_round_targets)
-        if not self.outer_call:
-            for i in range(self.opt_size):
-                task_weights = self.task_weights[i]
-                if ce_loss[i] != 0 and len(task_weights) > 1:
-                    self.log("val_ce_loss_{}".format(i), ce_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
-                if cls_loss[i] != 0:
-                    self.log("val_cls_loss_{}".format(i), cls_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)
-                    if cls_detail is not None:
-                        for key in cls_detail.keys():
-                            if key=='total':
-                                self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)  
-                            else:
-                                self.log("val_trunk_detail_{}".format(key), cls_detail[key], batch_size=val_batch[0].shape[0], prog_bar=False,sync_dist=True)  
-                if fds_loss[i] != 0 and len(task_weights) > 2:
-                    self.log("val_fds_loss_{}".format(i), fds_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)                
-                if corr_loss[i] != 0 and len(task_weights) > 3:
-                    self.log("val_corr_loss_{}".format(i), corr_loss[i], batch_size=val_batch[0].shape[0], prog_bar=True,sync_dist=True)   
-            self.log("val_loss", loss, batch_size=val_batch[0].shape[0], prog_bar=True, sync_dist=True)
+        
                 
         return loss, detail_loss, output_combine       
 
@@ -930,41 +928,20 @@ class FuturesTransformerModule(MlpModule):
         if rate_total is None:
             return
         date_total_num = float(coll_result['date'].unique().shape[0])
-        self.rate_total = rate_total
-        
-        # 生成epoch内损失均值数据
-        loss_result = self.loss_result
-        loss_result = pd.DataFrame(np.array(loss_result),columns=['main','total','real_batch_size','batch_size'])
-        real_batch_size_sum = 0
-        batch_size_sum = 0
-        loss_main = 0
-        loss_total = 0
-        # 综合每个批次size与标准批次size，计算实际loss数据
-        for i,row in loss_result.iterrows():
-            real_batch_size = int(row['real_batch_size'])
-            real_batch_size_sum += real_batch_size
-            batch_size_sum += int(row['batch_size'])
-            loss_main += float(row['main']) * real_batch_size
-            loss_total += float(row['total']) * real_batch_size     
-        loss_main = loss_main/real_batch_size_sum
-        loss_total = loss_total/real_batch_size_sum 
-        self.loss_result = [loss_main,loss_total]   
-             
-        if self.outer_call:
-            return
         
         # 打印相关指标
         if rate_total is not None and rate_total.shape[0] > 0:
             for col in rate_total.columns:
                 if col != "total_cnt":
                     self.log(col, rate_total[col].values[0], prog_bar=True,sync_dist=True)  
+            
             dur_num = self.cut_len - 1
             anno_yield = rate_total['yield_rate'].values[0] * (240 / date_total_num) / (2 * self.pred_top_num * dur_num) 
             self.log("anno_yield", anno_yield, prog_bar=True,sync_dist=True) 
             self.log("trend_eva_diff", rate_total["trend_eva_diff"].values[0], prog_bar=True,sync_dist=True) 
             # self.log("cate_corr_rate", rate_total["cate_corr_rate"].values[0], prog_bar=True,sync_dist=True)
             # self.log("cate_yield", rate_total["cate_yield"].values[0], prog_bar=True,sync_dist=True)  
-                
+        
         output_3d, past_target_3d, future_target_3d, target_class_3d, price_targets_total, \
             past_future_round_targets_total, future_week_info_total, index_round_targets_3d, target_info_3d = self.combine_output_total(self.output_result)
         viz_total_size = 0
@@ -1363,15 +1340,7 @@ class FuturesTransformerModule(MlpModule):
         yield_rate_info = pd.DataFrame(np.array(data),columns=['mode',"suc_yield","fail_yield","fail_trend_yield"])            
         return (indus_info,cy_info,win_rate_info,yield_rate_info)        
         
-    def dump_loss_data(self, loss_detail,batch_size=32,real_batch_size=32):
-        """计算当前epoch的验证损失均值"""
-        
-        loss_detail_rebuild = [loss_detail[key].item() for key in loss_detail.keys()]
-        if len(loss_detail_rebuild)==1:
-            loss_detail_rebuild = [0.0] + loss_detail_rebuild
-        loss_detail_rebuild = loss_detail_rebuild + [real_batch_size,batch_size]
-        self.loss_result.append(loss_detail_rebuild)
-                                                      
+                                                         
     def dump_val_data(self, val_batch, outputs, batch_data):
     
         output, vr_class, price_outputs, past_future_round_targets = outputs
@@ -1552,8 +1521,8 @@ class FuturesTransformerModule(MlpModule):
             (features, cate_data,trend_logits_item) = output_list
             # 类别比较结果
             if cate_result is None:
-                cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)   
-                # cate_compare_result = self.compute_cateMain_compare(trend_list_main,batch_no=i,date=date)   
+                # cate_compare_result = self.compute_cate_compare(cate_data,batch_no=i,date=date)   
+                cate_compare_result = self.compute_cateMain_compare(trend_list_main,batch_no=i,date=date)   
             else:
                 cate_compare_result =  cate_result[cate_result['date']==date]               
             if trend_result is None:
@@ -1565,7 +1534,7 @@ class FuturesTransformerModule(MlpModule):
             if trend_result_item.shape[0]==0:
                 continue     
             # 对候选类别进行筛选            
-            trend_result_item = self.sumup_trend_with_cate(trend_result_item,cate_compare_result)   
+            trend_result_item = self.sumup_trend_with_cateMain(trend_result_item,cate_compare_result)   
             # 生成目标索引
             result_list = self.build_import_index(output_data=output_list, trend_result=trend_result_item,
                                                   cate_result=cate_compare_result,pred_top_num=pred_top_num,date=date,batch_no=i)
@@ -1713,8 +1682,8 @@ class FuturesTransformerModule(MlpModule):
         # 同时从正反2个方向选取品种
         trend_result_item = trend_result[(trend_result['date']==date)]
         trend_result_can = trend_result_item[(trend_result_item['is_can']==1)]
-        cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
-        # cancidate_list = self.compute_arg_sort_by_total_trend(features,cate_result=cate_result,batch_no=batch_no,date=date)     
+        # cancidate_list = self.compute_arg_sort_by_trend(features,trend_result=trend_result_can,cate_result=cate_result,batch_no=batch_no,date=date)   
+        cancidate_list = self.compute_arg_sort_by_total_trend(features,trend_result=trend_result,batch_no=batch_no,date=date)     
         
         return cancidate_list
     
@@ -1762,6 +1731,7 @@ class FuturesTransformerModule(MlpModule):
     def sumup_trend_with_cateMain(self,trend_result,cate_result):
         """参考类别比较结果，对类别趋势结果进行筛选，获取类别候选"""
         
+        trend_result = trend_result.groupby('p0').first().reset_index()
         trend_result['is_can'] = 0
         trend_result['can_trend_flag'] = 0
         trend_result['can_ins_num'] = 0
@@ -1769,12 +1739,12 @@ class FuturesTransformerModule(MlpModule):
         trend_result = trend_result.sort_values(by='pred_trend_value_scale').reset_index()
         cate_result = cate_result.sort_values(by='value').reset_index()
         long_cate_top = cate_result.iloc[-1]
-        long_cate_top_dict = {'p0':long_cate_top['p0'],'p1':long_cate_top['p1']}
+        long_cate_top_dict = {'p0':long_cate_top['p0']}
         short_cate_top = cate_result.iloc[0]
-        short_cate_top_dict = {'p0':short_cate_top['p0'],'p1':short_cate_top['p1']}
+        short_cate_top_dict = {'p0':short_cate_top['p0']}
         long_condi = (trend_result['p0']==long_cate_top_dict['p0'])
         short_condi = (trend_result['p0']==short_cate_top_dict['p0'])    
-        # 31模式：如果总体趋势为多方，则取得1个多方小类（内部品种3）。空方则反过来。趋势为平，则类别1+1，品种2+2
+        # 31模式：如果总体趋势为多方，则取得1个多方大类（内部品种3个,空方大类内部1个。空方则反过来。趋势为平，则品种2+2
         if total_trend_flag==1:
             trend_result.loc[long_condi,'is_can'] = 1
             trend_result.loc[long_condi,'can_trend_flag'] = 1
@@ -1798,7 +1768,8 @@ class FuturesTransformerModule(MlpModule):
             trend_result.loc[short_condi,'can_ins_num'] = 2        
         
         trend_result = trend_result.astype({'is_can':int,'can_trend_flag':int,'can_ins_num':int})  
-        return trend_result           
+        return trend_result        
+       
     def sumup_trend(self,trend_result):
         """对类别趋势结果进行筛选，获取类别候选"""
         
@@ -1924,7 +1895,7 @@ class FuturesTransformerModule(MlpModule):
         
         return pre_index_total
         
-    def compute_arg_sort_by_total_trend(self, features,cate_result=None,date=None,batch_no=0,top_num=2):
+    def compute_arg_sort_by_total_trend(self, features,trend_result=None,date=None,batch_no=0,top_num=2):
         """根据输出进行排序,参照总体输出趋势"""
         
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
@@ -1934,20 +1905,22 @@ class FuturesTransformerModule(MlpModule):
         
         scale_arr = emb_scale_arr(self.scale_arr)
         # 根据趋势增减top数量
-        for i,row in cate_result.iterrows():
+        for i,row in trend_result.iterrows():
             p0 = row['p0']
             can_trend_flag = row['can_trend_flag']
             can_ins_num = row['can_ins_num']     
             pred_trend_value = row['pred_trend_value'] 
             pred_trend_value_scale = row['pred_trend_value_scale']
-            rel_ins = scale_arr[p0]['rel_ins']
-            features_item = features[p0][batch_no][rel_ins]
+            if p0=='total':
+                continue
+            rel_ins = get_scale_cate_ins(self.scale_arr,p0)
+            features_item = features[p0][batch_no]
             if can_trend_flag==1:
                 pre_index = np.argsort(-features_item)[:can_ins_num]
             else:
                 pre_index = np.argsort(features_item)[:can_ins_num]            
             for index in pre_index:
-                real_index = scale_arr[p0]['instruments'][index]
+                real_index = rel_ins[index]
                 p1 = 'any'
                 pre_index_total.append([real_index,can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
         pre_index_total = np.array(pre_index_total)
@@ -2182,3 +2155,4 @@ class FuturesTransformerModule(MlpModule):
         self.result_target = result_target
         
         return result_target
+                         
