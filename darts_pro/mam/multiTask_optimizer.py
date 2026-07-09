@@ -320,7 +320,7 @@ class MultiTaskOptimizer(Adam):
         # 多个任务的梯度相加（带权重）
         total_gradients,gradient_components = self.grad_combine(gradient_components,dynamic_grad=False)
         # 计算重点层梯度参数数值情况
-        total_norm_trans,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)        
+        total_norm_encoder,total_norm_decoder,total_norm_ins_layer = self.compute_focus_grad_info(total_gradients)        
         # 统计梯度范数
         task_grad_norms = [self._compute_grad_norm(comp) for comp in gradient_components] 
                 
@@ -334,8 +334,9 @@ class MultiTaskOptimizer(Adam):
         return {
             'total_loss': show_loss,
             'total_grad_norm': self._compute_total_grad_norm(total_gradients),
-            'total_norm_trans': total_norm_trans,
-            'total_norm_ins_layer': total_norm_ins_layer,
+            'total_norm_encoder': total_norm_encoder,
+            'total_norm_decoder': total_norm_decoder,
+            'total_norm_ins_layer': total_norm_ins_layer,  
             'conflict_analysis': {'conflict_count':conflict_count,'similarity':similarity},
             'task_grad_norms': task_grad_norms if gradient_components else None,
             'auxiliary_weights': dynamic_weights_info['auxiliary_weights'], 

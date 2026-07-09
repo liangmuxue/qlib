@@ -628,7 +628,7 @@ class FuturesIndustryDataset(GenericShiftedDataset):
             # dayofweek_array = self.ass_data[code][5][past_start_ser:future_end_ser]
             # week_array = self.ass_data[code][6][past_start_ser:future_end_ser]
             # 计算开盘价目标差值范围
-            open_diff = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
+            # open_diff = (open_array[-self.output_chunk_length+self.cut_len-1] - open_array[-self.output_chunk_length])/open_array[-self.output_chunk_length]*100
             open_diff_norm = diff_range_norm[-self.output_chunk_length+self.cut_len-1]
             open_diff = diff_range[-self.output_chunk_length+self.cut_len-1]
             # future_dayofweek = dayofweek_array[-self.output_chunk_length+self.cut_len-1]
@@ -802,8 +802,8 @@ class FuturesIndustryDataset(GenericShiftedDataset):
         # 记录涨跌品种数量比例，用于整体趋势损失
         target_info_total[self.main_index]['long_ins_num'] = np.sum(open_diff_arr>0)
         
-        # if future_start_datetime==20241225:
-        #     result_file_path = "custom/data/results/data_compare_val_20250812.pkl"
+        # if future_start_datetime==20250403:
+        #     result_file_path = "custom/data/results/data_compare_val_20250403.pkl"
         #     results = [target_info_total,past_target_total, past_covariate_total, historic_future_covariates_total,future_covariates_total,static_covariate_total
         #                ,past_future_round_targets[:,:self.input_chunk_length,:],index_round_targets[:,:self.input_chunk_length,:]]
         #     with open(result_file_path, "wb") as fout:

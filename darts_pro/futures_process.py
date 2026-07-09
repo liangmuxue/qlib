@@ -228,24 +228,34 @@ class FuturesProcessModel(TftDataframeModel):
                     
                     self.trainer.validate(model=model,dataloaders=self.test_loader)
                     loss_result = model.loss_result
-                    [loss_main,loss_total] = loss_result
-                    print("main loss:{},total loss:{}".format(loss_main,loss_total))
-                    tb.add_scalar("epoch", trainer.current_epoch, trainer.current_epoch)   
-                    tb.add_scalar("main", loss_main, trainer.current_epoch)   
-                    tb.add_scalar("total", loss_total, trainer.current_epoch)       
+                    tb.add_scalar("epoch", trainer.current_epoch, trainer.current_epoch)  
+                    for key in loss_result:
+                        if self.caller.optargs["target_mode"][0]==3 and key.startswith("cate_main"):
+                            continue                           
+                        print("{} loss:{}".format(key,loss_result[key]))
+                        tb.add_scalar(key, loss_result[key], trainer.current_epoch)   
                     
                     rate_total = model.rate_total                               
                     for key in rate_total.columns:
-                        if key.startswith("dist"):
-                            continue
-                        if key.startswith("trend"):
-                            continue             
-                        if key=='win_rate' or key=='yield_rate' or  key=='total_cnt':
-                            continue                                      
+                        if self.caller.optargs["target_mode"][0]==2:
+                            if key.startswith("dist"):
+                                continue
+                            if key.startswith("trend"):
+                                continue             
+                            if key=='win_rate' or key=='yield_rate' or key=='total_cnt':
+                                continue   
+                        else:
+                            if key.startswith("trend") or key=='total_cnt' or key.startswith("dist"):
+                                continue      
+                            if key.startswith("val_"):
+                                continue          
                         item = rate_total[key].values[0]
-                        tb.add_scalar("{}".format(key), item, trainer.current_epoch)
+                        tb.add_scalar("rate/{}".format(key), item, trainer.current_epoch)
                         if key=='cate_yield':
                             print("cate_yield:{}".format(item))
+                    if self.caller.optargs["target_mode"][0]==3:
+                        tb.add_scalar("rate/anno_yield", model.anno_yield, trainer.current_epoch)
+                        print("anno_yield:",model.anno_yield)
                         
             trainer,model_inner,train_loader,val_loader,_ = \
             self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
@@ -623,7 +633,13 @@ class FuturesProcessModel(TftDataframeModel):
             def forward_to_end(self,x_array):
                 x = self.model(*x_array,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)   
                 # print("output is:{}".format(x[self.output_index][0].mean()))
+                if self.output_index==1:
+                    return self.transfer_features(x[self.output_index][0])
                 return x[self.output_index][0]
+            
+            def transfer_features(self,fea_out):
+                monitor_key = "abpfi"
+                return fea_out[monitor_key]
             
             def forward_to_layer(self,x_array):
                 if self.layer=='model.trans_model_encoder':

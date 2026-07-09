@@ -941,8 +941,9 @@ if __name__ == "__main__":
     # futures_zh_minute_sina_df = ak.futures_zh_minute_sina(symbol="FU2509", period="1")
     # print(futures_zh_minute_sina_df)
     # 历史行情
-    # futures_hist_em_df = futures_hist_em(symbol="LH", period="daily")
+    # futures_hist_em_df = futures_hist_em(symbol="BU", period="daily")
     # futures_hist_em_df['date'] = futures_hist_em_df['时间']
+    # futures_hist_em_df.to_csv("bu.csv",index=None)
     # print(futures_hist_em_df)    
     # futures_hist_df = ak.futures_zh_daily_sina(symbol="A2603")
     # print(futures_hist_df)   

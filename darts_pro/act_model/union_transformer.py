@@ -508,7 +508,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         
         time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.1)
         
-        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.01)
+        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.03)
         if PRINT_STD_FLAG:
             print("obs_proj std:{}".format(obs_feat.std()))          
         # 2.1 融合历史观测+时间嵌入+样本交互
@@ -579,7 +579,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         hist_summary = hist_summary * 0.8
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        fur_scale = 0.002 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
+        fur_scale = 0.005 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
@@ -710,15 +710,27 @@ class SparseGateFeatureTopK(nn.Module):
             nn.init.zeros_(branch_trend_combine_layer.linear_output.bias)
             trend_layer.append(branch_trend_combine_layer)
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
-        # 所有小类的mlp 
-        # self.branch_trend_combine_layer_total = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=hidden_dim,
-        #                             layer_norm=False,batch_norm=True,dropout=0,relu=False) 
         self.branch_trend_combine_layer_total = nn.Sequential(nn.Linear(scales_dict.shape[0],scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))     
         # 小类mlp的残差，加速收敛
         self.total_resid = nn.Sequential(nn.Linear(sample_dim*input_dim,scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))       
+        
         # 大类的mlp
-        self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0)   
+        trend_layer = [] 
+        for i,item in enumerate(scales_arr):
+            inner_sample_dim = item['instruments'].shape[0]
+            branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
+                                    layer_norm=False,batch_norm=True,dropout=dropout)     
+            nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
+            nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
+            nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
+            nn.init.zeros_(branch_trend_combine_layer.linear_output.bias)
+            trend_layer.append(branch_trend_combine_layer)
+        self.branch_trend_combine_layer_main = nn.ModuleList(trend_layer)      
+        self.branch_trend_combine_layer_main_bn = nn.Sequential(nn.Linear(len(scales_arr),len(scales_arr)),nn.BatchNorm1d(len(scales_arr)))     
+        # self.branch_trend_combine_layer_main = LinelessLayer(sample_dim*input_dim,len(scales_arr),hidden_size=hidden_dim,relu=True,
+        #                             layer_norm=False,batch_norm=True,dropout=0)   
+        # 大类mlp的残差，加速收敛
+        self.main_resid = nn.Sequential(nn.Linear(sample_dim*input_dim,len(scales_arr)),nn.BatchNorm1d(len(scales_arr)))          
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
@@ -744,7 +756,7 @@ class SparseGateFeatureTopK(nn.Module):
                 trend_logits_list[key] = trend_index_logits
         # Total Trend
         # trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}
-        # Cate Compare
+        # Total Cate Compare
         trend_list = []
         for i,item in self.scales_dict.iterrows():
             ins = torch.Tensor(item['instruments']).to(x.device).long()
@@ -760,7 +772,17 @@ class SparseGateFeatureTopK(nn.Module):
         trend_list_total = trend_list + 0.1 * resid_data
         if PRINT_STD_FLAG:
             print("trend_list std:{} and resid_data std:{}".format(trend_list.std(),resid_data.std()))        
-        trend_list_main = self.branch_trend_combine_layer_main(trend_list)
+        # Main Cate compute    
+        trend_list = []
+        for i,item in enumerate(self.scales_arr):            
+            ins = torch.Tensor(item['instruments']).to(x.device).long()
+            x_part = x[:,ins,:]
+            cate_data = self.branch_trend_combine_layer_main[i](x_part.reshape(batch_size,-1)).squeeze(-1)
+            trend_list.append(cate_data)    
+        trend_list = torch.stack(trend_list).transpose(1,0) 
+        trend_list = self.branch_trend_combine_layer_main_bn(trend_list)
+        resid_data = self.main_resid(x.reshape([batch_size,-1]))
+        trend_list_main = trend_list + 0.1 * resid_data        
         
         return trend_logits_list,features_list,trend_list_total,trend_list_main
     
