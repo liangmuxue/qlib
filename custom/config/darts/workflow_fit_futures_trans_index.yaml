@@ -87,9 +87,9 @@ task:
                work_dir: 'custom/data/darts'
                model_name: "Futures_cleanData2022TrainCutlen2_transMoreLoss_2507"
                model_type: 'mlp'
-               load_weight: True 
+               load_weight: False 
                best_weight: False
-               task_weights: [[1.0,1.0],[0.5,0.5]]
+               task_weights: [[1.0,2.0],[0.5,0.5]]
                grad_limits: [5.0,3.0]
                pred_weights: [1.0,0.0]
                main_task_seq: [[1],[1]]
