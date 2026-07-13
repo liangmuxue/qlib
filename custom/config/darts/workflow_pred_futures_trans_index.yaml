@@ -85,7 +85,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2022TrainCutlen2_transMoreLoss3_2507"
+               model_name: "Futures_cleanData2022TrainCutlen2_transMoreLoss_2507"
                model_type: 'mlp'
                load_weight: True 
                best_weight: False

@@ -14,10 +14,6 @@ from .cov_cnn import LinelessLayer
 
 PRINT_STD_FLAG = False
 
-def set_global(value):
-    global PRINT_STD_FLAG
-    PRINT_STD_FLAG = value
-    
 # ---------------------- 核心新增：样本维度交互模块 ----------------------
 class SampleCrossAttention(nn.Module):
     """样本维度自注意力：建模样本间（站点/设备/用户）的关联"""
@@ -135,7 +131,6 @@ class GatedResidualNetwork(nn.Module):
     """门控残差网络（GRN）：TFT核心特征处理模块"""
     def __init__(self, input_dim, hidden_dim, output_dim, context_combine_dim=None,dropout=0.1):
         super().__init__()
-        
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
         self.gate = nn.Linear(output_dim, output_dim)
@@ -152,7 +147,7 @@ class GatedResidualNetwork(nn.Module):
         self.norm_ctx = nn.LayerNorm(hidden_dim)         
         # 残差连接适配
         self.residual = nn.Linear(input_dim, output_dim) if input_dim != output_dim else nn.Identity()
-    
+
     def forward(self, x, context=None,scale_ctx=0.1,no_ctx_squeeze=False):
         """
         x: (batch, seq_len, input_dim) 或 (batch, input_dim)
@@ -450,6 +445,16 @@ class TFTWithFutureCovariatesEn(nn.Module):
         self.transformer_end = nn.Linear(d_model,hidden_dim)
         
         
+    def get_dynamic_target_ratio(self,epoch,max_epochs, final_target=1.0,warmup_ratio=0.5):
+        # 线性退火：前期偏向浅层，后期收敛到固定目标比例
+        
+        total_epochs = max_epochs
+        if epoch < total_epochs * 0.2 or total_epochs==0:
+            return warmup_ratio
+        else:
+            alpha = (epoch - total_epochs*0.2) / (total_epochs*0.8)
+            return warmup_ratio * (1-alpha) + final_target * alpha
+            
     def forward(self, static_feat=None, obs_feat=None, time_embed_hist=None,future_single_emb=None,current_epoch=0,max_epochs=0):
         """
         static_feat: [B, S, static_dim] - 静态特征
@@ -501,7 +506,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         else:
             static_context_hist = None
         
-        time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.05)
+        time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.1)
         
         obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.03)
         if PRINT_STD_FLAG:
@@ -560,7 +565,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         self.tar_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
                      dropout=0.01, pred_len=1)          
         
-    def forward(self, hist_summary,future_single_emb=None,static_context_hist=None,current_epoch=0,max_epochs=0):
+    def forward(self, hist_summary,future_single_emb=None,static_context_hist=None):
 
         B, S, _ = hist_summary.shape
         hist_summary = hist_summary.reshape([B*S,-1])
@@ -574,7 +579,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         # hist_summary = hist_summary * 0.8
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        fur_scale = 0.005 # self.get_dynamic_target_ratio(current_epoch,epoch_dur=10,start_ratio=0.006,warmup_ratio=0.2)
+        fur_scale = 0.003 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
@@ -585,15 +590,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         # var_weights = var_weights.reshape(B, S, T, self.obs_dim)  # [B, S, T, obs_dim]
         
         return pred_tar           
-    
-    def get_dynamic_target_ratio(self,current_epoch,epoch_dur=10, start_ratio=0.01,warmup_ratio=0.2):
-        # 线性退火：前期确定数值，后续持续增加
-        
-        section_no = current_epoch//epoch_dur
-        target_radio = start_ratio + start_ratio * warmup_ratio * section_no
-        
-        return target_radio
-                    
+            
 class ContinuousToDiscreteIndex(nn.Module):
     def __init__(self, num_indices=3, hidden_dim=8):
         super().__init__()
@@ -706,7 +703,7 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=True,dropout=0.2)     
+                                    layer_norm=False,batch_norm=True,dropout=dropout)     
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
             nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
@@ -720,24 +717,12 @@ class SparseGateFeatureTopK(nn.Module):
         # 小类mlp的残差，加速收敛
         self.total_resid = nn.Sequential(nn.Linear(sample_dim*input_dim,scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))       
         # 大类的mlp
-        trend_layer = []
-        for i,item in enumerate(scales_arr):
-            inner_sample_dim = item['p_index'].shape[0]
-            branch_trend_combine_layer = LinelessLayer(inner_sample_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=True,dropout=0)     
-            nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
-            nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
-            nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
-            nn.init.zeros_(branch_trend_combine_layer.linear_output.bias)
-            trend_layer.append(branch_trend_combine_layer)     
-        self.branch_trend_combine_layer_main = nn.ModuleList(trend_layer)   
-        self.branch_trend_combine_layer_main_bn = nn.Sequential(nn.Linear(len(scales_arr),len(scales_arr)),nn.BatchNorm1d(len(scales_arr)))      
-        # self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-        #                             layer_norm=False,batch_norm=True,dropout=0)          
+        self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
+                                    layer_norm=False,batch_norm=True,dropout=0)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
-        # nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
-        # nn.init.zeros_(self.branch_trend_combine_layer_main.linear_output.bias)        
+        nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
+        nn.init.zeros_(self.branch_trend_combine_layer_main.linear_output.bias)        
 
                 
     def forward_combine(self, x):
@@ -770,30 +755,20 @@ class SparseGateFeatureTopK(nn.Module):
         if PRINT_STD_FLAG:
             print("trend_list std:{}".format(trend_list.std()))
         trend_list = self.branch_trend_combine_layer_total(trend_list)
+        if PRINT_STD_FLAG:
+            print("trend_list after std:{}".format(trend_list.std()))        
         # 直接残差连接transformer的输出，用于调整深层和浅层权重贡献度比例
-        resid_data = self.total_resid(x.reshape([batch_size,-1]))
-        trend_list_total = trend_list + 0.1 * resid_data
+        # resid_data = self.total_resid(x.reshape([batch_size,-1]))
+        trend_list_total = trend_list # + 0.1 * resid_data
+        trend_list_main = self.branch_trend_combine_layer_main(trend_list)
         if PRINT_STD_FLAG:
-            print("trend_list std:{} and resid_data std:{}".format(trend_list.std(),resid_data.std()))        
-        # 大类的mlp
-        trend_list = []
-        for i,item in enumerate(self.scales_arr):
-            x_part = trend_list_total[:,self.scales_arr[i]['p_index']]
-            cate_data = self.branch_trend_combine_layer_main[i](x_part.reshape(batch_size,-1)).squeeze(-1)
-            trend_list.append(cate_data)     
-        trend_list_main = torch.stack(trend_list).transpose(1,0)
-        if PRINT_STD_FLAG:
-            print("trend_list_main std:{}".format(trend_list_main.std()))   
-        trend_list_main = self.branch_trend_combine_layer_main_bn(trend_list_main)
-        if PRINT_STD_FLAG:
-            print("trend_list_main bn std:{}".format(trend_list_main.std()))   
-                                
+            print("trend_list_main std:{}".format(trend_list_main.std()))           
         return trend_logits_list,features_list,trend_list_total,trend_list_main
     
     def forward(self, x,output_index=2):
         output = self.forward_combine(x)
         return output[output_index]
-    
+
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
 
@@ -896,9 +871,8 @@ class UnionTransCombine(nn.Module):
         
         # 基础模型的向前传播
         hist_summary,static_context_hist = self.trans_model_encoder(static_covs,past_convs_item, his_future_emb,future_single_emb,current_epoch=current_epoch,max_epochs=max_epochs)   
-        pred_tar = self.trans_model_decoder(hist_summary,future_single_emb=future_single_emb,static_context_hist=static_context_hist,
-                                            current_epoch=current_epoch,max_epochs=max_epochs)  
-        tar_scale = 1.5 # self.get_dynamic_target_ratio(current_epoch,max_epochs)
+        pred_tar = self.trans_model_decoder(hist_summary,future_single_emb=future_single_emb,static_context_hist=static_context_hist)  
+        tar_scale = 2.0 # self.get_dynamic_target_ratio(current_epoch,max_epochs)
         pred_tar = pred_tar * tar_scale
         
         trend_logits_combine = []
