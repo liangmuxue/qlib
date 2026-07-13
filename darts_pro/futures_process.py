@@ -234,7 +234,6 @@ class FuturesProcessModel(TftDataframeModel):
                             continue                           
                         print("{} loss:{}".format(key,loss_result[key]))
                         tb.add_scalar(key, loss_result[key], trainer.current_epoch)   
-                    
                     rate_total = model.rate_total                               
                     for key in rate_total.columns:
                         if self.caller.optargs["target_mode"][0]==2:
@@ -254,8 +253,11 @@ class FuturesProcessModel(TftDataframeModel):
                         if key=='cate_yield':
                             print("cate_yield:{}".format(item))
                     if self.caller.optargs["target_mode"][0]==3:
-                        tb.add_scalar("rate/anno_yield", model.anno_yield, trainer.current_epoch)
                         print("anno_yield:",model.anno_yield)
+                        tb.add_scalar("rate/anno_yield", model.anno_yield, trainer.current_epoch)
+                    fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
+                    print("model.fur_scale:{}".format(fur_scale))
+                    tb.add_scalar('fur_scale', fur_scale, trainer.current_epoch)                         
                         
             trainer,model_inner,train_loader,val_loader,_ = \
             self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
@@ -481,6 +483,10 @@ class FuturesProcessModel(TftDataframeModel):
          
     
     def check_sampler_output(self,model,input):
+        
+        import darts_pro.act_model.union_transformer as ut
+        ut.set_global(True)
+        
         with torch.no_grad():
             input_1 = [item[:10] for item in input]
             input_2 = [item[10:20] for item in input]
@@ -597,7 +603,7 @@ class FuturesProcessModel(TftDataframeModel):
         # plt.close(fig)                
         #
 
-    def ind_layer_analysis(self,model,background_input,test_input,sample_num=10):
+    def ind_layer_analysis(self,model_ori,background_input,test_input,sample_num=10):
 
         class ShapWrapper(torch.nn.Module):
             """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
@@ -658,59 +664,60 @@ class FuturesProcessModel(TftDataframeModel):
                     x = x.reshape([x.shape[0],-1])
                 return x
         
-        output_index = 3
-        model = ShapWrapper(model,output_index=output_index)         
-        x = tuple([item[:50] for item in test_input])
-        baselines = tuple([xi[:50] for xi in background_input])
-        x_train = tuple([xi[50:100] for xi in background_input])
-        current_epoch = 130
-        max_epochs = 180
-        model.set_cur_epoch(current_epoch)
-        model.set_max_epochs(max_epochs)
-        # current_epoch = torch.tensor(current_epoch)
-        # y_baseline = model(*baselines)
-        # y_pred = model(*x)
-        # print("y_baseline:{},y_pred:{}".format(y_baseline.mean(),y_pred.mean()))
-        input_names = ['static_covs','past_convs','his_future_emb','future_single_emb']
-        # 对每个输入分别归因
-        # gs = GradientShap(model)
-        # for i in range(len(baselines)):
-        #     baselines_item = tuple([baselines[j] if j==i else x[j] for j in range(len(baselines))])
-        #     attr_inp_combine = []
-        #     for k in range(sample_num):
-        #         # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
-        #         x_single = tuple([item[k:k+1] for item in x])
-        #         attr_inp,delta = gs.attribute(x_single, baselines_item, n_samples=200, stdevs=0.1,target=0,return_convergence_delta=True)
-        #         attr_inp_combine.append(attr_inp[i])  
-        #     attr_inp_combine = torch.cat(attr_inp_combine)
-        #     print("input {} attr_inp shape:{},mean:{}".format(input_names[i],attr_inp_combine.shape, attr_inp_combine.abs().mean().item()))       
-
-        # 训练接和验证集的归因差异排查
-        ig = IntegratedGradients(model)
-        for i in range(len(baselines)):
-            train_importance_total = []
-            val_importance_total = []            
-            train_attr, delta_train = ig.attribute(x_train, target=0, return_convergence_delta=True,internal_batch_size=32)
-            val_attr, delta_val = ig.attribute(x, target=0, return_convergence_delta=True,internal_batch_size=32)
-            train_attr_final = torch.nan_to_num(train_attr[i]) 
-            train_importance = np.abs(train_attr_final.detach().cpu().numpy())
-            train_importance_mean = train_importance.flatten()
-            train_importance_mean = train_importance_mean[train_importance_mean!=0]
-            train_importance_mean = np.abs(train_importance).mean()
-            train_importance_detail = []
-            for j in range(train_attr_final.shape[-1]):
-                train_importance_detail_item = train_attr_final[...,j]
-                train_importance_detail_item = train_importance_detail_item[train_importance_detail_item!=0].abs().detach().cpu().numpy().mean()
-                train_importance_detail.append(train_importance_detail_item)
-
-            val_attr_final = torch.nan_to_num(val_attr[i])    
-            val_importance = np.abs(val_attr_final[i].detach().cpu().numpy())                       
-            # val_importance = np.abs(val_attr[i].detach().cpu().numpy())           
-            val_importance_mean = val_importance.mean()
-            val_importance_detail = val_importance.mean(tuple(range(val_importance.ndim - 1)))
-            print("input {} train_importance mean:{},val_importance mean:{}".format(input_names[i],train_importance_mean, val_importance_mean)) 
-            # if i==1:
-            #     print("input {} train_importance detail:{},val_importance detail:{}".format(input_names[i],train_importance_detail, val_importance_detail)) 
+        output_indexs = [2,3]
+        for output_index in output_indexs:
+            model = ShapWrapper(model_ori,output_index=output_index)         
+            x = tuple([item[:50] for item in test_input])
+            baselines = tuple([xi[:50] for xi in background_input])
+            x_train = tuple([xi[50:100] for xi in background_input])
+            current_epoch = 130
+            max_epochs = 180
+            model.set_cur_epoch(current_epoch)
+            model.set_max_epochs(max_epochs)
+            # current_epoch = torch.tensor(current_epoch)
+            # y_baseline = model(*baselines)
+            # y_pred = model(*x)
+            # print("y_baseline:{},y_pred:{}".format(y_baseline.mean(),y_pred.mean()))
+            input_names = ['static_covs','past_convs','his_future_emb','future_single_emb']
+            # 对每个输入分别归因
+            # gs = GradientShap(model)
+            # for i in range(len(baselines)):
+            #     baselines_item = tuple([baselines[j] if j==i else x[j] for j in range(len(baselines))])
+            #     attr_inp_combine = []
+            #     for k in range(sample_num):
+            #         # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
+            #         x_single = tuple([item[k:k+1] for item in x])
+            #         attr_inp,delta = gs.attribute(x_single, baselines_item, n_samples=200, stdevs=0.1,target=0,return_convergence_delta=True)
+            #         attr_inp_combine.append(attr_inp[i])  
+            #     attr_inp_combine = torch.cat(attr_inp_combine)
+            #     print("input {} attr_inp shape:{},mean:{}".format(input_names[i],attr_inp_combine.shape, attr_inp_combine.abs().mean().item()))       
+    
+            # 训练接和验证集的归因差异排查
+            ig = IntegratedGradients(model)
+            for i in range(len(baselines)):
+                train_importance_total = []
+                val_importance_total = []            
+                train_attr, delta_train = ig.attribute(x_train, target=0, return_convergence_delta=True,internal_batch_size=32)
+                val_attr, delta_val = ig.attribute(x, target=0, return_convergence_delta=True,internal_batch_size=32)
+                train_attr_final = torch.nan_to_num(train_attr[i]) 
+                train_importance = np.abs(train_attr_final.detach().cpu().numpy())
+                train_importance_mean = train_importance.flatten()
+                train_importance_mean = train_importance_mean[train_importance_mean!=0]
+                train_importance_mean = np.abs(train_importance).mean()
+                train_importance_detail = []
+                for j in range(train_attr_final.shape[-1]):
+                    train_importance_detail_item = train_attr_final[...,j]
+                    train_importance_detail_item = train_importance_detail_item[train_importance_detail_item!=0].abs().detach().cpu().numpy().mean()
+                    train_importance_detail.append(train_importance_detail_item)
+    
+                val_attr_final = torch.nan_to_num(val_attr[i])    
+                val_importance = np.abs(val_attr_final[i].detach().cpu().numpy())                       
+                # val_importance = np.abs(val_attr[i].detach().cpu().numpy())           
+                val_importance_mean = val_importance.mean()
+                val_importance_detail = val_importance.mean(tuple(range(val_importance.ndim - 1)))
+                print("output_index_{} input {} train_importance mean:{},val_importance mean:{}".format(output_index,input_names[i],train_importance_mean, val_importance_mean)) 
+                # if i==1:
+                #     print("input {} train_importance detail:{},val_importance detail:{}".format(input_names[i],train_importance_detail, val_importance_detail)) 
  
         focus_layers = ['model.trans_model_encoder','model.trans_model_decoder','model.top_selector.0']  
         train_contribs = {}
@@ -751,76 +758,76 @@ class FuturesProcessModel(TftDataframeModel):
             # 系数范围 0.7 ~ 1.0，线性平滑，不极端压制/抬高
             return 1.0 - 0.3 * (layer_depth - 1) / (total_depth - 1)   
              
-        # for name, layer in model.named_modules():
-        #     if name in focus_layers:
-        #         model.set_layer(name)
-        #         lgs = LayerGradientShap(model, layer)
-        #         attr_inp_combine = []
-        #         attr_inp_combine_after = []
-        #         attr_inp_combine_train = []
-        #         attr_inp_combine_train_after = []
-        #         for k in range(sample_num):
-        #             # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
-        #             x_single = tuple([item[k:k+1] for item in x])
-        #             x_single_train = tuple([item[k:k+1] for item in x_train])
-        #             # attr_inp = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
-        #             attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
-        #             # attr_inp_train = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
-        #             attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
-        #             if name=='model.trans_model_encoder':
-        #                 # attr_inp_combine.append(attr_inp[1])
-        #                 # attr_inp_combine_train.append(attr_inp_train[1])
-        #                 for h in range(x_single[0].shape[1]):
-        #                     size = h * x_single[0].shape[2]
-        #                     attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
-        #                     attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])  
-        #                     attr_inp_combine_after.append(attr_inp_after_final)
-        #                     attr_inp_combine_train_after.append(attr_inp_train_after_final)
-        #             if name=='model.trans_model_decoder':
-        #                 # attr_inp_combine.append(attr_inp[1])
-        #                 # attr_inp_combine_train.append(attr_inp_train[1])
-        #                 for h in range(x_single[0].shape[1]):
-        #                     size = h * x_single[0].shape[2]
-        #                     attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
-        #                     attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
-        #                     attr_inp_combine_after.append(attr_inp_after_final)
-        #                     attr_inp_combine_train_after.append(attr_inp_train_after_final)                      
-        #             if name=='model.top_selector.0':
-        #                 # attr_inp_combine.append(attr_inp[0])
-        #                 # attr_inp_combine_train.append(attr_inp_train[0])   
-        #                 if output_index==2:
-        #                     r = 7
-        #                 else:
-        #                     r = 4
-        #                 for h in range(r):   
-        #                     attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
-        #                     attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
-        #                     attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
-        #                     attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
-        #                     attr_inp_combine_after.append(attr_inp_after_final)
-        #                     attr_inp_combine_train_after.append(attr_inp_train_after_final)                                           
-        #         # attr_inp_combine = torch.cat(attr_inp_combine)    
-        #         # attr_inp_combine_train = torch.cat(attr_inp_combine_train) 
-        #         attr_inp_combine_after = torch.cat(attr_inp_combine_after)    
-        #         attr_inp_combine_train_after = torch.cat(attr_inp_combine_train_after) 
-        #         # train_contribs[name] = attr_inp_combine_train.abs().mean().item()
-        #         # val_contribs[name] = attr_inp_combine.abs().mean().item()
-        #         # train_contrib_value = torch.norm(attr_inp_combine_train_after,dim=-1).mean().item()
-        #         # val_contrib_value = torch.norm(attr_inp_combine_after,dim=-1).mean().item()
-        #         attr_inp_combine_train_after = attr_inp_combine_train_after[attr_inp_combine_train_after!=0]
-        #         attr_inp_combine_after = attr_inp_combine_after[attr_inp_combine_after!=0]
-        #         train_contrib_total = calc_total_contribution(attr_inp_combine_train_after)
-        #         # train_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_train_after)))
-        #         val_contrib_total = calc_total_contribution(attr_inp_combine_after)
-        #         # val_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_after)))
-        #         train_contribs[name+"_after_total"] = train_contrib_total
-        #         val_contribs[name+"_after_total"] = val_contrib_total
-        # print("train_contribs:",train_contribs)
-        # print("val_contribs:",val_contribs)
+        for name, layer in model.named_modules():
+            if name in focus_layers:
+                model.set_layer(name)
+                lgs = LayerGradientShap(model, layer)
+                attr_inp_combine = []
+                attr_inp_combine_after = []
+                attr_inp_combine_train = []
+                attr_inp_combine_train_after = []
+                for k in range(sample_num):
+                    # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
+                    x_single = tuple([item[k:k+1] for item in x])
+                    x_single_train = tuple([item[k:k+1] for item in x_train])
+                    # attr_inp = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
+                    attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+                    # attr_inp_train = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
+                    attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+                    if name=='model.trans_model_encoder':
+                        # attr_inp_combine.append(attr_inp[1])
+                        # attr_inp_combine_train.append(attr_inp_train[1])
+                        for h in range(x_single[0].shape[1]):
+                            size = h * x_single[0].shape[2]
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])  
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)
+                    if name=='model.trans_model_decoder':
+                        # attr_inp_combine.append(attr_inp[1])
+                        # attr_inp_combine_train.append(attr_inp_train[1])
+                        for h in range(x_single[0].shape[1]):
+                            size = h * x_single[0].shape[2]
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)                      
+                    if name=='model.top_selector.0':
+                        # attr_inp_combine.append(attr_inp[0])
+                        # attr_inp_combine_train.append(attr_inp_train[0])   
+                        if output_index==2:
+                            r = 7
+                        else:
+                            r = 4
+                        for h in range(r):   
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)                                           
+                # attr_inp_combine = torch.cat(attr_inp_combine)    
+                # attr_inp_combine_train = torch.cat(attr_inp_combine_train) 
+                attr_inp_combine_after = torch.cat(attr_inp_combine_after)    
+                attr_inp_combine_train_after = torch.cat(attr_inp_combine_train_after) 
+                # train_contribs[name] = attr_inp_combine_train.abs().mean().item()
+                # val_contribs[name] = attr_inp_combine.abs().mean().item()
+                # train_contrib_value = torch.norm(attr_inp_combine_train_after,dim=-1).mean().item()
+                # val_contrib_value = torch.norm(attr_inp_combine_after,dim=-1).mean().item()
+                attr_inp_combine_train_after = attr_inp_combine_train_after[attr_inp_combine_train_after!=0]
+                attr_inp_combine_after = attr_inp_combine_after[attr_inp_combine_after!=0]
+                train_contrib_total = calc_total_contribution(attr_inp_combine_train_after)
+                # train_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_train_after)))
+                val_contrib_total = calc_total_contribution(attr_inp_combine_after)
+                # val_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_after)))
+                train_contribs[name+"_after_total"] = train_contrib_total
+                val_contribs[name+"_after_total"] = val_contrib_total
+        print("train_contribs:",train_contribs)
+        print("val_contribs:",val_contribs)
                         
     def model_layer_analysis(self,model,background_input,test_input,sample_num=10):
         """Model Layer compute analysis"""

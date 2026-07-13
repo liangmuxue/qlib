@@ -30,7 +30,11 @@ logger = AppLogger()
 def concat_scale_arr(scale_arr):
     """把2级分片定义合并为1级，用于模型参数设置"""
     
-    df_group = scale_arr.groupby('p0', as_index=False)['instruments'].agg(lambda x: np.concatenate(list(x)))
+    scale_arr["p_index_arr"] = scale_arr["p_index"].apply(lambda x: [x])
+    df_group = scale_arr.groupby('p0', as_index=False).agg(
+        instruments=("instruments", lambda s: np.concatenate(list(s))),
+        p_index=("p_index_arr", lambda s: np.concatenate(list(s)))
+    )
     df_group['p'] = df_group['p0']
             
     return df_group.to_dict('records')

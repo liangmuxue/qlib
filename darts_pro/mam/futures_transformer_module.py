@@ -73,49 +73,6 @@ class FeatureExtractorHook:
         # 训练阶段和验证阶段关注不同的内容
         self.features[name + "_input"] = input.reshape(B,S,-1)
         self.features[name + "_output"] = output.reshape(B,S,-1)    
-          
-def build_scale_arr(sw_ins_mappings):
-    """对品种按照不同业务范围进行分组"""
-    
-    indus_data_index = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
-    # 按照行业分组
-    scale_conf,_ = get_scale_conf()
-    indus_code = FuturesMappingUtil.get_industry_codes(sw_ins_mappings)
-    threhold_bin = [['ZS_CDIFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL','ZS_NFFI']]
-    # threhold_bin = [['ZS_CDIFI'],['ZS_NFFI','ZS_HSJS'],['ZS_ABPFI','ZS_YZYL']]
-    indus_scale_arr = [None for _ in range(len(threhold_bin))]
-    for i in range(len(indus_code)):
-        for j in range(len(threhold_bin)):
-            if indus_code[i] in threhold_bin[j]:
-                indus_scale_arr[j] = indus_data_index[i] if indus_scale_arr[j] is None else np.concatenate([indus_scale_arr[j],indus_data_index[i]])
-    magin_radio = FuturesMappingUtil.get_magin_radio_flags(sw_ins_mappings).astype(int)
-    create_year = FuturesMappingUtil.get_create_year_flags(sw_ins_mappings).astype(int)
-    # 交易保证金比例分组
-    threhold_bin = [[0,18],[18,100]]
-    mr_scale_arr = [np.where((magin_radio>=threhold[0])&(magin_radio<threhold[1]))[0] for threhold in threhold_bin]
-    # 按照是否包含夜盘来分组
-    night_flag = FuturesMappingUtil.get_night_flag_ids(sw_ins_mappings)
-    nt_scale_arr =  [np.where(night_flag==i)[0] for i in range(2)]
-    # 创建年份分组
-    threhold_bin = [[0,2013],[2013,2030]]
-    # threhold_bin = [[0,2012],[2012,2018],[2018,2030]]
-    cy_scale_arr = [np.where((create_year>threhold[0])&(create_year<=threhold[1]))[0] for threhold in threhold_bin]
-    
-    # 统合分组
-    combine_scale_arr = [nt_scale_arr[0],[],[]]
-    for instrument_idx in nt_scale_arr[1]:
-        # 对包含夜盘的品种，再按照创建年份来分
-        if create_year[instrument_idx]<=2012:
-            combine_scale_arr[1].append(instrument_idx)
-        else:
-            combine_scale_arr[2].append(instrument_idx)
-                
-    # scale_arr = (cy_scale_arr,nt_scale_arr,mr_scale_arr,indus_scale_arr)
-    scale_arr_total = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr,'nt_scale':nt_scale_arr,'mr_scale':mr_scale_arr}
-    scale_arr = {key:scale_arr_total[key] for key in scale_conf.keys()}
-    # scale_arr = {'indus_scale':indus_scale_arr,'cy_scale':cy_scale_arr}
-    
-    return scale_arr
 
 def build_mul_scale_arr(sw_ins_mappings,mode=0,dataset=None):
     """对品种按照不同业务范围进行分组"""
@@ -251,6 +208,7 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0,dataset=None):
             return rtn
         
         ins_arr = FuturesMappingUtil.get_industry_instrument(sw_ins_mappings)
+        total_index = 0
         for i,indus_code in enumerate(indus_codes):
             ins = ins_arr[i]
             p0 = indus_code[3:].lower()
@@ -260,8 +218,9 @@ def build_mul_scale_arr(sw_ins_mappings,mode=0,dataset=None):
                 if len(items[key])<=2:
                     continue
                 p1_code,p1_name = dataset.get_exchange(key)            
-                item = {'p0':p0,'p0_code':p0,'p0_name':indus_name,'p1':p1_code,'p1_name':p1_name,'p1_code':p1_code,'instruments':np.array(items[key])}
+                item = {'p_index':total_index,'p0':p0,'p0_code':p0,'p0_name':indus_name,'p1':p1_code,'p1_name':p1_name,'p1_code':p1_code,'instruments':np.array(items[key])}
                 scale_data.append(item)
+                total_index += 1
         scale_data = pd.DataFrame(scale_data) 
                                          
     return scale_data
@@ -320,7 +279,7 @@ class FuturesTransformerModule(MlpModule):
         self.time_encoder = None
         self.nhead = 4
         self.cate_mode = 'cateMain'
-        self.cate_mode = 'cateTotal'        
+        # self.cate_mode = 'cateTotal'        
         # 趋势数值量级区间
         self.trend_threhold = None
 
@@ -590,7 +549,7 @@ class FuturesTransformerModule(MlpModule):
                 # input_final = (static_covs,past_convs_item, his_future_covs)
                 if not hasattr(self, 'cur_epoch'):
                     self.cur_epoch = 0
-                out = m(*input_final,current_epoch=self.cur_epoch,max_epochs=self.max_epochs)                
+                out = m(*input_final,current_epoch=self.current_epoch,max_epochs=self.max_epochs)                
                 out_class = torch.ones([batch_size, self.output_chunk_length, 1]).to(self.device)
             else:
                 # 模拟数据
