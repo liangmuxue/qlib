@@ -1,0 +1,74 @@
+input static_covs train_importance mean:0.0006640438223257661,val_importance mean:0.0009347667801193893
+input past_convs train_importance mean:0.0006683006649836898,val_importance mean:0.000867145718075335
+input past_convs train_importance detail:[0.0003822218, 0.0008527072, 0.0010970954, 0.0010195794, 0.0007903352, 0.00042079, 0.0009334174, 0.0008202936, 0.0005074703, 0.0008683099, 0.000883538, 0.0006142802],val_importance detail:[0.00032827 0.00076953 0.00121752 0.00109163 0.0008473  0.00036622
+ 0.00097412 0.00092063 0.00059266 0.00146852 0.00104594 0.00078337]
+input his_future_emb train_importance mean:0.00020185606263112277,val_importance mean:0.00024014849623199552
+input future_single_emb train_importance mean:8.8995454916585e-07,val_importance mean:1.1109236766060349e-06
+train_contribs: {'model.trans_model_after_total': 0.5311053991317749, 'model.top_selector.0_after_total': 0.9989133477210999}
+val_contribs: {'model.trans_model_after_total': 0.6675981879234314, 'model.top_selector.0_after_total': 2.056624174118042}
+
+
+<good>
+
+07
+
+input static_covs train_importance mean:0.0001214377989526838,val_importance mean:0.0001006752354442142
+input past_convs train_importance mean:0.0007138596847653389,val_importance mean:0.0007169381133280694
+input past_convs train_importance detail:[0.00023308028, 0.00089827087, 0.0011030195, 0.0010836207, 0.0009826588, 0.0008612292, 0.0012575211, 0.0014179518, 0.0010002557, 0.00053699344, 0.00094994606, 0.0008961661],val_importance detail:[0.00018158 0.0006178  0.00088047 0.00081227 0.00076783 0.00056338
+ 0.00096433 0.00112953 0.00085807 0.00038067 0.0007207  0.00072663]
+input his_future_emb train_importance mean:2.812488492054399e-05,val_importance mean:2.8296159143792465e-05
+input future_single_emb train_importance mean:2.4003961698326748e-06,val_importance mean:2.401654683126253e-06
+train_contribs: {'model.trans_model_after_total': 0.7476359605789185, 'model.top_selector.0_after_total': 0.5565344095230103}
+val_contribs: {'model.trans_model_after_total': 0.7778879404067993, 'model.top_selector.0_after_total': 0.5221328735351562}
+
+05
+
+input static_covs train_importance mean:1.7330794435110874e-05,val_importance mean:1.922111914609559e-05
+input past_convs train_importance mean:0.00028533441945910454,val_importance mean:0.0003219441859982908
+input past_convs train_importance detail:[0.00011325317, 0.00036775647, 0.00043534982, 0.0003747891, 0.0003836933, 0.00040814478, 0.000317858, 0.000717239, 9.828046e-05, 0.00034289053, 0.0007817111, 0.00014472993],val_importance detail:[9.4160569e-05 3.2809010e-04 4.1998157e-04 3.2049243e-04 3.5973740e-04
+ 2.4328243e-04 2.7351495e-04 6.8591489e-04 1.0135205e-04 2.6118054e-04
+ 6.7575008e-04 9.9862635e-05]
+input his_future_emb train_importance mean:6.140036566648632e-05,val_importance mean:6.187530379975215e-05
+input future_single_emb train_importance mean:9.683500138635281e-06,val_importance mean:9.721247806737665e-06
+train_contribs: {'model.trans_model_after_total': 0.8192727565765381, 'model.top_selector.0_after_total': 0.5761976838111877}
+val_contribs: {'model.trans_model_after_total': 0.8528445959091187, 'model.top_selector.0_after_total': 0.4980972409248352}
+
+
+input static_covs train_importance mean:3.0992239771876484e-05,val_importance mean:2.5872192054521292e-05
+input past_convs train_importance mean:0.0003356444067321718,val_importance mean:0.00035889347782358527
+input past_convs train_importance detail:[0.0001213083, 0.00044090583, 0.0006080469, 0.00048677405, 0.00048058957, 0.00034481363, 0.00036809445, 0.000764203, 0.00021704216, 0.0005052732, 0.0007310469, 0.00021998394],val_importance detail:[8.4777545e-05 3.6006264e-04 5.0076586e-04 3.4902527e-04 4.9860275e-04
+ 2.0244296e-04 2.8411634e-04 6.5584702e-04 2.4088850e-04 3.7469165e-04
+ 6.2453200e-04 1.3096452e-04]
+input his_future_emb train_importance mean:1.1508373063406907e-05,val_importance mean:1.1531502423167694e-05
+input future_single_emb train_importance mean:6.9092725425434764e-06,val_importance mean:6.944014785403851e-06
+train_contribs: {'model.trans_model_after_total': 0.7182900309562683, 'model.top_selector.0_after_total': 0.6565963625907898}
+val_contribs: {'model.trans_model_after_total': 0.9203315377235413, 'model.top_selector.0_after_total': 0.5271181464195251}
+
+
+03
+
+input static_covs train_importance mean:4.332992102717981e-05,val_importance mean:3.9115664549171925e-05
+input past_convs train_importance mean:0.00045817895443178713,val_importance mean:0.00037535696174018085
+input his_future_emb train_importance mean:1.8462240404915065e-05,val_importance mean:1.865784179244656e-05
+input future_single_emb train_importance mean:1.6120604414027184e-05,val_importance mean:1.6018078895285726e-05
+train_contribs: {'model.trans_model_after_total': 0.6895124912261963, 'model.top_selector.0_after_total': 0.45479458570480347}
+val_contribs: {'model.trans_model_after_total': 0.806912899017334, 'model.top_selector.0_after_total': 0.9718133211135864}
+
+<bad>
+input static_covs train_importance mean:0.0007909180712886155,val_importance mean:0.0004103665705770254
+input past_convs train_importance mean:0.0014667331706732512,val_importance mean:0.0006605125963687897
+input his_future_emb train_importance mean:0.00030738351051695645,val_importance mean:0.0002912098716478795
+input future_single_emb train_importance mean:7.256795015564421e-06,val_importance mean:7.209255272755399e-06
+train_contribs: {'model.trans_model_after_total': 0.6247721314430237, 'model.top_selector.0_after_total': 0.9208931922912598
+val_contribs: {'model.trans_model_after_total': 0.7492309212684631, 'model.top_selector.0_after_total': 1.062587022781372}
+
+
+input static_covs train_importance mean:0.00035387196112424135,val_importance mean:0.00039850882603786886
+input past_convs train_importance mean:0.0018241647630929947,val_importance mean:0.0019937101751565933
+input his_future_emb train_importance mean:0.00011271322728134692,val_importance mean:0.00011193632235517725
+input future_single_emb train_importance mean:0.00011429782898630947,val_importance mean:0.00011362679651938379
+train_contribs: {'model.trans_model_after_total': 0.17382733523845673, 'model.top_selector.0_after_total': 0.15310820937156677}
+val_contribs: {'model.trans_model_after_total': 0.16736409068107605, 'model.top_selector.0_after_total': 0.21916817128658295}
+2026-06-18 07:57:07,432 - qlib.timer - INFO - Time cost: 0.000s | waiting `async_log` Done
+
+
