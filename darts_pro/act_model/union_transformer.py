@@ -14,6 +14,10 @@ from .cov_cnn import LinelessLayer
 
 PRINT_STD_FLAG = False
 
+def set_global(value):
+    global PRINT_STD_FLAG
+    PRINT_STD_FLAG = value
+    
 # ---------------------- 核心新增：样本维度交互模块 ----------------------
 class SampleCrossAttention(nn.Module):
     """样本维度自注意力：建模样本间（站点/设备/用户）的关联"""
