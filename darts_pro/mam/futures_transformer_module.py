@@ -279,7 +279,7 @@ class FuturesTransformerModule(MlpModule):
         self.time_encoder = None
         self.nhead = 4
         self.cate_mode = 'cateMain'
-        self.cate_mode = 'cateTotal'        
+        # self.cate_mode = 'cateTotal'        
         # 趋势数值量级区间
         self.trend_threhold = None
 
