@@ -733,7 +733,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 loss_inner = self.mse_loss(pred_data_main.unsqueeze(0),target_data_main.unsqueeze(0))
             else:
                 # loss_inner = self.ccc_loss_comp(pred_data_main,target_data_main)     
-                loss_inner = self.compute_top_loss(pred_data_main,target_data_main,top_num=1, mid_num=1, need_mid=True)    
+                loss_inner = self.compute_top_loss(pred_data_main,target_data_main,top_num=1, mid_num=1, need_mid=False)    
             loss_item += loss_inner  
             detail_loss_main += loss_inner  
             if 'main' not in detail_loss:
@@ -766,7 +766,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                 detail_loss['total'].append(loss_inner)
             cnt += 1
             total_cnt += 1
-        if cnt>0:
+        if cnt>0 and total_cnt>0 and main_cnt>0:
             loss_item = loss_item/cnt
             detail_loss_total = detail_loss_total/total_cnt
             detail_loss_main = detail_loss_main/main_cnt

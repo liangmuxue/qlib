@@ -583,7 +583,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         # hist_summary = hist_summary * 0.8
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        fur_scale = 0.01 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
+        fur_scale = 0.005 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
@@ -707,7 +707,7 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=True,dropout=0.2)     
+                                    layer_norm=False,batch_norm=True,dropout=0)     
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
             nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
