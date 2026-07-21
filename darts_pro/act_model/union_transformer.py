@@ -707,7 +707,7 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=True,dropout=0)     
+                                    layer_norm=False,batch_norm=True,dropout=dropout)     
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
             nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
@@ -722,7 +722,7 @@ class SparseGateFeatureTopK(nn.Module):
         self.total_resid = nn.Sequential(nn.Linear(sample_dim*input_dim,scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))       
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0)   
+                                    layer_norm=False,batch_norm=True,dropout=dropout)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
         nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
@@ -765,7 +765,7 @@ class SparseGateFeatureTopK(nn.Module):
         # 直接残差连接transformer的输出，用于调整深层和浅层权重贡献度比例
         # resid_data = self.total_resid(x.reshape([batch_size,-1]))
         trend_list_total = trend_list # + 0.1 * resid_data
-        trend_list_main = self.branch_trend_combine_layer_main(trend_list,redu=True)
+        trend_list_main = self.branch_trend_combine_layer_main(trend_list)
         if PRINT_STD_FLAG:
             print("trend_list_main std:{}".format(trend_list_main.std()))           
         return trend_logits_list,features_list,trend_list_total,trend_list_main

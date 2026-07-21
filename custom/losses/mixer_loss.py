@@ -732,8 +732,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if all_elements_same(pred_data_main) or all_elements_same(target_data_main):
                 loss_inner = self.mse_loss(pred_data_main.unsqueeze(0),target_data_main.unsqueeze(0))
             else:
-                # loss_inner = self.ccc_loss_comp(pred_data_main,target_data_main)     
-                loss_inner = self.compute_top_loss(pred_data_main,target_data_main,top_num=1, mid_num=1, need_mid=False)    
+                loss_inner = self.ccc_loss_comp(pred_data_main,target_data_main)     
+                # loss_inner = self.compute_top_loss(pred_data_main,target_data_main,top_num=1, mid_num=1, need_mid=True)    
             loss_item += loss_inner  
             detail_loss_main += loss_inner  
             if 'main' not in detail_loss:
@@ -756,8 +756,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
                 loss_inner = self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
             else:
-                loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=1, mid_num=1, need_mid=True)
-                # loss_inner = self.ccc_loss_comp(p0_cate_pred,p0_cate_target)
+                # loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=1, mid_num=1, need_mid=True)
+                loss_inner = self.ccc_loss_comp(p0_cate_pred,p0_cate_target)
             loss_item += loss_inner
             detail_loss_total += loss_inner
             if 'total' not in detail_loss:
