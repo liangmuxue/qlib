@@ -707,7 +707,7 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=True,dropout=dropout)     
+                                    layer_norm=False,batch_norm=True,dropout=0.1)     
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
             nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)

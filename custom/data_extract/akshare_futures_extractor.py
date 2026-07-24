@@ -836,7 +836,7 @@ class AkFuturesExtractor(FutureExtractor):
             begin = int(date_string_transfer(row['begin'],2))
             end = int(date_string_transfer(row['end'],2))
             # 日期太少的不要，没有近期数据的不要
-            if begin>20150101 or end<20250901:
+            if begin>20220101 or end<20250901:
                 continue
             exchange_code = self.get_exchange_from_instrument(code)
             if exchange_code in ['CFFEX','INE']:

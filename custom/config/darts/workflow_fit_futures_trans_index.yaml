@@ -85,7 +85,7 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2022TrainCutlen2_transMoreLoss_2505"
+               model_name: "Futures_cleanData2022TrainCutlen2_transMoreLoss_2501"
                model_type: 'mlp'
                load_weight: False 
                best_weight: False
@@ -120,9 +120,9 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2022-01-01, 2025-05-28]
-                valid: [2025-02-01, 2025-05-28]
-                test: [2025-05-01, 2025-08-15]
+                train: [2022-01-01, 2025-01-28]
+                valid: [2024-10-01, 2025-01-28]
+                test: [2025-01-01, 2025-04-15]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file
