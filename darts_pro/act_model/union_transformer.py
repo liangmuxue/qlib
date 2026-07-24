@@ -707,7 +707,7 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=True,dropout=0.1)     
+                                    layer_norm=False,batch_norm=True,dropout=0.3)     
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
             nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
@@ -722,7 +722,7 @@ class SparseGateFeatureTopK(nn.Module):
         self.total_resid = nn.Sequential(nn.Linear(sample_dim*input_dim,scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))       
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.1)   
+                                    layer_norm=False,batch_norm=True,dropout=0.5)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
         nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
