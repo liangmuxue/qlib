@@ -512,7 +512,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         
         time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.1)
         
-        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.01)
+        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.02)
         if PRINT_STD_FLAG:
             print("obs_proj std:{}".format(obs_feat.std()))          
         # 2.1 融合历史观测+时间嵌入+样本交互
@@ -707,7 +707,7 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
-                                    layer_norm=False,batch_norm=True,dropout=0.3)     
+                                    layer_norm=False,batch_norm=True,dropout=0.5)     
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_hidden.weight, gain=mlp_init_scale)
             nn.init.xavier_normal_(branch_trend_combine_layer.linear_output.weight, gain=mlp_init_scale)
             nn.init.zeros_(branch_trend_combine_layer.linear_hidden.bias)
