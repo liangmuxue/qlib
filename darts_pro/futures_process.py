@@ -252,12 +252,12 @@ class FuturesProcessModel(TftDataframeModel):
                         tb.add_scalar("rate/{}".format(key), item, trainer.current_epoch)
                         if key=='cate_yield':
                             print("cate_yield:{}".format(item))
-                    if self.caller.optargs["target_mode"][0]==3:
+                    if self.caller.optargs["target_mode"][0]==5:
                         print("anno_yield:",model.anno_yield)
                         tb.add_scalar("rate/anno_yield", model.anno_yield, trainer.current_epoch)
                     fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
-                    print("model.fur_scale:{}".format(fur_scale))
-                    tb.add_scalar('fur_scale', fur_scale, trainer.current_epoch)                         
+                    # print("model.fur_scale:{}".format(fur_scale))
+                    # tb.add_scalar('fur_scale', fur_scale, trainer.current_epoch)                         
                         
             trainer,model_inner,train_loader,val_loader,_ = \
             self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,

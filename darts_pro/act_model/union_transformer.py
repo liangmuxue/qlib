@@ -722,7 +722,7 @@ class SparseGateFeatureTopK(nn.Module):
         self.total_resid = nn.Sequential(nn.Linear(sample_dim*input_dim,scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))       
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.1)   
+                                    layer_norm=False,batch_norm=True,dropout=0.4)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
         nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
@@ -735,18 +735,17 @@ class SparseGateFeatureTopK(nn.Module):
         batch_size, S, input_dim = x.shape
         features_list = {}
         trend_logits_list = {}
-        if self.target_mode!=2 or True:
-            # 分别根据不同的业务尺度，生成1维度特征
-            g_features = self.top_global_layer(x.reshape(batch_size,-1))  
-            features_list['global_feature'] = g_features
-            # Instrument Compare
-            for i,layer in enumerate(self.scales_layer):
-                scale_features,_,trend_index_logits = layer(x)  
-                scale_def = self.scales_arr[i]
-                key = scale_def['p']
-                # 合并主体特征和分尺度特征
-                features_list[key] = scale_features
-                trend_logits_list[key] = trend_index_logits
+        # 分别根据不同的业务尺度，生成1维度特征
+        g_features = self.top_global_layer(x.reshape(batch_size,-1))  
+        features_list['global_feature'] = g_features
+        # Instrument Compare
+        for i,layer in enumerate(self.scales_layer):
+            scale_features,_,trend_index_logits = layer(x)  
+            scale_def = self.scales_arr[i]
+            key = scale_def['p']
+            # 合并主体特征和分尺度特征
+            features_list[key] = scale_features
+            trend_logits_list[key] = trend_index_logits
         # Total Trend
         # trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}
         # Cate Compare

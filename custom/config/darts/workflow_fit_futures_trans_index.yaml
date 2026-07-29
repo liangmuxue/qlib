@@ -74,7 +74,7 @@ task:
                # total_iters: 1e2
                T_0: 10 # 初始周期
                T_mult: 2  # 周期倍增
-               eta_min: 1e-5  # 最小学习率
+               eta_min: 1e-5  # 最小学习率7
             optimizer_kwargs:
                lr: 1e-3
                betas: [0.9,0.999]
@@ -85,9 +85,9 @@ task:
                data_type: 'combine'
                data_path: 'custom/data/aug/darts/all_nor.npy'
                work_dir: 'custom/data/darts'
-               model_name: "Futures_cleanData2022TrainCutlen2_transMoreLoss_2501"
+               model_name: "Futures_cleanData2022TrainCutlen2_transMoreLoss_2503"
                model_type: 'mlp'
-               load_weight: False 
+               load_weight: True 
                best_weight: False
                task_weights: [[1.0,2.0],[0.5,0.5]]
                grad_limits: [5.0,3.0]
@@ -120,9 +120,9 @@ task:
                 module_path: tft.tft_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2022-01-01, 2025-01-28]
-                valid: [2024-10-01, 2025-01-28]
-                test: [2025-01-01, 2025-04-15]
+                train: [2022-01-01, 2025-03-28]
+                valid: [2024-12-01, 2025-03-28]
+                test: [2025-03-01, 2025-06-15]
             whole_data: False
             data_path: 'custom/data/aug/darts/all_nor.npy'
             load_dataset_file: *load_dataset_file

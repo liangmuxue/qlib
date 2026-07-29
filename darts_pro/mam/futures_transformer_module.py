@@ -279,7 +279,7 @@ class FuturesTransformerModule(MlpModule):
         self.time_encoder = None
         self.nhead = 4
         self.cate_mode = 'cateMain'
-        self.cate_mode = 'cateTotal'        
+        # self.cate_mode = 'cateTotal'        
         # 趋势数值量级区间
         self.trend_threhold = None
 
@@ -1947,12 +1947,14 @@ class FuturesTransformerModule(MlpModule):
         # 根据趋势增减top数量
         for i,row in trend_result.iterrows():
             p0 = row['p0']
+            if p0=='total':
+                continue            
+            if row['is_can']==0:
+                continue
             can_trend_flag = row['can_trend_flag']
             can_ins_num = row['can_ins_num']     
             pred_trend_value = row['pred_trend_value'] 
             pred_trend_value_scale = row['pred_trend_value_scale']
-            if p0=='total':
-                continue
             rel_ins = get_scale_cate_ins(self.scale_arr,p0)
             features_item = features[p0][batch_no]
             if can_trend_flag==1:
