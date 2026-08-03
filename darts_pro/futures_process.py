@@ -186,7 +186,7 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.set_outer_params(outer_params) 
             trainer.validate(model=model,dataloaders=val_loader)
             loss_result = self.model.model.loss_result
-            print("ins_total loss:{}".format(loss_result['ins_total']))
+            # print("ins_total loss:{}".format(loss_result['ins_total']))
         elif self.type=="fit_futures_trans":
             # 设置外部hook，每训练一个轮次后，进行测试
             
