@@ -23,7 +23,7 @@ from losses.mixer_loss import FuturesIndustryLoss
 from darts_pro.data_extension.industry_mapping_util import FuturesMappingUtil
 from darts_pro.act_model.union_transformer import TimeFeatureEncoder
 from .multiTask_optimizer import MultiTaskOptimizer,analyze_similarity
-from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,scale_value, normalization_axis
+from cus_utils.common_compute import linear_map, pairwise_compare, min_max_norm,scale_value, intersect1d_preserve_order
 from tft.class_define import CLASS_SIMPLE_VALUES, get_simple_class
 from trader.utils.data_stats import DataStats, RESULT_FILE_PATH, RESULT_FILE_VIEW, INTER_RS_FILEPATH
 from darts_pro.tft_futures_dataset import get_scale_conf,concat_scale_arr,emb_scale_arr,get_scale_cate_ins
@@ -34,8 +34,8 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-TRACK_DATE = [item for item in range(20250403,20250404)]
-# TRACK_DATE = [item for item in range(20250328,20250329)]
+# TRACK_DATE = [item for item in range(20250403,20250404)]
+TRACK_DATE = [item for item in range(20250818,20250906)]
 # TRACK_DATE = [item for item in range(20241231,20250105)]
 # TRACK_DATE = [20250403]
 STAT_DATE = [20240428, 20260505]
@@ -1003,8 +1003,9 @@ class FuturesTransformerModule(MlpModule):
             target_class_item = target_class_3d[index]
             keep_index = np.where(target_class_item >= 0)[0]
             round_targets = past_future_round_targets_total[index]
-            future_target = future_target_3d[index]
             ts_arr = target_info_3d[index]
+            # future_target = future_target_3d[index]
+            future_open_diff = np.array([t['open_diff'] if t is not None else 0 for t in np.array(ts_arr)])
             date = int(ts_arr[keep_index][0]["future_start_datetime"])
             if index==0:
                 first_date = date
@@ -1024,36 +1025,56 @@ class FuturesTransformerModule(MlpModule):
             ins_output_total = []
             for k,p0 in enumerate(scale_arr):
                 scale_item_p0 = scale_arr[p0]
-                for j,key_p1 in enumerate(scale_item_p0.keys()):
-                    scale_item = scale_item_p0[key_p1]
-                    ins = scale_item['instruments']
+                if self.cate_mode=='cateMain':
+                    scale_item = scale_item_p0
+                    ins = np.concatenate([scale_item_p0[key]['instruments'] for key in scale_item_p0.keys()])
                     # print("p0_{},p1_{} ins shape:{}".format(p0,key_p1,ins.shape[0]))
                     # 取得相对位置，用于匹配子趋势
-                    rel_ins = scale_item['rel_ins']
-                    p1 = scale_item['p1']   
-                    p0_name = scale_item['p0_name']      
-                    p1_name = scale_item['p1_name']     
-                    ins_output_outer = features[p0][index]          
-                    ins_output_item = ins_output_outer[rel_ins]
-                    ins_output_total.append(ins_output_item)
-                    ins_in_scale = np.intersect1d(ins,instruments)
+                    p0_name = scale_item[list(scale_item_p0.keys())[0]]['p0_name']      
+                    ins_output_total.append(ins)
+                    ins_in_scale = intersect1d_preserve_order(ins,instruments)
                     ins_in_scale_total.append(ins_in_scale)
+                    ins_output_item = features[p0][index]
                     price_array_range = np.array([self.criterion.compute_diff_range_class(item)[0] for item in ts_arr[ins_in_scale]])
                     price_array_range = price_array_range / 10                
-                    # fur_round_target = round_targets[ins_in_scale, -self.output_chunk_length+self.cut_len-1, 0]
-                    fur_target = future_target[ins_in_scale, -self.output_chunk_length+self.cut_len-1, 0]
+                    fur_target = future_open_diff[ins_in_scale]
                     fur_target_total.append(fur_target)
-                    coll_item = coll_result[(coll_result['date']==date)&(coll_result['p1']==key_p1)]
-                    trend_result_item = trend_result[(trend_result['date']==date)&(trend_result['p0']==p0)&(trend_result['p1']==key_p1)]
+                    coll_item = coll_result[(coll_result['date']==date)]
+                    trend_result_item = trend_result[(trend_result['date']==date)&(trend_result['p0']==p0)]
                     cate_result_item = cate_result[(cate_result['date']==date)]
                     self.draw_ins_visdom(ins_in_scale, ins_output_item, fur_target, ts_arr,coll_item=coll_item,scale_item=scale_item,cate_result=cate_result_item,
-                                trend_result=trend_result_item, date=date, iter_num='{}_{}_{}'.format(k,j,date), key=(p0_name+'/'+p1_name))
+                                trend_result=trend_result_item, date=date, iter_num='{}_{}'.format(k,date), key=(p0_name))
+                else:
+                    for j,key_p1 in enumerate(scale_item_p0.keys()):
+                        scale_item = scale_item_p0[key_p1]
+                        ins = scale_item['instruments']
+                        # print("p0_{},p1_{} ins shape:{}".format(p0,key_p1,ins.shape[0]))
+                        # 取得相对位置，用于匹配子趋势
+                        rel_ins = scale_item['rel_ins']
+                        p1 = scale_item['p1']   
+                        p0_name = scale_item['p0_name']      
+                        p1_name = scale_item['p1_name']     
+                        ins_output_outer = features[p0][index]   
+                        ins_output_item = ins_output_outer[rel_ins]
+                        ins_output_total.append(ins)
+                        ins_in_scale = np.intersect1d(ins,instruments)
+                        ins_in_scale_total.append(ins_in_scale)
+                        price_array_range = np.array([self.criterion.compute_diff_range_class(item)[0] for item in ts_arr[ins_in_scale]])
+                        price_array_range = price_array_range / 10                
+                        # fur_round_target = round_targets[ins_in_scale, -self.output_chunk_length+self.cut_len-1, 0]
+                        fur_target = future_open_diff[ins_in_scale]
+                        fur_target_total.append(fur_target)
+                        coll_item = coll_result[(coll_result['date']==date)&(coll_result['p1']==key_p1)]
+                        trend_result_item = trend_result[(trend_result['date']==date)&(trend_result['p0']==p0)&(trend_result['p1']==key_p1)]
+                        cate_result_item = cate_result[(cate_result['date']==date)]
+                        self.draw_ins_visdom(ins_in_scale, ins_output_item, fur_target, ts_arr,coll_item=coll_item,scale_item=scale_item,cate_result=cate_result_item,
+                                    trend_result=trend_result_item, date=date, iter_num='{}_{}_{}'.format(k,j,date), key=(p0_name+'/'+p1_name))                    
             
-            fur_target_total = np.concatenate(fur_target_total)     
-            ins_in_scale_total = np.concatenate(ins_in_scale_total)
-            ins_output_total = np.concatenate(ins_output_total)
-            trend_result_item = trend_result[(trend_result['date']==date)&(trend_result['p0']=='total')]
-            fur_target = future_target[instruments, -self.output_chunk_length+self.cut_len-1, 0]
+            # fur_target_total = np.concatenate(fur_target_total)     
+            # ins_in_scale_total = np.concatenate(ins_in_scale_total)
+            # ins_output_total = np.concatenate(ins_output_total)
+            # trend_result_item = trend_result[(trend_result['date']==date)&(trend_result['p0']=='total')]
+            # fur_target = future_target[instruments, -self.output_chunk_length+self.cut_len-1, 0]
             # self.draw_ins_visdom(ins_in_scale_total, ins_output_total, fur_target_total, ts_arr,coll_item=coll_item,
             #             trend_result=trend_result_item, date=date, iter_num='{}_all'.format(date), key='total')                    
             # 分类趋势比较可视化
@@ -1089,8 +1110,11 @@ class FuturesTransformerModule(MlpModule):
                         cate_result=None,trend_result=None,date=None,iter_num='',key=None):
         
         name_arr = []
-        p0 = scale_item['p0']
-        p1 = scale_item['p1']
+        if self.cate_mode=='cateTotal':
+            p0 = scale_item['p0']
+            p1 = scale_item['p1']
+        else:
+            p0 = scale_item[list(scale_item.keys())[0]]['p0']
         for inner_index, item in enumerate(ts_arr[instruments]):
             match_item = coll_item[coll_item['instrument'] == item['instrument']]
             if match_item.shape[0] > 0:
@@ -1115,11 +1139,12 @@ class FuturesTransformerModule(MlpModule):
         else:
             cate_item = cate_result[(cate_result['p0']==p0)].iloc[0]
         if cate_item['top_flag']==1:
-            target_title = "{}_{} long".format(date,key,match_flag)  
+            target_title = "{}_{}({}) long".format(date,key,p0,match_flag)  
         elif cate_item['top_flag']==-1:
-            target_title = "{}_{} short".format(date,key,match_flag)   
+            target_title = "{}_{}({}) short".format(date,key,p0,match_flag)   
         else:
-            target_title = "{}_{}".format(date,key)             
+            # target_title = "{}_{}({})".format(date,key,p0)
+            return              
         viz_result_detail = global_var.get_value("viz_result_detail")
         viz_result_detail.viz_bar_compare(view_data, win=win, title=target_title, rownames=name_arr, legends=["pred_cls", "target", "price"])        
 
@@ -1784,28 +1809,35 @@ class FuturesTransformerModule(MlpModule):
         short_cate_top_dict = {'p0':short_cate_top['p0']}
         long_condi = (trend_result['p0']==long_cate_top_dict['p0'])
         short_condi = (trend_result['p0']==short_cate_top_dict['p0'])    
-        # 31模式：如果总体趋势为多方，则取得1个多方大类（内部品种3个,空方大类内部1个。空方则反过来。趋势为平，则品种2+2
-        if total_trend_flag==1:
-            trend_result.loc[long_condi,'is_can'] = 1
-            trend_result.loc[long_condi,'can_trend_flag'] = 1
-            trend_result.loc[long_condi,'can_ins_num'] = 3
-            trend_result.loc[short_condi,'is_can'] = 1
-            trend_result.loc[short_condi,'can_trend_flag'] = 0
-            trend_result.loc[short_condi,'can_ins_num'] = 1            
-        elif total_trend_flag==-1:
-            trend_result.loc[long_condi,'is_can'] = 1
-            trend_result.loc[long_condi,'can_trend_flag'] = 1
-            trend_result.loc[long_condi,'can_ins_num'] = 1
-            trend_result.loc[short_condi,'is_can'] = 1
-            trend_result.loc[short_condi,'can_trend_flag'] = 0
-            trend_result.loc[short_condi,'can_ins_num'] = 3    
-        else:
-            trend_result.loc[long_condi,'is_can'] = 1
-            trend_result.loc[long_condi,'can_trend_flag'] = 1
-            trend_result.loc[long_condi,'can_ins_num'] = 2
-            trend_result.loc[short_condi,'is_can'] = 1
-            trend_result.loc[short_condi,'can_trend_flag'] = 0
-            trend_result.loc[short_condi,'can_ins_num'] = 2        
+        # # 31模式：如果总体趋势为多方，则取得1个多方大类（内部品种3个,空方大类内部1个。空方则反过来。趋势为平，则品种2+2
+        # if total_trend_flag==1:
+        #     trend_result.loc[long_condi,'is_can'] = 1
+        #     trend_result.loc[long_condi,'can_trend_flag'] = 1
+        #     trend_result.loc[long_condi,'can_ins_num'] = 3
+        #     trend_result.loc[short_condi,'is_can'] = 1
+        #     trend_result.loc[short_condi,'can_trend_flag'] = 0
+        #     trend_result.loc[short_condi,'can_ins_num'] = 1            
+        # elif total_trend_flag==-1:
+        #     trend_result.loc[long_condi,'is_can'] = 1
+        #     trend_result.loc[long_condi,'can_trend_flag'] = 1
+        #     trend_result.loc[long_condi,'can_ins_num'] = 1
+        #     trend_result.loc[short_condi,'is_can'] = 1
+        #     trend_result.loc[short_condi,'can_trend_flag'] = 0
+        #     trend_result.loc[short_condi,'can_ins_num'] = 3    
+        # else:
+        #     trend_result.loc[long_condi,'is_can'] = 1
+        #     trend_result.loc[long_condi,'can_trend_flag'] = 1
+        #     trend_result.loc[long_condi,'can_ins_num'] = 2
+        #     trend_result.loc[short_condi,'is_can'] = 1
+        #     trend_result.loc[short_condi,'can_trend_flag'] = 0
+        #     trend_result.loc[short_condi,'can_ins_num'] = 2       
+         
+        trend_result.loc[long_condi,'is_can'] = 1
+        trend_result.loc[long_condi,'can_trend_flag'] = 1
+        trend_result.loc[long_condi,'can_ins_num'] = self.pred_top_num
+        trend_result.loc[short_condi,'is_can'] = 1
+        trend_result.loc[short_condi,'can_trend_flag'] = 0
+        trend_result.loc[short_condi,'can_ins_num'] = self.pred_top_num          
         
         trend_result = trend_result.astype({'is_can':int,'can_trend_flag':int,'can_ins_num':int})  
         return trend_result        
@@ -1943,7 +1975,13 @@ class FuturesTransformerModule(MlpModule):
         
         pre_index_total = []
         
-        scale_arr = emb_scale_arr(self.scale_arr)
+        scale_arr = concat_scale_arr(self.scale_arr)
+        def get_p0_ins(p0):
+            for item in scale_arr:
+                if item['p0']==p0:
+                    return item['instruments']
+            return None
+        
         # 根据趋势增减top数量
         for i,row in trend_result.iterrows():
             p0 = row['p0']
@@ -1955,7 +1993,7 @@ class FuturesTransformerModule(MlpModule):
             can_ins_num = row['can_ins_num']     
             pred_trend_value = row['pred_trend_value'] 
             pred_trend_value_scale = row['pred_trend_value_scale']
-            rel_ins = get_scale_cate_ins(self.scale_arr,p0)
+            rel_ins = get_p0_ins(p0)
             features_item = features[p0][batch_no]
             if can_trend_flag==1:
                 pre_index = np.argsort(-features_item)[:can_ins_num]
@@ -1964,9 +2002,9 @@ class FuturesTransformerModule(MlpModule):
             for index in pre_index:
                 real_index = rel_ins[index]
                 p1 = 'any'
-                pre_index_total.append([real_index,can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
+                pre_index_total.append([real_index,index,features_item[index],can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
         pre_index_total = np.array(pre_index_total)
-        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
+        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','rel_index','pred_value','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
         pre_index_total['top_index'] = pre_index_total['top_index'].astype(int)
         pre_index_total['top_flag'] = pre_index_total['top_flag'].astype(int)
         
@@ -2010,6 +2048,8 @@ class FuturesTransformerModule(MlpModule):
             overroll_trend = row.top_flag
             p1 = row.p1
             p0 = row.p0
+            rel_index = int(row.rel_index)
+            pred_value = row.pred_value
             if self.cate_mode=='cateTotal':
                 ins = scale_arr[p0][p1]['instruments']
             else:
@@ -2030,10 +2070,10 @@ class FuturesTransformerModule(MlpModule):
                 p_taraget_class = np.array([3, 2, 1, 0])[p_taraget_class]
             else:
                 diff_range_with_trend = diff_range
-            coll_results.append([imp_idx,p0, p1,ts["instrument"], diff_range_with_trend, p_taraget_class, overroll_trend,real_trend_values,real_trend_values_scale])    
+            coll_results.append([imp_idx,rel_index,pred_value,p0, p1,ts["instrument"], diff_range_with_trend, p_taraget_class, overroll_trend,real_trend_values,real_trend_values_scale])    
         
         coll_results = np.array(coll_results)
-        coll_results = pd.DataFrame(coll_results, columns=['top_index', 'p0', 'p1','instrument',
+        coll_results = pd.DataFrame(coll_results, columns=['top_index','rel_index','pred_value', 'p0', 'p1','instrument',
                                      'diff_range', 'target_class', 'trend_value','real_trend_values','real_trend_values_scale'])
         coll_results['diff_range'] = coll_results['diff_range'].astype(float)
         coll_results['target_class'] = coll_results['target_class'].astype(int)

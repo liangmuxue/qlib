@@ -186,8 +186,7 @@ class FuturesProcessModel(TftDataframeModel):
             self.model.model.set_outer_params(outer_params) 
             trainer.validate(model=model,dataloaders=val_loader)
             loss_result = self.model.model.loss_result
-            [loss_main,loss_total] = loss_result      
-            print("main loss:{},total loss:{}".format(loss_main,loss_total))
+            print("ins_total loss:{}".format(loss_result['ins_total']))
         elif self.type=="fit_futures_trans":
             # 设置外部hook，每训练一个轮次后，进行测试
             
@@ -644,8 +643,9 @@ class FuturesProcessModel(TftDataframeModel):
                 return x[self.output_index][0]
             
             def transfer_features(self,fea_out):
-                monitor_key = "abpfi"
-                return fea_out[monitor_key]
+                monitor_keys = ["abpfi","cdifi","hsjs","nffi","yzyl"]
+                output = torch.cat([fea_out[monitor_key] for monitor_key in monitor_keys],dim=-1)
+                return output
             
             def forward_to_layer(self,x_array):
                 if self.layer=='model.trans_model_encoder':
@@ -665,6 +665,7 @@ class FuturesProcessModel(TftDataframeModel):
                 return x
         
         output_indexs = [2,3]
+        output_indexs = [1]
         for output_index in output_indexs:
             model = ShapWrapper(model_ori,output_index=output_index)         
             x = tuple([item[:50] for item in test_input])

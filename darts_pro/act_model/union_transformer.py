@@ -356,6 +356,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         d_model=64,        # 注意力维度
         static_emb_dim=4,      # 离散特征嵌入维度
         static_cate_emb=None,  # 静态离散特征嵌入
+        target_mode=0,
         device='cuda'
     ):
         super().__init__()
@@ -366,6 +367,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         self.fut_dim = fut_dim
         self.sample_dim = sample_dim
         self.hidden_dim = hidden_dim
+        self.target_mode = target_mode
         
         # 静态离散特征嵌入初始化
         self.static_embed_layers = nn.ParameterList()
@@ -512,12 +514,20 @@ class TFTWithFutureCovariatesEn(nn.Module):
         
         time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.1)
         
-        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=0.03)
+        if self.target_mode==5:
+            scale_ctx=0.06
+        else:
+            scale_ctx=0.03
+        obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=scale_ctx)
         if PRINT_STD_FLAG:
             print("obs_proj std:{}".format(obs_feat.std()))          
         # 2.1 融合历史观测+时间嵌入+样本交互
         # obs_input = torch.cat([obs_feat, time_embed_hist], dim=-1)  # [B,S,T,F]
-        obs_input = self.his_temporal_grn(obs_feat,context=time_embed_hist,scale_ctx=0.2,no_ctx_squeeze=True)
+        if self.target_mode==5:
+            scale_ctx=0.5
+        else:
+            scale_ctx=0.2        
+        obs_input = self.his_temporal_grn(obs_feat,context=time_embed_hist,scale_ctx=scale_ctx,no_ctx_squeeze=True)
         
         # 2.2 展平样本维度：[B,S,T,F] → [B*S, T, F]
         obs_input = obs_input.reshape(B*S, T, -1)     
@@ -556,6 +566,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         d_model=64,        # 注意力维度
         static_emb_dim=4,      # 离散特征嵌入维度
         static_cate_emb=None,  # 静态离散特征嵌入
+        target_mode=0,
         device='cuda'
     ):
 
@@ -563,6 +574,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         
         self.calendar_encoder_fur = GatedResidualNetwork(input_dim=time_embed_dim, hidden_dim=hidden_dim,output_dim=hidden_dim,
                                                  context_combine_dim=1)          
+        self.target_mode = target_mode
         # 分别定义完整预测序列的解码器，以及最终单独目标的解码器
         # self.seq_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
         #              dropout=0.01, pred_len=pred_len)
@@ -583,7 +595,10 @@ class TFTWithFutureCovariatesDe(nn.Module):
         # hist_summary = hist_summary * 0.8
         # 针对序列目标和单独阶段目标分别进行解码
         # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
-        fur_scale = 0.015 # self.get_dynamic_target_ratio(current_epoch,max_epochs,final_target=1.0,warmup_ratio=0.1)
+        if self.target_mode==5:
+            fur_scale = 0.02
+        else:
+            fur_scale = 0.015
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
@@ -633,6 +648,10 @@ class AttScaleFeature(nn.Module):
         sample_dim_inner = ins_arr.shape[0]
         ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
                             layer_norm=False,batch_norm=False,dropout=dropout)
+        # nn.init.xavier_normal_(ins_layer_inner.linear_hidden.weight, gain=1.2)
+        # nn.init.xavier_normal_(ins_layer_inner.linear_output.weight, gain=1.2)
+        # nn.init.zeros_(ins_layer_inner.linear_hidden.bias)
+        # nn.init.zeros_(ins_layer_inner.linear_output.bias)        
         self.ins_layer = ins_layer_inner
         # 分支趋势计算网络
         trend_logits_layer = {}
@@ -692,18 +711,11 @@ class SparseGateFeatureTopK(nn.Module):
             trend_arr = scales_trend_arr[item['p0']]
             instruments_dict = {key:torch.Tensor(trend_arr[key]['instruments']).to(device).long() for key in trend_arr.keys()}
             scales_layer.append(AttScaleFeature(sample_dim,input_dim,seq_len=seq_len,ins_arr=item['instruments'],target_mode=target_mode,
-                                                ins_trend_dict=instruments_dict,device=device))
+                                                ins_trend_dict=instruments_dict, dropout=dropout,device=device))
         self.scales_layer = nn.ModuleList(scales_layer)
-        # # 分支趋势网络
-        # branch_trend_layer = []
-        # for i,row in scales_dict.iterrows():
-        #     instruments = row['instruments']
-        #     branch_trend_layer_inner = LinelessLayer(instruments.shape[0]*input_dim,1,hidden_size=input_dim,
-        #                         layer_norm=False,batch_norm=False,dropout=dropout)  
-        #     branch_trend_layer.append(branch_trend_layer_inner)                  
-        # self.branch_trend_layer = nn.ModuleList(branch_trend_layer)
         p1_count = scales_dict.shape[0]
         trend_layer = [] 
+        # 小类的内部mlp及整体连接
         for i,item in scales_dict.iterrows():
             inner_sample_dim = item['instruments'].shape[0]
             branch_trend_combine_layer = LinelessLayer(inner_sample_dim*input_dim,1,hidden_size=hidden_dim,
@@ -714,12 +726,7 @@ class SparseGateFeatureTopK(nn.Module):
             nn.init.zeros_(branch_trend_combine_layer.linear_output.bias)
             trend_layer.append(branch_trend_combine_layer)
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
-        # 所有小类的mlp 
-        # self.branch_trend_combine_layer_total = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=hidden_dim,
-        #                             layer_norm=False,batch_norm=True,dropout=0,relu=False) 
         self.branch_trend_combine_layer_total = nn.Sequential(nn.Linear(scales_dict.shape[0],scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))     
-        # 小类mlp的残差，加速收敛
-        self.total_resid = nn.Sequential(nn.Linear(sample_dim*input_dim,scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))       
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
                                     layer_norm=False,batch_norm=True,dropout=0.4)   
@@ -738,17 +745,19 @@ class SparseGateFeatureTopK(nn.Module):
         # 分别根据不同的业务尺度，生成1维度特征
         g_features = self.top_global_layer(x.reshape(batch_size,-1))  
         features_list['global_feature'] = g_features
-        # Instrument Compare
+        # 每个小类内部的品种计算
         for i,layer in enumerate(self.scales_layer):
             scale_features,_,trend_index_logits = layer(x)  
             scale_def = self.scales_arr[i]
             key = scale_def['p']
             # 合并主体特征和分尺度特征
             features_list[key] = scale_features
+            if PRINT_STD_FLAG:
+                print("features_list/{} std:{}".format(key,scale_features.std()))               
             trend_logits_list[key] = trend_index_logits
         # Total Trend
         # trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}
-        # Cate Compare
+        # 小类计算
         trend_list = []
         for i,item in self.scales_dict.iterrows():
             ins = torch.Tensor(item['instruments']).to(x.device).long()
@@ -758,12 +767,12 @@ class SparseGateFeatureTopK(nn.Module):
         trend_list = torch.stack(trend_list).transpose(1,0)    
         if PRINT_STD_FLAG:
             print("trend_list std:{}".format(trend_list.std()))
+        # 总体小类整合计算
         trend_list = self.branch_trend_combine_layer_total(trend_list)
         if PRINT_STD_FLAG:
             print("trend_list after std:{}".format(trend_list.std()))        
-        # 直接残差连接transformer的输出，用于调整深层和浅层权重贡献度比例
-        # resid_data = self.total_resid(x.reshape([batch_size,-1]))
-        trend_list_total = trend_list # + 0.1 * resid_data
+        trend_list_total = trend_list
+        # 大类整合计算
         trend_list_main = self.branch_trend_combine_layer_main(trend_list)
         if PRINT_STD_FLAG:
             print("trend_list_main std:{}".format(trend_list_main.std()))           
@@ -771,7 +780,15 @@ class SparseGateFeatureTopK(nn.Module):
     
     def forward(self, x,output_index=2):
         output = self.forward_combine(x)
-        return output[output_index]
+        if output_index==1:
+            output = output[output_index]
+            output_combine = []
+            for item in self.scales_arr :
+                output_combine.append(output[item['p0']])
+            output = torch.concat(output_combine,dim=-1)
+        else:
+            output = output[output_index]
+        return output
 
 class UnionTransCombine(nn.Module):
     """整合后的完整模型"""
@@ -822,6 +839,7 @@ class UnionTransCombine(nn.Module):
                 sample_dim=sample_dim,
                 static_cate_emb=static_cate_emb,
                 static_emb_dim=static_emb_dim,
+                target_mode=target_mode,
                 device=device,
             )
         self.trans_model_decoder = TFTWithFutureCovariatesDe(
@@ -839,12 +857,14 @@ class UnionTransCombine(nn.Module):
                 sample_dim=sample_dim,
                 static_cate_emb=static_cate_emb,
                 static_emb_dim=static_emb_dim,
+                target_mode=target_mode,
                 device=device,
             )        
         self.pred_len = pred_len         
         self.sample_dim = sample_dim
         self.target_feat_dim = target_feat_dim  
         self.trans_scale = trans_scale
+        self.target_mode = target_mode
         # 整合输出网络
         # self.ins_layer = nn.ParameterList([LinelessLayer(sample_dim*obs_dim*pred_len,sample_dim,hidden_size=hidden_size,layer_norm=True,batch_norm=False,dropout=0.3).double() for _ in range(self.target_feat_dim)])
         # 指数整合输出网络       
@@ -876,7 +896,10 @@ class UnionTransCombine(nn.Module):
         # 基础模型的向前传播
         hist_summary,static_context_hist = self.trans_model_encoder(static_covs,past_convs_item, his_future_emb,future_single_emb,current_epoch=current_epoch,max_epochs=max_epochs)   
         pred_tar = self.trans_model_decoder(hist_summary,future_single_emb=future_single_emb,static_context_hist=static_context_hist)  
-        tar_scale = 2.0 # self.get_dynamic_target_ratio(current_epoch,max_epochs)
+        if self.target_mode==5:
+            tar_scale = 2.0 
+        else:
+            tar_scale = 2.0
         pred_tar = pred_tar * tar_scale
         
         trend_logits_combine = []

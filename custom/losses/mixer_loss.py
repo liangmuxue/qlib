@@ -265,16 +265,25 @@ class FuturesIndustryLoss(UncertaintyLoss):
             
         return loss
         
-    def compute_multi_trunk_loss(self,pred_ori,target,key=None,norm_in_batch=0,detail_trunk_loss=None):
+    def compute_multi_trunk_loss(self,pred_ori,target,key=None,norm_in_batch=0,detail_trunk_loss=None,cate_mode='main'):
         """按照业务属性，分片比较
             norm_in_batch: 1-整体norm 2-内部norm
         """
 
-        scale_arr = self.scale_dict[key].values()
+        if cate_mode=='total':
+            scale_arr = self.scale_dict[key].values()
+            ins_all = np.concatenate([item['instruments'] for item in scale_arr])
+        else:
+            scale_arr = None
+            for item in self.scale_arr:
+                if item['p0']==key:
+                    scale_arr = [item]
+                    ins_all = item['instruments']
+                    break
+        ins_all = torch.Tensor(ins_all).to(target.device).long()
+        
         loss_detail = {}
         loss = 0
-        ins_all = np.concatenate([item['instruments'] for item in scale_arr])
-        ins_all = torch.Tensor(ins_all).to(target.device).long()
         if norm_in_batch==1:
             target_item = normalization_standard(target[ins_all])
             pred = normalization_standard(pred_ori)
@@ -308,9 +317,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:
-                # loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=detail_top_num,mid_num=detail_top_num,need_mid=True)
-                loss_item = self.ccc_loss_comp(pred_norm, target_norm_item)
-            loss_key = item['p0_code'] + "_" + item['p1_code']
+                if pred_norm.shape[0]<=5:
+                    loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=1,mid_num=1,need_mid=True)
+                else:
+                    loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=2,mid_num=2,need_mid=True)
+                # loss_item = self.ccc_loss_comp(pred_norm, target_norm_item)
+            if cate_mode=='total':
+                loss_key = item['p0_code'] + "_" + item['p1_code']
+            else:
+                loss_key = item['p0']
             if loss_key in detail_trunk_loss:
                 detail_trunk_loss[loss_key] = torch.cat([detail_trunk_loss[loss_key],torch.Tensor([loss_item])])
             else:
@@ -590,14 +605,13 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in self.scale_dict.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            # loss,_ = self.compute_multi_trunk_loss(sv_out_item,target_item,key=key,norm_in_batch=0,detail_trunk_loss=detail_trunk_loss)
                             loss,_ = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2,detail_trunk_loss=detail_trunk_loss)
                             loss_item += loss
                             cnt += 1
                         loss_item = loss_item/cnt
                         cls_loss[i] += loss_item
-                        sv_out_item = scale_output['global_feature'][j]
-                        ce_loss[i] += self.compute_global_trunk_loss(sv_out_item,ins_diff,ins_rel_index=ins_rel_index,detail_trunk_loss=detail_trunk_loss)                        
+                        # sv_out_item = scale_output['global_feature'][j]
+                        # ce_loss[i] += self.compute_global_trunk_loss(sv_out_item,ins_diff,ins_rel_index=ins_rel_index,detail_trunk_loss=detail_trunk_loss)                        
                         batch_size += 1                                   
                     elif target_mode==3:
                         # 综合类别损失和品种损失

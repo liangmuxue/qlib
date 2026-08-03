@@ -14,6 +14,22 @@ from tft.class_define import SLOPE_SHAPE_FALL,SLOPE_SHAPE_RAISE,SLOPE_SHAPE_SHAK
 from pip._internal.models import candidate
 
 
+def intersect1d_preserve_order(ar1, ar2, return_unique: bool = True):
+    """
+    两个数组求交集，保持 ar1 内部出现顺序
+    :param ar1: 基准数组（顺序以此为准）
+    :param ar2: 对比数组
+    :param return_unique: True 返回不重复交集；False 保留ar1内所有匹配重复元素
+    :return: 交集数组
+    """
+    common = np.intersect1d(ar1, ar2)
+    mask = np.isin(ar1, common)
+    filtered = ar1[mask]
+    if return_unique:
+        _, idx = np.unique(filtered, return_index=True)
+        filtered = filtered[np.sort(idx)]
+    return filtered
+
 def check_iqr_outler(data,range=3):
     """四分位排查异常值"""
     
