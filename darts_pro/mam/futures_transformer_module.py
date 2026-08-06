@@ -34,8 +34,8 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-# TRACK_DATE = [item for item in range(20250403,20250404)]
-TRACK_DATE = [item for item in range(20250818,20250906)]
+TRACK_DATE = [item for item in range(20250403,20250408)]
+# TRACK_DATE = [item for item in range(20250818,20250906)]
 # TRACK_DATE = [item for item in range(20241231,20250105)]
 # TRACK_DATE = [20250403]
 STAT_DATE = [20240428, 20260505]
@@ -279,7 +279,7 @@ class FuturesTransformerModule(MlpModule):
         self.time_encoder = None
         self.nhead = 4
         self.cate_mode = 'cateMain'
-        # self.cate_mode = 'cateTotal'        
+        self.cate_mode = 'cateTotal'        
         # 趋势数值量级区间
         self.trend_threhold = None
 
@@ -1959,9 +1959,9 @@ class FuturesTransformerModule(MlpModule):
                 pre_index = np.argsort(features_item)[:can_ins_num]            
             for index in pre_index:
                 real_index = scale_arr[p0][p1]['instruments'][index]
-                pre_index_total.append([real_index,can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
+                pre_index_total.append([real_index,index,features_item[index],can_trend_flag,pred_trend_value,pred_trend_value_scale,can_trend_flag,p0,p1])
         pre_index_total = np.array(pre_index_total)
-        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
+        pre_index_total = pd.DataFrame(pre_index_total,columns=['top_index','rel_index','pred_value','top_flag','pred_trend_value','pred_trend_value_scale','pred_trend_flag','p0','p1'])
         pre_index_total['top_index'] = pre_index_total['top_index'].astype(int)
         pre_index_total['top_flag'] = pre_index_total['top_flag'].astype(int)
         

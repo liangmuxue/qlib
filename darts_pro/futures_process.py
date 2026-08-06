@@ -665,7 +665,8 @@ class FuturesProcessModel(TftDataframeModel):
                 return x
         
         output_indexs = [2,3]
-        output_indexs = [1]
+        # output_indexs = [2]
+        # output_indexs = [1]
         for output_index in output_indexs:
             model = ShapWrapper(model_ori,output_index=output_index)         
             x = tuple([item[:50] for item in test_input])

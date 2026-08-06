@@ -526,7 +526,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         if self.target_mode==5:
             scale_ctx=0.5
         else:
-            scale_ctx=0.2        
+            scale_ctx=0.3       
         obs_input = self.his_temporal_grn(obs_feat,context=time_embed_hist,scale_ctx=scale_ctx,no_ctx_squeeze=True)
         
         # 2.2 展平样本维度：[B,S,T,F] → [B*S, T, F]
@@ -592,13 +592,10 @@ class TFTWithFutureCovariatesDe(nn.Module):
             print("hist_summary std:{}".format(hist_summary.std()))
             print("future_single_emb std:{}".format(future_single_emb.std()))
         
-        # hist_summary = hist_summary * 0.8
-        # 针对序列目标和单独阶段目标分别进行解码
-        # pred_seq = self.seq_decoder(hist_summary,fut_proj)        # [B*S*P, obs_dim]
         if self.target_mode==5:
             fur_scale = 0.02
         else:
-            fur_scale = 0.005
+            fur_scale = 0.01
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
