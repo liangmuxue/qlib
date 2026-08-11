@@ -595,7 +595,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         if self.target_mode==5:
             fur_scale = 0.02
         else:
-            fur_scale = 0.021
+            fur_scale = 0.015
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
