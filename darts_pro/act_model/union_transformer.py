@@ -767,12 +767,12 @@ class SparseGateFeatureTopK(nn.Module):
         if PRINT_STD_FLAG:
             print("trend_list std:{}".format(trend_list.std()))
         # 总体小类整合计算
-        trend_list = self.branch_trend_combine_layer_total(trend_list)
+        trend_list = self.branch_trend_combine_layer_total(trend_list,redu=True)
         if PRINT_STD_FLAG:
             print("trend_list after std:{}".format(trend_list.std()))        
         trend_list_total = trend_list
         # 大类整合计算
-        trend_list_main = self.branch_trend_combine_layer_main(trend_list)
+        trend_list_main = self.branch_trend_combine_layer_main(trend_list,redu=True)
         if PRINT_STD_FLAG:
             print("trend_list_main std:{}".format(trend_list_main.std()))           
         return trend_logits_list,features_list,trend_list_total,trend_list_main

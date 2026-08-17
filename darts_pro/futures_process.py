@@ -760,76 +760,76 @@ class FuturesProcessModel(TftDataframeModel):
             # 系数范围 0.7 ~ 1.0，线性平滑，不极端压制/抬高
             return 1.0 - 0.3 * (layer_depth - 1) / (total_depth - 1)   
              
-        # for name, layer in model.named_modules():
-        #     if name in focus_layers:
-        #         model.set_layer(name)
-        #         lgs = LayerGradientShap(model, layer)
-        #         attr_inp_combine = []
-        #         attr_inp_combine_after = []
-        #         attr_inp_combine_train = []
-        #         attr_inp_combine_train_after = []
-        #         for k in range(sample_num):
-        #             # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
-        #             x_single = tuple([item[k:k+1] for item in x])
-        #             x_single_train = tuple([item[k:k+1] for item in x_train])
-        #             # attr_inp = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
-        #             attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
-        #             # attr_inp_train = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
-        #             attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
-        #             if name=='model.trans_model_encoder':
-        #                 # attr_inp_combine.append(attr_inp[1])
-        #                 # attr_inp_combine_train.append(attr_inp_train[1])
-        #                 for h in range(x_single[0].shape[1]):
-        #                     size = h * x_single[0].shape[2]
-        #                     attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
-        #                     attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])  
-        #                     attr_inp_combine_after.append(attr_inp_after_final)
-        #                     attr_inp_combine_train_after.append(attr_inp_train_after_final)
-        #             if name=='model.trans_model_decoder':
-        #                 # attr_inp_combine.append(attr_inp[1])
-        #                 # attr_inp_combine_train.append(attr_inp_train[1])
-        #                 for h in range(x_single[0].shape[1]):
-        #                     size = h * x_single[0].shape[2]
-        #                     attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
-        #                     attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
-        #                     attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
-        #                     attr_inp_combine_after.append(attr_inp_after_final)
-        #                     attr_inp_combine_train_after.append(attr_inp_train_after_final)                      
-        #             if name=='model.top_selector.0':
-        #                 # attr_inp_combine.append(attr_inp[0])
-        #                 # attr_inp_combine_train.append(attr_inp_train[0])   
-        #                 if output_index==2:
-        #                     r = 7
-        #                 else:
-        #                     r = 4
-        #                 for h in range(r):   
-        #                     attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
-        #                     attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
-        #                     attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
-        #                     attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
-        #                     attr_inp_combine_after.append(attr_inp_after_final)
-        #                     attr_inp_combine_train_after.append(attr_inp_train_after_final)                                           
-        #         # attr_inp_combine = torch.cat(attr_inp_combine)    
-        #         # attr_inp_combine_train = torch.cat(attr_inp_combine_train) 
-        #         attr_inp_combine_after = torch.cat(attr_inp_combine_after)    
-        #         attr_inp_combine_train_after = torch.cat(attr_inp_combine_train_after) 
-        #         # train_contribs[name] = attr_inp_combine_train.abs().mean().item()
-        #         # val_contribs[name] = attr_inp_combine.abs().mean().item()
-        #         # train_contrib_value = torch.norm(attr_inp_combine_train_after,dim=-1).mean().item()
-        #         # val_contrib_value = torch.norm(attr_inp_combine_after,dim=-1).mean().item()
-        #         attr_inp_combine_train_after = attr_inp_combine_train_after[attr_inp_combine_train_after!=0]
-        #         attr_inp_combine_after = attr_inp_combine_after[attr_inp_combine_after!=0]
-        #         train_contrib_total = calc_total_contribution(attr_inp_combine_train_after)
-        #         # train_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_train_after)))
-        #         val_contrib_total = calc_total_contribution(attr_inp_combine_after)
-        #         # val_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_after)))
-        #         train_contribs[name+"_after_total"] = train_contrib_total
-        #         val_contribs[name+"_after_total"] = val_contrib_total
-        # print("train_contribs:",train_contribs)
-        # print("val_contribs:",val_contribs)
+        for name, layer in model.named_modules():
+            if name in focus_layers:
+                model.set_layer(name)
+                lgs = LayerGradientShap(model, layer)
+                attr_inp_combine = []
+                attr_inp_combine_after = []
+                attr_inp_combine_train = []
+                attr_inp_combine_train_after = []
+                for k in range(sample_num):
+                    # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
+                    x_single = tuple([item[k:k+1] for item in x])
+                    x_single_train = tuple([item[k:k+1] for item in x_train])
+                    # attr_inp = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
+                    attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+                    # attr_inp_train = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=True)
+                    attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=0,attribute_to_layer_input=False)
+                    if name=='model.trans_model_encoder':
+                        # attr_inp_combine.append(attr_inp[1])
+                        # attr_inp_combine_train.append(attr_inp_train[1])
+                        for h in range(x_single[0].shape[1]):
+                            size = h * x_single[0].shape[2]
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])  
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)
+                    if name=='model.trans_model_decoder':
+                        # attr_inp_combine.append(attr_inp[1])
+                        # attr_inp_combine_train.append(attr_inp_train[1])
+                        for h in range(x_single[0].shape[1]):
+                            size = h * x_single[0].shape[2]
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=size,attribute_to_layer_input=False)
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)                      
+                    if name=='model.top_selector.0':
+                        # attr_inp_combine.append(attr_inp[0])
+                        # attr_inp_combine_train.append(attr_inp_train[0])   
+                        if output_index==2:
+                            r = 7
+                        else:
+                            r = 4
+                        for h in range(r):   
+                            attr_inp_after = lgs.attribute(x_single, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
+                            attr_inp_train_after = lgs.attribute(x_single_train, baselines=baselines, n_samples=50,target=h,attribute_to_layer_input=False)
+                            attr_inp_after_final = torch.nan_to_num(attr_inp_after[0]) 
+                            attr_inp_train_after_final = torch.nan_to_num(attr_inp_train_after[0])      
+                            attr_inp_combine_after.append(attr_inp_after_final)
+                            attr_inp_combine_train_after.append(attr_inp_train_after_final)                                           
+                # attr_inp_combine = torch.cat(attr_inp_combine)    
+                # attr_inp_combine_train = torch.cat(attr_inp_combine_train) 
+                attr_inp_combine_after = torch.cat(attr_inp_combine_after)    
+                attr_inp_combine_train_after = torch.cat(attr_inp_combine_train_after) 
+                # train_contribs[name] = attr_inp_combine_train.abs().mean().item()
+                # val_contribs[name] = attr_inp_combine.abs().mean().item()
+                # train_contrib_value = torch.norm(attr_inp_combine_train_after,dim=-1).mean().item()
+                # val_contrib_value = torch.norm(attr_inp_combine_after,dim=-1).mean().item()
+                attr_inp_combine_train_after = attr_inp_combine_train_after[attr_inp_combine_train_after!=0]
+                attr_inp_combine_after = attr_inp_combine_after[attr_inp_combine_after!=0]
+                train_contrib_total = calc_total_contribution(attr_inp_combine_train_after)
+                # train_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_train_after)))
+                val_contrib_total = calc_total_contribution(attr_inp_combine_after)
+                # val_contrib_layer = np.mean(np.abs(layer_wise_normalize(attr_inp_combine_after)))
+                train_contribs[name+"_after_total"] = train_contrib_total
+                val_contribs[name+"_after_total"] = val_contrib_total
+        print("train_contribs:",train_contribs)
+        print("val_contribs:",val_contribs)
                         
     def model_layer_analysis(self,model,background_input,test_input,sample_num=10):
         """Model Layer compute analysis"""
