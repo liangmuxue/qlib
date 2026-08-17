@@ -517,7 +517,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         if self.target_mode==5:
             scale_ctx=0.06
         else:
-            scale_ctx=0.04
+            scale_ctx=0.02
         obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=scale_ctx)
         if PRINT_STD_FLAG:
             print("obs_proj std:{}".format(obs_feat.std()))          
@@ -526,7 +526,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         if self.target_mode==5:
             scale_ctx=0.5
         else:
-            scale_ctx=0.25       
+            scale_ctx=0.05       
         obs_input = self.his_temporal_grn(obs_feat,context=time_embed_hist,scale_ctx=scale_ctx,no_ctx_squeeze=True)
         
         # 2.2 展平样本维度：[B,S,T,F] → [B*S, T, F]
@@ -595,7 +595,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
         if self.target_mode==5:
             fur_scale = 0.02
         else:
-            fur_scale = 0.015
+            fur_scale = 0.018
         self.fur_scale = fur_scale
         pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
@@ -725,10 +725,10 @@ class SparseGateFeatureTopK(nn.Module):
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
         # self.branch_trend_combine_layer_total = nn.Sequential(nn.Linear(scales_dict.shape[0],scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))     
         self.branch_trend_combine_layer_total = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.4)  
+                                    layer_norm=False,batch_norm=True,dropout=0.5)  
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.4)   
+                                    layer_norm=False,batch_norm=True,dropout=0.5)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
         nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
