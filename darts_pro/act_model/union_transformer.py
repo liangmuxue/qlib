@@ -725,10 +725,10 @@ class SparseGateFeatureTopK(nn.Module):
         self.branch_trend_combine_layer = nn.ModuleList(trend_layer)
         # self.branch_trend_combine_layer_total = nn.Sequential(nn.Linear(scales_dict.shape[0],scales_dict.shape[0]),nn.BatchNorm1d(scales_dict.shape[0]))     
         self.branch_trend_combine_layer_total = LinelessLayer(scales_dict.shape[0],scales_dict.shape[0],hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.5)  
+                                    layer_norm=False,batch_norm=True,dropout=0.4)  
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.5)   
+                                    layer_norm=False,batch_norm=True,dropout=0.4)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
         nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
@@ -898,7 +898,7 @@ class UnionTransCombine(nn.Module):
         if self.target_mode==5:
             tar_scale = 2.0 
         else:
-            tar_scale = 2.0
+            tar_scale = 1.8
         pred_tar = pred_tar * tar_scale
         
         trend_logits_combine = []
