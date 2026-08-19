@@ -761,18 +761,18 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in self.scales_dict.iterrows():
             ins = torch.Tensor(item['instruments']).to(x.device).long()
             x_part = x[:,ins,:]
-            cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1),redu=True).squeeze(-1)
+            cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1),redu=1).squeeze(-1)
             trend_list.append(cate_data)     
         trend_list = torch.stack(trend_list).transpose(1,0)    
         if PRINT_STD_FLAG:
             print("trend_list std:{}".format(trend_list.std()))
         # 总体小类整合计算
-        trend_list = self.branch_trend_combine_layer_total(trend_list,redu=True)
+        trend_list = self.branch_trend_combine_layer_total(trend_list,redu=2)
         if PRINT_STD_FLAG:
             print("trend_list after std:{}".format(trend_list.std()))        
         trend_list_total = trend_list
         # 大类整合计算
-        trend_list_main = self.branch_trend_combine_layer_main(trend_list,redu=True)
+        trend_list_main = self.branch_trend_combine_layer_main(trend_list,redu=2)
         if PRINT_STD_FLAG:
             print("trend_list_main std:{}".format(trend_list_main.std()))           
         return trend_logits_list,features_list,trend_list_total,trend_list_main

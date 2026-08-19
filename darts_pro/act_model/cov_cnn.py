@@ -158,13 +158,13 @@ class LinelessLayer(nn.Module):
     """全连接加非线性"""
 
     def __init__(self,input_num,output_num,shutcut_num=0,hidden_size=16,device=None,layer_norm=True,batch_norm=False,
-                 dropout=0,bias=False,sigmoid=False,relu=True,elementwise_affine=True,track_running_stats=True):   
+                 dropout=0,redu_dropout=0.1,bias=False,sigmoid=False,relu=True,elementwise_affine=True,track_running_stats=True):   
         super(LinelessLayer, self).__init__()
         
         self.bias = bias
         self.sigmoid = sigmoid
         self.linear_hidden = nn.Linear(input_num, hidden_size)
-        self.linear_hidden_redu = nn.Linear(hidden_size, hidden_size)
+        self.linear_hidden_redu =  nn.ParameterList([nn.Linear(hidden_size, hidden_size) for _ in range(3)])
         self.linear_output = nn.Linear(hidden_size, output_num)
         self.relu = nn.GELU() 
         self.relu_flag = relu
@@ -172,9 +172,12 @@ class LinelessLayer(nn.Module):
         self.batch_norm = batch_norm
         self.output_num = output_num
         self.dropout_value = dropout
+        self.redu_dropout = redu_dropout
+        
         if dropout>0:
             self.dropout = nn.Dropout(dropout)
-        
+        if redu_dropout>0:
+            self.redu_dropout = nn.Dropout(redu_dropout)
         if batch_norm:
             self.bn = nn.BatchNorm1d(hidden_size,track_running_stats=track_running_stats)          
         if output_num>1 and layer_norm:
@@ -189,15 +192,19 @@ class LinelessLayer(nn.Module):
         if bias:
             nn.init.constant_(self.linear_output.bias, 0.1)
             
-    def forward(self, input_data,redu=False,res_data=None): 
+    def forward(self, input_data,redu=0,res_data=None): 
         
         input_data = self.linear_hidden(input_data)
-        if redu:
-            input_data = self.linear_hidden_redu(input_data)
-        if self.batch_norm:
-            input_data = self.bn(input_data)          
+        input_data = self.relu(input_data)        
+        for i in range(redu):
+            redu_layer = self.linear_hidden_redu[i]
+            input_data = redu_layer(input_data)
+            input_data = self.relu(input_data)
+            # input_data = self.redu_dropout(input_data)
         if self.relu_flag:
             input_data = self.relu(input_data)
+        if self.batch_norm:
+            input_data = self.bn(input_data)             
         input_data = self.linear_output(input_data)
         if self.dropout_value>0:
             input_data = self.dropout(input_data)

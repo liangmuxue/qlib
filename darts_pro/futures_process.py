@@ -133,6 +133,9 @@ class FuturesProcessModel(TftDataframeModel):
         self,
         dataset: TFTFuturesDataset,
     ):
+        
+        torch.set_float32_matmul_precision('medium')
+        
         self.pred_data_path = self.kwargs["pred_data_path"]
         self.batch_file_path = self.kwargs["batch_file_path"]
         self.load_dataset_file = self.kwargs["load_dataset_file"]
