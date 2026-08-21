@@ -134,68 +134,36 @@ class FuturesProcessModel(TftDataframeModel):
         dataset: TFTFuturesDataset,
     ):
         
-        torch.set_float32_matmul_precision('medium')
+        # torch.set_float32_matmul_precision('medium')
         
-        self.pred_data_path = self.kwargs["pred_data_path"]
-        self.batch_file_path = self.kwargs["batch_file_path"]
-        self.load_dataset_file = self.kwargs["load_dataset_file"]
-        self.save_dataset_file = self.kwargs["save_dataset_file"]      
-        if not os.path.exists(self.batch_file_path):
-            os.mkdir(self.batch_file_path)
+        ori_model,build_data,outer_params = self.prepare_model_env(dataset)
+        train_data = build_data['train']
+        val_data = build_data['val']
+        test_data = build_data['test']
         
-        # 生成tft时间序列数据集,包括目标数据、协变量等
-        global_var.set_value("trend_threhold",self.optargs["trend_threhold"])
-        train_data,val_data,test_data = dataset.build_series_data()
         train_series_transformed,past_convariates_train,future_convariates_train = train_data
         val_series_transformed,past_convariates_val,future_convariates_val = val_data
-        test_series_transformed,past_convariates_test,future_convariates_test = test_data
-        global_var.set_value("load_ass_data",False)
-        global_var.set_value("save_ass_data",False)  
-            
-        # 使用股票代码数量作为embbding长度
-        emb_size = dataset.get_emb_size()
-        # emb_size = 500
-        load_weight = self.optargs["load_weight"]
-        # map_location = torch.device("cpu")
-        device = self._build_device()
-        
-        outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
-                        'top_num':self.optargs['loss_top_num'],'pred_top_num':self.optargs['pred_top_num'],
-                        'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode'],
-                        'trend_threhold':self.optargs['trend_threhold'],'max_epochs':self.n_epochs,
-                        'pred_index_data_path':self.kwargs["pred_index_data_path"],'load_index_data':self.kwargs["load_index_data"],
-                        'pred_cate_data_path':self.kwargs["pred_cate_data_path"],'load_cate_data':self.kwargs["load_cate_data"]
-                        }
-        if load_weight:
-            best_weight = self.optargs["best_weight"]    
-            self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
-                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
-            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
-            self.model.model.set_outer_params(outer_params) 
-        else:
-            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
-        self.model.mode = self.type 
-        self.model.set_outer_params(outer_params) 
+        test_series_transformed,past_convariates_test,future_convariates_test = test_data        
         
         if self.type=="pred_futures_trans":  
             # 预测模式下，通过设置epochs为0来达到不进行训练的目的，并直接执行validate
             trainer,model,train_loader,val_loader,test_loader = \
-            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+            ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                     test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
-            self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-            self.model.model.set_outer_params(outer_params) 
+            ori_model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            ori_model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            ori_model.model.set_outer_params(outer_params) 
             trainer.validate(model=model,dataloaders=val_loader)
-            loss_result = self.model.model.loss_result
+            loss_result = ori_model.model.loss_result
             # print("ins_total loss:{}".format(loss_result['ins_total']))
         elif self.type=="fit_futures_trans":
             # 设置外部hook，每训练一个轮次后，进行测试
             
             class ExternalTrainHook(Callback):
                 """外部训练生命周期钩子，完全脱离LightningModule"""
-                def __init__(self,trainer,test_loader,epoch_num=0,log_folder=None,caller=None):
+                def __init__(self,trainer,test_loader,epoch_num=0,log_folder=None,caller=None,train_loader=None,val_loader=None):
                     self.caller = caller
                     self.trainer = trainer
                     self.test_loader = test_loader
@@ -203,6 +171,8 @@ class FuturesProcessModel(TftDataframeModel):
                     logger = pl_loggers.TensorBoardLogger(save_dir=log_folder, default_hp_metric=False,name="", version="val_logs")
                     trainer.logger = logger     
                     self.epoch_num = epoch_num     
+                    self.train_loader = train_loader
+                    self.val_loader = val_loader
 
                 def clone_pl_model(self,src_model) -> pl.LightningModule:
                     # 1. 用原超参新建实例
@@ -257,26 +227,88 @@ class FuturesProcessModel(TftDataframeModel):
                     if self.caller.optargs["target_mode"][0]==5:
                         print("anno_yield:",model.anno_yield)
                         tb.add_scalar("rate/anno_yield", model.anno_yield, trainer.current_epoch)
-                    fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
-                    # print("model.fur_scale:{}".format(fur_scale))
-                    # tb.add_scalar('fur_scale', fur_scale, trainer.current_epoch)                         
+                    
+                    # 根据归因数据，动态调整未来协变量缩放参数
+                    new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
+                    if (trainer.current_epoch%10)==0:
+                        # 调用归因分析方法，取得归因结果
+                        ori_model.model = model
+                        model_env = (ori_model,build_data,outer_params,self.train_loader,self.val_loader)
+                        rtn_data = self.caller.analysis_model(dataset,model_env=model_env)
+                        # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
+                        past_convs_weights = rtn_data['past_convs'][1]
+                        future_single_emb_weights = rtn_data['future_single_emb'][1]
+                        # 未来时间协变量的归因权重不能小于过去业务协变量的一定比例,如果超出，则调整缩放参数
+                        scale_threhold = 4
+                        scale_value = past_convs_weights/(future_single_emb_weights*scale_threhold)
+                        if scale_value > 1:
+                            new_fur_scale = new_fur_scale * scale_value
+                            pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
+                        
+                    print("model.fur_scale:{}".format(new_fur_scale))
+                    tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)                         
                         
             trainer,model_inner,train_loader,val_loader,_ = \
-            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+            ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                     test_series=None,test_past_covariates=None,test_future_covariates=None,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=True)   
             trainer_test,_,_,_,test_loader = \
-            self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+            ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                     test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=True)  
             
             log_folder = os.path.join(self.optargs["work_dir"],self.optargs["model_name"])
-            hook = ExternalTrainHook(trainer_test,test_loader,log_folder=log_folder,epoch_num=trainer.current_epoch,caller=self)
+            hook = ExternalTrainHook(trainer_test,test_loader,log_folder=log_folder,epoch_num=trainer.current_epoch,caller=self,train_loader=train_loader,val_loader=val_loader)
             trainer.callbacks.append(hook)
-            self.model.train(trainer,model_inner,train_loader,val_loader)
-
+            ori_model.train(trainer,model_inner,train_loader,val_loader)
+    
+    def prepare_model_env(self,dataset):
+        
+        self.pred_data_path = self.kwargs["pred_data_path"]
+        self.batch_file_path = self.kwargs["batch_file_path"]
+        self.load_dataset_file = self.kwargs["load_dataset_file"]
+        self.save_dataset_file = self.kwargs["save_dataset_file"]      
+        if not os.path.exists(self.batch_file_path):
+            os.mkdir(self.batch_file_path)
+        
+        # 生成tft时间序列数据集,包括目标数据、协变量等
+        global_var.set_value("trend_threhold",self.optargs["trend_threhold"])
+        train_data,val_data,test_data = dataset.build_series_data()
+        train_series_transformed,past_convariates_train,future_convariates_train = train_data
+        val_series_transformed,past_convariates_val,future_convariates_val = val_data
+        test_series_transformed,past_convariates_test,future_convariates_test = test_data
+        global_var.set_value("load_ass_data",False)
+        global_var.set_value("save_ass_data",False)  
+            
+        # 使用股票代码数量作为embbding长度
+        emb_size = dataset.get_emb_size()
+        # emb_size = 500
+        load_weight = self.optargs["load_weight"]
+        # map_location = torch.device("cpu")
+        device = self._build_device()
+        
+        outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
+                        'top_num':self.optargs['loss_top_num'],'pred_top_num':self.optargs['pred_top_num'],
+                        'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode'],
+                        'trend_threhold':self.optargs['trend_threhold'],'max_epochs':self.n_epochs,
+                        'pred_index_data_path':self.kwargs["pred_index_data_path"],'load_index_data':self.kwargs["load_index_data"],
+                        'pred_cate_data_path':self.kwargs["pred_cate_data_path"],'load_cate_data':self.kwargs["load_cate_data"]
+                        }
+        if load_weight:
+            best_weight = self.optargs["best_weight"]    
+            ori_model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
+                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
+            self.rebuild_model_params(ori_model,model_name=self.optargs["model_name"])  
+            ori_model.model.set_outer_params(outer_params) 
+        else:
+            ori_model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
+        ori_model.mode = self.type 
+        ori_model.set_outer_params(outer_params)    
+        
+        return ori_model,{'train':train_data,'val':val_data,'test':test_data},outer_params
+         
     def rebuild_model_params(self,model,model_name=None):
         
         model.model.model_name = model_name
@@ -379,60 +411,34 @@ class FuturesProcessModel(TftDataframeModel):
     def analysis_model(
         self,
         dataset: TFTFuturesDataset,
+        model_env=None
     ):
         """分析特征重要性"""
         
-        self.pred_data_path = self.kwargs["pred_data_path"]
-        self.batch_file_path = self.kwargs["batch_file_path"]
-        self.load_dataset_file = self.kwargs["load_dataset_file"]
-        self.save_dataset_file = self.kwargs["save_dataset_file"]      
-        if not os.path.exists(self.batch_file_path):
-            os.mkdir(self.batch_file_path)
-        
-        # 生成tft时间序列数据集,包括目标数据、协变量等
-        global_var.set_value("trend_threhold",self.optargs["trend_threhold"])
-        train_data,val_data,_ = dataset.build_series_data()
-        train_series_transformed,past_convariates_train,future_convariates_train = train_data
-        val_series_transformed,past_convariates_val,future_convariates_val = val_data
-        global_var.set_value("load_ass_data",False)
-        global_var.set_value("save_ass_data",False)  
-            
-        # 使用股票代码数量作为embbding长度
-        emb_size = dataset.get_emb_size()
-        # emb_size = 500
-        load_weight = self.optargs["load_weight"]
-        # map_location = torch.device("cpu")
-        device = self._build_device()
-        
-        outer_params = {'pred_weights':self.optargs["pred_weights"],'mode':self.type,'use_pcgrad':self.optargs['use_pcgrad'],
-                        'top_num':self.optargs['loss_top_num'],'pred_top_num':self.optargs['pred_top_num'],
-                        'opt_size':self.optargs['opt_size'],'candidate_inverse':self.optargs['candidate_inverse'],'pred_mode':self.optargs['pred_mode'],
-                        'trend_threhold':self.optargs['trend_threhold'],'max_epochs':self.n_epochs,
-                        'pred_index_data_path':self.kwargs["pred_index_data_path"],'load_index_data':self.kwargs["load_index_data"],
-                        'pred_cate_data_path':self.kwargs["pred_cate_data_path"],'load_cate_data':self.kwargs["load_cate_data"]
-                        }
-        if load_weight:
-            best_weight = self.optargs["best_weight"]    
-            self.model = FuturesModel.load_from_checkpoint(self.optargs["model_name"],work_dir=self.optargs["work_dir"],device=device,
-                                                             best=best_weight,batch_file_path=self.batch_file_path,map_location=None)
-            self.rebuild_model_params(self.model,model_name=self.optargs["model_name"])  
-            self.model.model.set_outer_params(outer_params) 
+        if model_env is not None:
+            # 从参数中直接取得数据环境和模型
+            model_ori,build_data,outer_params,train_loader,val_loader = model_env
         else:
-            self.model = self._build_model(dataset,emb_size=emb_size,use_model_name=True,mode=1) 
-        self.model.mode = self.type 
-        self.model.set_outer_params(outer_params) 
-        
-        
-        trainer,model,train_loader,val_loader,_ = \
-        self.model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
-                val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
-                 max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
-        self.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-        self.model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
-        self.model.model.set_outer_params(outer_params) 
+            # 生成数据环境和模型
+            model_ori,build_data,outer_params = self.prepare_model_env(dataset)
+            train_data = build_data['train']
+            val_data = build_data['val']
+            test_data = build_data['test']
+            train_series_transformed,past_convariates_train,future_convariates_train = train_data
+            val_series_transformed,past_convariates_val,future_convariates_val = val_data
+            test_series_transformed,past_convariates_test,future_convariates_test = test_data 
+            
+            
+            trainer,model,train_loader,val_loader,_ = \
+            model_ori.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
+                    val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+            model_ori.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            model_ori.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
+            model_ori.model.set_outer_params(outer_params) 
 
-        self.model.model.eval()
-        real_model = self.model.model.sub_models[0].cuda().float()
+        model_ori.model.eval()
+        real_model = model_ori.model.sub_models[0].cuda().float()
         real_model.eval()        # SHAP 必须 eval
         
         for p in real_model.parameters():
@@ -446,42 +452,18 @@ class FuturesProcessModel(TftDataframeModel):
         static_covariate_total = []
         historic_future_covariates_total = []
         # 背景数据：用少量训练集
-        background,_ = self.form_input_data(train_dataset,pl_module=self.model.model,data_loader=train_loader,sampler_cnt=5,mode='train')
+        background,_ = self.form_input_data(train_dataset,pl_module=model_ori.model,data_loader=train_loader,sampler_cnt=5,mode='train')
         # 待解释数据：选测试集一小部分
-        to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=self.model.model,data_loader=val_loader,sampler_cnt=3,mode='val')
+        to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=model_ori.model,data_loader=val_loader,sampler_cnt=3,mode='val')
         # Model Layer compute analysis
         sample_num = 50
+        rtn_data = None
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
-        self.ind_layer_analysis(real_model, background, to_explain,sample_num=10)
+        rtn_data = self.ind_layer_analysis(real_model, background, to_explain,model_ref=model_ori)
         # self.check_sampler_output(real_model, background)
 
-        # # ======================== 【5】核心诊断：每层SHAP贡献 ========================
-        # print("="*60)
-        # print("  训练损失不下降 → SHAP 层诊断报告")
-        # print("="*60)
-        #
-        # for i, (out, sv) in enumerate(zip(layer_recorder, shap_values)):
-        #     # 量化指标
-        #     mean_abs = np.mean(np.abs(sv))
-        #     neg_ratio = np.mean(sv < 0)
-        #     zero_ratio = np.mean(np.abs(out.cpu().numpy()) < 1e-6)
-        #
-        #     # 输出诊断
-        #     print(f"\n📌 层 {i+1}")
-        #     print(f"   平均贡献强度：{mean_abs:.6f}")
-        #     print(f"   负贡献比例：{neg_ratio:.1%}")
-        #     print(f"   神经元死亡比例：{zero_ratio:.1%}")
-        #
-        #     # ======================== 自动判断问题 ========================
-        #     if mean_abs < 1e-5:
-        #         print("   ❌ 问题：该层**完全失效，无任何贡献**（梯度消失/权重死了）")
-        #     elif neg_ratio > 0.2:
-        #         print("   ❌ 问题：该层**有害**，在破坏预测（梯度爆炸/过拟合）")
-        #     elif zero_ratio > 0.8:
-        #         print("   ❌ 问题：该层**神经元全部死亡**（ReLU死区/权重为0）")
-        #     else:
-        #         print("   ✅ 正常")        
+        return rtn_data   
          
     
     def check_sampler_output(self,model,input):
@@ -603,9 +585,9 @@ class FuturesProcessModel(TftDataframeModel):
         # save_path = "custom/data/asis/view_data/{}/dep_plot_val.png".format(analysis_task_name)
         # fig.savefig(save_path, dpi=300, bbox_inches='tight')
         # plt.close(fig)                
-        #
+        
 
-    def ind_layer_analysis(self,model_ori,background_input,test_input,sample_num=10):
+    def ind_layer_analysis(self,model_ori,background_input,test_input,model_ref=None):
 
         class ShapWrapper(torch.nn.Module):
             """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
@@ -670,6 +652,7 @@ class FuturesProcessModel(TftDataframeModel):
         output_indexs = [2,3]
         # output_indexs = [2]
         # output_indexs = [1]
+        rtn_data = {}
         for output_index in output_indexs:
             model = ShapWrapper(model_ori,output_index=output_index)         
             x = tuple([item[:50] for item in test_input])
@@ -720,7 +703,10 @@ class FuturesProcessModel(TftDataframeModel):
                 # val_importance = np.abs(val_attr[i].detach().cpu().numpy())           
                 val_importance_mean = val_importance.mean()
                 val_importance_detail = val_importance.mean(tuple(range(val_importance.ndim - 1)))
-                print("output_index_{} input {} train_importance mean:{},val_importance mean:{}".format(output_index,input_names[i],train_importance_mean, val_importance_mean)) 
+                if output_index==2:
+                    rtn_data[input_names[i]] = [train_importance_mean,val_importance_mean]
+                print("output_index_{} input {} train_importance mean:{},val_importance mean:{}".format(output_index,input_names[i],
+                                            train_importance_mean, val_importance_mean)) 
                 # if i==1:
                 #     print("input {} train_importance detail:{},val_importance detail:{}".format(input_names[i],train_importance_detail, val_importance_detail)) 
  
@@ -833,6 +819,8 @@ class FuturesProcessModel(TftDataframeModel):
         #         val_contribs[name+"_after_total"] = val_contrib_total
         # print("train_contribs:",train_contribs)
         # print("val_contribs:",val_contribs)
+        
+        return rtn_data
                         
     def model_layer_analysis(self,model,background_input,test_input,sample_num=10):
         """Model Layer compute analysis"""

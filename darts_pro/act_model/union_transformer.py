@@ -579,8 +579,17 @@ class TFTWithFutureCovariatesDe(nn.Module):
         # self.seq_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
         #              dropout=0.01, pred_len=pred_len)
         self.tar_decoder = DecoderLayer(obs_dim=obs_dim, hidden_dim=hidden_dim,sample_dim=sample_dim,
-                     dropout=0.01, pred_len=1)          
-        
+                     dropout=0.01, pred_len=1)     
+             
+        if self.target_mode==5:
+            fur_scale = 0.02
+        else:
+            fur_scale = 0.018
+        self.fur_scale = fur_scale
+    
+    def set_fur_scale(self,fur_scale):     
+        self.fur_scale = fur_scale
+           
     def forward(self, hist_summary,future_single_emb=None,static_context_hist=None):
 
         B, S, _ = hist_summary.shape
@@ -592,12 +601,7 @@ class TFTWithFutureCovariatesDe(nn.Module):
             print("hist_summary std:{}".format(hist_summary.std()))
             print("future_single_emb std:{}".format(future_single_emb.std()))
         
-        if self.target_mode==5:
-            fur_scale = 0.02
-        else:
-            fur_scale = 0.018
-        self.fur_scale = fur_scale
-        pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=fur_scale)        # [B*S*1, obs_dim]
+        pred_tar = self.tar_decoder(hist_summary,future_single_emb,fur_scale=self.fur_scale)        # [B*S*1, obs_dim]
         # pred_tar_tmp = pred_tar.reshape([-1,pred_tar.shape[-1]])
         
         if PRINT_STD_FLAG:
@@ -728,14 +732,23 @@ class SparseGateFeatureTopK(nn.Module):
                                     layer_norm=False,batch_norm=True,dropout=0.4)  
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.4)   
+                                    layer_norm=False,batch_norm=True,dropout=0.3)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
+        nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_output.weight, gain=mlp_init_scale)
+        nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
+        nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden_redu.weight, gain=mlp_init_scale)
+        nn.init.zeros_(self.branch_trend_combine_layer_total.linear_output.bias)        
+        nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias) 
+        nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden_redu.bias) 
+        
         nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_output.weight, gain=mlp_init_scale)
         nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_hidden.weight, gain=mlp_init_scale)
+        nn.init.xavier_normal_(self.branch_trend_combine_layer_main.linear_hidden_redu.weight, gain=mlp_init_scale)
         nn.init.zeros_(self.branch_trend_combine_layer_main.linear_output.bias)        
         nn.init.zeros_(self.branch_trend_combine_layer_main.linear_hidden.bias) 
-                
+        nn.init.zeros_(self.branch_trend_combine_layer_main.linear_hidden_redu.bias) 
+                        
     def forward_combine(self, x):
         # x: (batch_size, 品种S, 特征input_dim)
         batch_size, S, input_dim = x.shape
@@ -761,18 +774,18 @@ class SparseGateFeatureTopK(nn.Module):
         for i,item in self.scales_dict.iterrows():
             ins = torch.Tensor(item['instruments']).to(x.device).long()
             x_part = x[:,ins,:]
-            cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1),redu=1).squeeze(-1)
+            cate_data = self.branch_trend_combine_layer[i](x_part.reshape(batch_size,-1),redu=True).squeeze(-1)
             trend_list.append(cate_data)     
         trend_list = torch.stack(trend_list).transpose(1,0)    
         if PRINT_STD_FLAG:
             print("trend_list std:{}".format(trend_list.std()))
         # 总体小类整合计算
-        trend_list = self.branch_trend_combine_layer_total(trend_list,redu=2)
+        trend_list = self.branch_trend_combine_layer_total(trend_list,redu=False)
         if PRINT_STD_FLAG:
             print("trend_list after std:{}".format(trend_list.std()))        
         trend_list_total = trend_list
         # 大类整合计算
-        trend_list_main = self.branch_trend_combine_layer_main(trend_list,redu=2)
+        trend_list_main = self.branch_trend_combine_layer_main(trend_list,redu=False)
         if PRINT_STD_FLAG:
             print("trend_list_main std:{}".format(trend_list_main.std()))           
         return trend_logits_list,features_list,trend_list_total,trend_list_main
