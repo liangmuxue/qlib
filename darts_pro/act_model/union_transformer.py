@@ -764,8 +764,8 @@ class SparseGateFeatureTopK(nn.Module):
             key = scale_def['p']
             # 合并主体特征和分尺度特征
             features_list[key] = scale_features
-            if PRINT_STD_FLAG:
-                print("features_list/{} std:{}".format(key,scale_features.std()))               
+            # if PRINT_STD_FLAG:
+            #     print("features_list/{} std:{}".format(key,scale_features.std()))               
             trend_logits_list[key] = trend_index_logits
         # Total Trend
         # trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}

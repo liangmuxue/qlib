@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 import tsaug
 import warnings
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple, Union
 from torch import nn
 from pytorch_lightning.trainer.states import RunningStage
 from sklearn.preprocessing import StandardScaler
@@ -282,6 +282,7 @@ class FuturesTransformerModule(MlpModule):
         self.cate_mode = 'cateTotal'        
         # 趋势数值量级区间
         self.trend_threhold = None
+        self.fur_scale = 0.018
 
         super().__init__(output_dim, variables_meta_array, num_static_components, hidden_size, lstm_layers, num_attention_heads,
                                     full_attention, feed_forward, hidden_continuous_size,
@@ -296,7 +297,23 @@ class FuturesTransformerModule(MlpModule):
         self.inter_rs_filepath = os.path.join(RESULT_FILE_PATH, INTER_RS_FILEPATH)
         self.result_columns = ["date", "indus_index", "trend_flag", "price_inf", "ce_inf"]
         self.outer_call = False
+
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        super().on_save_checkpoint(checkpoint)
+        checkpoint["fur_scale"] = self.fur_scale
+
+    def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        """定制模型加载，单独设置fur_scale参数"""
         
+        super().on_load_checkpoint(checkpoint)
+        self.fur_scale = checkpoint["fur_scale"]
+        # 取得参数后，加载到子模型中
+        self.sub_models[0].trans_model_decoder.set_fur_scale(self.fur_scale)
+                
+    def set_net_parasms(self,params):
+        for name in params:
+            setattr(self, name, params[name])    
+                 
     def set_outer_params(self, params):
         for name in params:
             setattr(self, name, params[name])       
@@ -385,7 +402,6 @@ class FuturesTransformerModule(MlpModule):
             )         
             self.time_embed_dim = time_embed_dim      
             self.embedding_size = input_dim
-            
             ################# 植入钩子进行中间变量输出调试 #################
             if seq==0:
                 self.reg_hook(model,combine_nodes_num)

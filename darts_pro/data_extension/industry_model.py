@@ -272,7 +272,7 @@ class IndustryModel(DateTogeModel):
                 # 否则使用文件中的最大epoch进行匹配
                 file_name = max(checklist, key=lambda x: int(x.split("=")[1].split("-")[0]))
                 file_name = os.path.basename(file_name)  
-                file_name = "epoch=237-val_loss=1.79.ckpt"
+                # file_name = "epoch=252-val_loss=1.76.ckpt"
                      
         file_path = os.path.join(checkpoint_dir, file_name)
         print("weights file_path:",file_path) 

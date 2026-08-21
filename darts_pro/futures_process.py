@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning import loggers as pl_loggers
+from pytorch_lightning.trainer.states import RunningStage
             
 from darts.metrics import mape
 from darts.models import TFTModel
@@ -189,14 +190,6 @@ class FuturesProcessModel(TftDataframeModel):
                     tb = self.trainer.logger.experiment
                     model = self.clone_pl_model(pl_module)
                     model.set_outer_params({'outer_call':True}) 
-                    # caller = self.caller
-                    # best_weight = caller.optargs["best_weight"]    
-                    # outer_model = FuturesModel.load_from_checkpoint(caller.optargs["model_name"],work_dir=caller.optargs["work_dir"],device=device,
-                    #                                                  best=best_weight,batch_file_path=caller.batch_file_path,map_location=None)
-                    # caller.rebuild_model_params(outer_model,model_name=caller.optargs["model_name"])  
-                    # model = outer_model.model
-                    # model.set_outer_params(outer_params) 
-                    # model.set_outer_params({'outer_call':True}) 
                     
                     self.trainer.validate(model=model,dataloaders=self.test_loader)
                     loss_result = model.loss_result
@@ -230,7 +223,7 @@ class FuturesProcessModel(TftDataframeModel):
                     
                     # 根据归因数据，动态调整未来协变量缩放参数
                     new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
-                    if (trainer.current_epoch%10)==0:
+                    if (trainer.current_epoch%3)==0 and trainer.current_epoch>1 or True:
                         # 调用归因分析方法，取得归因结果
                         ori_model.model = model
                         model_env = (ori_model,build_data,outer_params,self.train_loader,self.val_loader)
@@ -238,12 +231,15 @@ class FuturesProcessModel(TftDataframeModel):
                         # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
                         past_convs_weights = rtn_data['past_convs'][1]
                         future_single_emb_weights = rtn_data['future_single_emb'][1]
-                        # 未来时间协变量的归因权重不能小于过去业务协变量的一定比例,如果超出，则调整缩放参数
-                        scale_threhold = 4
-                        scale_value = past_convs_weights/(future_single_emb_weights*scale_threhold)
-                        if scale_value > 1:
-                            new_fur_scale = new_fur_scale * scale_value
-                            pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
+                        # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
+                        scale_threhold = [2,3]
+                        scale_value = past_convs_weights/future_single_emb_weights
+                        if scale_value < scale_threhold[0]:
+                            new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
+                        if scale_value > scale_threhold[1]:
+                            new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                           
+                        pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
+                        pl_module.set_net_parasms({'fur_scale':new_fur_scale})
                         
                     print("model.fur_scale:{}".format(new_fur_scale))
                     tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)                         
