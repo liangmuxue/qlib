@@ -176,14 +176,18 @@ class FuturesProcessModel(TftDataframeModel):
                     self.val_loader = val_loader
 
                 def clone_pl_model(self,src_model) -> pl.LightningModule:
-                    # 1. 用原超参新建实例
+                    # 用原超参新建实例
                     new_model = type(src_model)(**src_model.hparams)
-                    # 2. 复制网络权重
+                    # 复制网络权重
                     new_model.load_state_dict(src_model.state_dict())
                     new_model.set_outer_params(outer_params) 
-                    # 3. 同步设备
+                    # 同步设备
                     new_model = new_model.to(src_model.device)
-                    
+                    # 对于内部nn模型，直接使用deepcopy
+                    new_model.sub_models = copy.deepcopy(src_model.sub_models)
+                    # 单独设置外部维护参数
+                    new_model.fur_scale = src_model.fur_scale        
+                                
                     return new_model
           
                 def on_validation_end(self, trainer, pl_module):
@@ -223,11 +227,12 @@ class FuturesProcessModel(TftDataframeModel):
                     
                     # 根据归因数据，动态调整未来协变量缩放参数
                     new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
-                    if (trainer.current_epoch%3)==0 and trainer.current_epoch>1 or True:
+                    if (trainer.current_epoch%3)==0 and trainer.current_epoch>1:
                         # 调用归因分析方法，取得归因结果
-                        ori_model.model = model
-                        model_env = (ori_model,build_data,outer_params,self.train_loader,self.val_loader)
-                        rtn_data = self.caller.analysis_model(dataset,model_env=model_env)
+                        # ori_model.model = model
+                        # model_env = (ori_model,build_data,outer_params,self.train_loader,self.val_loader)
+                        model = self.clone_pl_model(pl_module)
+                        rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader)
                         # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
                         past_convs_weights = rtn_data['past_convs'][1]
                         future_single_emb_weights = rtn_data['future_single_emb'][1]
@@ -456,11 +461,21 @@ class FuturesProcessModel(TftDataframeModel):
         rtn_data = None
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
-        rtn_data = self.ind_layer_analysis(real_model, background, to_explain,model_ref=model_ori)
+        # rtn_data = self.ind_layer_analysis(real_model, background, to_explain)
+        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader)
         # self.check_sampler_output(real_model, background)
 
         return rtn_data   
          
+    
+    def ind_analysis(self,train_dataset,val_dataset,pl_module=None,train_loader=None,val_loader=None):
+        
+        real_model = pl_module.sub_models[0].cuda().float()
+        background,_ = self.form_input_data(train_dataset,pl_module=pl_module,data_loader=train_loader,sampler_cnt=5,mode='train')
+        to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=pl_module,data_loader=val_loader,sampler_cnt=3,mode='val')
+        rtn_data = self.ind_layer_analysis(real_model, background, to_explain)
+        
+        return rtn_data
     
     def check_sampler_output(self,model,input):
         
@@ -583,7 +598,7 @@ class FuturesProcessModel(TftDataframeModel):
         # plt.close(fig)                
         
 
-    def ind_layer_analysis(self,model_ori,background_input,test_input,model_ref=None):
+    def ind_layer_analysis(self,model_ori,background_input,test_input):
 
         class ShapWrapper(torch.nn.Module):
             """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
