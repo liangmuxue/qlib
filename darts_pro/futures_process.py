@@ -227,7 +227,7 @@ class FuturesProcessModel(TftDataframeModel):
                     
                     # 根据归因数据，动态调整未来协变量缩放参数
                     new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
-                    if (trainer.current_epoch%3)==0 and trainer.current_epoch>1:
+                    if (trainer.current_epoch%6)==0 and trainer.current_epoch>1:
                         # 调用归因分析方法，取得归因结果
                         # ori_model.model = model
                         # model_env = (ori_model,build_data,outer_params,self.train_loader,self.val_loader)
@@ -237,7 +237,7 @@ class FuturesProcessModel(TftDataframeModel):
                         past_convs_weights = rtn_data['past_convs'][1]
                         future_single_emb_weights = rtn_data['future_single_emb'][1]
                         # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
-                        scale_threhold = [2,3]
+                        scale_threhold = [8,10]
                         scale_value = past_convs_weights/future_single_emb_weights
                         if scale_value < scale_threhold[0]:
                             new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
