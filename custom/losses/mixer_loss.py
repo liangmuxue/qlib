@@ -270,7 +270,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             norm_in_batch: 1-整体norm 2-内部norm
         """
 
-        if cate_mode=='total':
+        if cate_mode=='cateTotal':
             scale_arr = self.scale_dict[key].values()
             ins_all = np.concatenate([item['instruments'] for item in scale_arr])
         else:
@@ -508,7 +508,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
             
         return pred_index_long,pred_index_short
     
-    def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,top_num=5,trend_threhold=None):
+    def forward(self, output_ori,target_ori,sw_ins_mappings=None,optimizers_idx=0,cate_mode=None):
         """Multiple Loss Combine"""
 
         (output,_,_) = output_ori
@@ -605,7 +605,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in self.scale_dict.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            loss,_ = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2,detail_trunk_loss=detail_trunk_loss)
+                            loss,_ = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2,
+                                                    detail_trunk_loss=detail_trunk_loss,cate_mode=cate_mode)
                             loss_item += loss
                             cnt += 1
                         loss_item = loss_item/cnt

@@ -482,20 +482,6 @@ class TFTWithFutureCovariatesEn(nn.Module):
         B, S, T, _ = obs_feat.shape  # B=batch, S=样本数, T=历史序列长度
         P = self.pred_len            # P=预测步长
         
-        # ---------------------- 步骤1：样本维度交互（仅历史，无未来泄露） ----------------------
-        # # 1.1 历史特征全局池化
-        # obs_global = self.pool_layer(obs_feat).reshape(B,S,-1)  # [B, S, obs_dim]
-        # time_hist_global = time_embed_hist.mean(dim=2)  # [B, S, time_embed_dim]
-        # sample_feat = torch.cat([obs_global, time_hist_global], dim=-1)  # [B, S, F]
-        #
-        # # 1.2 样本间自注意力（建模样本关联）
-        # sample_feat_interact, sample_attn_weights = self.sample_cross_attn(sample_feat)  # [B, S, F]
-        #
-        # # 1.3 广播回时间维度
-        # sample_feat_interact = sample_feat_interact.unsqueeze(2).repeat(1, 1, T, 1)  # [B, S, T, F]
-        
-        # ---------------------- 步骤2：历史特征处理（因果掩码，仅看过去） ----------------------
-        
         # 2.3 静态特征处理
         cate_static_num = len(self.static_embed_layers)
         
@@ -515,7 +501,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.1)
         
         if self.target_mode==5:
-            scale_ctx=0.06
+            scale_ctx=0.01
         else:
             scale_ctx=0.02
         obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=scale_ctx)
@@ -524,7 +510,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         # 2.1 融合历史观测+时间嵌入+样本交互
         # obs_input = torch.cat([obs_feat, time_embed_hist], dim=-1)  # [B,S,T,F]
         if self.target_mode==5:
-            scale_ctx=0.5
+            scale_ctx=0.25
         else:
             scale_ctx=0.05       
         obs_input = self.his_temporal_grn(obs_feat,context=time_embed_hist,scale_ctx=scale_ctx,no_ctx_squeeze=True)
@@ -732,7 +718,7 @@ class SparseGateFeatureTopK(nn.Module):
                                     layer_norm=False,batch_norm=True,dropout=0.4)  
         # 大类的mlp
         self.branch_trend_combine_layer_main = LinelessLayer(scales_dict.shape[0],len(scales_arr),hidden_size=hidden_dim,relu=True,
-                                    layer_norm=False,batch_norm=True,dropout=0.3)   
+                                    layer_norm=False,batch_norm=True,dropout=0.4)   
         # nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_hidden.weight, gain=mlp_init_scale)
         # nn.init.zeros_(self.branch_trend_combine_layer_total.linear_hidden.bias)
         nn.init.xavier_normal_(self.branch_trend_combine_layer_total.linear_output.weight, gain=mlp_init_scale)
@@ -764,8 +750,8 @@ class SparseGateFeatureTopK(nn.Module):
             key = scale_def['p']
             # 合并主体特征和分尺度特征
             features_list[key] = scale_features
-            # if PRINT_STD_FLAG:
-            #     print("features_list/{} std:{}".format(key,scale_features.std()))               
+            if PRINT_STD_FLAG:
+                print("features_list/{} std:{}".format(key,scale_features.std()))               
             trend_logits_list[key] = trend_index_logits
         # Total Trend
         # trend_logits_list['total'] = {'total':self.total_trend_layer(x.reshape([batch_size,-1])).squeeze(-1)}

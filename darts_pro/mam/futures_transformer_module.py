@@ -900,7 +900,7 @@ class FuturesTransformerModule(MlpModule):
         sw_ins_mappings = self.train_sw_ins_mappings if self.trainer.state.stage == RunningStage.TRAINING else self.valid_sw_ins_mappings
         tft_dataset = global_var.get_value("dataset") 
         return self.criterion(output, (future_target, future_covs, target_class, future_round_targets, index_round_targets, price_targets, past_target, target_info),
-                    sw_ins_mappings=sw_ins_mappings, optimizers_idx=optimizers_idx, top_num=self.top_num, trend_threhold=self.trend_threhold)        
+                    sw_ins_mappings=sw_ins_mappings, optimizers_idx=optimizers_idx, cate_mode=self.cate_mode)        
 
     def on_validation_epoch_end(self):
         """重载父类方法，修改指标计算部分"""
@@ -1782,28 +1782,13 @@ class FuturesTransformerModule(MlpModule):
         short_cate_top_dict = {'p0':short_cate_top['p0'],'p1':short_cate_top['p1']}
         long_condi = (trend_result['p0']==long_cate_top_dict['p0'])&(trend_result['p1']==long_cate_top_dict['p1'])
         short_condi = (trend_result['p0']==short_cate_top_dict['p0'])&(trend_result['p1']==short_cate_top_dict['p1'])        
-        # 31模式：如果总体趋势为多方，则取得1个多方小类（内部品种3）。空方则反过来。趋势为平，则类别1+1，品种2+2
-        if total_trend_flag==1:
-            trend_result.loc[long_condi,'is_can'] = 1
-            trend_result.loc[long_condi,'can_trend_flag'] = 1
-            trend_result.loc[long_condi,'can_ins_num'] = 3
-            trend_result.loc[short_condi,'is_can'] = 1
-            trend_result.loc[short_condi,'can_trend_flag'] = 0
-            trend_result.loc[short_condi,'can_ins_num'] = 1            
-        elif total_trend_flag==-1:
-            trend_result.loc[long_condi,'is_can'] = 1
-            trend_result.loc[long_condi,'can_trend_flag'] = 1
-            trend_result.loc[long_condi,'can_ins_num'] = 1
-            trend_result.loc[short_condi,'is_can'] = 1
-            trend_result.loc[short_condi,'can_trend_flag'] = 0
-            trend_result.loc[short_condi,'can_ins_num'] = 3    
-        else:
-            trend_result.loc[long_condi,'is_can'] = 1
-            trend_result.loc[long_condi,'can_trend_flag'] = 1
-            trend_result.loc[long_condi,'can_ins_num'] = 2
-            trend_result.loc[short_condi,'is_can'] = 1
-            trend_result.loc[short_condi,'can_trend_flag'] = 0
-            trend_result.loc[short_condi,'can_ins_num'] = 2        
+        # 11模式：类别1+1，品种1+1
+        trend_result.loc[long_condi,'is_can'] = 1
+        trend_result.loc[long_condi,'can_trend_flag'] = 1
+        trend_result.loc[long_condi,'can_ins_num'] = self.pred_top_num
+        trend_result.loc[short_condi,'is_can'] = 1
+        trend_result.loc[short_condi,'can_trend_flag'] = 0
+        trend_result.loc[short_condi,'can_ins_num'] = self.pred_top_num       
         
         trend_result = trend_result.astype({'is_can':int,'can_trend_flag':int,'can_ins_num':int})  
         return trend_result

@@ -225,30 +225,50 @@ class FuturesProcessModel(TftDataframeModel):
                         print("anno_yield:",model.anno_yield)
                         tb.add_scalar("rate/anno_yield", model.anno_yield, trainer.current_epoch)
                     
-                    # 根据归因数据，动态调整未来协变量缩放参数
-                    new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
-                    if (trainer.current_epoch%6)==0 and trainer.current_epoch>1:
-                        # 调用归因分析方法，取得归因结果
-                        # ori_model.model = model
-                        # model_env = (ori_model,build_data,outer_params,self.train_loader,self.val_loader)
-                        model = self.clone_pl_model(pl_module)
-                        rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader)
-                        # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
-                        past_convs_weights = rtn_data['past_convs'][1]
-                        future_single_emb_weights = rtn_data['future_single_emb'][1]
-                        # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
-                        scale_threhold = [8,10]
-                        scale_value = past_convs_weights/future_single_emb_weights
-                        if scale_value < scale_threhold[0]:
-                            new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
-                        if scale_value > scale_threhold[1]:
-                            new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                           
-                        pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
-                        pl_module.set_net_parasms({'fur_scale':new_fur_scale})
-                        
-                    print("model.fur_scale:{}".format(new_fur_scale))
-                    tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)                         
-                        
+                    if self.caller.optargs["target_mode"][0]==2:
+                        # 根据归因数据，动态调整未来协变量缩放参数
+                        new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
+                        if (trainer.current_epoch%6)==0 and trainer.current_epoch>1:
+                            # 调用归因分析方法，取得归因结果
+                            model = self.clone_pl_model(pl_module)
+                            rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,
+                                            pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[2,3])
+                            # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
+                            past_convs_weights = rtn_data['past_convs'][1]
+                            future_single_emb_weights = rtn_data['future_single_emb'][1]
+                            # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
+                            scale_threhold = [10,12]
+                            scale_value = past_convs_weights/future_single_emb_weights
+                            if scale_value < scale_threhold[0]:
+                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
+                            if scale_value > scale_threhold[1]:
+                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                           
+                            pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
+                            pl_module.set_net_parasms({'fur_scale':new_fur_scale})
+                        print("model.fur_scale:{}".format(new_fur_scale))
+                        tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)                         
+                    if self.caller.optargs["target_mode"][0]==5:
+                        # 根据归因数据，动态调整未来协变量缩放参数
+                        new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
+                        if (trainer.current_epoch%6)==0 and trainer.current_epoch>1:
+                            # 调用归因分析方法，取得归因结果
+                            model = self.clone_pl_model(pl_module)
+                            rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,
+                                            pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[1])
+                            # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
+                            past_convs_weights = rtn_data['past_convs'][1]
+                            future_single_emb_weights = rtn_data['future_single_emb'][1]
+                            # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
+                            scale_threhold = [10,12]
+                            scale_value = past_convs_weights/future_single_emb_weights
+                            if scale_value < scale_threhold[0]:
+                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
+                            if scale_value > scale_threhold[1]:
+                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                           
+                            pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
+                            pl_module.set_net_parasms({'fur_scale':new_fur_scale})
+                        print("model.fur_scale:{}".format(new_fur_scale))
+                        tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)                         
             trainer,model_inner,train_loader,val_loader,_ = \
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
@@ -462,18 +482,18 @@ class FuturesProcessModel(TftDataframeModel):
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
         # rtn_data = self.ind_layer_analysis(real_model, background, to_explain)
-        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader)
+        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader,output_indexs=[1])
         # self.check_sampler_output(real_model, background)
 
         return rtn_data   
          
     
-    def ind_analysis(self,train_dataset,val_dataset,pl_module=None,train_loader=None,val_loader=None):
+    def ind_analysis(self,train_dataset,val_dataset,pl_module=None,train_loader=None,val_loader=None,output_indexs=[2,3]):
         
         real_model = pl_module.sub_models[0].cuda().float()
         background,_ = self.form_input_data(train_dataset,pl_module=pl_module,data_loader=train_loader,sampler_cnt=5,mode='train')
         to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=pl_module,data_loader=val_loader,sampler_cnt=3,mode='val')
-        rtn_data = self.ind_layer_analysis(real_model, background, to_explain)
+        rtn_data = self.ind_layer_analysis(real_model, background, to_explain,output_indexs=output_indexs)
         
         return rtn_data
     
@@ -488,6 +508,7 @@ class FuturesProcessModel(TftDataframeModel):
             out1 = model(*input_1) 
             out2 = model(*input_2)
             out = model(*input) 
+            # print("out1 mean:{},std:{}".format(out[1][0].mean(),out[1][0].std()))
             print("out2 mean:{},std:{}".format(out[2][0].mean(),out[2][0].std()))
             print("out3 mean 2:{},std:{}".format(out[3][0].mean(),out[3][0].std()))
     
@@ -598,7 +619,7 @@ class FuturesProcessModel(TftDataframeModel):
         # plt.close(fig)                
         
 
-    def ind_layer_analysis(self,model_ori,background_input,test_input):
+    def ind_layer_analysis(self,model_ori,background_input,test_input,output_indexs=[2,3]):
 
         class ShapWrapper(torch.nn.Module):
             """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
@@ -660,7 +681,7 @@ class FuturesProcessModel(TftDataframeModel):
                     x = x.reshape([x.shape[0],-1])
                 return x
         
-        output_indexs = [2,3]
+        output_indexs = output_indexs
         # output_indexs = [2]
         # output_indexs = [1]
         rtn_data = {}
@@ -714,7 +735,7 @@ class FuturesProcessModel(TftDataframeModel):
                 # val_importance = np.abs(val_attr[i].detach().cpu().numpy())           
                 val_importance_mean = val_importance.mean()
                 val_importance_detail = val_importance.mean(tuple(range(val_importance.ndim - 1)))
-                if output_index==2:
+                if output_index==1 or output_index==2:
                     rtn_data[input_names[i]] = [train_importance_mean,val_importance_mean]
                 print("output_index_{} input {} train_importance mean:{},val_importance mean:{}".format(output_index,input_names[i],
                                             train_importance_mean, val_importance_mean)) 
