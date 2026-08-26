@@ -235,7 +235,7 @@ class FuturesProcessModel(TftDataframeModel):
                                             pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[2,3])
                             # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
                             past_convs_weights = rtn_data['past_convs'][1]
-                            future_single_emb_weights = rtn_data['future_single_emb'][1]
+                            future_single_emb_weights = rtn_data['future_single_emb'][1]                            
                             # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
                             scale_threhold = [10,12]
                             scale_value = past_convs_weights/future_single_emb_weights
@@ -255,12 +255,15 @@ class FuturesProcessModel(TftDataframeModel):
                             model = self.clone_pl_model(pl_module)
                             rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,
                                             pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[1])
-                            # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
+                            # 重点关注过去业务协变量和未来时间协变量的权重关系
                             past_convs_weights = rtn_data['past_convs'][1]
                             future_single_emb_weights = rtn_data['future_single_emb'][1]
+                            past_convs_weights_train = rtn_data['past_convs'][0]
+                            future_single_emb_weights_train = rtn_data['future_single_emb'][0]                            
                             # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
-                            scale_threhold = [10,12]
+                            scale_threhold = [18,20]
                             scale_value = past_convs_weights/future_single_emb_weights
+                            scale_value_train = past_convs_weights_train/future_single_emb_weights_train
                             if scale_value < scale_threhold[0]:
                                 new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
                             if scale_value > scale_threhold[1]:
@@ -453,7 +456,7 @@ class FuturesProcessModel(TftDataframeModel):
             trainer,model,train_loader,val_loader,_ = \
             model_ori.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=1,seperate_mode=False)  
             model_ori.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             model_ori.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             model_ori.model.set_outer_params(outer_params) 

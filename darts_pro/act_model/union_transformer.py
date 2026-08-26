@@ -501,7 +501,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         time_embed_hist = self.calendar_encoder(time_embed_hist,context=static_context_hist,scale_ctx=0.1)
         
         if self.target_mode==5:
-            scale_ctx=0.01
+            scale_ctx=0.02
         else:
             scale_ctx=0.02
         obs_feat = self.obs_grn(obs_feat,context=static_context_hist,scale_ctx=scale_ctx)
@@ -510,7 +510,7 @@ class TFTWithFutureCovariatesEn(nn.Module):
         # 2.1 融合历史观测+时间嵌入+样本交互
         # obs_input = torch.cat([obs_feat, time_embed_hist], dim=-1)  # [B,S,T,F]
         if self.target_mode==5:
-            scale_ctx=0.25
+            scale_ctx=0.15
         else:
             scale_ctx=0.05       
         obs_input = self.his_temporal_grn(obs_feat,context=time_embed_hist,scale_ctx=scale_ctx,no_ctx_squeeze=True)
@@ -633,20 +633,26 @@ class AttScaleFeature(nn.Module):
         
         # TOP值选取网络
         sample_dim_inner = ins_arr.shape[0]
-        ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
-                            layer_norm=False,batch_norm=False,dropout=dropout)
+        # ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
+        #                     layer_norm=False,batch_norm=False,dropout=dropout)
         # nn.init.xavier_normal_(ins_layer_inner.linear_hidden.weight, gain=1.2)
         # nn.init.xavier_normal_(ins_layer_inner.linear_output.weight, gain=1.2)
         # nn.init.zeros_(ins_layer_inner.linear_hidden.bias)
         # nn.init.zeros_(ins_layer_inner.linear_output.bias)        
-        self.ins_layer = ins_layer_inner
+        
         # 分支趋势计算网络
         trend_logits_layer = {}
+        ins_layer = {}
         for key in ins_trend_dict.keys():  
             sample_dim_inner = ins_trend_dict[key].shape[0]
+            # 每个大类内包含1个或多个小类，小类内包含品种，照此创建mlp网络
+            ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
+                            layer_norm=True,batch_norm=False,dropout=0.4)    
+            ins_layer[key] = ins_layer_inner           
             trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
                                 layer_norm=False,batch_norm=True,track_running_stats=True,dropout=dropout)      
             trend_logits_layer[key] = trend_logits_layer_inner
+        self.ins_layer = nn.ModuleDict(ins_layer)
         self.trend_logits_layer = nn.ModuleDict(trend_logits_layer)
         # 整体趋势计算网络
         trend_layer_inner = []
@@ -663,14 +669,18 @@ class AttScaleFeature(nn.Module):
         batch_size, S, _ = x.shape
         
         x_part = x[:,self.scale_arr,:].reshape(batch_size,-1)
-        output = self.ins_layer(x_part)
+        output = []
         # 整体趋势网络计算
         output2index_trend = {}
         for key in self.ins_trend_dict.keys(): 
             ins = self.ins_trend_dict[key]
             x_l_part = x[:,ins].reshape(batch_size,-1)
+            output_single = self.ins_layer[key](x_l_part).squeeze(-1) 
+            output.append(output_single)
             output_trend = self.trend_logits_layer[key](x_l_part).squeeze(-1) 
             output2index_trend[key] = output_trend
+        output = torch.cat(output,dim=-1)
+        
         return output,output_trend,output2index_trend
                         
 class SparseGateFeatureTopK(nn.Module):
@@ -693,7 +703,7 @@ class SparseGateFeatureTopK(nn.Module):
         # scales_trend_arr = scales_trend_arr[0]
         self.scales_arr = scales_arr
         self.scales_dict = scales_dict        
-        
+        # 类别内部品种的mlp
         for i,item in enumerate(scales_arr):
             trend_arr = scales_trend_arr[item['p0']]
             instruments_dict = {key:torch.Tensor(trend_arr[key]['instruments']).to(device).long() for key in trend_arr.keys()}

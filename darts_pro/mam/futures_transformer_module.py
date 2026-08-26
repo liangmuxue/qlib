@@ -34,7 +34,7 @@ warnings.simplefilter(action="ignore", category=SettingWithCopyWarning)
 
 # TRACK_DATE = [20250728,20250715,20250731]
 TRACK_DATE = [20250812, 20250811, 20250825, 20250728, 20250715, 20250731]
-TRACK_DATE = [item for item in range(20250403,20250408)]
+TRACK_DATE = [item for item in range(20250703,20250708)]
 # TRACK_DATE = [item for item in range(20250818,20250906)]
 # TRACK_DATE = [item for item in range(20241231,20250105)]
 # TRACK_DATE = [20250403]

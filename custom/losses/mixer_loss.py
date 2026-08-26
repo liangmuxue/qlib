@@ -284,12 +284,8 @@ class FuturesIndustryLoss(UncertaintyLoss):
         
         loss_detail = {}
         loss = 0
-        if norm_in_batch==1:
-            target_item = normalization_standard(target[ins_all])
-            pred = normalization_standard(pred_ori)
-        else:
-            target_item = target[ins_all]
-            pred = pred_ori
+        target_item = target[ins_all]
+        pred = pred_ori
         
         # top_num = 2
         # # 针对总体进行损失计算
@@ -311,17 +307,21 @@ class FuturesIndustryLoss(UncertaintyLoss):
             if norm_in_batch==2:
                 pred_norm = normalization_standard(pred[real_ins_index])
                 target_norm_item = normalization_standard(target_item[real_ins_index])
+            elif norm_in_batch==1:
+                pred_norm = pred[real_ins_index]
+                target_norm_item = normalization_standard(target_item[real_ins_index])                
             else:
                 pred_norm = pred[real_ins_index]
                 target_norm_item = target_item[real_ins_index]                
             if all_elements_same(target_norm_item) or all_elements_same(pred_norm):
                 loss_item = self.mse_loss(pred_norm.unsqueeze(0), target_norm_item.unsqueeze(0))
             else:
-                if pred_norm.shape[0]<=5:
-                    loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=1,mid_num=1,need_mid=True)
-                else:
-                    loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=2,mid_num=2,need_mid=True)
-                # loss_item = self.ccc_loss_comp(pred_norm, target_norm_item)
+                # if pred_norm.shape[0]<=5 or True:
+                #     loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=1,mid_num=1,need_mid=False)
+                # else:
+                #     loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=2,mid_num=2,need_mid=False)
+                # loss_item = self.compute_top_loss(pred_norm, target_norm_item,top_num=1,mid_num=1,need_mid=False)
+                loss_item = self.ccc_loss_comp(pred_norm, target_norm_item)
             if cate_mode=='total':
                 loss_key = item['p0_code'] + "_" + item['p1_code']
             else:
@@ -605,7 +605,7 @@ class FuturesIndustryLoss(UncertaintyLoss):
                         for key in self.scale_dict.keys():
                             ins_arr = self.scale_dict[key]
                             sv_out_item = scale_output[key][j]
-                            loss,_ = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=2,
+                            loss,_ = self.compute_multi_trunk_loss(sv_out_item,ins_diff,key=key,norm_in_batch=1,
                                                     detail_trunk_loss=detail_trunk_loss,cate_mode=cate_mode)
                             loss_item += loss
                             cnt += 1
