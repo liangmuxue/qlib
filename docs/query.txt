@@ -1,0 +1,132 @@
+/home/liang/anaconda3/envs/py39/bin/tensorboard --logdir=/home/qdata/project/qlib/custom/data/darts/Futures_cleanData2023TrainCutlen2_transInsLoss_2503/logs --port 6008
+
+/home/liang/anaconda3/envs/py39/bin/tensorboard --logdir=/home/qdata/project/qlib/custom/data/darts/Futures_cleanData2023TrainCutlen2_transInsLoss_2503/val_logs --port 6006
+
+
+
+
+strend_result_total[(trend_result_total['p0']=='total')&(trend_result_total['p1']=='total')]
+
+dataset.df_all[(~dataset.df_all['instrument'].str.startswith('ZS'))]['diff_range']
+dataset.df_all[(dataset.df_all['instrument'].str.startswith('ZS_ALL'))]['diff_range']
+
+df_mean_norm[(df_mean_norm['datetime_number']>=20241220)&(df_mean_norm['datetime_number']<=20241228)][['datetime_number','cy_scale_norm']]
+df[(df['datetime_number']>=20241220)&(df['datetime_number']<=20241220)][['datetime_number','cy_scale','open_diff']]
+df[(df['datetime_number']==20241225)&(df['instrument']=='BR')][['datetime_number','cy_scale','open_diff']]
+df[(df['datetime_number']==20241225)&(df['instrument'].isin(['A','BR']))][['datetime_number','instrument','open_diff']]
+
+df[df['instrument']=='ZS_NFFI'][['instrument','diff_range_norm']]
+
+df[(df['datetime_number']>=20241225)&(df['datetime_number']<=20241225)&(df['indus_scale']==0)]['open_diff'].mean()
+
+self.df_data[(self.df_data['datetime_number']>=20241220)&(self.df_data['datetime_number']<=20241220)&(self.df_data['cy_scale']==1)][['diff_range']].mean()
+
+(target_info_total[0]['open_array'][-1] - target_info_total[0]['open_array'][-2])/target_info_total[0]['open_array'][-2]
+
+dataset.df_val[['diff_range','rsv_diff']].corr()
+
+covariate_series.random_component_values(copy=False)[past_start:future_end]
+
+self.df_data[(df['instrument']=='J')&(self.df_data['datetime_number']>=20250214)&(self.df_data['datetime_number']<=20250214)][["datetime_number","instrument","label_ori"]]
+self.df_data[(self.df_data['instrument']=='A')][["datetime_number","instrument","label_ori"]]
+
+self.df_data[(self.df_data['instrument']=='A')&(self.df_data['datetime_number']>=20150901)&(self.df_data['datetime_number']<=20150908)][["time_idx","datetime_number","open_diff","OPEN"]]
+
+
+self.df_data[(self.df_data['instrument']=='ZS_YZYL')][["time_idx","datetime_number","price_norm"]]
+
+self.df_data[(self.df_data['datetime_number']>=20250214)&(self.df_data['datetime_number']<=20250214)][["datetime_number","instrument","label_ori"]]
+
+df[(df['price_range']==0)][['datetime','instrument']]
+df[(df[column]==0)][['datetime','instrument']]
+
+df[(df['datetime_number']>=20250403)&(df['datetime_number']<=20250404)][["time_idx","datetime_number","open_diff"]].mean()
+
+df[(df['datetime_number']>=20250403)&(df['datetime_number']<=20250407)].groupby('datetime_number')[["open_diff"]].mean()
+
+df[(df['datetime_number']>=20250403)&(df['datetime_number']<=20250407)].sort_values(by='instrument')[['instrument','datetime_number','OPEN']]
+
+ts.instrument_code for ts in self.target_series
+df[(df['instrument']=='A')&(df['datetime_number']>=20240801)][["datetime_number",'open_range','OPEN',"open_diff"]].iloc[:10]
+
+combine_content[np.where(np.isin(combine_content[:,0],import_index_real))[0]]
+combine_instrument[np.where(np.isin(combine_instrument[:,0],import_index_real))[0]]
+
+df_data[(df_data["datetime_number"]>=20250315)&(df_data["datetime_number"]<=20250318)&(df_data['instrument']=='ZS_ALL')][["instrument","datetime_number","diff_range"]]
+df_data[(~df_data['instrument'].str.startswith('ZS'))&(df_data['datetime_number'].isin([20250317,20250318]))].groupby('datetime_number')["diff_range"].mean()
+
+df_data[(df_data['time_idx']>=100)&(df_data['time_idx']<=110)][['datetime','time_idx','instrument']]
+
+df_expands[(df_expands['instrument']=='A')&(df_expands['datetime_number']>=20250403)&(df_expands['datetime_number']<=20250407)][["time_idx","datetime_number","RSV5","label_ori"]]
+
+self.df_data[(self.df_data['instrument']=='ZS_MTBK')][["datetime_number","diff_range","CLOSE"]]
+
+self.df_data[self.df_data['instrument'].isin(['ZS_ABPFI'])][["instrument","datetime_number","time_idx","CCI5"]]
+
+self.df_data[(self.df_data['instrument'].isin(['ZC']))&(self.df_data['datetime_number']>=20220613)&(self.df_data['datetime_number']<=20220616)][["instrument","datetime_number","CLOSE","RSV5","diff_range"]]
+self.df_data[(self.df_data['instrument']=='ZS_ABPFI')&(self.df_data['datetime_number']==20221011)][["datetime_number","diff_range","CLOSE"]]
+
+df[(df['instrument']=='ZS_ABPFI')&(df['datetime_number']>=20221011][["datetime_number","diff_range","CLOSE"]]
+self.df_data[(self.df_data['industry']==12)&(~self.df_data['instrument'].str.startswith('ZS'))&(self.df_data['datetime_number']>=20221017)][["datetime_number","qtlu_diff","diff_range","CLOSE"]]
+
+self.df_data[(self.df_data['instrument'].str.startswith('ZS'))&(~self.df_data['instrument'].str.startswith('ZSALL'))&(self.df_data['datetime_number']>=20221019)&(self.df_data['datetime_number']<=20221020)][["instrument","datetime_number","qtlu_diff","diff_range","CLOSE"]]
+
+self.df_data[(self.df_data['instrument'].isin(['ZS_YZYL','ZS_HSJS']))&(self.df_data['datetime_number']>=20221019)&(self.df_data['datetime_number']<=20221020)][["instrument","datetime_number","qtlu_diff","diff_range","CLOSE"]]
+
+df[(df['industry']==10)&(~df['instrument'].str.startswith('ZS'))&(df['datetime_number']>=20221011)].groupby('datetime_number').mean()['diff_range']
+self.df_data[(self.df_data['instrument']=='WH')&(self.df_data['datetime_number']==20221011)][["datetime_number","rsv_diff","RSV5"]].iloc[-20:]
+
+self.df_data[(self.df_data['instrument']=='A')][["time_idx","datetime_number","dayofweek"]].iloc[-10:]
+self.df_data[(self.df_data['instrument_rank']==25)][["instrument","time_idx","datetime_number","rsv_diff"]].iloc[-10:]
+
+glo_match_data[(glo_match_data['date']==20221011)][["time_index","pred_data"]]
+glo_match_data[(glo_match_data['indus_code']=='ZS_ABPFI')][["time_index","pred_data"]]
+
+df[(df['instrument']=='ZS_CDIFI')][["time_idx","datetime_number","price_norm"]].values[:,-1]
+
+self.df_data[self.df_data['instrument']=='ZS_ABPFI'][["time_idx","datetime_number","RVI"]]
+dataset.df_all['datetime_number'].max()
+
+dataset.df_all[(dataset.df_all['instrument']=='WH')&(dataset.df_all['datetime_number']<=20221011)][["datetime_number","rsv_diff","RSV5"]].iloc[-20:]
+
+df_expands[(df_expands['instrument']=='A')&(df_expands['CLOSE']==6192)]
+
+df[(df['instrument']=='ZS_ABPFI')&(df['datetime_number']>=20200601)&(df['datetime_number']<=20200730)][["time_idx","datetime_number","RSV5","label_ori"]]
+pd.DataFrame(scale_data[:,0]).describe(percentiles=[.1,.25,.5,.75,.9])
+
+pd.DataFrame(scale_data[:,1]).describe()
+
+[ts['instrument'] for ts in np.array(target_info_total)[self.instrument_index]]
+
+np.array([item['open_diff'] if item is not None else None for item in np.array(target_info_total)])
+np.array([item['instrument'] if item is not None else None for item in np.array(target_info_total)[np.array(self.indus_index)]])
+np.array([item['instrument'] if item is not None else None for item in np.array(target_info_total)[np.array([24,27,17])]])
+
+[item[0]["future_start_datetime"] if item is not None else None for item in np.array(target_info)]
+[item["diff_range"][-1]  for item in np.array(target_info)[[66,68,69,71,73]]]
+
+[item.shape[0] for item in FuturesMappingUtil.get_industry_instrument(self.valid_sw_ins_mappings)]
+[sv_indus[i].shape[1] for i in range(len(sv_indus))]
+
+[ser.instrument_code for ser in val_series_transformed_new]
+
+df_data[(df_data["time_idx"]>=series.time_index.start)&(df_data["time_idx"]<series.time_index.stop)&(df_data["instrument_rank"]==code)]
+
+
+rate_total[rate_total['trend_correct']==0]['date']
+rate_total[rate_total['indus_top_class']==1][['date']]
+
+
+self.df_data[(self.df_data['datetime_number']>=20220601)&(self.df_data['datetime_number']<=20220613)][['datetime','month']]
+
+
+combine_result[combine_result['gross_profit']>0.05][["date","instrument","order_book_id","open_price","close_price","prev_close","secondday_open"]]
+
+futures_hist_em_df[pd.to_datetime(futures_hist_em_df['date'],format="%Y%m%d").dt.strftime('%Y%m%d').astype(int)>20220101]
+
+np.unique(np.concatenate([item[4] for item in self.model.train_sw_ins_mappings]))
+
+
+date_mappings
+
+

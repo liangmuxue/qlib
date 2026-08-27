@@ -647,7 +647,7 @@ class AttScaleFeature(nn.Module):
             sample_dim_inner = ins_trend_dict[key].shape[0]
             # 每个大类内包含1个或多个小类，小类内包含品种，照此创建mlp网络
             ins_layer_inner = LinelessLayer(sample_dim_inner*input_dim,sample_dim_inner,hidden_size=hidden_dim,
-                            layer_norm=True,batch_norm=False,dropout=0.4)    
+                            layer_norm=True,batch_norm=False,dropout=dropout)    
             ins_layer[key] = ins_layer_inner           
             trend_logits_layer_inner = LinelessLayer(sample_dim_inner*input_dim,1,hidden_size=input_dim,
                                 layer_norm=False,batch_norm=True,track_running_stats=True,dropout=dropout)      
