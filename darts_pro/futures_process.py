@@ -233,16 +233,27 @@ class FuturesProcessModel(TftDataframeModel):
                         # model_env = (ori_model,build_data,outer_params,self.train_loader,self.val_loader)
                         model = self.clone_pl_model(pl_module)
                         rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader)
-                        # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
+                        # 重点关注过去业务协变量和未来时间协变量的权重关系
                         past_convs_weights = rtn_data['past_convs'][1]
                         future_single_emb_weights = rtn_data['future_single_emb'][1]
-                        # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
-                        scale_threhold = [8,10]
+                        past_convs_weights_train = rtn_data['past_convs'][0]
+                        future_single_emb_weights_train = rtn_data['future_single_emb'][0]    
                         scale_value = past_convs_weights/future_single_emb_weights
-                        if scale_value < scale_threhold[0]:
-                            new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
-                        if scale_value > scale_threhold[1]:
-                            new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                           
+                        scale_value_train = past_convs_weights_train/future_single_emb_weights_train                                            
+                        # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
+                        scale_threhold = [3,4]
+                        scale_value_real = 0
+                        if (scale_value<scale_threhold[0]) or (scale_value_train<scale_threhold[0]):
+                            # 同时检查训练和验证归因，只要有一个比例低的，就优先调整
+                            scale_value_real = scale_value if scale_value<scale_value_train else scale_value_train
+                            new_fur_scale = new_fur_scale * scale_value_real /scale_threhold[0]
+                        elif (scale_value>scale_threhold[1]) and (scale_value_train>scale_threhold[1]):
+                            # 其次再检查是否比例过高
+                            scale_value_real = scale_value if scale_value>scale_value_train else scale_value_train
+                            new_fur_scale = new_fur_scale * scale_value_real /scale_threhold[1]                             
+                        print("past_convs_weights:{} and future_single_emb_weights:{},scale_value:{}".format(past_convs_weights,future_single_emb_weights,scale_value))
+                        print("past_convs_weights_train:{} and future_single_emb_weights_train:{},scale_value_train:{}".format(past_convs_weights_train,future_single_emb_weights_train,scale_value_train))
+                        print("scale_value_real:{} ".format(scale_value_real))
                         pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
                         pl_module.set_net_parasms({'fur_scale':new_fur_scale})
                         
@@ -258,7 +269,7 @@ class FuturesProcessModel(TftDataframeModel):
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                     test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=True)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0,seperate_mode=True)  
             
             log_folder = os.path.join(self.optargs["work_dir"],self.optargs["model_name"])
             hook = ExternalTrainHook(trainer_test,test_loader,log_folder=log_folder,epoch_num=trainer.current_epoch,caller=self,train_loader=train_loader,val_loader=val_loader)
