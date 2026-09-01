@@ -322,31 +322,28 @@ class AkFuturesExtractor(FutureExtractor):
         # 清空临时表
         self.dbaccessor.do_updateto("drop table temp_spot_price")  
     
-    def export_to_qlib(self,cross_mode=False):
+    def export_to_qlib(self,step_mode=True):
         """导出到qlib"""
         
-        # 首先从数据库导出到csv
-        save_path = "{}/day/csv_data".format(self.item_savepath)
-        # 使用交错表
-        if cross_mode:
-            table = "dominant_continues_data_cross"
-        else:
+        if step_mode:
+            # 首先从数据库导出到csv
+            save_path = "{}/day/csv_data".format(self.item_savepath)
             table = "dominant_continues_data"
-        date_sql = "select distinct(code) from {}".format(table)
-        result_rows = self.dbaccessor.do_query(date_sql)    
-        for index,result in enumerate(result_rows):
-            code = result[0]
-            item_sql = "select date,open,close,high,low,volume,hold,settle from {} where code='{}'".format(table,code)
-            item_rows = self.dbaccessor.do_query(item_sql)    
-            filename = "{}/{}.csv".format(save_path,code)
-            with open(filename,mode='w',encoding='utf-8') as f:
-                writer = csv.writer(f,dialect='excel')
-                # 改变字段名，把结算价设置为收盘价，收盘价命名为参考收盘价
-                header = ["datetime","open","refclose","high","low","volume","hold","close"]
-                writer.writerow(header)
-                for row in item_rows:
-                    writer.writerow(row)            
-                print("{} ok".format(code))
+            date_sql = "select distinct(code) from {}".format(table)
+            result_rows = self.dbaccessor.do_query(date_sql)    
+            for index,result in enumerate(result_rows):
+                code = result[0]
+                item_sql = "select date,open,close,high,low,volume,hold,settle from {} where code='{}'".format(table,code)
+                item_rows = self.dbaccessor.do_query(item_sql)    
+                filename = "{}/{}.csv".format(save_path,code)
+                with open(filename,mode='w',encoding='utf-8') as f:
+                    writer = csv.writer(f,dialect='excel')
+                    # 改变字段名，把结算价设置为收盘价，收盘价命名为参考收盘价
+                    header = ["datetime","open","refclose","high","low","volume","hold","close"]
+                    writer.writerow(header)
+                    for row in item_rows:
+                        writer.writerow(row)            
+                    print("{} ok".format(code))
                 
         # 然后导出到qlib
         qlib_dir = "/home/qdata/qlib_data/futures_data"
@@ -836,7 +833,7 @@ class AkFuturesExtractor(FutureExtractor):
             begin = int(date_string_transfer(row['begin'],2))
             end = int(date_string_transfer(row['end'],2))
             # 日期太少的不要，没有近期数据的不要
-            if begin>20230101 or end<20250901:
+            if begin>20220101 or end<20250901:
                 continue
             exchange_code = self.get_exchange_from_instrument(code)
             if exchange_code in ['CFFEX','INE']:
@@ -1012,11 +1009,11 @@ if __name__ == "__main__":
     # 导入外盘数据
     # extractor.extract_outer_data()
     # 导出到qlib
-    # extractor.export_to_qlib()
+    extractor.export_to_qlib(step_mode=False)
     # extractor.load_item_day_data("CU2205", "2022-03-03")
     # extractor.build_cleandata_table()
     # qlib品种名单列表生成
-    extractor.build_qlib_instrument()
+    # extractor.build_qlib_instrument()
     # extractor.rebuild_qlib_instrument()
     
     ############ 历史合约数据导入 ###################

@@ -225,53 +225,61 @@ class FuturesProcessModel(TftDataframeModel):
                         print("anno_yield:",model.anno_yield)
                         tb.add_scalar("rate/anno_yield", model.anno_yield, trainer.current_epoch)
                     
+                    new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
                     if self.caller.optargs["target_mode"][0]==2:
                         # 根据归因数据，动态调整未来协变量缩放参数
-                        new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
                         if (trainer.current_epoch%6)==0 and trainer.current_epoch>1:
                             # 调用归因分析方法，取得归因结果
                             model = self.clone_pl_model(pl_module)
                             rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,
-                                            pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[2,3])
-                            # 重点关注过去业务协变量和未来时间协变量的权重关系，只看验证集
-                            past_convs_weights = rtn_data['past_convs'][1]
-                            future_single_emb_weights = rtn_data['future_single_emb'][1]                            
-                            # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
-                            scale_threhold = [10,12]
-                            scale_value = past_convs_weights/future_single_emb_weights
-                            if scale_value < scale_threhold[0]:
-                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
-                            if scale_value > scale_threhold[1]:
-                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                           
-                            pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
-                            pl_module.set_net_parasms({'fur_scale':new_fur_scale})
-                        print("model.fur_scale:{}".format(new_fur_scale))
-                        tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)                         
-                    if self.caller.optargs["target_mode"][0]==5:
+                                            pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[2])
+                            new_fur_scale = self.compute_fur_scale(rtn_data, target_mode=self.caller.optargs["target_mode"][0],pl_module=pl_module)
+                    elif self.caller.optargs["target_mode"][0]==5:
                         # 根据归因数据，动态调整未来协变量缩放参数
-                        new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
                         if (trainer.current_epoch%6)==0 and trainer.current_epoch>1:
                             # 调用归因分析方法，取得归因结果
                             model = self.clone_pl_model(pl_module)
                             rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,
                                             pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[1])
-                            # 重点关注过去业务协变量和未来时间协变量的权重关系
-                            past_convs_weights = rtn_data['past_convs'][1]
-                            future_single_emb_weights = rtn_data['future_single_emb'][1]
-                            past_convs_weights_train = rtn_data['past_convs'][0]
-                            future_single_emb_weights_train = rtn_data['future_single_emb'][0]                            
-                            # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
-                            scale_threhold = [18,20]
-                            scale_value = past_convs_weights/future_single_emb_weights
-                            scale_value_train = past_convs_weights_train/future_single_emb_weights_train
-                            if scale_value < scale_threhold[0]:
-                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[0]
-                            if scale_value > scale_threhold[1]:
-                                new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                           
-                            pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
-                            pl_module.set_net_parasms({'fur_scale':new_fur_scale})
-                        print("model.fur_scale:{}".format(new_fur_scale))
-                        tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)                         
+                            new_fur_scale = self.compute_fur_scale(rtn_data, target_mode=self.caller.optargs["target_mode"][0],pl_module=pl_module)
+                    print("model.fur_scale:{}".format(new_fur_scale))
+                    tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)     
+                        
+                def compute_fur_scale(self,rtn_data,target_mode=2,pl_module=None):
+                    
+                    new_fur_scale = pl_module.sub_models[0].trans_model_decoder.fur_scale
+                    # 重点关注过去业务协变量和未来时间协变量的权重关系
+                    past_convs_weights = rtn_data['past_convs'][1]
+                    future_single_emb_weights = rtn_data['future_single_emb'][1]
+                    past_convs_weights_train = rtn_data['past_convs'][0]
+                    future_single_emb_weights_train = rtn_data['future_single_emb'][0]    
+                    scale_value = past_convs_weights/future_single_emb_weights
+                    scale_value_train = past_convs_weights_train/future_single_emb_weights_train                                            
+                    if target_mode==2:
+                        # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
+                        scale_threhold = [10,12]
+                        if (scale_value<scale_threhold[0]) or (scale_value_train<scale_threhold[0]):
+                            # 同时检查训练和验证归因，只要有一个比例低的，就优先调整
+                            scale_value_real = scale_value if scale_value<scale_value_train else scale_value_train
+                            new_fur_scale = new_fur_scale * scale_value_real /scale_threhold[0]
+                        elif (scale_value>scale_threhold[1]) and (scale_value_train>scale_threhold[1]):
+                            # 其次再检查是否比例过高
+                            scale_value_real = scale_value if scale_value>scale_value_train else scale_value_train
+                            new_fur_scale = new_fur_scale * scale_value_real /scale_threhold[1]                         
+                    else:
+                        scale_threhold = [18,20]
+                        if scale_value<scale_threhold[0] or scale_value_train<scale_threhold[0]:
+                            # 同时检查训练和验证归因，只要有一个比例低的，就优先调整
+                            scale_value_real = scale_value if scale_value<scale_value_train else scale_value_train
+                            new_fur_scale = new_fur_scale * scale_value_real /scale_threhold[0]
+                        elif scale_value > scale_threhold[1]:
+                            # 其次再检查是否比例过高
+                            new_fur_scale = new_fur_scale * scale_value /scale_threhold[1]                            
+                    pl_module.sub_models[0].trans_model_decoder.set_fur_scale(new_fur_scale) 
+                    pl_module.set_net_parasms({'fur_scale':new_fur_scale}) 
+                     
+                    return new_fur_scale
+                                                           
             trainer,model_inner,train_loader,val_loader,_ = \
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
@@ -288,6 +296,7 @@ class FuturesProcessModel(TftDataframeModel):
             trainer.callbacks.append(hook)
             ori_model.train(trainer,model_inner,train_loader,val_loader)
     
+            
     def prepare_model_env(self,dataset):
         
         self.pred_data_path = self.kwargs["pred_data_path"]
@@ -456,7 +465,7 @@ class FuturesProcessModel(TftDataframeModel):
             trainer,model,train_loader,val_loader,_ = \
             model_ori.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=1,seperate_mode=False)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0,seperate_mode=False)  
             model_ori.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             model_ori.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             model_ori.model.set_outer_params(outer_params) 
@@ -485,7 +494,7 @@ class FuturesProcessModel(TftDataframeModel):
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
         # rtn_data = self.ind_layer_analysis(real_model, background, to_explain)
-        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader,output_indexs=[1])
+        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader,output_indexs=[2,3])
         # self.check_sampler_output(real_model, background)
 
         return rtn_data   
@@ -688,34 +697,19 @@ class FuturesProcessModel(TftDataframeModel):
         # output_indexs = [2]
         # output_indexs = [1]
         rtn_data = {}
+        past_cov_cols = ['RSI5','SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','HOLD','REV5','diff_range','QTLUMA5']
         for output_index in output_indexs:
             model = ShapWrapper(model_ori,output_index=output_index)         
             x = tuple([item[:50] for item in test_input])
             baselines = tuple([xi[:50] for xi in background_input])
             x_train = tuple([xi[50:100] for xi in background_input])
-            current_epoch = 130
+            current_epoch = 120
             max_epochs = 180
             model.set_cur_epoch(current_epoch)
             model.set_max_epochs(max_epochs)
-            # current_epoch = torch.tensor(current_epoch)
-            # y_baseline = model(*baselines)
-            # y_pred = model(*x)
-            # print("y_baseline:{},y_pred:{}".format(y_baseline.mean(),y_pred.mean()))
             input_names = ['static_covs','past_convs','his_future_emb','future_single_emb']
-            # 对每个输入分别归因
-            # gs = GradientShap(model)
-            # for i in range(len(baselines)):
-            #     baselines_item = tuple([baselines[j] if j==i else x[j] for j in range(len(baselines))])
-            #     attr_inp_combine = []
-            #     for k in range(sample_num):
-            #         # baselines_item_single = tuple([item[k:k+1] for item in baselines_item])
-            #         x_single = tuple([item[k:k+1] for item in x])
-            #         attr_inp,delta = gs.attribute(x_single, baselines_item, n_samples=200, stdevs=0.1,target=0,return_convergence_delta=True)
-            #         attr_inp_combine.append(attr_inp[i])  
-            #     attr_inp_combine = torch.cat(attr_inp_combine)
-            #     print("input {} attr_inp shape:{},mean:{}".format(input_names[i],attr_inp_combine.shape, attr_inp_combine.abs().mean().item()))       
     
-            # 训练接和验证集的归因差异排查
+            # 训练接和验证集的归因差异排查,按照参数，对输入分别归因
             ig = IntegratedGradients(model)
             for i in range(len(baselines)):
                 train_importance_total = []
@@ -742,9 +736,20 @@ class FuturesProcessModel(TftDataframeModel):
                     rtn_data[input_names[i]] = [train_importance_mean,val_importance_mean]
                 print("output_index_{} input {} train_importance mean:{},val_importance mean:{}".format(output_index,input_names[i],
                                             train_importance_mean, val_importance_mean)) 
-                # if i==1:
-                #     print("input {} train_importance detail:{},val_importance detail:{}".format(input_names[i],train_importance_detail, val_importance_detail)) 
- 
+                # 针对过去协变量这个输入项，归因到每一个协变量子项
+                if i==1 and output_index==2:
+                    past_data = np.array([train_importance_detail,val_importance_detail])
+                    past_data = pd.DataFrame(past_data,columns=past_cov_cols)
+                    rtn_data['datail_past_covs'] = past_data
+
+        with pd.option_context(
+            'display.max_rows', None,
+            'display.max_columns', None,
+            'display.max_colwidth', None,
+            'display.width', None
+        ):                    
+            print("past_cov_detail:\n {}".format(rtn_data['datail_past_covs']))  
+            
         focus_layers = ['model.trans_model_encoder','model.trans_model_decoder','model.top_selector.0']  
         train_contribs = {}
         val_contribs = {}       

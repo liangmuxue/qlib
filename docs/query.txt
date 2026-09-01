@@ -1,6 +1,6 @@
-/home/liang/anaconda3/envs/py39/bin/tensorboard --logdir=/home/qdata/project/qlib/custom/data/darts/Futures_cleanData2023TrainCutlen2_transInsLoss_2503/logs --port 6008
+/home/liang/anaconda3/envs/py39/bin/tensorboard --logdir=/home/qdata/project/qlib_other/custom/data/darts/Futures_cleanData2023TrainCutlen2_transMoreLoss_2501/logs --port 6008
 
-/home/liang/anaconda3/envs/py39/bin/tensorboard --logdir=/home/qdata/project/qlib/custom/data/darts/Futures_cleanData2023TrainCutlen2_transInsLoss_2503/val_logs --port 6006
+/home/liang/anaconda3/envs/py39/bin/tensorboard --logdir=/home/qdata/project/qlib_other/custom/data/darts/Futures_cleanData2023TrainCutlen2_transMoreLoss_2501/val_logs --port 6006
 
 
 

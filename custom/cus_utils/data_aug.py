@@ -245,7 +245,7 @@ class CollResAna():
         qlib.init(provider_uri=qlib_init_config["provider_uri"], region=qlib_init_config["region"])  
         with R.start(experiment_name=experiment_name, recorder_name=None):              
             dataset = init_instance_by_config(config["task"]["dataset"])
-            train_data,val_data = dataset.build_series_data()
+            train_data,val_data,test_data = dataset.build_series_data()
             train_series_transformed,past_convariates_train,future_convariates_train = train_data
             val_series_transformed,past_convariates_val,future_convariates_val = val_data
             process_model = init_instance_by_config(config["task"]["model"])
@@ -255,7 +255,7 @@ class CollResAna():
             model = process_model._build_model(dataset,emb_size=emb_size,use_model_name=False,mode=1) 
             model.set_outer_params({'pred_weights':process_model.optargs["pred_weights"],'mode':process_model.type,'candidate_inverse':process_model.optargs['candidate_inverse']}) 
             model.mode = "predict"
-            _,_,train_loader,val_loader= \
+            _,_,train_loader,val_loader,test_loader= \
             model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                      max_samples_per_ts=None,trainer=None,epochs=0,verbose=True,num_loader_workers=0,seperate_mode=False)  
@@ -335,8 +335,8 @@ class CollResAna():
 
     def comprisive_stat(self):
         self.prepare_data()
-        self.extre_data_invest()
-        # self.fea_rel_stat()
+        # self.extre_data_invest()
+        self.fea_rel_stat()
         # self.relative_stat()
         # self.normal_stat()
         # self.scale_info_stat()
@@ -698,7 +698,7 @@ if __name__ == "__main__":
     # compare_dataset_consistence()
     # compare_clean_data_and_continus_data(match_date=20251009)
     # compare_clean_data_and_1min_cross_data(match_date=20251009)
-    coll_ana = CollResAna("custom/data/results/stats",yaml_file="custom/config/darts/workflow_pred_futures_trans_index.yaml")
+    coll_ana = CollResAna("custom/data/results/stats",yaml_file="custom/config/darts/workflow_fit_futures_trans_index.yaml")
     coll_ana.comprisive_stat()
        
     

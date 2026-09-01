@@ -179,7 +179,7 @@ class HisDataExtractor():
             source_path = self.get_whole_item_datapath(period,institution=institution)
         if type=="sw_industry":
             source_path = "{}/sw_industry/{}".format(self.savepath,get_period_name(period))        
-        dump_all = DumpDataAll(csv_path=source_path,qlib_dir=qlib_dir,date_field_name="datetime")
+        dump_all = DumpDataAll(csv_path=source_path,qlib_dir=qlib_dir,date_field_name="date")
         # 设置文件名
         dump_all.INSTRUMENTS_FILE_NAME = file_name
         dump_all.dump()
