@@ -291,7 +291,7 @@ class FuturesProcessModel(TftDataframeModel):
                             new_fur_scale = new_fur_scale * scale_value_real /scale_threhold[0]
                         elif (scale_value>scale_threhold[1]) and (scale_value_train>scale_threhold[1]):
                             # 其次再检查是否比例过高
-                            scale_value_real = scale_value if scale_value>scale_value_train else scale_value_train
+                            scale_value_real = scale_value if scale_value<scale_value_train else scale_value_train
                             new_fur_scale = new_fur_scale * scale_value_real /scale_threhold[1]                         
                     else:
                         scale_threhold = [18,20]
@@ -527,18 +527,18 @@ class FuturesProcessModel(TftDataframeModel):
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
         # rtn_data = self.ind_layer_analysis(real_model, background, to_explain)
-        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader,output_indexs=[2,3])
+        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader,dataset=dataset,output_indexs=[2,3])
         # self.check_sampler_output(real_model, background)
 
         return rtn_data   
          
     
-    def ind_analysis(self,train_dataset,val_dataset,pl_module=None,train_loader=None,val_loader=None,output_indexs=[2,3]):
+    def ind_analysis(self,train_dataset,val_dataset,pl_module=None,train_loader=None,val_loader=None,dataset=None,output_indexs=[2,3]):
         
         real_model = pl_module.sub_models[0].cuda().float()
         background,_ = self.form_input_data(train_dataset,pl_module=pl_module,data_loader=train_loader,sampler_cnt=5,mode='train')
         to_explain,layer_recorder = self.form_input_data(val_dataset,pl_module=pl_module,data_loader=val_loader,sampler_cnt=3,mode='val')
-        rtn_data = self.ind_layer_analysis(real_model, background, to_explain,output_indexs=output_indexs)
+        rtn_data = self.ind_layer_analysis(real_model, background, to_explain,output_indexs=output_indexs,dataset=dataset)
         
         return rtn_data
     
@@ -664,7 +664,7 @@ class FuturesProcessModel(TftDataframeModel):
         # plt.close(fig)                
         
 
-    def ind_layer_analysis(self,model_ori,background_input,test_input,output_indexs=[2,3]):
+    def ind_layer_analysis(self,model_ori,background_input,test_input,dataset=None,output_indexs=[2,3]):
 
         class ShapWrapper(torch.nn.Module):
             """专门包装 PL 多输出模型，让 SHAP 只接收一个输出"""
@@ -730,7 +730,7 @@ class FuturesProcessModel(TftDataframeModel):
         # output_indexs = [2]
         # output_indexs = [1]
         rtn_data = {}
-        past_cov_cols = ['RSI5','SUMD5','CORR5','REFCLOSE','RVI','MACD','RSV5','WVMA5','CLOSE','REV5','diff_range','QTLUMA5']
+        past_cov_cols = ['RSI5'] + dataset.past_covariate_col[:11]
         for output_index in output_indexs:
             model = ShapWrapper(model_ori,output_index=output_index)         
             x = tuple([item[:50] for item in test_input])
