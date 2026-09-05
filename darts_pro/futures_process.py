@@ -65,8 +65,9 @@ class FuturesProcessModel(TftDataframeModel):
         self,
         dataset: TFTFuturesDataset,
     ):
-        self.init_env(dataset)
+        self.set_seed(42) 
         
+        self.init_env(dataset)
         if self.type.startswith("fit_futures_togather"):
             self.fit_futures_togather(dataset)
             return   
@@ -114,6 +115,32 @@ class FuturesProcessModel(TftDataframeModel):
             return                                      
         print("Do Nothing")
 
+    def set_seed(self,seed: int = 42):
+        # 1. Python内置random模块（随机采样、随机增强等）
+        random.seed(seed)
+    
+        # 2. Numpy随机数（数据预处理、aug中numpy随机）
+        np.random.seed(seed)
+    
+        # 3. Torch CPU 随机数：权重初始化、CPU上一切torch随机操作
+        torch.manual_seed(seed)
+    
+        # 4. 当前单GPU种子
+        torch.cuda.manual_seed(seed)
+    
+        # 5. 多GPU环境，为每一块GPU设置种子
+        torch.cuda.manual_seed_all(seed)
+    
+        # 6. cuDNN 确定性开关【非常关键】
+        # deterministic=True：强制cuDNN使用确定卷积算法；速度下降
+        torch.backends.cudnn.deterministic = True
+        # benchmark=False：关闭cuDNN自动选最优卷积算法；benchmark会引入随机算法选择
+        torch.backends.cudnn.benchmark = False
+    
+        # 可选：禁用TF32（部分Ampere显卡TF32算子是非确定）
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        
     def init_env(self,dataset):
         
         self.dataset = dataset
@@ -152,7 +179,7 @@ class FuturesProcessModel(TftDataframeModel):
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                     test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=False)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0,seperate_mode=False)  
             ori_model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             ori_model.model.train_sw_ins_mappings = train_loader.dataset.sw_ins_mappings
             ori_model.model.set_outer_params(outer_params) 
@@ -279,17 +306,23 @@ class FuturesProcessModel(TftDataframeModel):
                     pl_module.set_net_parasms({'fur_scale':new_fur_scale}) 
                      
                     return new_fur_scale
-                                                           
+                
+            def worker_init_fn(worker_id):
+                # worker_id由pytorch自动传入，每个worker不一样
+                worker_seed = torch.initial_seed() % 2**32
+                np.random.seed(worker_seed)
+                random.seed(worker_seed)      
+            
             trainer,model_inner,train_loader,val_loader,_ = \
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
-                    test_series=None,test_past_covariates=None,test_future_covariates=None,
+                    test_series=None,test_past_covariates=None,test_future_covariates=None,worker_init_fn=worker_init_fn,
                      max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=True)   
             trainer_test,_,_,_,test_loader = \
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                     test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,seperate_mode=True)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,worker_init_fn=worker_init_fn,seperate_mode=True)  
             
             log_folder = os.path.join(self.optargs["work_dir"],self.optargs["model_name"])
             hook = ExternalTrainHook(trainer_test,test_loader,log_folder=log_folder,epoch_num=trainer.current_epoch,caller=self,train_loader=train_loader,val_loader=val_loader)
@@ -697,7 +730,7 @@ class FuturesProcessModel(TftDataframeModel):
         # output_indexs = [2]
         # output_indexs = [1]
         rtn_data = {}
-        past_cov_cols = ['RSI5','SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','HOLD','REV5','diff_range','QTLUMA5']
+        past_cov_cols = ['RSI5','SUMD5','CORR5','REFCLOSE','RVI','MACD','RSV5','WVMA5','CLOSE','REV5','diff_range','QTLUMA5']
         for output_index in output_indexs:
             model = ShapWrapper(model_ori,output_index=output_index)         
             x = tuple([item[:50] for item in test_input])

@@ -453,6 +453,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         verbose: Optional[bool] = None,
         epochs: int = 0,
         max_samples_per_ts: Optional[int] = None,
+        worker_init_fn = None,
         num_loader_workers: int = 0,
         seperate_mode = False,
         hook=None,
@@ -590,13 +591,13 @@ class TFTExtModel(MixedCovariatesTorchModel):
         if self.mode.startswith("pred") or self.mode.startswith("analysis"):
             # 预测模式，不使用tensorboard
             self.trainer_params["logger"] = False
-            trainer,model,train_loader,val_loader,test_loader = self._setup_for_train(train_dataset, val_dataset,test_dataset, trainer, verbose, epochs, num_loader_workers,hook=hook)
+            trainer,model,train_loader,val_loader,test_loader = self._setup_for_train(train_dataset, val_dataset,test_dataset, trainer, verbose, epochs, num_loader_workers,worker_init_fn=worker_init_fn,hook=hook)
             self.trainer = trainer
             if self.model is None:
                 self.model = model
             return trainer,model,train_loader,val_loader,test_loader
         return self.fit_from_dataset(
-            train_dataset, val_dataset,test_dataset, trainer, verbose, epochs, num_loader_workers,seperate_mode=seperate_mode,hook=hook
+            train_dataset, val_dataset,test_dataset, trainer, verbose, epochs, num_loader_workers,seperate_mode=seperate_mode,worker_init_fn=worker_init_fn,hook=hook
         )
     
     def check_dataset_range(self,train_dataset,val_dataset):
@@ -611,6 +612,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         verbose: Optional[bool] = None,
         epochs: int = 0,
         num_loader_workers: int = 0,
+        worker_init_fn=None,
         seperate_mode=False,
         hook=None,
     ):
@@ -623,6 +625,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                 verbose=verbose,
                 epochs=epochs,
                 num_loader_workers=num_loader_workers,
+                worker_init_fn=worker_init_fn,
                 hook=hook,
             )     
         else:       
@@ -635,6 +638,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
                     verbose=verbose,
                     epochs=epochs,
                     num_loader_workers=num_loader_workers,
+                    worker_init_fn=worker_init_fn,
                     hook=hook,
                 )
             )
@@ -670,6 +674,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
         verbose: Optional[bool] = None,
         epochs: int = 0,
         num_loader_workers: int = 0,
+        worker_init_fn=None,
         hook=None,
     ) -> Tuple[pl.Trainer, PLForecastingModule, DataLoader, Optional[DataLoader]]:
 
@@ -733,6 +738,7 @@ class TFTExtModel(MixedCovariatesTorchModel):
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_loader_workers,
+            worker_init_fn=worker_init_fn,
             pin_memory=True,
             drop_last=False,
             sampler=train_sampler,
