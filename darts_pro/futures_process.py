@@ -191,7 +191,7 @@ class FuturesProcessModel(TftDataframeModel):
             
             class ExternalTrainHook(Callback):
                 """外部训练生命周期钩子，完全脱离LightningModule"""
-                def __init__(self,trainer,test_loader,epoch_num=0,log_folder=None,caller=None,train_loader=None,val_loader=None):
+                def __init__(self,trainer,test_loader,epoch_num=0,log_folder=None,caller=None,train_loader=None,val_loader=None,rtn_callback=None):
                     self.caller = caller
                     self.trainer = trainer
                     self.test_loader = test_loader
@@ -201,6 +201,7 @@ class FuturesProcessModel(TftDataframeModel):
                     self.epoch_num = epoch_num     
                     self.train_loader = train_loader
                     self.val_loader = val_loader
+                    self.rtn_callback = rtn_callback
 
                 def clone_pl_model(self,src_model) -> pl.LightningModule:
                     # 用原超参新建实例
@@ -258,8 +259,11 @@ class FuturesProcessModel(TftDataframeModel):
                         if (trainer.current_epoch%6)==0 and trainer.current_epoch>1:
                             # 调用归因分析方法，取得归因结果
                             model = self.clone_pl_model(pl_module)
-                            rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,
-                                            pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[2])
+                            rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,dataset=dataset,
+                                            pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[2,3])
+                            rtn_data['loss_result'] = loss_result
+                            rtn_data['loss_result_train'] = self.caller.model_inner.loss_result
+                            self.rtn_callback(rtn_data)
                             new_fur_scale = self.compute_fur_scale(rtn_data, target_mode=self.caller.optargs["target_mode"][0],pl_module=pl_module)
                     elif self.caller.optargs["target_mode"][0]==5:
                         # 根据归因数据，动态调整未来协变量缩放参数
@@ -268,6 +272,7 @@ class FuturesProcessModel(TftDataframeModel):
                             model = self.clone_pl_model(pl_module)
                             rtn_data = self.caller.ind_analysis(self.train_loader.dataset,self.val_loader.dataset,
                                             pl_module=model,train_loader=self.train_loader,val_loader=self.val_loader,output_indexs=[1])
+                            self.rtn_callback(rtn_data)
                             new_fur_scale = self.compute_fur_scale(rtn_data, target_mode=self.caller.optargs["target_mode"][0],pl_module=pl_module)
                     print("model.fur_scale:{}".format(new_fur_scale))
                     tb.add_scalar('fur_scale', new_fur_scale, trainer.current_epoch)     
@@ -284,7 +289,7 @@ class FuturesProcessModel(TftDataframeModel):
                     scale_value_train = past_convs_weights_train/future_single_emb_weights_train                                            
                     if target_mode==2:
                         # 未来时间协变量的归因权重不能超出过去业务协变量的一定比例,如果超出，则调整缩放参数
-                        scale_threhold = [10,12]
+                        scale_threhold = [6,8]
                         if (scale_value<scale_threhold[0]) or (scale_value_train<scale_threhold[0]):
                             # 同时检查训练和验证归因，只要有一个比例低的，就优先调整
                             scale_value_real = scale_value if scale_value<scale_value_train else scale_value_train
@@ -313,6 +318,12 @@ class FuturesProcessModel(TftDataframeModel):
                 np.random.seed(worker_seed)
                 random.seed(worker_seed)      
             
+            def persist_rtn_data(rtn_data):
+                self.rtn_data_arr.append(rtn_data)
+                with open("custom/data/asis/rtn_data.pkl", "wb") as f:
+                    pickle.dump(self.rtn_data_arr, f)                
+            
+            self.rtn_data_arr = []
             trainer,model_inner,train_loader,val_loader,_ = \
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
@@ -322,14 +333,15 @@ class FuturesProcessModel(TftDataframeModel):
             ori_model.fit(train_series_transformed, past_covariates=past_convariates_train, future_covariates=future_convariates_train,
                     val_series=val_series_transformed,val_past_covariates=past_convariates_val,val_future_covariates=future_convariates_val,
                     test_series=test_series_transformed,test_past_covariates=past_convariates_test,test_future_covariates=future_convariates_test,
-                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=8,worker_init_fn=worker_init_fn,seperate_mode=True)  
+                     max_samples_per_ts=None,trainer=None,epochs=self.n_epochs,verbose=True,num_loader_workers=0,worker_init_fn=worker_init_fn,seperate_mode=True)  
             
             log_folder = os.path.join(self.optargs["work_dir"],self.optargs["model_name"])
-            hook = ExternalTrainHook(trainer_test,test_loader,log_folder=log_folder,epoch_num=trainer.current_epoch,caller=self,train_loader=train_loader,val_loader=val_loader)
+            hook = ExternalTrainHook(trainer_test,test_loader,log_folder=log_folder,epoch_num=trainer.current_epoch,caller=self,
+                                train_loader=train_loader,val_loader=val_loader,rtn_callback=persist_rtn_data)
             trainer.callbacks.append(hook)
+            self.model_inner = model_inner
             ori_model.train(trainer,model_inner,train_loader,val_loader)
     
-            
     def prepare_model_env(self,dataset):
         
         self.pred_data_path = self.kwargs["pred_data_path"]
@@ -527,7 +539,8 @@ class FuturesProcessModel(TftDataframeModel):
         # self.model_layer_analysis(real_model, background, to_explain,sample_num=sample_num)
         # self.viz_shape_value(to_explain,sample_num=sample_num)
         # rtn_data = self.ind_layer_analysis(real_model, background, to_explain)
-        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, train_loader=train_loader,val_loader=val_loader,dataset=dataset,output_indexs=[2,3])
+        rtn_data = self.ind_analysis(train_loader.dataset,val_loader.dataset, pl_module=model_ori.model, 
+                        train_loader=train_loader,val_loader=val_loader,dataset=dataset,output_indexs=[2,3])
         # self.check_sampler_output(real_model, background)
 
         return rtn_data   

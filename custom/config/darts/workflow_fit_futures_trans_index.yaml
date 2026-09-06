@@ -148,9 +148,9 @@ task:
                 target_column: ['RSI5','RSV5','SUMD5','SUMD5','RSV5']
                 time_column: 'time_idx'    
                 future_covariate_col: ['year','dayofweek','month','week'] 
-                past_covariate_col: ['SUMD5','CORR5','REFCLOSE','RVI','MACD','RSV5','WVMA5','CLOSE','REV5','diff_range','QTLUMA5'
-                                  ,'SUMD5','CORR5','REFCLOSE','RVI','MACD','RSV5','WVMA5','CLOSE','REV5','diff_range','QTLUMA5'
-                                  ,'SUMD5','CORR5','REFCLOSE','RVI','MACD','RSV5','WVMA5','CLOSE','REV5','diff_range','QTLUMA5'
+                past_covariate_col: ['SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','MA5','OPEN_COM','diff_range','QTLUMA5'
+                                  ,'SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','MA5','OPEN_COM','diff_range','QTLUMA5'
+                                  ,'SUMD5','CORR5','RSQR5','RVI','MACD','RSV5','WVMA5','MA5','OPEN_COM','diff_range','QTLUMA5'
                                   ] 
                 static_covariate_col: ['industry','night_flag','exchange_id','create_year','limit_rate','magin_radio']   
                 static_cate_col: ['industry','night_flag','exchange_id','create_year']

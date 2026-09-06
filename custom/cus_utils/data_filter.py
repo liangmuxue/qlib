@@ -24,7 +24,19 @@ def get_topN_dict(ori_dict,n):
         if i>=n-1:
             break    
     return new_dict
-    
+
+def check_rtn_data(file_path):
+        
+    rtn_data = pd.read_pickle(file_path)
+    for item in rtn_data:
+        loss_result = item['loss_result']
+        past_convs_weights = item['past_convs'][1]
+        future_single_emb_weights = item['future_single_emb'][1]
+        past_convs_weights_train = item['past_convs'][0]
+        future_single_emb_weights_train = item['future_single_emb'][0]    
+        datail_past_covs = item['datail_past_covs']  
+    rtn_data
+       
 class DataFilter():
     def __init__(self):
         self.wave_period = 30
@@ -140,6 +152,11 @@ class DataFilter():
         return target_data
             
 if __name__ == "__main__":
-    file_path = "/home/qdata/project/qlib/custom/data/aug/test_all_timeidx.pkl"
-    check_time_ser_data(file_path)
+    # file_path = "/home/qdata/project/qlib/custom/data/aug/test_all_timeidx.pkl"
+    # check_time_ser_data(file_path)
+    file_path = "custom/data/asis/rtn_data.pkl"
+    check_rtn_data(file_path)
+    
+    
+        
     

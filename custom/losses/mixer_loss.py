@@ -765,14 +765,15 @@ class FuturesIndustryLoss(UncertaintyLoss):
         p0_cate_target = torch.cat([cate_target_data[key] for key in cate_target_data.keys()])
         p0_cate_pred = torch.cat([cate_pred_data[key] for key in cate_pred_data.keys()])
         ava_idx = torch.where(p0_cate_target!=0)[0]
-        if ava_idx.shape[0]>5:
+        ava_idx_pred = torch.where(p0_cate_pred!=0)[0]
+        if ava_idx.shape[0]>5 and ava_idx_pred.shape[0]>5:
             p0_cate_pred = p0_cate_pred[ava_idx] # normalization_standard(p0_cate_pred[ava_idx])
             p0_cate_target = p0_cate_target[ava_idx] # normalization_standard(p0_cate_target[ava_idx])
             if all_elements_same(p0_cate_target) or all_elements_same(p0_cate_pred):
                 loss_inner = self.mse_loss(p0_cate_pred.unsqueeze(0),p0_cate_target.unsqueeze(0))
             else:
-                # loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=3, mid_num=2, need_mid=False)
-                loss_inner = self.ccc_loss_comp(p0_cate_pred,p0_cate_target)
+                loss_inner = self.compute_top_loss(p0_cate_pred,p0_cate_target, top_num=2, mid_num=2, need_mid=False)
+                # loss_inner = self.ccc_loss_comp(p0_cate_pred,p0_cate_target)
             loss_item += loss_inner
             detail_loss_total += loss_inner
             if 'total' not in detail_loss:
